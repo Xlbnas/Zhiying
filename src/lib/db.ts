@@ -67,6 +67,46 @@ CREATE TABLE IF NOT EXISTS llm_jobs (   -- M2 用，M1 只建表不消费
   progress REAL DEFAULT 0, error_code TEXT, error_message TEXT,
   cancel_requested INTEGER DEFAULT 0
 );
+-- ============ M2-A：工作流数据地基（仅新增，不修改以上 M1 表） ============
+CREATE TABLE IF NOT EXISTS project_stages (   -- 阶段状态机，每项目 10 行
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  stage TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'not_started', -- not_started/generated/edited/locked/stale
+  active_version INTEGER,          -- 当前展示/编辑版本（project_versions.version）
+  locked_version INTEGER,          -- 锁定版本（null=未锁）
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, stage)
+);
+CREATE TABLE IF NOT EXISTS project_versions ( -- 阶段产物版本快照
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  stage TEXT NOT NULL,
+  version INTEGER NOT NULL,        -- 每 (project_id, stage) 递增
+  content TEXT NOT NULL,           -- Markdown 文本或 JSON 字符串
+  content_type TEXT NOT NULL,      -- 'markdown' | 'json'
+  source TEXT NOT NULL,            -- ai_generate/manual_edit/repair/rollback
+  prompt_version TEXT,             -- Prompt Registry 版本（M2-B 起写入）
+  model TEXT,                      -- 生成模型（人工编辑为 null）
+  job_id TEXT,                     -- 来源 llm_job（可空）
+  note TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_project_versions_stage
+  ON project_versions (project_id, stage, version);
+CREATE TABLE IF NOT EXISTS llm_usage (        -- 逐请求成本快照（架构 §6.2）
+  id TEXT PRIMARY KEY,
+  project_id TEXT, stage TEXT, job_id TEXT, request_id TEXT,
+  provider TEXT NOT NULL, model TEXT NOT NULL,
+  input_tokens INTEGER, cached_tokens INTEGER, output_tokens INTEGER,
+  price_cache_hit_per_m REAL,      -- 调用当时单价快照（元/百万 tokens）
+  price_cache_miss_per_m REAL,
+  price_output_per_m REAL,
+  cost_cny REAL,                   -- 以快照单价算出，历史成本永不重算
+  prompt_version TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_project
+  ON llm_usage (project_id, stage);
 `;
 
 /**
