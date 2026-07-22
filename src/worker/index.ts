@@ -1,0 +1,317 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {bundle} from '@remotion/bundler';
+import {renderMedia, selectComposition} from '@remotion/renderer';
+import {getDataDir} from '@/lib/db';
+import {
+  claimNextJob,
+  completeJob,
+  failJob,
+  heartbeat,
+  isCancelRequested,
+  markCancelled,
+  recoverStaleJobs,
+  requeueJob,
+  type RenderJobRow,
+} from '@/lib/jobs';
+import {
+  COMPOSITION_ID,
+  COMPOSITION_ID_NO_SUBTITLES,
+  TEMPLATE_VERSION,
+  zhiyingFullCutPropsSchema,
+  type ZhiyingFullCutProps,
+} from '@/lib/scene-schema';
+
+/**
+ * 知影渲染 Worker（CONTRACT §4）
+ * - 单调度器：每 2s claim 一次，任何时刻只跑一个任务
+ * - bundle 缓存：data/bundle-cache/{templateVersion}/，无则用 @remotion/bundler 打包并缓存
+ * - 渲染：selectComposition + renderMedia（h264 / crf 18）
+ * - onProgress 节流（≥2s）写 heartbeat + progress，并检查 isCancelRequested
+ * - SIGTERM/SIGINT 优雅退出：当前任务回 queued
+ * - WORKER_ROLE 预留（M1 只实现 'all'）
+ */
+
+const POLL_INTERVAL_MS = 2000;
+const HEARTBEAT_INTERVAL_MS = 2000;
+const STALE_TIMEOUT_MS = 2 * 60 * 1000; // recoverStaleJobs(2min)
+
+const WORKER_ID = `worker-${os.hostname()}-${process.pid}`;
+
+/**
+ * 渲染用静态服务端口：每个 job 在 runJob 内随机生成（4000+随机）。
+ * - 显式指定而非自动选口：renderer 自动选口从 3000 起，Windows 上 IPv4/IPv6
+ *   混绑会误判 3000 可用，导致页面实际打到 Next dev（"foreign page" 错误）。
+ * - 不复用模块级常量：渲染失败后 Remotion 静态服务端口未必释放，
+ *   同进程内 retry/后续 job 复用同一端口必撞（实测 RENDER_ERROR: port not available）。
+ */
+function randomRenderPort(): number {
+  return 4000 + Math.floor(Math.random() * 10000);
+}
+
+/** 优雅退出状态（模块级，信号处理器与主循环共享）。 */
+let shuttingDown = false;
+let currentController: AbortController | null = null;
+
+function log(...args: unknown[]): void {
+  console.log(`[${new Date().toISOString()}] [${WORKER_ID}]`, ...args);
+}
+
+function requestShutdown(signal: string): void {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  log(`received ${signal}, shutting down gracefully…`);
+  // 中止正在进行的 renderMedia；runJob 的 catch 分支会把任务回 queued
+  currentController?.abort();
+}
+
+/**
+ * 确保 Remotion bundle 存在。
+ * 缓存目录：data/bundle-cache/{templateVersion}/，以 index.html 作为完整标记；
+ * 缺失/不完整时清空后用 @remotion/bundler 重新打包（打包结果自带 public/ 静态资源拷贝）。
+ */
+async function ensureBundle(): Promise<string> {
+  const cacheDir = path.join(getDataDir(), 'bundle-cache', TEMPLATE_VERSION);
+  const marker = path.join(cacheDir, 'index.html');
+  if (fs.existsSync(marker)) {
+    log(`bundle cache hit: ${cacheDir}`);
+    return cacheDir;
+  }
+  const entryPoint = path.resolve(process.cwd(), 'src/remotion/index.ts');
+  if (!fs.existsSync(entryPoint)) {
+    throw new Error(
+      `Remotion entry not found: ${entryPoint}（Template agent 负责，等待其交付后再启动 worker）`,
+    );
+  }
+  log(`bundle cache miss, bundling ${entryPoint} → ${cacheDir} …`);
+  fs.rmSync(cacheDir, {recursive: true, force: true});
+  fs.mkdirSync(cacheDir, {recursive: true});
+  let lastLog = 0;
+  const location = await bundle({
+    entryPoint,
+    outDir: cacheDir,
+    webpackOverride: (config) => ({
+      ...config,
+      resolve: {
+        ...config.resolve,
+        // Remotion bundler 不读 tsconfig paths，显式注册 '@/*' → './src/*' alias
+        alias: {
+          ...(config.resolve?.alias ?? {}),
+          '@': path.resolve(process.cwd(), 'src'),
+        },
+      },
+      module: {
+        ...config.module,
+        // tsconfig.json 的 jsx:'preserve' 会被 esbuild-loader 经 tsconfigRaw 传给
+        // esbuild，输出 classic React.createElement 且模块内无 React 导入，
+        // headless Chrome 执行即抛 "React is not defined"。
+        // 此处对 esbuild-loader 强制 jsx:'automatic'（显式选项优先于 tsconfigRaw）。
+        rules: (config.module?.rules ?? []).map((rule) => {
+          if (!rule || typeof rule !== 'object' || !('use' in rule)) {
+            return rule;
+          }
+          const uses = Array.isArray(rule.use) ? rule.use : [rule.use];
+          const patched = uses.map((u) => {
+            if (
+              u &&
+              typeof u === 'object' &&
+              'loader' in u &&
+              typeof u.loader === 'string' &&
+              u.loader.includes('esbuild-loader')
+            ) {
+              // webpack 类型中 options 可为 string | object；esbuild-loader 恒为对象
+              const baseOptions =
+                u.options && typeof u.options === 'object' ? u.options : {};
+              return {
+                ...u,
+                options: {...baseOptions, jsx: 'automatic'},
+              };
+            }
+            return u;
+          });
+          return {...rule, use: patched};
+        }),
+      },
+    }),
+    onProgress: (progress: number) => {
+      const nowMs = Date.now();
+      if (nowMs - lastLog >= 5000) {
+        lastLog = nowMs;
+        log(`bundling… ${Math.round(progress)}%`);
+      }
+    },
+  });
+  log(`bundle ready: ${location}`);
+  return location;
+}
+
+/** 渲染单个任务（已被 claim，status=running）。 */
+async function runJob(job: RenderJobRow, bundleLocation: string): Promise<void> {
+  const controller = new AbortController();
+  currentController = controller;
+  // 每个 job 独立随机端口：失败后 retry / 下一个 job 不复用旧端口（见上文说明）
+  const renderPort = randomRenderPort();
+  try {
+    // 排队期间被请求取消：直接标记 cancelled，不进入渲染
+    if (isCancelRequested(job.id)) {
+      markCancelled(job.id);
+      log(`job ${job.id} cancelled before start`);
+      return;
+    }
+
+    // payload 解析 + zod 校验（契约：payload_json = ZhiyingFullCutProps JSON）
+    let payloadRaw: unknown;
+    try {
+      payloadRaw = JSON.parse(job.payload_json);
+    } catch {
+      failJob(job.id, 'PAYLOAD_INVALID', 'payload_json is not valid JSON');
+      return;
+    }
+    const parsed = zhiyingFullCutPropsSchema.safeParse(payloadRaw);
+    if (!parsed.success) {
+      failJob(
+        job.id,
+        'PAYLOAD_INVALID',
+        `payload failed schema validation: ${parsed.error.message}`,
+      );
+      return;
+    }
+    const inputProps: ZhiyingFullCutProps = {
+      ...parsed.data,
+      // kind 决定字幕开关与 composition，强制对齐，不信任 payload 里的 showSubtitles
+      showSubtitles: job.kind !== 'no-subtitles',
+    };
+    const compositionId =
+      job.kind === 'no-subtitles'
+        ? COMPOSITION_ID_NO_SUBTITLES
+        : COMPOSITION_ID;
+
+    const composition = await selectComposition({
+      serveUrl: bundleLocation,
+      id: compositionId,
+      inputProps,
+      port: renderPort,
+    });
+
+    // 输出：data/projects/{projectId}/renders/{jobId}.mp4
+    // output_path 存数据目录相对路径（API 侧用 getDataDir() 拼接还原）
+    const outputRel = path.posix.join(
+      'projects',
+      job.project_id,
+      'renders',
+      `${job.id}.mp4`,
+    );
+    const outputAbs = path.join(getDataDir(), outputRel);
+    fs.mkdirSync(path.dirname(outputAbs), {recursive: true});
+
+    log(
+      `job ${job.id} start: project=${job.project_id} kind=${job.kind} ` +
+        `composition=${compositionId} ${composition.width}x${composition.height}@${composition.fps} ` +
+        `${composition.durationInFrames}f → ${outputRel}`,
+    );
+
+    let lastBeat = 0;
+    await renderMedia({
+      composition,
+      serveUrl: bundleLocation,
+      codec: 'h264',
+      crf: 18,
+      outputLocation: outputAbs,
+      inputProps,
+      port: renderPort,
+      // Remotion 的 CancelSignal 是回调注册函数，不是 DOM AbortSignal；在此适配
+      cancelSignal: (callback) => {
+        if (controller.signal.aborted) {
+          callback();
+          return;
+        }
+        controller.signal.addEventListener('abort', callback, {once: true});
+      },
+      onProgress: ({progress}: {progress: number}) => {
+        const nowMs = Date.now();
+        if (nowMs - lastBeat < HEARTBEAT_INTERVAL_MS) {
+          return;
+        }
+        lastBeat = nowMs;
+        // 节流上报：heartbeat 兼作进度（0-100）
+        heartbeat(job.id, Math.round(progress * 1000) / 10);
+        // 每轮检查取消请求 → 中止 renderMedia
+        if (isCancelRequested(job.id)) {
+          controller.abort();
+        }
+      },
+    });
+
+    if (isCancelRequested(job.id)) {
+      markCancelled(job.id);
+      log(`job ${job.id} cancelled at finish line`);
+      return;
+    }
+    completeJob(job.id, outputRel);
+    log(`job ${job.id} succeeded → ${outputRel}`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (shuttingDown) {
+      // 优雅退出：当前任务回 queued，交给下一个 worker / 下次启动
+      requeueJob(job.id);
+      log(`job ${job.id} requeued due to shutdown`);
+      return;
+    }
+    if (isCancelRequested(job.id)) {
+      markCancelled(job.id);
+      log(`job ${job.id} cancelled (render aborted)`);
+      return;
+    }
+    failJob(job.id, 'RENDER_ERROR', message);
+    log(`job ${job.id} failed (attempt ${job.attempt}/${job.max_attempts}): ${message}`);
+  } finally {
+    currentController = null;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function main(): Promise<void> {
+  const role = process.env.WORKER_ROLE ?? 'all';
+  if (role !== 'all') {
+    log(`WARN: WORKER_ROLE='${role}' 尚未实现（M1 只支持 'all'），按 'all' 运行`);
+  }
+  process.on('SIGTERM', () => requestShutdown('SIGTERM'));
+  process.on('SIGINT', () => requestShutdown('SIGINT'));
+
+  log(`starting, data dir: ${getDataDir()}, role: ${role}`);
+
+  // 1. 启动：回收僵尸任务（heartbeat 超过 2min 未更新）
+  const recovered = recoverStaleJobs(STALE_TIMEOUT_MS);
+  if (recovered > 0) {
+    log(`recovered ${recovered} stale job(s) → queued`);
+  }
+
+  // 2. 准备 bundle（带缓存）
+  const bundleLocation = await ensureBundle();
+
+  // 3. 单调度循环：每 2s claim 一次，任何时刻只跑一个
+  while (!shuttingDown) {
+    const job = claimNextJob(WORKER_ID);
+    if (!job) {
+      await sleep(POLL_INTERVAL_MS);
+      continue;
+    }
+    await runJob(job, bundleLocation);
+  }
+
+  log('bye.');
+}
+
+main().catch((err: unknown) => {
+  console.error(
+    `[${new Date().toISOString()}] [${WORKER_ID}] fatal:`,
+    err instanceof Error ? (err.stack ?? err.message) : String(err),
+  );
+  process.exit(1);
+});

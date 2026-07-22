@@ -1,0 +1,36 @@
+{
+  "name": "zhiying",
+  "version": "0.1.0",
+  "private": true,
+  "description": "知影 · AI 知识视频工坊 — M1 渲染闭环",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "worker": "tsx src/worker/index.ts",
+    "typecheck": "tsc --noEmit",
+    "verify:roundtrip": "node scripts/verify-roundtrip.mjs",
+    "import:sample": "node scripts/import-sample.mjs"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.492",
+    "@remotion/cli": "4.0.492",
+    "@remotion/player": "4.0.492",
+    "@remotion/renderer": "4.0.492",
+    "better-sqlite3": "^12.4.1",
+    "next": "^15.5.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "remotion": "4.0.492",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  },
+  "packageManager": "pnpm@11.9.0"
+}

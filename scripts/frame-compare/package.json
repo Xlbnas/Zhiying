@@ -1,0 +1,11 @@
+{
+  "name": "frame-compare",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Player/Renderer 帧一致性像素对比（M1 验收资产），独立于主项目依赖",
+  "type": "commonjs",
+  "dependencies": {
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0"
+  }
+}

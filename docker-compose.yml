@@ -1,0 +1,33 @@
+# 知影 M1 — web + worker 双服务
+# 使用前：cp .env.example .env（飞牛部署详见 DEPLOY.md）
+services:
+  web:
+    build: .
+    image: zhiying:m1
+    container_name: zhiying-web
+    command: pnpm start
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      # SQLite DB / bundle 缓存 / 渲染输出
+      - ./data:/app/data
+      # 媒体资源（约 455MB）只读挂载，不打进镜像
+      - ./public:/app/public:ro
+    restart: unless-stopped
+
+  worker:
+    build: .
+    image: zhiying:m1
+    container_name: zhiying-worker
+    command: pnpm worker
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./public:/app/public:ro
+    # CONTRACT §7：渲染资源限额
+    cpus: 4
+    mem_limit: 6g
+    restart: unless-stopped

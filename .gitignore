@@ -1,0 +1,20 @@
+node_modules/
+.next/
+out/
+data/
+*.tsbuildinfo
+next-env.d.ts
+.env
+.env.local
+.DS_Store
+
+# 455MB 二进制媒体资产（BGM/SFX/TTS/图片）——与 .dockerignore 对齐，
+# 部署时随项目目录拷贝（DEPLOY.md §0），不进入 git
+public/full/
+public/pilot/
+
+# 帧对比工具的独立依赖（scripts/README.md 有使用说明）
+scripts/frame-compare/node_modules/
+
+# 临时日志
+*.log

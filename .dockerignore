@@ -1,0 +1,24 @@
+# 运行时数据（DB、bundle 缓存、渲染输出）—— volume 挂载，不进镜像
+data/
+
+# 大型媒体资源（约 455MB）—— volume 只读挂载，不进镜像
+public/full
+public/pilot
+
+# 依赖与构建产物——镜像内重新安装/构建
+node_modules
+.next
+
+# 样例数据与临时文件
+samples
+_skilltmp
+
+# 版本控制与本地环境
+.git
+.env
+.env.local
+*.tsbuildinfo
+next-env.d.ts
+Dockerfile
+docker-compose.yml
+DEPLOY.md

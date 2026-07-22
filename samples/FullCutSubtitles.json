@@ -1,0 +1,2135 @@
+[
+  {
+    "id": 1,
+    "segmentId": "VO_001",
+    "chapter": 1,
+    "text": "手机亮了一下。",
+    "start": 0.0,
+    "end": 1.254,
+    "position": "bottom"
+  },
+  {
+    "id": 2,
+    "segmentId": "VO_002",
+    "chapter": 1,
+    "text": "对方发来一句：“我们谈谈吧。",
+    "start": 1.739,
+    "end": 3.875,
+    "position": "bottom"
+  },
+  {
+    "id": 3,
+    "segmentId": "VO_002",
+    "chapter": 1,
+    "text": "”",
+    "start": 3.91,
+    "end": 4.29,
+    "position": "bottom"
+  },
+  {
+    "id": 4,
+    "segmentId": "VO_003",
+    "chapter": 1,
+    "text": "你看见了。",
+    "start": 5.607,
+    "end": 6.452,
+    "position": "bottom"
+  },
+  {
+    "id": 5,
+    "segmentId": "VO_003",
+    "chapter": 1,
+    "text": "手指停在屏幕上，却没有点进去。",
+    "start": 6.487,
+    "end": 9.311,
+    "position": "bottom"
+  },
+  {
+    "id": 6,
+    "segmentId": "VO_004",
+    "chapter": 1,
+    "text": "你告诉自己：“等会儿再回。",
+    "start": 9.796,
+    "end": 11.65,
+    "position": "bottom"
+  },
+  {
+    "id": 7,
+    "segmentId": "VO_004",
+    "chapter": 1,
+    "text": "”",
+    "start": 11.685,
+    "end": 12.065,
+    "position": "bottom"
+  },
+  {
+    "id": 8,
+    "segmentId": "VO_005",
+    "chapter": 1,
+    "text": "几个小时过去。",
+    "start": 12.574,
+    "end": 13.944,
+    "position": "bottom"
+  },
+  {
+    "id": 9,
+    "segmentId": "VO_006",
+    "chapter": 1,
+    "text": "一天过去。",
+    "start": 14.429,
+    "end": 15.497,
+    "position": "bottom"
+  },
+  {
+    "id": 10,
+    "segmentId": "VO_007",
+    "chapter": 1,
+    "text": "两天过去。",
+    "start": 16.332,
+    "end": 17.411,
+    "position": "bottom"
+  },
+  {
+    "id": 11,
+    "segmentId": "VO_008",
+    "chapter": 1,
+    "text": "后来有人问：“你为什么一直不回？",
+    "start": 18.246,
+    "end": 20.734,
+    "position": "bottom"
+  },
+  {
+    "id": 12,
+    "segmentId": "VO_008",
+    "chapter": 1,
+    "text": "”",
+    "start": 20.769,
+    "end": 21.149,
+    "position": "bottom"
+  },
+  {
+    "id": 13,
+    "segmentId": "VO_009",
+    "chapter": 1,
+    "text": "你说：“我忘了。",
+    "start": 21.263,
+    "end": 22.205,
+    "position": "bottom"
+  },
+  {
+    "id": 14,
+    "segmentId": "VO_009",
+    "chapter": 1,
+    "text": "”",
+    "start": 22.24,
+    "end": 22.62,
+    "position": "bottom"
+  },
+  {
+    "id": 15,
+    "segmentId": "VO_010",
+    "chapter": 1,
+    "text": "可这两天里，",
+    "start": 23.935,
+    "end": 24.968,
+    "position": "bottom"
+  },
+  {
+    "id": 16,
+    "segmentId": "VO_010",
+    "chapter": 1,
+    "text": "你明明打开过聊天软件很多次。",
+    "start": 25.003,
+    "end": 27.744,
+    "position": "bottom"
+  },
+  {
+    "id": 17,
+    "segmentId": "VO_010",
+    "chapter": 1,
+    "text": "回了工作群，看了朋友的照片，",
+    "start": 27.779,
+    "end": 30.307,
+    "position": "bottom"
+  },
+  {
+    "id": 18,
+    "segmentId": "VO_010",
+    "chapter": 1,
+    "text": "还清理了几条无关紧要的通知。",
+    "start": 30.342,
+    "end": 33.084,
+    "position": "bottom"
+  },
+  {
+    "id": 19,
+    "segmentId": "VO_011",
+    "chapter": 1,
+    "text": "为什么偏偏是这一条？",
+    "start": 33.569,
+    "end": 35.45,
+    "position": "mid"
+  },
+  {
+    "id": 20,
+    "segmentId": "VO_012",
+    "chapter": 1,
+    "text": "先别急着回答。",
+    "start": 37.985,
+    "end": 39.436,
+    "position": "bottom"
+  },
+  {
+    "id": 21,
+    "segmentId": "VO_013",
+    "chapter": 1,
+    "text": "我们通常把这种事叫作“忘记”。",
+    "start": 39.921,
+    "end": 42.196,
+    "position": "bottom"
+  },
+  {
+    "id": 22,
+    "segmentId": "VO_013",
+    "chapter": 1,
+    "text": "但一百多年前，",
+    "start": 42.231,
+    "end": 43.352,
+    "position": "bottom"
+  },
+  {
+    "id": 23,
+    "segmentId": "VO_013",
+    "chapter": 1,
+    "text": "有个人对“忘记”产生了一种近乎执拗的怀疑。",
+    "start": 43.386,
+    "end": 46.817,
+    "position": "bottom"
+  },
+  {
+    "id": 24,
+    "segmentId": "VO_014",
+    "chapter": 1,
+    "text": "这个人，就是弗洛伊德。",
+    "start": 47.202,
+    "end": 49.071,
+    "position": "bottom"
+  },
+  {
+    "id": 25,
+    "segmentId": "VO_015",
+    "chapter": 2,
+    "text": "当然，人本来就会忘事。",
+    "start": 50.006,
+    "end": 51.875,
+    "position": "bottom"
+  },
+  {
+    "id": 26,
+    "segmentId": "VO_016",
+    "chapter": 2,
+    "text": "注意力被打断，事情太多，睡眠不足，",
+    "start": 52.21,
+    "end": 55.174,
+    "position": "bottom"
+  },
+  {
+    "id": 27,
+    "segmentId": "VO_016",
+    "chapter": 2,
+    "text": "或者只是在某个瞬间没想起来——这些都很普通。",
+    "start": 55.209,
+    "end": 59.245,
+    "position": "bottom"
+  },
+  {
+    "id": 28,
+    "segmentId": "VO_017",
+    "chapter": 2,
+    "text": "忘记，不一定需要一个隐藏的理由。",
+    "start": 59.68,
+    "end": 62.258,
+    "position": "bottom"
+  },
+  {
+    "id": 29,
+    "segmentId": "VO_018",
+    "chapter": 2,
+    "text": "但弗洛伊德盯住了另一个问题：",
+    "start": 63.293,
+    "end": 66.027,
+    "position": "bottom"
+  },
+  {
+    "id": 30,
+    "segmentId": "VO_018",
+    "chapter": 2,
+    "text": "为什么有些遗忘看起来那么有选择性？",
+    "start": 66.062,
+    "end": 69.434,
+    "position": "bottom"
+  },
+  {
+    "id": 31,
+    "segmentId": "VO_019",
+    "chapter": 2,
+    "text": "为什么记得别的安排，偏偏忘了某一件？",
+    "start": 70.019,
+    "end": 73.131,
+    "position": "bottom"
+  },
+  {
+    "id": 32,
+    "segmentId": "VO_020",
+    "chapter": 2,
+    "text": "他举过一个忘记赴约的例子。",
+    "start": 74.666,
+    "end": 77.039,
+    "position": "bottom"
+  },
+  {
+    "id": 33,
+    "segmentId": "VO_020",
+    "chapter": 2,
+    "text": "一个人迟到了，说自己完全忘记了约会。",
+    "start": 77.074,
+    "end": 80.25,
+    "position": "bottom"
+  },
+  {
+    "id": 34,
+    "segmentId": "VO_020",
+    "chapter": 2,
+    "text": "对方却可能会想：以前怎么没有忘？",
+    "start": 80.285,
+    "end": 83.059,
+    "position": "bottom"
+  },
+  {
+    "id": 35,
+    "segmentId": "VO_020",
+    "chapter": 2,
+    "text": "是不是这场约会，已经没那么重要？",
+    "start": 83.094,
+    "end": 85.869,
+    "position": "bottom"
+  },
+  {
+    "id": 36,
+    "segmentId": "VO_021",
+    "chapter": 2,
+    "text": "这当然不是说，忘记赴约就等于不爱。",
+    "start": 86.704,
+    "end": 89.56,
+    "position": "bottom"
+  },
+  {
+    "id": 37,
+    "segmentId": "VO_022",
+    "chapter": 2,
+    "text": "它只能说明，同一句“我忘了”，",
+    "start": 90.195,
+    "end": 92.255,
+    "position": "bottom"
+  },
+  {
+    "id": 38,
+    "segmentId": "VO_022",
+    "chapter": 2,
+    "text": "放进一段具体关系里，",
+    "start": 92.29,
+    "end": 93.969,
+    "position": "bottom"
+  },
+  {
+    "id": 39,
+    "segmentId": "VO_022",
+    "chapter": 2,
+    "text": "人们很容易继续追问：被忘掉的，",
+    "start": 94.004,
+    "end": 96.445,
+    "position": "bottom"
+  },
+  {
+    "id": 40,
+    "segmentId": "VO_022",
+    "chapter": 2,
+    "text": "为什么恰好是这件事？",
+    "start": 96.48,
+    "end": 98.159,
+    "position": "bottom"
+  },
+  {
+    "id": 41,
+    "segmentId": "VO_023",
+    "chapter": 2,
+    "text": "弗洛伊德感兴趣的，正是这个“偏偏”。",
+    "start": 98.644,
+    "end": 101.454,
+    "position": "bottom"
+  },
+  {
+    "id": 42,
+    "segmentId": "VO_024",
+    "chapter": 3,
+    "text": "在《日常生活的心理分析》中，",
+    "start": 102.239,
+    "end": 104.298,
+    "position": "bottom"
+  },
+  {
+    "id": 43,
+    "segmentId": "VO_024",
+    "chapter": 3,
+    "text": "弗洛伊德把“忘记过去的事情”和“忘记已经决定要做的事”分开讨论。",
+    "start": 104.333,
+    "end": 109.437,
+    "position": "bottom"
+  },
+  {
+    "id": 44,
+    "segmentId": "VO_025",
+    "chapter": 3,
+    "text": "后者并不是没有计划。",
+    "start": 109.872,
+    "end": 111.625,
+    "position": "bottom"
+  },
+  {
+    "id": 45,
+    "segmentId": "VO_026",
+    "chapter": 3,
+    "text": "计划已经形成了：我答应去赴约，",
+    "start": 112.01,
+    "end": 114.448,
+    "position": "bottom"
+  },
+  {
+    "id": 46,
+    "segmentId": "VO_026",
+    "chapter": 3,
+    "text": "我决定寄出文件，",
+    "start": 114.483,
+    "end": 115.78,
+    "position": "bottom"
+  },
+  {
+    "id": 47,
+    "segmentId": "VO_026",
+    "chapter": 3,
+    "text": "我知道这条消息需要回复。",
+    "start": 115.815,
+    "end": 117.872,
+    "position": "bottom"
+  },
+  {
+    "id": 48,
+    "segmentId": "VO_027",
+    "chapter": 3,
+    "text": "只是从“决定去做”到真正执行之间，",
+    "start": 119.107,
+    "end": 121.807,
+    "position": "bottom"
+  },
+  {
+    "id": 49,
+    "segmentId": "VO_027",
+    "chapter": 3,
+    "text": "某种东西发生了变化。",
+    "start": 121.842,
+    "end": 123.566,
+    "position": "bottom"
+  },
+  {
+    "id": 50,
+    "segmentId": "VO_028",
+    "chapter": 3,
+    "text": "弗洛伊德把其中一部分情况，",
+    "start": 124.051,
+    "end": 125.692,
+    "position": "bottom"
+  },
+  {
+    "id": 51,
+    "segmentId": "VO_028",
+    "chapter": 3,
+    "text": "解释为“反向意愿（counter-will）”的干扰。",
+    "start": 125.727,
+    "end": 128.764,
+    "position": "bottom"
+  },
+  {
+    "id": 52,
+    "segmentId": "VO_029",
+    "chapter": 3,
+    "text": "这里不是两个人格，",
+    "start": 129.799,
+    "end": 131.263,
+    "position": "bottom"
+  },
+  {
+    "id": 53,
+    "segmentId": "VO_029",
+    "chapter": 3,
+    "text": "也没有所谓“真正的我”和“假的我”。",
+    "start": 131.298,
+    "end": 133.7,
+    "position": "bottom"
+  },
+  {
+    "id": 54,
+    "segmentId": "VO_030",
+    "chapter": 3,
+    "text": "只是同一个人，",
+    "start": 134.535,
+    "end": 135.716,
+    "position": "bottom"
+  },
+  {
+    "id": 55,
+    "segmentId": "VO_030",
+    "chapter": 3,
+    "text": "可以同时有两股方向不同的动机。",
+    "start": 135.751,
+    "end": 138.552,
+    "position": "bottom"
+  },
+  {
+    "id": 56,
+    "segmentId": "VO_031",
+    "chapter": 3,
+    "text": "一边想做，因为已经答应了。",
+    "start": 139.387,
+    "end": 141.592,
+    "position": "bottom"
+  },
+  {
+    "id": 57,
+    "segmentId": "VO_032",
+    "chapter": 3,
+    "text": "一边又抗拒，",
+    "start": 142.427,
+    "end": 143.425,
+    "position": "bottom"
+  },
+  {
+    "id": 58,
+    "segmentId": "VO_032",
+    "chapter": 3,
+    "text": "尤其抗拒行动以后要面对的后果。",
+    "start": 143.46,
+    "end": 146.317,
+    "position": "bottom"
+  },
+  {
+    "id": 59,
+    "segmentId": "VO_033",
+    "chapter": 3,
+    "text": "于是，明确的拒绝没有出现。",
+    "start": 147.152,
+    "end": 149.388,
+    "position": "bottom"
+  },
+  {
+    "id": 60,
+    "segmentId": "VO_033",
+    "chapter": 3,
+    "text": "出现的可能是拖延、失误，",
+    "start": 149.423,
+    "end": 151.452,
+    "position": "bottom"
+  },
+  {
+    "id": 61,
+    "segmentId": "VO_033",
+    "chapter": 3,
+    "text": "或者一句听起来很无辜的：",
+    "start": 151.487,
+    "end": 153.723,
+    "position": "bottom"
+  },
+  {
+    "id": 62,
+    "segmentId": "VO_034",
+    "chapter": 3,
+    "text": "“我忘了。",
+    "start": 154.078,
+    "end": 154.731,
+    "position": "bottom"
+  },
+  {
+    "id": 63,
+    "segmentId": "VO_034",
+    "chapter": 3,
+    "text": "”",
+    "start": 154.766,
+    "end": 155.146,
+    "position": "bottom"
+  },
+  {
+    "id": 64,
+    "segmentId": "VO_035",
+    "chapter": 3,
+    "text": "这是一种解释框架，不是已经判明的事实。",
+    "start": 156.195,
+    "end": 159.515,
+    "position": "bottom"
+  },
+  {
+    "id": 65,
+    "segmentId": "VO_036",
+    "chapter": 4,
+    "text": "Brill 报告过一个通信案例。",
+    "start": 160.55,
+    "end": 162.953,
+    "position": "bottom"
+  },
+  {
+    "id": 66,
+    "segmentId": "VO_037",
+    "chapter": 4,
+    "text": "当事人原本很喜欢写信，也一向准时回复。",
+    "start": 163.308,
+    "end": 166.721,
+    "position": "bottom"
+  },
+  {
+    "id": 67,
+    "segmentId": "VO_038",
+    "chapter": 4,
+    "text": "后来，她收到一封重要来信。",
+    "start": 167.076,
+    "end": 169.444,
+    "position": "bottom"
+  },
+  {
+    "id": 68,
+    "segmentId": "VO_038",
+    "chapter": 4,
+    "text": "对方要求她给出明确答案，",
+    "start": 169.479,
+    "end": 171.847,
+    "position": "bottom"
+  },
+  {
+    "id": 69,
+    "segmentId": "VO_038",
+    "chapter": 4,
+    "text": "可她不知道该怎么回答。",
+    "start": 171.882,
+    "end": 174.031,
+    "position": "bottom"
+  },
+  {
+    "id": 70,
+    "segmentId": "VO_039",
+    "chapter": 4,
+    "text": "于是，她一直没有回。",
+    "start": 174.386,
+    "end": 176.115,
+    "position": "bottom"
+  },
+  {
+    "id": 71,
+    "segmentId": "VO_040",
+    "chapter": 4,
+    "text": "但事情还没结束。",
+    "start": 177.15,
+    "end": 179.159,
+    "position": "bottom"
+  },
+  {
+    "id": 72,
+    "segmentId": "VO_041",
+    "chapter": 4,
+    "text": "接下来，她不只是回不了那一封信。",
+    "start": 180.694,
+    "end": 183.476,
+    "position": "bottom"
+  },
+  {
+    "id": 73,
+    "segmentId": "VO_041",
+    "chapter": 4,
+    "text": "连写其他信件，也变得十分困难。",
+    "start": 183.511,
+    "end": 186.092,
+    "position": "bottom"
+  },
+  {
+    "id": 74,
+    "segmentId": "VO_041",
+    "chapter": 4,
+    "text": "原本轻松的通信，像是被一起冻住了。",
+    "start": 186.127,
+    "end": 189.111,
+    "position": "bottom"
+  },
+  {
+    "id": 75,
+    "segmentId": "VO_042",
+    "chapter": 4,
+    "text": "按照原书中的解释，",
+    "start": 190.546,
+    "end": 191.96,
+    "position": "bottom"
+  },
+  {
+    "id": 76,
+    "segmentId": "VO_042",
+    "chapter": 4,
+    "text": "对那封重要来信的犹豫和抑制，",
+    "start": 191.995,
+    "end": 194.316,
+    "position": "bottom"
+  },
+  {
+    "id": 77,
+    "segmentId": "VO_042",
+    "chapter": 4,
+    "text": "扩散到了更广泛的通信行为。",
+    "start": 194.351,
+    "end": 196.49,
+    "position": "bottom"
+  },
+  {
+    "id": 78,
+    "segmentId": "VO_043",
+    "chapter": 4,
+    "text": "这个案例提供了一种理解：让人回避的，",
+    "start": 196.845,
+    "end": 199.897,
+    "position": "bottom"
+  },
+  {
+    "id": 79,
+    "segmentId": "VO_043",
+    "chapter": 4,
+    "text": "也许不是“写字”这个动作，",
+    "start": 199.932,
+    "end": 201.826,
+    "position": "bottom"
+  },
+  {
+    "id": 80,
+    "segmentId": "VO_043",
+    "chapter": 4,
+    "text": "而是某一封信所代表的决定。",
+    "start": 201.861,
+    "end": 204.14,
+    "position": "bottom"
+  },
+  {
+    "id": 81,
+    "segmentId": "VO_043",
+    "chapter": 4,
+    "text": "当这种冲突和整个通信情境连在一起，",
+    "start": 204.175,
+    "end": 207.227,
+    "position": "bottom"
+  },
+  {
+    "id": 82,
+    "segmentId": "VO_043",
+    "chapter": 4,
+    "text": "其他通信也可能受到牵连。",
+    "start": 207.262,
+    "end": 209.349,
+    "position": "bottom"
+  },
+  {
+    "id": 83,
+    "segmentId": "VO_044",
+    "chapter": 4,
+    "text": "但它不能证明，现实中每一次不想回消息，",
+    "start": 209.704,
+    "end": 212.966,
+    "position": "bottom"
+  },
+  {
+    "id": 84,
+    "segmentId": "VO_044",
+    "chapter": 4,
+    "text": "都来自同一种心理冲突。",
+    "start": 213.001,
+    "end": 214.905,
+    "position": "bottom"
+  },
+  {
+    "id": 85,
+    "segmentId": "VO_045",
+    "chapter": 4,
+    "text": "现在，再看开头那部手机。",
+    "start": 215.94,
+    "end": 217.937,
+    "position": "bottom"
+  },
+  {
+    "id": 86,
+    "segmentId": "VO_046",
+    "chapter": 4,
+    "text": "主人公回避的，也许不只是几个字，",
+    "start": 218.772,
+    "end": 221.808,
+    "position": "bottom"
+  },
+  {
+    "id": 87,
+    "segmentId": "VO_046",
+    "chapter": 4,
+    "text": "而是“我们谈谈吧”后面的整场对话。",
+    "start": 221.843,
+    "end": 224.878,
+    "position": "bottom"
+  },
+  {
+    "id": 88,
+    "segmentId": "VO_047",
+    "chapter": 4,
+    "text": "但请注意：",
+    "start": 225.233,
+    "end": 225.955,
+    "position": "bottom"
+  },
+  {
+    "id": 89,
+    "segmentId": "VO_047",
+    "chapter": 4,
+    "text": "这只是把原书中的结构放到今天来理解。",
+    "start": 225.99,
+    "end": 229.171,
+    "position": "bottom"
+  },
+  {
+    "id": 90,
+    "segmentId": "VO_047",
+    "chapter": 4,
+    "text": "微信，不是弗洛伊德的原书案例。",
+    "start": 229.206,
+    "end": 231.63,
+    "position": "bottom"
+  },
+  {
+    "id": 91,
+    "segmentId": "VO_048",
+    "chapter": 5,
+    "text": "还有一种拖延，更让人困惑。",
+    "start": 232.665,
+    "end": 234.813,
+    "position": "bottom"
+  },
+  {
+    "id": 92,
+    "segmentId": "VO_049",
+    "chapter": 5,
+    "text": "事情明明已经完成了百分之九十五，",
+    "start": 235.168,
+    "end": 238.224,
+    "position": "bottom"
+  },
+  {
+    "id": 93,
+    "segmentId": "VO_049",
+    "chapter": 5,
+    "text": "却总是卡在最后一步。",
+    "start": 238.259,
+    "end": 240.079,
+    "position": "bottom"
+  },
+  {
+    "id": 94,
+    "segmentId": "VO_050",
+    "chapter": 5,
+    "text": "弗洛伊德写过一篇关于梦的短文。",
+    "start": 241.114,
+    "end": 244.139,
+    "position": "bottom"
+  },
+  {
+    "id": 95,
+    "segmentId": "VO_050",
+    "chapter": 5,
+    "text": "出版方把校样寄给他，希望尽快收回。",
+    "start": 244.174,
+    "end": 247.418,
+    "position": "bottom"
+  },
+  {
+    "id": 96,
+    "segmentId": "VO_051",
+    "chapter": 5,
+    "text": "他当晚就改完了，把校样放在桌上，",
+    "start": 247.773,
+    "end": 250.54,
+    "position": "bottom"
+  },
+  {
+    "id": 97,
+    "segmentId": "VO_051",
+    "chapter": 5,
+    "text": "准备第二天寄出。",
+    "start": 250.575,
+    "end": 251.941,
+    "position": "bottom"
+  },
+  {
+    "id": 98,
+    "segmentId": "VO_052",
+    "chapter": 5,
+    "text": "第二天早上，他忘了。",
+    "start": 252.296,
+    "end": 254.021,
+    "position": "bottom"
+  },
+  {
+    "id": 99,
+    "segmentId": "VO_052",
+    "chapter": 5,
+    "text": "下午看到桌上的纸，才又想起来。",
+    "start": 254.056,
+    "end": 256.882,
+    "position": "bottom"
+  },
+  {
+    "id": 100,
+    "segmentId": "VO_053",
+    "chapter": 5,
+    "text": "可到了晚上，以及再下一个早晨，",
+    "start": 257.517,
+    "end": 260.039,
+    "position": "bottom"
+  },
+  {
+    "id": 101,
+    "segmentId": "VO_053",
+    "chapter": 5,
+    "text": "他还是没有寄。",
+    "start": 260.074,
+    "end": 261.22,
+    "position": "bottom"
+  },
+  {
+    "id": 102,
+    "segmentId": "VO_053",
+    "chapter": 5,
+    "text": "直到第二天下午，校样才终于被投入信箱。",
+    "start": 261.255,
+    "end": 264.564,
+    "position": "bottom"
+  },
+  {
+    "id": 103,
+    "segmentId": "VO_054",
+    "chapter": 5,
+    "text": "弗洛伊德后来把这次拖延，",
+    "start": 265.399,
+    "end": 267.365,
+    "position": "bottom"
+  },
+  {
+    "id": 104,
+    "segmentId": "VO_054",
+    "chapter": 5,
+    "text": "联系到自己对出版问题的潜在顾虑。",
+    "start": 267.4,
+    "end": 270.093,
+    "position": "bottom"
+  },
+  {
+    "id": 105,
+    "segmentId": "VO_054",
+    "chapter": 5,
+    "text": "他认为，自己虽然已经决定寄出，",
+    "start": 270.128,
+    "end": 272.457,
+    "position": "bottom"
+  },
+  {
+    "id": 106,
+    "segmentId": "VO_054",
+    "chapter": 5,
+    "text": "另一股不愿行动的倾向，",
+    "start": 272.492,
+    "end": 274.276,
+    "position": "bottom"
+  },
+  {
+    "id": 107,
+    "segmentId": "VO_054",
+    "chapter": 5,
+    "text": "仍在妨碍最后一步。",
+    "start": 274.311,
+    "end": 275.731,
+    "position": "bottom"
+  },
+  {
+    "id": 108,
+    "segmentId": "VO_055",
+    "chapter": 5,
+    "text": "这只是弗洛伊德后来给出的自我解释。",
+    "start": 276.086,
+    "end": 279.093,
+    "position": "bottom"
+  },
+  {
+    "id": 109,
+    "segmentId": "VO_056",
+    "chapter": 5,
+    "text": "不是经过独立验证的唯一原因。",
+    "start": 279.828,
+    "end": 282.208,
+    "position": "bottom"
+  },
+  {
+    "id": 110,
+    "segmentId": "VO_057",
+    "chapter": 5,
+    "text": "如果把这个结构放到今天，",
+    "start": 283.743,
+    "end": 286.025,
+    "position": "bottom"
+  },
+  {
+    "id": 111,
+    "segmentId": "VO_057",
+    "chapter": 5,
+    "text": "我们可能会想到：邮件写完了，",
+    "start": 286.06,
+    "end": 288.553,
+    "position": "bottom"
+  },
+  {
+    "id": 112,
+    "segmentId": "VO_057",
+    "chapter": 5,
+    "text": "却不点发送；简历做好了，却迟迟不投；",
+    "start": 288.588,
+    "end": 291.712,
+    "position": "bottom"
+  },
+  {
+    "id": 113,
+    "segmentId": "VO_057",
+    "chapter": 5,
+    "text": "视频剪完了，却一直不发布。",
+    "start": 291.747,
+    "end": 294.029,
+    "position": "bottom"
+  },
+  {
+    "id": 114,
+    "segmentId": "VO_058",
+    "chapter": 5,
+    "text": "至少在这类情境里，",
+    "start": 294.384,
+    "end": 295.921,
+    "position": "bottom"
+  },
+  {
+    "id": 115,
+    "segmentId": "VO_058",
+    "chapter": 5,
+    "text": "它提供了一种值得追问的可能：",
+    "start": 295.956,
+    "end": 298.476,
+    "position": "bottom"
+  },
+  {
+    "id": 116,
+    "segmentId": "VO_058",
+    "chapter": 5,
+    "text": "真正让人犹豫的，也许不是完成任务，",
+    "start": 298.511,
+    "end": 301.424,
+    "position": "bottom"
+  },
+  {
+    "id": 117,
+    "segmentId": "VO_058",
+    "chapter": 5,
+    "text": "而是完成以后，必须面对的评价、拒绝，",
+    "start": 301.459,
+    "end": 304.372,
+    "position": "bottom"
+  },
+  {
+    "id": 118,
+    "segmentId": "VO_058",
+    "chapter": 5,
+    "text": "或者冲突。",
+    "start": 304.407,
+    "end": 305.158,
+    "position": "bottom"
+  },
+  {
+    "id": 119,
+    "segmentId": "VO_059",
+    "chapter": 5,
+    "text": "可这仍然只是一种可能。",
+    "start": 306.693,
+    "end": 308.876,
+    "position": "bottom"
+  },
+  {
+    "id": 120,
+    "segmentId": "VO_060",
+    "chapter": 6,
+    "text": "把这些案例放在一起，",
+    "start": 310.411,
+    "end": 312.032,
+    "position": "bottom"
+  },
+  {
+    "id": 121,
+    "segmentId": "VO_060",
+    "chapter": 6,
+    "text": "会出现一条很简单的路线。",
+    "start": 312.067,
+    "end": 314.056,
+    "position": "bottom"
+  },
+  {
+    "id": 122,
+    "segmentId": "VO_061",
+    "chapter": 6,
+    "text": "我们通常以为：形成意图，等到时机，",
+    "start": 314.411,
+    "end": 317.085,
+    "position": "bottom"
+  },
+  {
+    "id": 123,
+    "segmentId": "VO_061",
+    "chapter": 6,
+    "text": "然后执行。",
+    "start": 317.12,
+    "end": 317.859,
+    "position": "bottom"
+  },
+  {
+    "id": 124,
+    "segmentId": "VO_062",
+    "chapter": 6,
+    "text": "可弗洛伊德加进了另一股力量。",
+    "start": 318.214,
+    "end": 320.582,
+    "position": "bottom"
+  },
+  {
+    "id": 125,
+    "segmentId": "VO_063",
+    "chapter": 6,
+    "text": "一边是：“我要做。",
+    "start": 320.937,
+    "end": 322.057,
+    "position": "bottom"
+  },
+  {
+    "id": 126,
+    "segmentId": "VO_063",
+    "chapter": 6,
+    "text": "”",
+    "start": 322.092,
+    "end": 322.472,
+    "position": "bottom"
+  },
+  {
+    "id": 127,
+    "segmentId": "VO_064",
+    "chapter": 6,
+    "text": "另一边是：“我不想做。",
+    "start": 323.284,
+    "end": 324.869,
+    "position": "bottom"
+  },
+  {
+    "id": 128,
+    "segmentId": "VO_064",
+    "chapter": 6,
+    "text": "”",
+    "start": 324.904,
+    "end": 325.284,
+    "position": "bottom"
+  },
+  {
+    "id": 129,
+    "segmentId": "VO_065",
+    "chapter": 6,
+    "text": "反向意愿不一定取消计划。",
+    "start": 326.107,
+    "end": 328.536,
+    "position": "bottom"
+  },
+  {
+    "id": 130,
+    "segmentId": "VO_065",
+    "chapter": 6,
+    "text": "它可能只是不断把执行往后推。",
+    "start": 328.571,
+    "end": 331.447,
+    "position": "bottom"
+  },
+  {
+    "id": 131,
+    "segmentId": "VO_066",
+    "chapter": 6,
+    "text": "再等一会儿。",
+    "start": 331.802,
+    "end": 333.219,
+    "position": "bottom"
+  },
+  {
+    "id": 132,
+    "segmentId": "VO_067",
+    "chapter": 6,
+    "text": "明天处理。",
+    "start": 333.954,
+    "end": 334.94,
+    "position": "bottom"
+  },
+  {
+    "id": 133,
+    "segmentId": "VO_068",
+    "chapter": 6,
+    "text": "状态好一点再说。",
+    "start": 335.675,
+    "end": 337.15,
+    "position": "bottom"
+  },
+  {
+    "id": 134,
+    "segmentId": "VO_069",
+    "chapter": 6,
+    "text": "然后，我们回过头，",
+    "start": 337.885,
+    "end": 339.077,
+    "position": "bottom"
+  },
+  {
+    "id": 135,
+    "segmentId": "VO_069",
+    "chapter": 6,
+    "text": "才发现那个动作一直没有发生。",
+    "start": 339.112,
+    "end": 341.356,
+    "position": "bottom"
+  },
+  {
+    "id": 136,
+    "segmentId": "VO_070",
+    "chapter": 6,
+    "text": "至于两股动机如何拉扯，交给画面展开。",
+    "start": 341.711,
+    "end": 344.985,
+    "position": "bottom"
+  },
+  {
+    "id": 137,
+    "segmentId": "VO_071",
+    "chapter": 6,
+    "text": "旁白只需要留下一个问题：行动没有发生，",
+    "start": 347.02,
+    "end": 350.287,
+    "position": "bottom"
+  },
+  {
+    "id": 138,
+    "segmentId": "VO_071",
+    "chapter": 6,
+    "text": "究竟只是没想起来，还是这件事本身，",
+    "start": 350.322,
+    "end": 353.201,
+    "position": "bottom"
+  },
+  {
+    "id": 139,
+    "segmentId": "VO_071",
+    "chapter": 6,
+    "text": "让人不愿走到下一步？",
+    "start": 353.236,
+    "end": 354.949,
+    "position": "bottom"
+  },
+  {
+    "id": 140,
+    "segmentId": "VO_072",
+    "chapter": 6,
+    "text": "这个模型让我们多看见一种可能。",
+    "start": 356.484,
+    "end": 359.166,
+    "position": "bottom"
+  },
+  {
+    "id": 141,
+    "segmentId": "VO_073",
+    "chapter": 6,
+    "text": "可这还不够。",
+    "start": 359.521,
+    "end": 360.484,
+    "position": "bottom"
+  },
+  {
+    "id": 142,
+    "segmentId": "VO_073",
+    "chapter": 6,
+    "text": "一个解释越贴近经验，我们越要问：",
+    "start": 360.519,
+    "end": 363.277,
+    "position": "bottom"
+  },
+  {
+    "id": 143,
+    "segmentId": "VO_073",
+    "chapter": 6,
+    "text": "它到底有多少证据？",
+    "start": 363.312,
+    "end": 364.873,
+    "position": "bottom"
+  },
+  {
+    "id": 144,
+    "segmentId": "VO_074",
+    "chapter": 7,
+    "text": "现代记忆研究里，",
+    "start": 366.408,
+    "end": 367.264,
+    "position": "bottom"
+  },
+  {
+    "id": 145,
+    "segmentId": "VO_074",
+    "chapter": 7,
+    "text": "有个 Think/No-Think 实验。",
+    "start": 367.299,
+    "end": 369.554,
+    "position": "bottom"
+  },
+  {
+    "id": 146,
+    "segmentId": "VO_075",
+    "chapter": 7,
+    "text": "参与者先记住一些材料。",
+    "start": 369.909,
+    "end": 371.873,
+    "position": "bottom"
+  },
+  {
+    "id": 147,
+    "segmentId": "VO_075",
+    "chapter": 7,
+    "text": "后来看到提示：有些要主动回忆，",
+    "start": 371.908,
+    "end": 374.472,
+    "position": "bottom"
+  },
+  {
+    "id": 148,
+    "segmentId": "VO_075",
+    "chapter": 7,
+    "text": "有些则要阻止相关记忆进入意识。",
+    "start": 374.507,
+    "end": 377.27,
+    "position": "bottom"
+  },
+  {
+    "id": 149,
+    "segmentId": "VO_076",
+    "chapter": 7,
+    "text": "反复抑制后，一些研究发现，",
+    "start": 377.625,
+    "end": 379.796,
+    "position": "bottom"
+  },
+  {
+    "id": 150,
+    "segmentId": "VO_076",
+    "chapter": 7,
+    "text": "后续记忆表现会受到影响。",
+    "start": 379.831,
+    "end": 382.001,
+    "position": "bottom"
+  },
+  {
+    "id": 151,
+    "segmentId": "VO_077",
+    "chapter": 7,
+    "text": "这说明，在实验条件下，",
+    "start": 383.036,
+    "end": 384.923,
+    "position": "bottom"
+  },
+  {
+    "id": 152,
+    "segmentId": "VO_077",
+    "chapter": 7,
+    "text": "人可以主动调节记忆提取。",
+    "start": 384.958,
+    "end": 387.273,
+    "position": "bottom"
+  },
+  {
+    "id": 153,
+    "segmentId": "VO_077",
+    "chapter": 7,
+    "text": "研究也把这类过程和认知控制及相关脑网络联系起来。",
+    "start": 387.308,
+    "end": 392.185,
+    "position": "bottom"
+  },
+  {
+    "id": 154,
+    "segmentId": "VO_078",
+    "chapter": 7,
+    "text": "听上去，这似乎在支持弗洛伊德。",
+    "start": 392.54,
+    "end": 395.059,
+    "position": "bottom"
+  },
+  {
+    "id": 155,
+    "segmentId": "VO_079",
+    "chapter": 7,
+    "text": "但不要把两件事偷偷换成一件事。",
+    "start": 396.294,
+    "end": 399.243,
+    "position": "bottom"
+  },
+  {
+    "id": 156,
+    "segmentId": "VO_080",
+    "chapter": 7,
+    "text": "实验里，",
+    "start": 401.278,
+    "end": 401.86,
+    "position": "bottom"
+  },
+  {
+    "id": 157,
+    "segmentId": "VO_080",
+    "chapter": 7,
+    "text": "人知道自己正在遵循“不去想”的指令。",
+    "start": 401.895,
+    "end": 404.944,
+    "position": "bottom"
+  },
+  {
+    "id": 158,
+    "segmentId": "VO_080",
+    "chapter": 7,
+    "text": "弗洛伊德谈的反向意愿，",
+    "start": 404.979,
+    "end": 406.999,
+    "position": "bottom"
+  },
+  {
+    "id": 159,
+    "segmentId": "VO_080",
+    "chapter": 7,
+    "text": "却可能没有被当事人充分承认。",
+    "start": 407.034,
+    "end": 409.672,
+    "position": "bottom"
+  },
+  {
+    "id": 160,
+    "segmentId": "VO_081",
+    "chapter": 7,
+    "text": "一个是受控实验中的主动检索抑制。",
+    "start": 410.027,
+    "end": 413.034,
+    "position": "bottom"
+  },
+  {
+    "id": 161,
+    "segmentId": "VO_082",
+    "chapter": 7,
+    "text": "一个是精神分析对日常失误的解释。",
+    "start": 413.819,
+    "end": 417.092,
+    "position": "bottom"
+  },
+  {
+    "id": 162,
+    "segmentId": "VO_083",
+    "chapter": 7,
+    "text": "它们不是同一个概念。",
+    "start": 417.877,
+    "end": 419.654,
+    "position": "bottom"
+  },
+  {
+    "id": 163,
+    "segmentId": "VO_084",
+    "chapter": 7,
+    "text": "现代研究最多说明：",
+    "start": 421.189,
+    "end": 422.799,
+    "position": "bottom"
+  },
+  {
+    "id": 164,
+    "segmentId": "VO_084",
+    "chapter": 7,
+    "text": "记忆提取可以受到控制。",
+    "start": 422.834,
+    "end": 424.856,
+    "position": "bottom"
+  },
+  {
+    "id": 165,
+    "segmentId": "VO_084",
+    "chapter": 7,
+    "text": "它不能倒过来证明，",
+    "start": 424.891,
+    "end": 426.501,
+    "position": "bottom"
+  },
+  {
+    "id": 166,
+    "segmentId": "VO_084",
+    "chapter": 7,
+    "text": "弗洛伊德对某一次赴约、",
+    "start": 426.536,
+    "end": 428.558,
+    "position": "bottom"
+  },
+  {
+    "id": 167,
+    "segmentId": "VO_084",
+    "chapter": 7,
+    "text": "拖延或口误的解释就是正确的。",
+    "start": 428.593,
+    "end": 431.231,
+    "position": "bottom"
+  },
+  {
+    "id": 168,
+    "segmentId": "VO_085",
+    "chapter": 7,
+    "text": "没有这么简单。",
+    "start": 431.586,
+    "end": 432.84,
+    "position": "bottom"
+  },
+  {
+    "id": 169,
+    "segmentId": "VO_086",
+    "chapter": 8,
+    "text": "但到这里，我们应该停一下。",
+    "start": 434.375,
+    "end": 436.581,
+    "position": "bottom"
+  },
+  {
+    "id": 170,
+    "segmentId": "VO_087",
+    "chapter": 8,
+    "text": "难道每一次忘记，",
+    "start": 438.116,
+    "end": 439.341,
+    "position": "bottom"
+  },
+  {
+    "id": 171,
+    "segmentId": "VO_087",
+    "chapter": 8,
+    "text": "都藏着一个我们不愿承认的动机吗？",
+    "start": 439.376,
+    "end": 442.04,
+    "position": "bottom"
+  },
+  {
+    "id": 172,
+    "segmentId": "VO_088",
+    "chapter": 8,
+    "text": "当然不是。",
+    "start": 442.825,
+    "end": 443.811,
+    "position": "bottom"
+  },
+  {
+    "id": 173,
+    "segmentId": "VO_089",
+    "chapter": 8,
+    "text": "人会普通地遗忘。",
+    "start": 445.346,
+    "end": 446.902,
+    "position": "bottom"
+  },
+  {
+    "id": 174,
+    "segmentId": "VO_090",
+    "chapter": 8,
+    "text": "注意力会被打断。",
+    "start": 447.387,
+    "end": 448.815,
+    "position": "bottom"
+  },
+  {
+    "id": 175,
+    "segmentId": "VO_091",
+    "chapter": 8,
+    "text": "工作记忆能同时处理的内容有限。",
+    "start": 449.3,
+    "end": 452.005,
+    "position": "bottom"
+  },
+  {
+    "id": 176,
+    "segmentId": "VO_091",
+    "chapter": 8,
+    "text": "事情一多，原本打算做的动作，",
+    "start": 452.04,
+    "end": 454.354,
+    "position": "bottom"
+  },
+  {
+    "id": 177,
+    "segmentId": "VO_091",
+    "chapter": 8,
+    "text": "就可能从脑中掉出去。",
+    "start": 454.389,
+    "end": 456.115,
+    "position": "bottom"
+  },
+  {
+    "id": 178,
+    "segmentId": "VO_092",
+    "chapter": 8,
+    "text": "这些解释不仅存在，而且常常更直接。",
+    "start": 456.47,
+    "end": 459.453,
+    "position": "bottom"
+  },
+  {
+    "id": 179,
+    "segmentId": "VO_093",
+    "chapter": 8,
+    "text": "我们还需要把几件听起来相似的事分开：",
+    "start": 459.808,
+    "end": 463.291,
+    "position": "bottom"
+  },
+  {
+    "id": 180,
+    "segmentId": "VO_094",
+    "chapter": 8,
+    "text": "普通遗忘，不等于主动的记忆抑制。",
+    "start": 463.646,
+    "end": 466.432,
+    "position": "bottom"
+  },
+  {
+    "id": 181,
+    "segmentId": "VO_095",
+    "chapter": 8,
+    "text": "实验中的主动检索抑制，",
+    "start": 467.267,
+    "end": 469.264,
+    "position": "bottom"
+  },
+  {
+    "id": 182,
+    "segmentId": "VO_095",
+    "chapter": 8,
+    "text": "不等于精神分析意义上的无意识冲突。",
+    "start": 469.299,
+    "end": 472.515,
+    "position": "bottom"
+  },
+  {
+    "id": 183,
+    "segmentId": "VO_096",
+    "chapter": 8,
+    "text": "而事情发生以后，",
+    "start": 473.35,
+    "end": 474.741,
+    "position": "bottom"
+  },
+  {
+    "id": 184,
+    "segmentId": "VO_096",
+    "chapter": 8,
+    "text": "一个听起来很顺的心理解释，",
+    "start": 474.776,
+    "end": 477.185,
+    "position": "bottom"
+  },
+  {
+    "id": 185,
+    "segmentId": "VO_096",
+    "chapter": 8,
+    "text": "也不等于真实原因已经被找到了。",
+    "start": 477.22,
+    "end": 480.037,
+    "position": "bottom"
+  },
+  {
+    "id": 186,
+    "segmentId": "VO_097",
+    "chapter": 8,
+    "text": "一个人忘记回复消息，",
+    "start": 480.872,
+    "end": 482.863,
+    "position": "bottom"
+  },
+  {
+    "id": 187,
+    "segmentId": "VO_097",
+    "chapter": 8,
+    "text": "不能推出“他潜意识里讨厌这个人”。",
+    "start": 482.898,
+    "end": 486.015,
+    "position": "bottom"
+  },
+  {
+    "id": 188,
+    "segmentId": "VO_098",
+    "chapter": 8,
+    "text": "忘记赴约，",
+    "start": 486.37,
+    "end": 487.143,
+    "position": "bottom"
+  },
+  {
+    "id": 189,
+    "segmentId": "VO_098",
+    "chapter": 8,
+    "text": "也不能自动测出一段关系的真假。",
+    "start": 487.178,
+    "end": 489.969,
+    "position": "bottom"
+  },
+  {
+    "id": 190,
+    "segmentId": "VO_099",
+    "chapter": 8,
+    "text": "完成的文件没有寄出，可能是顾虑，",
+    "start": 490.324,
+    "end": 493.108,
+    "position": "bottom"
+  },
+  {
+    "id": 191,
+    "segmentId": "VO_099",
+    "chapter": 8,
+    "text": "也可能只是忙乱、疲惫，或者提醒失效。",
+    "start": 493.143,
+    "end": 496.129,
+    "position": "bottom"
+  },
+  {
+    "id": 192,
+    "segmentId": "VO_100",
+    "chapter": 8,
+    "text": "即使有件事总是偏偏被忘，",
+    "start": 496.484,
+    "end": 498.714,
+    "position": "bottom"
+  },
+  {
+    "id": 193,
+    "segmentId": "VO_100",
+    "chapter": 8,
+    "text": "反复发生在同一段关系、同一类任务，",
+    "start": 498.749,
+    "end": 501.803,
+    "position": "bottom"
+  },
+  {
+    "id": 194,
+    "segmentId": "VO_100",
+    "chapter": 8,
+    "text": "或者总卡在产生后果的最后一步——这些现象，",
+    "start": 501.838,
+    "end": 505.509,
+    "position": "bottom"
+  },
+  {
+    "id": 195,
+    "segmentId": "VO_100",
+    "chapter": 8,
+    "text": "最多让它更值得追问。",
+    "start": 505.544,
+    "end": 507.362,
+    "position": "bottom"
+  },
+  {
+    "id": 196,
+    "segmentId": "VO_101",
+    "chapter": 8,
+    "text": "值得追问，",
+    "start": 507.717,
+    "end": 508.658,
+    "position": "mid"
+  },
+  {
+    "id": 197,
+    "segmentId": "VO_102",
+    "chapter": 8,
+    "text": "不等于已经证明。",
+    "start": 509.693,
+    "end": 511.236,
+    "position": "mid"
+  },
+  {
+    "id": 198,
+    "segmentId": "VO_103",
+    "chapter": 8,
+    "text": "问题就在这里。",
+    "start": 513.271,
+    "end": 514.676,
+    "position": "bottom"
+  },
+  {
+    "id": 199,
+    "segmentId": "VO_104",
+    "chapter": 8,
+    "text": "弗洛伊德的解释很有吸引力，",
+    "start": 515.711,
+    "end": 518.256,
+    "position": "bottom"
+  },
+  {
+    "id": 200,
+    "segmentId": "VO_104",
+    "chapter": 8,
+    "text": "因为它很容易让人产生一种“我已经看穿了”的感觉。",
+    "start": 518.291,
+    "end": 522.77,
+    "position": "bottom"
+  },
+  {
+    "id": 201,
+    "segmentId": "VO_105",
+    "chapter": 8,
+    "text": "但只要把这种怀疑变成对别人的诊断，",
+    "start": 523.125,
+    "end": 526.178,
+    "position": "bottom"
+  },
+  {
+    "id": 202,
+    "segmentId": "VO_105",
+    "chapter": 8,
+    "text": "我们就走得太远了。",
+    "start": 526.213,
+    "end": 527.722,
+    "position": "bottom"
+  },
+  {
+    "id": 203,
+    "segmentId": "VO_106",
+    "chapter": 8,
+    "text": "它更适合成为一个向内的问题，",
+    "start": 528.077,
+    "end": 530.224,
+    "position": "bottom"
+  },
+  {
+    "id": 204,
+    "segmentId": "VO_106",
+    "chapter": 8,
+    "text": "而不是一套向外的读心术。",
+    "start": 530.259,
+    "end": 532.071,
+    "position": "bottom"
+  },
+  {
+    "id": 205,
+    "segmentId": "VO_107",
+    "chapter": 9,
+    "text": "现在，第三次回到那条消息。",
+    "start": 532.426,
+    "end": 534.806,
+    "position": "bottom"
+  },
+  {
+    "id": 206,
+    "segmentId": "VO_108",
+    "chapter": 9,
+    "text": "“我们谈谈吧。",
+    "start": 536.341,
+    "end": 537.303,
+    "position": "bottom"
+  },
+  {
+    "id": 207,
+    "segmentId": "VO_108",
+    "chapter": 9,
+    "text": "”",
+    "start": 537.338,
+    "end": 537.718,
+    "position": "bottom"
+  },
+  {
+    "id": 208,
+    "segmentId": "VO_109",
+    "chapter": 9,
+    "text": "它仍然停在那里。",
+    "start": 539.037,
+    "end": 540.406,
+    "position": "bottom"
+  },
+  {
+    "id": 209,
+    "segmentId": "VO_110",
+    "chapter": 9,
+    "text": "我们不知道主人公为什么没有回复，",
+    "start": 540.891,
+    "end": 543.879,
+    "position": "bottom"
+  },
+  {
+    "id": 210,
+    "segmentId": "VO_110",
+    "chapter": 9,
+    "text": "也不应该替他揭晓答案。",
+    "start": 543.914,
+    "end": 545.895,
+    "position": "bottom"
+  },
+  {
+    "id": 211,
+    "segmentId": "VO_111",
+    "chapter": 9,
+    "text": "也许，他真的忘了。",
+    "start": 546.25,
+    "end": 547.724,
+    "position": "bottom"
+  },
+  {
+    "id": 212,
+    "segmentId": "VO_112",
+    "chapter": 9,
+    "text": "也许，他看见了太多次。",
+    "start": 548.759,
+    "end": 550.544,
+    "position": "bottom"
+  },
+  {
+    "id": 213,
+    "segmentId": "VO_112",
+    "chapter": 9,
+    "text": "每一次，都对自己说：“晚一点再处理。",
+    "start": 550.579,
+    "end": 553.375,
+    "position": "bottom"
+  },
+  {
+    "id": 214,
+    "segmentId": "VO_112",
+    "chapter": 9,
+    "text": "”",
+    "start": 553.41,
+    "end": 553.79,
+    "position": "bottom"
+  },
+  {
+    "id": 215,
+    "segmentId": "VO_113",
+    "chapter": 9,
+    "text": "也许真正被拖延的，不是回复这条消息，",
+    "start": 554.612,
+    "end": 557.73,
+    "position": "bottom"
+  },
+  {
+    "id": 216,
+    "segmentId": "VO_113",
+    "chapter": 9,
+    "text": "而是回复以后，他不得不面对的某件事。",
+    "start": 557.764,
+    "end": 560.882,
+    "position": "bottom"
+  },
+  {
+    "id": 217,
+    "segmentId": "VO_114",
+    "chapter": 9,
+    "text": "我们不能因此说他害怕冲突，",
+    "start": 561.917,
+    "end": 564.455,
+    "position": "bottom"
+  },
+  {
+    "id": 218,
+    "segmentId": "VO_114",
+    "chapter": 9,
+    "text": "不能说他不爱对方，",
+    "start": 564.49,
+    "end": 566.17,
+    "position": "bottom"
+  },
+  {
+    "id": 219,
+    "segmentId": "VO_114",
+    "chapter": 9,
+    "text": "也不能说他在逃避亲密关系。",
+    "start": 566.205,
+    "end": 568.743,
+    "position": "bottom"
+  },
+  {
+    "id": 220,
+    "segmentId": "VO_115",
+    "chapter": 9,
+    "text": "现有的信息，不够。",
+    "start": 569.098,
+    "end": 570.48,
+    "position": "bottom"
+  },
+  {
+    "id": 221,
+    "segmentId": "VO_116",
+    "chapter": 9,
+    "text": "任何确定的答案，都只是我们补写的故事。",
+    "start": 572.015,
+    "end": 575.451,
+    "position": "bottom"
+  },
+  {
+    "id": 222,
+    "segmentId": "VO_117",
+    "chapter": 9,
+    "text": "所以下一次，",
+    "start": 575.806,
+    "end": 576.739,
+    "position": "bottom"
+  },
+  {
+    "id": 223,
+    "segmentId": "VO_117",
+    "chapter": 9,
+    "text": "当你再次说出“我忘了”的时候，",
+    "start": 576.774,
+    "end": 579.061,
+    "position": "bottom"
+  },
+  {
+    "id": 224,
+    "segmentId": "VO_117",
+    "chapter": 9,
+    "text": "你不一定需要怀疑自己，",
+    "start": 579.096,
+    "end": 580.996,
+    "position": "bottom"
+  },
+  {
+    "id": 225,
+    "segmentId": "VO_117",
+    "chapter": 9,
+    "text": "更没有必要把每一次失误，",
+    "start": 581.031,
+    "end": 583.124,
+    "position": "bottom"
+  },
+  {
+    "id": 226,
+    "segmentId": "VO_117",
+    "chapter": 9,
+    "text": "都解释成潜意识。",
+    "start": 583.159,
+    "end": 584.479,
+    "position": "bottom"
+  },
+  {
+    "id": 227,
+    "segmentId": "VO_118",
+    "chapter": 9,
+    "text": "但如果有一件事，",
+    "start": 584.834,
+    "end": 586.331,
+    "position": "bottom"
+  },
+  {
+    "id": 228,
+    "segmentId": "VO_119",
+    "chapter": 9,
+    "text": "你总是在忘，",
+    "start": 586.816,
+    "end": 588.07,
+    "position": "bottom"
+  },
+  {
+    "id": 229,
+    "segmentId": "VO_120",
+    "chapter": 9,
+    "text": "总是在拖，",
+    "start": 588.905,
+    "end": 589.949,
+    "position": "bottom"
+  },
+  {
+    "id": 230,
+    "segmentId": "VO_121",
+    "chapter": 9,
+    "text": "总是在最后一步停下来……",
+    "start": 590.784,
+    "end": 592.654,
+    "position": "bottom"
+  },
+  {
+    "id": 231,
+    "segmentId": "VO_122",
+    "chapter": 9,
+    "text": "也许可以多问一句：",
+    "start": 593.689,
+    "end": 595.43,
+    "position": "bottom"
+  },
+  {
+    "id": 232,
+    "segmentId": "VO_123",
+    "chapter": 9,
+    "text": "我是真的忘了？",
+    "start": 595.915,
+    "end": 597.32,
+    "position": "bottom"
+  },
+  {
+    "id": 233,
+    "segmentId": "VO_124",
+    "chapter": 9,
+    "text": "还是，",
+    "start": 598.855,
+    "end": 599.493,
+    "position": "bottom"
+  },
+  {
+    "id": 234,
+    "segmentId": "VO_125",
+    "chapter": 9,
+    "text": "我只是不想面对它？",
+    "start": 599.978,
+    "end": 601.626,
+    "position": "bottom"
+  },
+  {
+    "id": 235,
+    "segmentId": "VO_126",
+    "chapter": 9,
+    "text": "当然，",
+    "start": 604.161,
+    "end": 604.765,
+    "position": "bottom"
+  },
+  {
+    "id": 236,
+    "segmentId": "VO_127",
+    "chapter": 9,
+    "text": "有时候，",
+    "start": 605.8,
+    "end": 606.763,
+    "position": "bottom"
+  },
+  {
+    "id": 237,
+    "segmentId": "VO_128",
+    "chapter": 9,
+    "text": "我们真的只是忘了。",
+    "start": 607.798,
+    "end": 609.354,
+    "position": "bottom"
+  }
+]
