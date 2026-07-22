@@ -1,0 +1,1946 @@
+{
+  "project": {
+    "title": "你真的只是忘了吗？——弗洛伊德眼中的“刻意回避”",
+    "fps": 30,
+    "width": 1920,
+    "height": 1080,
+    "durationSec": 620
+  },
+  "visualSystem": {
+    "background": "dark",
+    "primary": "white",
+    "accent": "red",
+    "secondaryAccent": "blue"
+  },
+  "scenes": [
+    {
+      "id": "S001",
+      "start": 0,
+      "end": 5,
+      "duration": 5,
+      "chapter": 1,
+      "visualType": "B",
+      "template": null,
+      "narrationSummary": "手机亮起",
+      "visual": {
+        "description": "深灰环境中手机屏幕独自亮起，聊天列表保持低对比度，尚无红色强调。",
+        "elements": [
+          "reality_context",
+          "low_contrast_environment"
+        ]
+      },
+      "assets": [
+        "smartphone_hand",
+        "smartphone_chat_ui"
+      ],
+      "transitionIn": "fade",
+      "transitionOut": "hold",
+      "notes": "安静进入，不显示弗洛伊德。"
+    },
+    {
+      "id": "S002",
+      "start": 5,
+      "end": 9,
+      "duration": 4,
+      "chapter": 1,
+      "visualType": "F",
+      "template": "MG_MessageFocus",
+      "narrationSummary": "“我们谈谈吧。”",
+      "visual": {
+        "description": "目标消息从列表顶部展开，文字“我们谈谈吧。”清晰出现；背景 UI 降暗，消息右侧出现极小红点。",
+        "elements": [
+          "red_subject",
+          "target_message",
+          "dimmed_messages"
+        ]
+      },
+      "assets": [
+        "smartphone_chat_ui"
+      ],
+      "transitionIn": "hold",
+      "transitionOut": "cut",
+      "notes": "台词后保留 1.5 秒视觉停顿。"
+    },
+    {
+      "id": "S003",
+      "start": 9,
+      "end": 14,
+      "duration": 5,
+      "chapter": 1,
+      "visualType": "B",
+      "template": null,
+      "narrationSummary": "看见却没点开",
+      "visual": {
+        "description": "手指停在目标消息上方，没有触碰；屏幕亮度缓慢下降，目标消息仍保持可见。",
+        "elements": [
+          "reality_context",
+          "low_contrast_environment"
+        ]
+      },
+      "assets": [
+        "smartphone_hand",
+        "smartphone_chat_ui"
+      ],
+      "transitionIn": "cut",
+      "transitionOut": "match_cut",
+      "notes": "不暗示“故意不回”。"
+    },
+    {
+      "id": "S004",
+      "start": 14,
+      "end": 21,
+      "duration": 7,
+      "chapter": 1,
+      "visualType": "F",
+      "template": "MG_TimePass",
+      "narrationSummary": "“等会儿再回”",
+      "visual": {
+        "description": "屏幕关闭后，白色短标签“等会儿”悬在黑底；一条细时间线从当前时刻向右延伸。",
+        "elements": [
+          "timeline",
+          "time_markers",
+          "pending_node"
+        ]
+      },
+      "assets": [
+        "clock_ui"
+      ],
+      "transitionIn": "match_cut",
+      "transitionOut": "mg_continue",
+      "notes": "标签不解释动机。"
+    },
+    {
+      "id": "S005",
+      "start": 21,
+      "end": 28,
+      "duration": 7,
+      "chapter": 1,
+      "visualType": "A",
+      "template": "MG_TimePass",
+      "narrationSummary": "几小时、一天、两天",
+      "visual": {
+        "description": "时间线依次越过“几小时”“一天”“两天”，每个刻度出现后变灰；红色消息节点始终停在起点。",
+        "elements": [
+          "timeline",
+          "time_markers",
+          "pending_node"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "cut",
+      "notes": "为三个时间短句留出呼吸。"
+    },
+    {
+      "id": "S006",
+      "start": 28,
+      "end": 35,
+      "duration": 7,
+      "chapter": 1,
+      "visualType": "B",
+      "template": null,
+      "narrationSummary": "期间回复了其他内容",
+      "visual": {
+        "description": "聊天列表再次打开，工作群、照片、通知依次被点开并变为已读；目标消息保持未打开。",
+        "elements": [
+          "reality_context",
+          "low_contrast_environment"
+        ]
+      },
+      "assets": [
+        "smartphone_chat_ui",
+        "generic_message_rows"
+      ],
+      "transitionIn": "cut",
+      "transitionOut": "hold",
+      "notes": "只建立行为对比。"
+    },
+    {
+      "id": "S007",
+      "start": 35,
+      "end": 43,
+      "duration": 8,
+      "chapter": 1,
+      "visualType": "F",
+      "template": "MG_MessageFocus",
+      "narrationSummary": "“我忘了”",
+      "visual": {
+        "description": "其他消息向两侧淡出，只剩目标消息和红色人物小图标；“我忘了”在人物旁出现，随后保持静止。",
+        "elements": [
+          "red_subject",
+          "target_message",
+          "dimmed_messages"
+        ]
+      },
+      "assets": [
+        "smartphone_chat_ui"
+      ],
+      "transitionIn": "hold",
+      "transitionOut": "black",
+      "notes": "“我忘了”后停 1.5 秒。"
+    },
+    {
+      "id": "S008",
+      "start": 43,
+      "end": 50,
+      "duration": 7,
+      "chapter": 1,
+      "visualType": "E",
+      "template": "MG_MessageFocus",
+      "narrationSummary": "为什么偏偏是这一条；引出弗洛伊德",
+      "visual": {
+        "description": "黑屏中央只留“为什么偏偏是这一条？”，红色消息节点在句号旁轻微显现；长停后问题淡出，末端只出现白字“弗洛伊德”。",
+        "elements": [
+          "red_subject",
+          "target_message",
+          "dimmed_messages"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "black",
+      "transitionOut": "cut",
+      "notes": "核心问题至少保持 2.5 秒；不解释红色节点。"
+    },
+    {
+      "id": "S009",
+      "start": 50,
+      "end": 56,
+      "duration": 6,
+      "chapter": 2,
+      "visualType": "B",
+      "template": null,
+      "narrationSummary": "人本来就会忘事",
+      "visual": {
+        "description": "深色桌面上，手伸向门把后停住，钥匙仍留在桌角；画面无红色节点。",
+        "elements": [
+          "reality_context",
+          "low_contrast_environment"
+        ]
+      },
+      "assets": [
+        "keys_on_table",
+        "doorway"
+      ],
+      "transitionIn": "cut",
+      "transitionOut": "match_cut",
+      "notes": "普通遗忘保持中性。"
+    },
+    {
+      "id": "S010",
+      "start": 56,
+      "end": 63,
+      "duration": 7,
+      "chapter": 2,
+      "visualType": "B",
+      "template": null,
+      "narrationSummary": "注意、事情多、睡眠等普通原因",
+      "visual": {
+        "description": "日程提醒被多个普通通知覆盖，三个白色小标签“注意”“负荷”“疲惫”短暂出现后淡出。",
+        "elements": [
+          "reality_context",
+          "low_contrast_environment"
+        ]
+      },
+      "assets": [
+        "generic_notifications",
+        "calendar_ui"
+      ],
+      "transitionIn": "match_cut",
+      "transitionOut": "morph",
+      "notes": "不建立隐藏动机。"
+    },
+    {
+      "id": "S011",
+      "start": 63,
+      "end": 70,
+      "duration": 7,
+      "chapter": 2,
+      "visualType": "A",
+      "template": "MG_ScheduleNodes",
+      "narrationSummary": "忘记不一定有隐藏理由",
+      "visual": {
+        "description": "六个白色日程节点沿时间轴排列，其中一个因提醒消失而自然变灰；下方短句“不一定需要隐藏理由”。",
+        "elements": [
+          "schedule_nodes",
+          "completion_marks",
+          "missed_node"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "morph",
+      "transitionOut": "mg_continue",
+      "notes": "普通遗漏与红色冲突符号分开。"
+    },
+    {
+      "id": "S012",
+      "start": 70,
+      "end": 76,
+      "duration": 6,
+      "chapter": 2,
+      "visualType": "A",
+      "template": "MG_ScheduleNodes",
+      "narrationSummary": "为什么偏偏忘了某件事",
+      "visual": {
+        "description": "同一组日程节点重新出现，其他节点依次完成；“赴约”节点仍未勾选，边框由白转红。",
+        "elements": [
+          "schedule_nodes",
+          "completion_marks",
+          "missed_node"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "match_cut",
+      "notes": "红色表示观察焦点，不是结论。"
+    },
+    {
+      "id": "S013",
+      "start": 76,
+      "end": 83,
+      "duration": 7,
+      "chapter": 2,
+      "visualType": "F",
+      "template": "MG_TimePass",
+      "narrationSummary": "忘记赴约",
+      "visual": {
+        "description": "日历上的赴约时间越过当前刻度；画面另一侧是一张空椅和白色等待人物，人物不做情绪表演。",
+        "elements": [
+          "timeline",
+          "time_markers",
+          "pending_node"
+        ]
+      },
+      "assets": [
+        "calendar_ui",
+        "empty_chair",
+        "waiting_person"
+      ],
+      "transitionIn": "match_cut",
+      "transitionOut": "hold",
+      "notes": "原书案例视觉化，不拍爱情短片。"
+    },
+    {
+      "id": "S014",
+      "start": 83,
+      "end": 91,
+      "duration": 8,
+      "chapter": 2,
+      "visualType": "E",
+      "template": null,
+      "narrationSummary": "“以前怎么没有忘？”",
+      "visual": {
+        "description": "空椅淡出，黑底依次出现“以前怎么没有忘？”与“已经没那么重要？”两个问句，均带问号。",
+        "elements": [
+          "black_background",
+          "minimal_text"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "hold",
+      "transitionOut": "morph",
+      "notes": "问句不是答案。"
+    },
+    {
+      "id": "S015",
+      "start": 91,
+      "end": 98,
+      "duration": 7,
+      "chapter": 2,
+      "visualType": "A",
+      "template": "MG_ScheduleNodes",
+      "narrationSummary": "不等于不爱",
+      "visual": {
+        "description": "红色“赴约”节点旁出现“= 不爱”，等号立即变为巨大“≠”，错误结论整体灰化。",
+        "elements": [
+          "schedule_nodes",
+          "completion_marks",
+          "missed_node"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "morph",
+      "transitionOut": "fade",
+      "notes": "明确保护 E05 边界。"
+    },
+    {
+      "id": "S016",
+      "start": 98,
+      "end": 105,
+      "duration": 7,
+      "chapter": 2,
+      "visualType": "C",
+      "template": null,
+      "narrationSummary": "弗洛伊德关注“偏偏”",
+      "visual": {
+        "description": "弗洛伊德肖像与《日常生活的心理分析》书封以档案边框短暂并列；中央只留红字“偏偏”。",
+        "elements": [
+          "archive_frame",
+          "warm_gray_texture"
+        ]
+      },
+      "assets": [
+        "freud_portrait",
+        "book_cover"
+      ],
+      "transitionIn": "fade",
+      "transitionOut": "cut",
+      "notes": "历史资料只作定位，不转人物介绍。"
+    },
+    {
+      "id": "S017",
+      "start": 105,
+      "end": 112,
+      "duration": 7,
+      "chapter": 3,
+      "visualType": "D",
+      "template": null,
+      "narrationSummary": "两类遗忘分开讨论",
+      "visual": {
+        "description": "黑底上出现两个独立白框：“过去的事情”与“已经决定要做的事”；中间保持间距，不画等号。",
+        "elements": [
+          "short_text",
+          "evidence_label"
+        ]
+      },
+      "assets": [
+        "book_page_excerpt"
+      ],
+      "transitionIn": "cut",
+      "transitionOut": "morph",
+      "notes": "对应 E02，仅显示短标签。"
+    },
+    {
+      "id": "S018",
+      "start": 112,
+      "end": 119,
+      "duration": 7,
+      "chapter": 3,
+      "visualType": "A",
+      "template": "MG_IntentPath",
+      "narrationSummary": "计划已经形成",
+      "visual": {
+        "description": "红色人物上方依次出现“赴约”“寄出”“回复”三个白色意图节点，均有完整轮廓。",
+        "elements": [
+          "red_subject",
+          "intent_node",
+          "action_node",
+          "white_path"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "morph",
+      "transitionOut": "mg_continue",
+      "notes": "说明不是没有计划。"
+    },
+    {
+      "id": "S019",
+      "start": 119,
+      "end": 126,
+      "duration": 7,
+      "chapter": 3,
+      "visualType": "A",
+      "template": "MG_IntentPath",
+      "narrationSummary": "从决定到执行",
+      "visual": {
+        "description": "选中“回复”节点，白色实线从“意图”平稳生长到“执行”，形成单一路径。",
+        "elements": [
+          "red_subject",
+          "intent_node",
+          "action_node",
+          "white_path"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "fade",
+      "notes": "建立正常行动路径模板。"
+    },
+    {
+      "id": "S020",
+      "start": 126,
+      "end": 134,
+      "duration": 8,
+      "chapter": 3,
+      "visualType": "D",
+      "template": "MG_IntentConflict",
+      "narrationSummary": "反向意愿",
+      "visual": {
+        "description": "路径上方出现“反向意愿（counter-will）”短标签；红色虚线从侧面接近，但暂未触碰执行线。",
+        "elements": [
+          "red_subject",
+          "white_action_path",
+          "red_dashed_interference"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "fade",
+      "transitionOut": "hold",
+      "notes": "术语后停顿；标记为弗洛伊德解释。"
+    },
+    {
+      "id": "S021",
+      "start": 134,
+      "end": 141,
+      "duration": 7,
+      "chapter": 3,
+      "visualType": "A",
+      "template": "MG_IntentConflict",
+      "narrationSummary": "不是两个人格",
+      "visual": {
+        "description": "画面始终只有一个红色人物；旁边“两个真实人格”字样被划掉，人物不复制。",
+        "elements": [
+          "red_subject",
+          "white_action_path",
+          "red_dashed_interference"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "hold",
+      "transitionOut": "mg_continue",
+      "notes": "必须只有一个人物。"
+    },
+    {
+      "id": "S022",
+      "start": 141,
+      "end": 148,
+      "duration": 7,
+      "chapter": 3,
+      "visualType": "A",
+      "template": "MG_IntentConflict",
+      "narrationSummary": "两股方向不同的动机",
+      "visual": {
+        "description": "同一人物发出白色实线“我要做”和红色虚线“我不想面对结果”；两线方向相反。",
+        "elements": [
+          "red_subject",
+          "white_action_path",
+          "red_dashed_interference"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "mg_continue",
+      "notes": "红虚线是候选干扰，不是真相扫描。"
+    },
+    {
+      "id": "S023",
+      "start": 148,
+      "end": 154,
+      "duration": 6,
+      "chapter": 3,
+      "visualType": "A",
+      "template": "MG_IntentConflict",
+      "narrationSummary": "拖延、失误、遗忘",
+      "visual": {
+        "description": "红色虚线触碰白线后，执行节点短暂停滞；外围出现三个灰色结果标签，均不高亮。",
+        "elements": [
+          "red_subject",
+          "white_action_path",
+          "red_dashed_interference"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "black",
+      "notes": "不把三个结果写成必然链。"
+    },
+    {
+      "id": "S024",
+      "start": 154,
+      "end": 160,
+      "duration": 6,
+      "chapter": 3,
+      "visualType": "E",
+      "template": "MG_ConceptSeparation",
+      "narrationSummary": "解释框架，不是事实判决",
+      "visual": {
+        "description": "模型缩小置于画面中央，外框标题变为“一种解释框架”；下方出现“≠ 已判明事实”。",
+        "elements": [
+          "concept_boxes",
+          "not_equal_sign",
+          "boundary_label"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "black",
+      "transitionOut": "fade",
+      "notes": "为章节边界留 1 秒。"
+    },
+    {
+      "id": "S025",
+      "start": 160,
+      "end": 166,
+      "duration": 6,
+      "chapter": 4,
+      "visualType": "C",
+      "template": null,
+      "narrationSummary": "Brill 通信案例",
+      "visual": {
+        "description": "暖灰纸张纹理中，旧信纸、钢笔和信封静置；角落标注“原书转引案例”。",
+        "elements": [
+          "archive_frame",
+          "warm_gray_texture"
+        ]
+      },
+      "assets": [
+        "old_letter",
+        "fountain_pen",
+        "envelope"
+      ],
+      "transitionIn": "fade",
+      "transitionOut": "morph",
+      "notes": "不复原具体人物。"
+    },
+    {
+      "id": "S026",
+      "start": 166,
+      "end": 173,
+      "duration": 7,
+      "chapter": 4,
+      "visualType": "F",
+      "template": "MG_LocalConflictSpread",
+      "narrationSummary": "一封要求明确回答的重要来信",
+      "visual": {
+        "description": "信封进入白色通信方框，文字“需要明确回答”；信封边框逐渐转红。",
+        "elements": [
+          "important_message",
+          "ordinary_messages",
+          "influence_field"
+        ]
+      },
+      "assets": [
+        "old_letter"
+      ],
+      "transitionIn": "morph",
+      "transitionOut": "mg_continue",
+      "notes": "红色表示重要与冲突焦点。"
+    },
+    {
+      "id": "S027",
+      "start": 173,
+      "end": 181,
+      "duration": 8,
+      "chapter": 4,
+      "visualType": "A",
+      "template": "MG_LocalConflictSpread",
+      "narrationSummary": "不知道如何回答",
+      "visual": {
+        "description": "红色信件下方依次展开“需要回答→犹豫→未回复”，箭头在“犹豫”后减速。",
+        "elements": [
+          "important_message",
+          "ordinary_messages",
+          "influence_field"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "hold",
+      "notes": "原书解释结构。"
+    },
+    {
+      "id": "S028",
+      "start": 181,
+      "end": 188,
+      "duration": 7,
+      "chapter": 4,
+      "visualType": "E",
+      "template": "MG_LocalConflictSpread",
+      "narrationSummary": "一直没有回",
+      "visual": {
+        "description": "“未回复”节点保持红色静止，其他元素降到 25% 亮度。",
+        "elements": [
+          "important_message",
+          "ordinary_messages",
+          "influence_field"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "hold",
+      "transitionOut": "mg_continue",
+      "notes": "对应 1 秒停顿。"
+    },
+    {
+      "id": "S029",
+      "start": 188,
+      "end": 197,
+      "duration": 9,
+      "chapter": 4,
+      "visualType": "A",
+      "template": "MG_LocalConflictSpread",
+      "narrationSummary": "其他信件也变困难",
+      "visual": {
+        "description": "红色影响圈从重要信件缓慢扩展，周围五封白色信件逐一变灰，但不消失。",
+        "elements": [
+          "important_message",
+          "ordinary_messages",
+          "influence_field"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "hold",
+      "notes": "核心 MG 第一次完整展开。"
+    },
+    {
+      "id": "S030",
+      "start": 197,
+      "end": 206,
+      "duration": 9,
+      "chapter": 4,
+      "visualType": "A",
+      "template": "MG_LocalConflictSpread",
+      "narrationSummary": "通信像被冻住",
+      "visual": {
+        "description": "整个通信方框的运动逐步停止，线条冻结；红色信件仍是唯一活动色。",
+        "elements": [
+          "important_message",
+          "ordinary_messages",
+          "influence_field"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "hold",
+      "transitionOut": "fade",
+      "notes": "“冻住”后保持 1.5 秒。"
+    },
+    {
+      "id": "S031",
+      "start": 206,
+      "end": 214,
+      "duration": 8,
+      "chapter": 4,
+      "visualType": "D",
+      "template": "MG_LocalConflictSpread",
+      "narrationSummary": "原书如何解释扩散",
+      "visual": {
+        "description": "冻结系统旁出现短注：“原书解释：局部犹豫可能扩散”；注释前带“弗洛伊德／Brill 框架”。",
+        "elements": [
+          "important_message",
+          "ordinary_messages",
+          "influence_field"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "fade",
+      "transitionOut": "black",
+      "notes": "不包装为现代机制。"
+    },
+    {
+      "id": "S032",
+      "start": 214,
+      "end": 222,
+      "duration": 8,
+      "chapter": 4,
+      "visualType": "E",
+      "template": "MG_ConceptSeparation",
+      "narrationSummary": "不能证明每次不回都同源",
+      "visual": {
+        "description": "通信系统退到左侧；右侧出现“每次不回 = 同一种冲突”，等号被改为“≠”。",
+        "elements": [
+          "concept_boxes",
+          "not_equal_sign",
+          "boundary_label"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "black",
+      "transitionOut": "match_cut",
+      "notes": "强化边界，不新增原因。"
+    },
+    {
+      "id": "S033",
+      "start": 222,
+      "end": 229,
+      "duration": 7,
+      "chapter": 4,
+      "visualType": "F",
+      "template": "MG_MessageFocus",
+      "narrationSummary": "切回现代手机",
+      "visual": {
+        "description": "暖灰纸张边框完全退出，冷灰手机方框从右侧进入；顶部明确标注“现代类比”。",
+        "elements": [
+          "red_subject",
+          "target_message",
+          "dimmed_messages"
+        ]
+      },
+      "assets": [
+        "smartphone_chat_ui"
+      ],
+      "transitionIn": "match_cut",
+      "transitionOut": "hold",
+      "notes": "历史与现代必须明显分层。"
+    },
+    {
+      "id": "S034",
+      "start": 229,
+      "end": 235,
+      "duration": 6,
+      "chapter": 4,
+      "visualType": "F",
+      "template": "MG_MessageFocus",
+      "narrationSummary": "消息代表整场对话；微信不是原书案例",
+      "visual": {
+        "description": "“我们谈谈吧”红色消息保留，周围对话变灰；底部短句“不是原书案例”保持到切章。",
+        "elements": [
+          "red_subject",
+          "target_message",
+          "dimmed_messages"
+        ]
+      },
+      "assets": [
+        "smartphone_chat_ui"
+      ],
+      "transitionIn": "hold",
+      "transitionOut": "morph",
+      "notes": "禁止把微信冒充 Brill 案例。"
+    },
+    {
+      "id": "S035",
+      "start": 235,
+      "end": 241,
+      "duration": 6,
+      "chapter": 5,
+      "visualType": "A",
+      "template": "MG_LastStepThreshold",
+      "narrationSummary": "完成 95%，卡在最后一步",
+      "visual": {
+        "description": "黑底进度条从 0 快速推进至 95%，最后 5% 变成红色窄区并停住。",
+        "elements": [
+          "progress_state",
+          "last_step",
+          "consequence_layer"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "morph",
+      "transitionOut": "match_cut",
+      "notes": "不显示心理原因。"
+    },
+    {
+      "id": "S036",
+      "start": 241,
+      "end": 248,
+      "duration": 7,
+      "chapter": 5,
+      "visualType": "C",
+      "template": null,
+      "narrationSummary": "出版方寄来校样",
+      "visual": {
+        "description": "暖灰历史桌面上，校样纸页与信封被放到书桌中央；角落标“原书案例”。",
+        "elements": [
+          "archive_frame",
+          "warm_gray_texture"
+        ]
+      },
+      "assets": [
+        "proof_pages",
+        "historical_desk",
+        "envelope"
+      ],
+      "transitionIn": "match_cut",
+      "transitionOut": "cut",
+      "notes": "不做复杂时代复原。"
+    },
+    {
+      "id": "S037",
+      "start": 248,
+      "end": 255,
+      "duration": 7,
+      "chapter": 5,
+      "visualType": "C",
+      "template": null,
+      "narrationSummary": "当晚改完",
+      "visual": {
+        "description": "红铅笔批注停下，纸页叠齐；白色标签“修改完成”出现，寄出动作尚未发生。",
+        "elements": [
+          "archive_frame",
+          "warm_gray_texture"
+        ]
+      },
+      "assets": [
+        "proof_pages",
+        "red_pencil"
+      ],
+      "transitionIn": "cut",
+      "transitionOut": "match_cut",
+      "notes": "完成与寄出分开。"
+    },
+    {
+      "id": "S038",
+      "start": 255,
+      "end": 262,
+      "duration": 7,
+      "chapter": 5,
+      "visualType": "F",
+      "template": "MG_TimePass",
+      "narrationSummary": "第二天早上忘了",
+      "visual": {
+        "description": "校样仍在桌面，窗外光线由夜转晨；时间刻度越过“早上”，纸页变灰。",
+        "elements": [
+          "timeline",
+          "time_markers",
+          "pending_node"
+        ]
+      },
+      "assets": [
+        "proof_pages",
+        "window_light"
+      ],
+      "transitionIn": "match_cut",
+      "transitionOut": "mg_continue",
+      "notes": "第一次遗漏后停 0.6 秒。"
+    },
+    {
+      "id": "S039",
+      "start": 262,
+      "end": 269,
+      "duration": 7,
+      "chapter": 5,
+      "visualType": "F",
+      "template": "MG_TimePass",
+      "narrationSummary": "晚上和次日又没寄",
+      "visual": {
+        "description": "时间轴从下午滑到夜晚再到次晨；“寄出”节点两次亮起又熄灭。",
+        "elements": [
+          "timeline",
+          "time_markers",
+          "pending_node"
+        ]
+      },
+      "assets": [
+        "proof_pages"
+      ],
+      "transitionIn": "mg_continue",
+      "transitionOut": "cut",
+      "notes": "呈现重复，不解释原因。"
+    },
+    {
+      "id": "S040",
+      "start": 269,
+      "end": 276,
+      "duration": 7,
+      "chapter": 5,
+      "visualType": "C",
+      "template": null,
+      "narrationSummary": "最终投入信箱",
+      "visual": {
+        "description": "校样进入信封，信封被放入简化邮筒；动作完成后画面保持静止。",
+        "elements": [
+          "archive_frame",
+          "warm_gray_texture"
+        ]
+      },
+      "assets": [
+        "envelope",
+        "post_box"
+      ],
+      "transitionIn": "cut",
+      "transitionOut": "fade",
+      "notes": "只陈述原书事件。"
+    },
+    {
+      "id": "S041",
+      "start": 276,
+      "end": 284,
+      "duration": 8,
+      "chapter": 5,
+      "visualType": "D",
+      "template": null,
+      "narrationSummary": "弗洛伊德后来联系出版顾虑",
+      "visual": {
+        "description": "历史纸页旁出现“弗洛伊德后来解释：出版顾虑？”；问号和“后来”使用红色。",
+        "elements": [
+          "short_text",
+          "evidence_label"
+        ]
+      },
+      "assets": [
+        "proof_pages"
+      ],
+      "transitionIn": "fade",
+      "transitionOut": "black",
+      "notes": "自我解释必须带时间与问号。"
+    },
+    {
+      "id": "S042",
+      "start": 284,
+      "end": 291,
+      "duration": 7,
+      "chapter": 5,
+      "visualType": "E",
+      "template": "MG_ConceptSeparation",
+      "narrationSummary": "不是独立验证的唯一原因",
+      "visual": {
+        "description": "上一句缩小，中央出现“不是唯一原因”；下方细字“未独立验证”。",
+        "elements": [
+          "concept_boxes",
+          "not_equal_sign",
+          "boundary_label"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "black",
+      "transitionOut": "match_cut",
+      "notes": "对应 E09 使用原则。"
+    },
+    {
+      "id": "S043",
+      "start": 291,
+      "end": 299,
+      "duration": 8,
+      "chapter": 5,
+      "visualType": "F",
+      "template": "MG_LastStepThreshold",
+      "narrationSummary": "邮件、简历、视频现代类比",
+      "visual": {
+        "description": "三个冷灰方框并排：邮件发送、简历投递、视频发布；按钮均保持白色未触发，顶部标“现代类比”。",
+        "elements": [
+          "progress_state",
+          "last_step",
+          "consequence_layer"
+        ]
+      },
+      "assets": [
+        "email_ui",
+        "resume_submit_ui",
+        "video_publish_ui"
+      ],
+      "transitionIn": "match_cut",
+      "transitionOut": "mg_continue",
+      "notes": "不新增其他案例，不暗示同因。"
+    },
+    {
+      "id": "S044",
+      "start": 299,
+      "end": 307,
+      "duration": 8,
+      "chapter": 5,
+      "visualType": "A",
+      "template": "MG_LastStepThreshold",
+      "narrationSummary": "完成任务与面对后果",
+      "visual": {
+        "description": "上层“完成任务”已满格；下层“面对后果”包含评价、拒绝、冲突三个灰色问号节点；中间红色阈值未跨越。",
+        "elements": [
+          "progress_state",
+          "last_step",
+          "consequence_layer"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "hold",
+      "notes": "标题加“一种可能”。"
+    },
+    {
+      "id": "S045",
+      "start": 307,
+      "end": 315,
+      "duration": 8,
+      "chapter": 5,
+      "visualType": "E",
+      "template": "MG_LastStepThreshold",
+      "narrationSummary": "仍然只是一种可能",
+      "visual": {
+        "description": "所有现代类比淡出，只剩红色阈值与问句“真正犹豫的是什么？”；随后“一种可能”留在黑屏中央。",
+        "elements": [
+          "progress_state",
+          "last_step",
+          "consequence_layer"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "hold",
+      "transitionOut": "morph",
+      "notes": "收窄普遍化，停 1.5 秒。"
+    },
+    {
+      "id": "S046",
+      "start": 315,
+      "end": 322,
+      "duration": 7,
+      "chapter": 6,
+      "visualType": "A",
+      "template": "MG_ActionDelay",
+      "narrationSummary": "把三个案例放在一起",
+      "visual": {
+        "description": "消息、旧信、校样三个小节点沿水平线出现，颜色分别保持现代冷灰、历史暖灰和白色。",
+        "elements": [
+          "intent_node",
+          "action_node",
+          "delay_labels",
+          "timeline"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "morph",
+      "transitionOut": "mg_continue",
+      "notes": "不合并证据类型。"
+    },
+    {
+      "id": "S047",
+      "start": 322,
+      "end": 330,
+      "duration": 8,
+      "chapter": 6,
+      "visualType": "A",
+      "template": "MG_IntentPath",
+      "narrationSummary": "形成意图，然后执行",
+      "visual": {
+        "description": "三个案例缩为背景；中央重建白色“意图→执行”单一路径。",
+        "elements": [
+          "red_subject",
+          "intent_node",
+          "action_node",
+          "white_path"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "mg_continue",
+      "notes": "复用已建立模板。"
+    },
+    {
+      "id": "S048",
+      "start": 330,
+      "end": 338,
+      "duration": 8,
+      "chapter": 6,
+      "visualType": "A",
+      "template": "MG_IntentConflict",
+      "narrationSummary": "加进另一股力量",
+      "visual": {
+        "description": "同一红色人物侧面出现红色虚线，靠近白色执行路径；人物数量始终为一。",
+        "elements": [
+          "red_subject",
+          "white_action_path",
+          "red_dashed_interference"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "hold",
+      "notes": "只表示可能干扰。"
+    },
+    {
+      "id": "S049",
+      "start": 338,
+      "end": 346,
+      "duration": 8,
+      "chapter": 6,
+      "visualType": "A",
+      "template": "MG_IntentConflict",
+      "narrationSummary": "“我要做”与“我不想做”",
+      "visual": {
+        "description": "白色实线标“我要做”，红色虚线标“我不想做”；两标签从同一人物发出。",
+        "elements": [
+          "red_subject",
+          "white_action_path",
+          "red_dashed_interference"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "hold",
+      "transitionOut": "mg_continue",
+      "notes": "两句之间留 1 秒。"
+    },
+    {
+      "id": "S050",
+      "start": 346,
+      "end": 354,
+      "duration": 8,
+      "chapter": 6,
+      "visualType": "A",
+      "template": "MG_ActionDelay",
+      "narrationSummary": "“再等一会儿”",
+      "visual": {
+        "description": "执行节点被推向时间轴右侧，原位置出现灰字“Later／再等一会儿”。",
+        "elements": [
+          "intent_node",
+          "action_node",
+          "delay_labels",
+          "timeline"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "mg_continue",
+      "notes": "画面主导，不逐字解释模型。"
+    },
+    {
+      "id": "S051",
+      "start": 354,
+      "end": 362,
+      "duration": 8,
+      "chapter": 6,
+      "visualType": "A",
+      "template": "MG_ActionDelay",
+      "narrationSummary": "“明天处理”",
+      "visual": {
+        "description": "执行节点再次右移，灰字替换为“Tomorrow／明天处理”；路径拉长。",
+        "elements": [
+          "intent_node",
+          "action_node",
+          "delay_labels",
+          "timeline"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "mg_continue",
+      "notes": "对应 0.7 秒停顿。"
+    },
+    {
+      "id": "S052",
+      "start": 362,
+      "end": 370,
+      "duration": 8,
+      "chapter": 6,
+      "visualType": "A",
+      "template": "MG_ActionDelay",
+      "narrationSummary": "“状态好一点再说”",
+      "visual": {
+        "description": "执行节点移出时间轴可见范围，红虚线仍停在原处；末端只剩未完成的白线。",
+        "elements": [
+          "intent_node",
+          "action_node",
+          "delay_labels",
+          "timeline"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "hold",
+      "notes": "不表示蓄意欺骗。"
+    },
+    {
+      "id": "S053",
+      "start": 370,
+      "end": 378,
+      "duration": 8,
+      "chapter": 6,
+      "visualType": "A",
+      "template": "MG_ActionDelay",
+      "narrationSummary": "三个案例连接行动未发生",
+      "visual": {
+        "description": "三个案例节点以独立虚线连接“行动未发生”；上方固定标题“一种可能的结构”，各线互不相连。",
+        "elements": [
+          "intent_node",
+          "action_node",
+          "delay_labels",
+          "timeline"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "hold",
+      "transitionOut": "black",
+      "notes": "明确不是“相同原因”。"
+    },
+    {
+      "id": "S054",
+      "start": 378,
+      "end": 385,
+      "duration": 7,
+      "chapter": 6,
+      "visualType": "E",
+      "template": null,
+      "narrationSummary": "它有多少证据？",
+      "visual": {
+        "description": "模型全部淡出，黑屏中央只剩“它到底有多少证据？”；文字静止到切章。",
+        "elements": [
+          "black_background",
+          "minimal_text"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "black",
+      "transitionOut": "fade",
+      "notes": "对应 1.5 秒停顿与 8 秒视觉留白。"
+    },
+    {
+      "id": "S055",
+      "start": 385,
+      "end": 392,
+      "duration": 7,
+      "chapter": 7,
+      "visualType": "A",
+      "template": "MG_ThinkNoThink",
+      "narrationSummary": "Think/No-Think 实验",
+      "visual": {
+        "description": "蓝色辅助标题“Think / No-Think”；下方出现三组成对记忆卡，保持极简。",
+        "elements": [
+          "cue_node",
+          "memory_node",
+          "retrieval_path",
+          "suppression_marker"
+        ]
+      },
+      "assets": [
+        "paired_memory_items"
+      ],
+      "transitionIn": "fade",
+      "transitionOut": "mg_continue",
+      "notes": "不用科研 B-roll。"
+    },
+    {
+      "id": "S056",
+      "start": 392,
+      "end": 400,
+      "duration": 8,
+      "chapter": 7,
+      "visualType": "A",
+      "template": "MG_ThinkNoThink",
+      "narrationSummary": "Think：看到提示并回忆",
+      "visual": {
+        "description": "左侧方框中，提示节点通过白色实线连接记忆节点，记忆节点完整出现。",
+        "elements": [
+          "cue_node",
+          "memory_node",
+          "retrieval_path",
+          "suppression_marker"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "mg_continue",
+      "notes": "蓝色只作实验标签。"
+    },
+    {
+      "id": "S057",
+      "start": 400,
+      "end": 408,
+      "duration": 8,
+      "chapter": 7,
+      "visualType": "A",
+      "template": "MG_ThinkNoThink",
+      "narrationSummary": "No-Think：阻止检索",
+      "visual": {
+        "description": "右侧方框中，提示到记忆的路径被蓝色阻断符截住；记忆节点降低亮度但不消失。",
+        "elements": [
+          "cue_node",
+          "memory_node",
+          "retrieval_path",
+          "suppression_marker"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "hold",
+      "notes": "避免表现成永久删除。"
+    },
+    {
+      "id": "S058",
+      "start": 408,
+      "end": 416,
+      "duration": 8,
+      "chapter": 7,
+      "visualType": "A",
+      "template": "MG_ThinkNoThink",
+      "narrationSummary": "反复抑制后表现可能受影响",
+      "visual": {
+        "description": "多次提示以刻度出现，右侧记忆节点在后测量尺上低于基线；标签“一些研究观察到”。",
+        "elements": [
+          "cue_node",
+          "memory_node",
+          "retrieval_path",
+          "suppression_marker"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "hold",
+      "transitionOut": "morph",
+      "notes": "只陈述 E11 强度。"
+    },
+    {
+      "id": "S059",
+      "start": 416,
+      "end": 423,
+      "duration": 7,
+      "chapter": 7,
+      "visualType": "A",
+      "template": "MG_ThinkNoThink",
+      "narrationSummary": "认知控制及相关脑网络",
+      "visual": {
+        "description": "简化控制节点连接多个小蓝点网络，旁边短标签“认知控制／相关网络”；无脑区名称。",
+        "elements": [
+          "cue_node",
+          "memory_node",
+          "retrieval_path",
+          "suppression_marker"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "morph",
+      "transitionOut": "black",
+      "notes": "不暗示找到“压抑脑区”。"
+    },
+    {
+      "id": "S060",
+      "start": 423,
+      "end": 431,
+      "duration": 8,
+      "chapter": 7,
+      "visualType": "E",
+      "template": null,
+      "narrationSummary": "“似乎支持？”",
+      "visual": {
+        "description": "实验模型缩小，黑底中央出现“似乎支持弗洛伊德？”；问号为红色，画面保持 1.2 秒。",
+        "elements": [
+          "black_background",
+          "minimal_text"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "black",
+      "transitionOut": "hold",
+      "notes": "有意制造期待，但必须立即纠正。"
+    },
+    {
+      "id": "S061",
+      "start": 431,
+      "end": 439,
+      "duration": 8,
+      "chapter": 7,
+      "visualType": "D",
+      "template": null,
+      "narrationSummary": "不要偷偷换成一件事",
+      "visual": {
+        "description": "句子“但不要把两件事偷偷换成一件事。”居中；“不要”和“两件事”加重，其他元素清空。",
+        "elements": [
+          "short_text",
+          "evidence_label"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "hold",
+      "transitionOut": "mg_continue",
+      "notes": "关键句后停 2 秒。"
+    },
+    {
+      "id": "S062",
+      "start": 439,
+      "end": 447,
+      "duration": 8,
+      "chapter": 7,
+      "visualType": "A",
+      "template": "MG_ConceptSeparation",
+      "narrationSummary": "主动检索抑制 ≠ 反向意愿",
+      "visual": {
+        "description": "左框“实验中的主动检索抑制”，右框“弗洛伊德式反向意愿”；中间巨大“≠”静止至少 2 秒。",
+        "elements": [
+          "concept_boxes",
+          "not_equal_sign",
+          "boundary_label"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "morph",
+      "notes": "本章视觉重点；对应 E16。"
+    },
+    {
+      "id": "S063",
+      "start": 447,
+      "end": 454,
+      "duration": 7,
+      "chapter": 7,
+      "visualType": "A",
+      "template": "MG_ConceptSeparation",
+      "narrationSummary": "现代研究能连到哪里",
+      "visual": {
+        "description": "“Modern Research”节点只以白线连接“Memory Retrieval Can Be Controlled／记忆提取可受控制”。",
+        "elements": [
+          "concept_boxes",
+          "not_equal_sign",
+          "boundary_label"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "morph",
+      "transitionOut": "black",
+      "notes": "允许的有限连接。"
+    },
+    {
+      "id": "S064",
+      "start": 454,
+      "end": 460,
+      "duration": 6,
+      "chapter": 7,
+      "visualType": "A",
+      "template": "MG_ConceptSeparation",
+      "narrationSummary": "不能连接“弗洛伊德正确”",
+      "visual": {
+        "description": "另一条试图连向“Freud Was Right”的红虚线在中途断开，错误标签被划掉并淡出；末端黑屏“没有这么简单”。",
+        "elements": [
+          "concept_boxes",
+          "not_equal_sign",
+          "boundary_label"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "black",
+      "transitionOut": "black",
+      "notes": "错误结论只短暂出现于否定语境。"
+    },
+    {
+      "id": "S065",
+      "start": 460,
+      "end": 467,
+      "duration": 7,
+      "chapter": 8,
+      "visualType": "E",
+      "template": null,
+      "narrationSummary": "到这里停一下",
+      "visual": {
+        "description": "纯黑屏先保持，随后白字“但到这里，我们应该停一下。”缓慢出现。",
+        "elements": [
+          "black_background",
+          "minimal_text"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "black",
+      "transitionOut": "hold",
+      "notes": "句后停 1.5 秒。"
+    },
+    {
+      "id": "S066",
+      "start": 467,
+      "end": 474,
+      "duration": 7,
+      "chapter": 8,
+      "visualType": "E",
+      "template": null,
+      "narrationSummary": "每次忘记都有隐藏动机吗？当然不是",
+      "visual": {
+        "description": "问题出现后，红字“当然不是”覆盖在下方并保持；没有其他图形。",
+        "elements": [
+          "black_background",
+          "minimal_text"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "hold",
+      "transitionOut": "fade",
+      "notes": "反驳必须明确。"
+    },
+    {
+      "id": "S067",
+      "start": 474,
+      "end": 482,
+      "duration": 8,
+      "chapter": 8,
+      "visualType": "A",
+      "template": "MG_ConceptSeparation",
+      "narrationSummary": "普通遗忘、注意不足",
+      "visual": {
+        "description": "两个大小一致的独立圆形出现：“普通遗忘”“注意不足”，均为白色，无连接线。",
+        "elements": [
+          "concept_boxes",
+          "not_equal_sign",
+          "boundary_label"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "fade",
+      "transitionOut": "mg_continue",
+      "notes": "不建立层级。"
+    },
+    {
+      "id": "S068",
+      "start": 482,
+      "end": 490,
+      "duration": 8,
+      "chapter": 8,
+      "visualType": "A",
+      "template": "MG_ConceptSeparation",
+      "narrationSummary": "工作记忆负荷、主动检索抑制",
+      "visual": {
+        "description": "再加入“工作记忆负荷”“主动检索抑制”两个同尺寸圆形，继续保持彼此分离。",
+        "elements": [
+          "concept_boxes",
+          "not_equal_sign",
+          "boundary_label"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "mg_continue",
+      "notes": "视觉权重一致。"
+    },
+    {
+      "id": "S069",
+      "start": 490,
+      "end": 498,
+      "duration": 8,
+      "chapter": 8,
+      "visualType": "A",
+      "template": "MG_ConceptSeparation",
+      "narrationSummary": "无意识冲突、事后解释",
+      "visual": {
+        "description": "最后加入“无意识冲突”“事后解释”两个圆形，组成六节点矩阵。",
+        "elements": [
+          "concept_boxes",
+          "not_equal_sign",
+          "boundary_label"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "hold",
+      "notes": "六类完整出现。"
+    },
+    {
+      "id": "S070",
+      "start": 498,
+      "end": 506,
+      "duration": 8,
+      "chapter": 8,
+      "visualType": "A",
+      "template": "MG_ConceptSeparation",
+      "narrationSummary": "六类不能混在一起",
+      "visual": {
+        "description": "六个圆形间依次浮现小“≠”，中央一个较大“≠”；所有节点同亮度、无箭头。",
+        "elements": [
+          "concept_boxes",
+          "not_equal_sign",
+          "boundary_label"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "hold",
+      "transitionOut": "match_cut",
+      "notes": "三组“不等于”各有停顿。"
+    },
+    {
+      "id": "S071",
+      "start": 506,
+      "end": 514,
+      "duration": 8,
+      "chapter": 8,
+      "visualType": "F",
+      "template": "MG_ConceptSeparation",
+      "narrationSummary": "现实还可能是忙乱、疲惫、提醒失效",
+      "visual": {
+        "description": "六节点退到背景；前景短暂并列三个灰色日常标签“忙乱”“疲惫”“提醒失效”，均带“可能”。",
+        "elements": [
+          "concept_boxes",
+          "not_equal_sign",
+          "boundary_label"
+        ]
+      },
+      "assets": [
+        "generic_task_ui"
+      ],
+      "transitionIn": "match_cut",
+      "transitionOut": "cut",
+      "notes": "不选定任何答案。"
+    },
+    {
+      "id": "S072",
+      "start": 514,
+      "end": 522,
+      "duration": 8,
+      "chapter": 8,
+      "visualType": "A",
+      "template": "MG_InwardQuestion",
+      "narrationSummary": "忘记回复不能推出讨厌",
+      "visual": {
+        "description": "白色人物指向另一人物，头顶出现“他潜意识里讨厌你”；整句立刻被红线划掉，箭头断开。",
+        "elements": [
+          "red_subject",
+          "question_nodes",
+          "direction_arrow"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "cut",
+      "transitionOut": "hold",
+      "notes": "错误诊断出现即删除，对应 E14。"
+    },
+    {
+      "id": "S073",
+      "start": 522,
+      "end": 530,
+      "duration": 8,
+      "chapter": 8,
+      "visualType": "A",
+      "template": "MG_WorthQuestioning",
+      "narrationSummary": "值得追问不等于已经证明",
+      "visual": {
+        "description": "左侧“值得追问”，右侧“已经证明”，中央巨大红色“≠”；两侧字号相同，画面静止。",
+        "elements": [
+          "worth_questioning",
+          "not_equal_sign",
+          "proven_claim"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "hold",
+      "transitionOut": "morph",
+      "notes": "全片最重要边界，保持至少 2 秒。"
+    },
+    {
+      "id": "S074",
+      "start": 530,
+      "end": 538,
+      "duration": 8,
+      "chapter": 8,
+      "visualType": "A",
+      "template": "MG_InwardQuestion",
+      "narrationSummary": "不要把怀疑变成诊断",
+      "visual": {
+        "description": "“我已经看穿了”气泡从人物上方出现并破裂；向外箭头被收回。",
+        "elements": [
+          "red_subject",
+          "question_nodes",
+          "direction_arrow"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "morph",
+      "transitionOut": "fade",
+      "notes": "不把观众置于优越视角。"
+    },
+    {
+      "id": "S075",
+      "start": 538,
+      "end": 545,
+      "duration": 7,
+      "chapter": 8,
+      "visualType": "A",
+      "template": "MG_InwardQuestion",
+      "narrationSummary": "向内的问题，不是读心术",
+      "visual": {
+        "description": "红色人物保持中央，箭头转向自身；上方“向外的读心术”灰化，下方“向内的问题”变白。",
+        "elements": [
+          "red_subject",
+          "question_nodes",
+          "direction_arrow"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "fade",
+      "transitionOut": "match_cut",
+      "notes": "过渡到自我审视。"
+    },
+    {
+      "id": "S076",
+      "start": 545,
+      "end": 552,
+      "duration": 7,
+      "chapter": 9,
+      "visualType": "F",
+      "template": "MG_MessageFocus",
+      "narrationSummary": "第三次回到消息",
+      "visual": {
+        "description": "开场同一冷灰聊天界面淡入，“我们谈谈吧”红色消息保持原位置，其他 UI 近乎不可见。",
+        "elements": [
+          "red_subject",
+          "target_message",
+          "dimmed_messages"
+        ]
+      },
+      "assets": [
+        "smartphone_chat_ui"
+      ],
+      "transitionIn": "match_cut",
+      "transitionOut": "hold",
+      "notes": "与开场保持视觉连续。"
+    },
+    {
+      "id": "S077",
+      "start": 552,
+      "end": 560,
+      "duration": 8,
+      "chapter": 9,
+      "visualType": "E",
+      "template": null,
+      "narrationSummary": "不揭晓原因",
+      "visual": {
+        "description": "聊天界面冻结，中央小字“答案未知”；文字保持后淡出，不出现勾选。",
+        "elements": [
+          "black_background",
+          "minimal_text"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "hold",
+      "transitionOut": "fade",
+      "notes": "对应 1.5 秒停顿。"
+    },
+    {
+      "id": "S078",
+      "start": 560,
+      "end": 568,
+      "duration": 8,
+      "chapter": 9,
+      "visualType": "A",
+      "template": "MG_InwardQuestion",
+      "narrationSummary": "也许真的忘了",
+      "visual": {
+        "description": "红色人物旁出现第一个白色节点“真的忘了？”，末尾问号轻微放大。",
+        "elements": [
+          "red_subject",
+          "question_nodes",
+          "direction_arrow"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "fade",
+      "transitionOut": "mg_continue",
+      "notes": "可能一，无勾选。"
+    },
+    {
+      "id": "S079",
+      "start": 568,
+      "end": 576,
+      "duration": 8,
+      "chapter": 9,
+      "visualType": "A",
+      "template": "MG_InwardQuestion",
+      "narrationSummary": "也许一直说晚一点",
+      "visual": {
+        "description": "第二个白色节点“晚一点再处理？”出现，与第一个节点并列同尺寸。",
+        "elements": [
+          "red_subject",
+          "question_nodes",
+          "direction_arrow"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "mg_continue",
+      "notes": "可能二，无优先级。"
+    },
+    {
+      "id": "S080",
+      "start": 576,
+      "end": 584,
+      "duration": 8,
+      "chapter": 9,
+      "visualType": "A",
+      "template": "MG_InwardQuestion",
+      "narrationSummary": "也许拖延的是后果",
+      "visual": {
+        "description": "第三个白色节点“不想面对后果？”出现，三个节点等距围绕人物，均带问号。",
+        "elements": [
+          "red_subject",
+          "question_nodes",
+          "direction_arrow"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "cut",
+      "notes": "可能三，不用红色高亮。"
+    },
+    {
+      "id": "S081",
+      "start": 584,
+      "end": 592,
+      "duration": 8,
+      "chapter": 9,
+      "visualType": "D",
+      "template": "MG_ConceptSeparation",
+      "narrationSummary": "拒绝确定诊断",
+      "visual": {
+        "description": "“害怕冲突”“不爱对方”“逃避亲密关系”三句依次出现并立即被细红线划掉。",
+        "elements": [
+          "concept_boxes",
+          "not_equal_sign",
+          "boundary_label"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "cut",
+      "transitionOut": "black",
+      "notes": "所有诊断都处于否定语境。"
+    },
+    {
+      "id": "S082",
+      "start": 592,
+      "end": 600,
+      "duration": 8,
+      "chapter": 9,
+      "visualType": "E",
+      "template": null,
+      "narrationSummary": "现有信息不够",
+      "visual": {
+        "description": "三个诊断和三个可能全部淡出，黑底中央只留“现有的信息，不够。”",
+        "elements": [
+          "black_background",
+          "minimal_text"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "black",
+      "transitionOut": "mg_continue",
+      "notes": "句后停 1.5 秒。"
+    },
+    {
+      "id": "S083",
+      "start": 600,
+      "end": 608,
+      "duration": 8,
+      "chapter": 9,
+      "visualType": "A",
+      "template": "MG_InwardQuestion",
+      "narrationSummary": "总是在忘、拖、最后一步停下",
+      "visual": {
+        "description": "红色人物旁依次出现三个灰色节拍标签“总是在忘”“总是在拖”“最后一步停下”，不连接因果箭头。",
+        "elements": [
+          "red_subject",
+          "question_nodes",
+          "direction_arrow"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "mg_continue",
+      "transitionOut": "hold",
+      "notes": "三个“总是”各留 0.8 秒。"
+    },
+    {
+      "id": "S084",
+      "start": 608,
+      "end": 614,
+      "duration": 6,
+      "chapter": 9,
+      "visualType": "E",
+      "template": "MG_InwardQuestion",
+      "narrationSummary": "我是真的忘了？还是不想面对？",
+      "visual": {
+        "description": "黑底分两次出现“我是真的忘了？”和“还是，我只是不想面对它？”；第二句出现后保持，红色人物缩成小点。",
+        "elements": [
+          "red_subject",
+          "question_nodes",
+          "direction_arrow"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "hold",
+      "transitionOut": "black",
+      "notes": "第一问停 1.5 秒，第二问后进入长停。"
+    },
+    {
+      "id": "S085",
+      "start": 614,
+      "end": 620,
+      "duration": 6,
+      "chapter": 9,
+      "visualType": "E",
+      "template": null,
+      "narrationSummary": "当然，有时候，我们真的只是忘了",
+      "visual": {
+        "description": "所有文字与人物完全消失，保持纯黑；旁白最后一句在黑屏上完成，结束后不追加任何动画或说明。",
+        "elements": [
+          "black_background",
+          "minimal_text"
+        ]
+      },
+      "assets": [],
+      "transitionIn": "black",
+      "transitionOut": "black",
+      "notes": "最终黑屏；绝不追加解释。"
+    }
+  ]
+}

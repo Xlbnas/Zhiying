@@ -1,7 +1,9 @@
 node_modules/
 .next/
 out/
-data/
+# 仅忽略仓库根目录的运行时 data/（SQLite、bundle 缓存、渲染输出）；
+# 不得吞掉 src/remotion/data（构建必需的渲染数据文件，已入库）
+/data/
 *.tsbuildinfo
 next-env.d.ts
 .env

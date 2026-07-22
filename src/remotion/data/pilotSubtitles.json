@@ -1,0 +1,490 @@
+[
+  {
+    "id": 1,
+    "segmentId": "P001",
+    "text": "手机亮了一下。",
+    "start": 0.0,
+    "end": 1.254,
+    "position": "bottom"
+  },
+  {
+    "id": 2,
+    "segmentId": "P002",
+    "text": "对方发来一句：",
+    "start": 1.739,
+    "end": 2.996,
+    "position": "bottom"
+  },
+  {
+    "id": 3,
+    "segmentId": "P002",
+    "text": "我们谈谈吧。",
+    "start": 3.031,
+    "end": 4.072,
+    "position": "bottom"
+  },
+  {
+    "id": 4,
+    "segmentId": "P003",
+    "text": "你看见了。",
+    "start": 5.607,
+    "end": 6.452,
+    "position": "bottom"
+  },
+  {
+    "id": 5,
+    "segmentId": "P003",
+    "text": "手指停在屏幕上，却没有点进去。",
+    "start": 6.487,
+    "end": 9.311,
+    "position": "bottom"
+  },
+  {
+    "id": 6,
+    "segmentId": "P004",
+    "text": "你告诉自己：",
+    "start": 9.796,
+    "end": 10.8,
+    "position": "bottom"
+  },
+  {
+    "id": 7,
+    "segmentId": "P004",
+    "text": "等会儿再回。",
+    "start": 10.835,
+    "end": 11.839,
+    "position": "bottom"
+  },
+  {
+    "id": 8,
+    "segmentId": "P005",
+    "text": "几个小时过去。",
+    "start": 12.574,
+    "end": 13.944,
+    "position": "bottom"
+  },
+  {
+    "id": 9,
+    "segmentId": "P006",
+    "text": "一天过去。",
+    "start": 14.429,
+    "end": 15.497,
+    "position": "bottom"
+  },
+  {
+    "id": 10,
+    "segmentId": "P007",
+    "text": "两天过去。",
+    "start": 16.332,
+    "end": 17.411,
+    "position": "bottom"
+  },
+  {
+    "id": 11,
+    "segmentId": "P008",
+    "text": "后来有人问：",
+    "start": 18.246,
+    "end": 19.256,
+    "position": "bottom"
+  },
+  {
+    "id": 12,
+    "segmentId": "P008",
+    "text": "你为什么一直不回？",
+    "start": 19.291,
+    "end": 20.928,
+    "position": "bottom"
+  },
+  {
+    "id": 13,
+    "segmentId": "P009",
+    "text": "你说：我忘了。",
+    "start": 21.263,
+    "end": 22.4,
+    "position": "bottom"
+  },
+  {
+    "id": 14,
+    "segmentId": "P010",
+    "text": "可这两天里，",
+    "start": 23.935,
+    "end": 24.968,
+    "position": "bottom"
+  },
+  {
+    "id": 15,
+    "segmentId": "P010",
+    "text": "你明明打开过聊天软件很多次。",
+    "start": 25.003,
+    "end": 27.744,
+    "position": "bottom"
+  },
+  {
+    "id": 16,
+    "segmentId": "P010",
+    "text": "回了工作群，看了朋友的照片，",
+    "start": 27.779,
+    "end": 30.307,
+    "position": "bottom"
+  },
+  {
+    "id": 17,
+    "segmentId": "P010",
+    "text": "还清理了几条无关紧要的通知。",
+    "start": 30.342,
+    "end": 33.084,
+    "position": "bottom"
+  },
+  {
+    "id": 18,
+    "segmentId": "P011",
+    "text": "为什么偏偏是这一条？",
+    "start": 33.569,
+    "end": 35.45,
+    "position": "mid"
+  },
+  {
+    "id": 19,
+    "segmentId": "P012",
+    "text": "先别急着回答。",
+    "start": 37.985,
+    "end": 39.436,
+    "position": "bottom"
+  },
+  {
+    "id": 20,
+    "segmentId": "P013",
+    "text": "我们通常把这种事叫作忘记。",
+    "start": 39.921,
+    "end": 42.196,
+    "position": "bottom"
+  },
+  {
+    "id": 21,
+    "segmentId": "P013",
+    "text": "但一百多年前，",
+    "start": 42.231,
+    "end": 43.352,
+    "position": "bottom"
+  },
+  {
+    "id": 22,
+    "segmentId": "P013",
+    "text": "有个人对忘记产生了一种",
+    "start": 43.386,
+    "end": 45.469,
+    "position": "bottom"
+  },
+  {
+    "id": 23,
+    "segmentId": "P013",
+    "text": "近乎执拗的怀疑。",
+    "start": 45.504,
+    "end": 46.817,
+    "position": "bottom"
+  },
+  {
+    "id": 24,
+    "segmentId": "P014",
+    "text": "这个人，就是弗洛伊德。",
+    "start": 47.202,
+    "end": 49.071,
+    "position": "bottom"
+  },
+  {
+    "id": 25,
+    "segmentId": "P015",
+    "text": "当然，人本来就会忘事。",
+    "start": 50.006,
+    "end": 51.875,
+    "position": "bottom"
+  },
+  {
+    "id": 26,
+    "segmentId": "P016",
+    "text": "注意力被打断，事情太多，",
+    "start": 52.21,
+    "end": 54.317,
+    "position": "bottom"
+  },
+  {
+    "id": 27,
+    "segmentId": "P016",
+    "text": "睡眠不足，",
+    "start": 54.352,
+    "end": 55.174,
+    "position": "bottom"
+  },
+  {
+    "id": 28,
+    "segmentId": "P016",
+    "text": "或者只是在某个瞬间没想起来，",
+    "start": 55.209,
+    "end": 57.96,
+    "position": "bottom"
+  },
+  {
+    "id": 29,
+    "segmentId": "P016",
+    "text": "这些都很普通。",
+    "start": 57.995,
+    "end": 59.245,
+    "position": "bottom"
+  },
+  {
+    "id": 30,
+    "segmentId": "P017",
+    "text": "忘记，不一定需要",
+    "start": 59.68,
+    "end": 60.952,
+    "position": "bottom"
+  },
+  {
+    "id": 31,
+    "segmentId": "P017",
+    "text": "一个隐藏的理由。",
+    "start": 60.986,
+    "end": 62.258,
+    "position": "bottom"
+  },
+  {
+    "id": 32,
+    "segmentId": "P018",
+    "text": "但弗洛伊德盯住了另一个问题：",
+    "start": 63.293,
+    "end": 66.027,
+    "position": "bottom"
+  },
+  {
+    "id": 33,
+    "segmentId": "P018",
+    "text": "为什么有些遗忘看起来",
+    "start": 66.062,
+    "end": 68.156,
+    "position": "bottom"
+  },
+  {
+    "id": 34,
+    "segmentId": "P018",
+    "text": "那么有选择性？",
+    "start": 68.191,
+    "end": 69.434,
+    "position": "bottom"
+  },
+  {
+    "id": 35,
+    "segmentId": "P019",
+    "text": "为什么记得别的安排，",
+    "start": 70.019,
+    "end": 71.754,
+    "position": "bottom"
+  },
+  {
+    "id": 36,
+    "segmentId": "P019",
+    "text": "偏偏忘了某一件？",
+    "start": 71.789,
+    "end": 73.131,
+    "position": "bottom"
+  },
+  {
+    "id": 37,
+    "segmentId": "P020",
+    "text": "他举过一个忘记赴约的例子。",
+    "start": 74.666,
+    "end": 77.039,
+    "position": "bottom"
+  },
+  {
+    "id": 38,
+    "segmentId": "P020",
+    "text": "一个人迟到了，",
+    "start": 77.074,
+    "end": 78.243,
+    "position": "bottom"
+  },
+  {
+    "id": 39,
+    "segmentId": "P020",
+    "text": "说自己完全忘记了约会。",
+    "start": 78.278,
+    "end": 80.25,
+    "position": "bottom"
+  },
+  {
+    "id": 40,
+    "segmentId": "P020",
+    "text": "对方却可能会想：",
+    "start": 80.285,
+    "end": 81.655,
+    "position": "bottom"
+  },
+  {
+    "id": 41,
+    "segmentId": "P020",
+    "text": "以前怎么没有忘？",
+    "start": 81.69,
+    "end": 83.06,
+    "position": "bottom"
+  },
+  {
+    "id": 42,
+    "segmentId": "P020",
+    "text": "是不是这场约会，",
+    "start": 83.095,
+    "end": 84.464,
+    "position": "bottom"
+  },
+  {
+    "id": 43,
+    "segmentId": "P020",
+    "text": "已经没那么重要？",
+    "start": 84.499,
+    "end": 85.869,
+    "position": "bottom"
+  },
+  {
+    "id": 44,
+    "segmentId": "P021",
+    "text": "这当然不是说，忘记赴约就等于不爱。",
+    "start": 86.704,
+    "end": 89.56,
+    "position": "bottom"
+  },
+  {
+    "id": 45,
+    "segmentId": "P022",
+    "text": "它只能说明，",
+    "start": 90.195,
+    "end": 91.112,
+    "position": "bottom"
+  },
+  {
+    "id": 46,
+    "segmentId": "P022",
+    "text": "同一句“我忘了”，",
+    "start": 91.147,
+    "end": 92.255,
+    "position": "bottom"
+  },
+  {
+    "id": 47,
+    "segmentId": "P022",
+    "text": "放进一段具体关系里，",
+    "start": 92.29,
+    "end": 93.969,
+    "position": "bottom"
+  },
+  {
+    "id": 48,
+    "segmentId": "P022",
+    "text": "人们很容易继续追问：",
+    "start": 94.004,
+    "end": 95.683,
+    "position": "bottom"
+  },
+  {
+    "id": 49,
+    "segmentId": "P022",
+    "text": "被忘掉的，",
+    "start": 95.718,
+    "end": 96.445,
+    "position": "bottom"
+  },
+  {
+    "id": 50,
+    "segmentId": "P022",
+    "text": "为什么恰好是这件事？",
+    "start": 96.48,
+    "end": 98.159,
+    "position": "bottom"
+  },
+  {
+    "id": 51,
+    "segmentId": "P023",
+    "text": "弗洛伊德感兴趣的，",
+    "start": 98.644,
+    "end": 100.235,
+    "position": "bottom"
+  },
+  {
+    "id": 52,
+    "segmentId": "P023",
+    "text": "正是这个“偏偏”。",
+    "start": 100.27,
+    "end": 101.454,
+    "position": "bottom"
+  },
+  {
+    "id": 53,
+    "segmentId": "P024",
+    "text": "在《日常生活的心理分析》中，",
+    "start": 102.239,
+    "end": 104.298,
+    "position": "bottom"
+  },
+  {
+    "id": 54,
+    "segmentId": "P024",
+    "text": "弗洛伊德把忘记过去的事情，",
+    "start": 104.333,
+    "end": 106.582,
+    "position": "bottom"
+  },
+  {
+    "id": 55,
+    "segmentId": "P024",
+    "text": "和忘记已经决定要做的事，",
+    "start": 106.617,
+    "end": 108.676,
+    "position": "bottom"
+  },
+  {
+    "id": 56,
+    "segmentId": "P024",
+    "text": "分开讨论。",
+    "start": 108.711,
+    "end": 109.437,
+    "position": "bottom"
+  },
+  {
+    "id": 57,
+    "segmentId": "P025",
+    "text": "后者并不是没有计划。",
+    "start": 109.872,
+    "end": 111.625,
+    "position": "bottom"
+  },
+  {
+    "id": 58,
+    "segmentId": "P026",
+    "text": "计划已经形成了：",
+    "start": 112.01,
+    "end": 113.307,
+    "position": "bottom"
+  },
+  {
+    "id": 59,
+    "segmentId": "P026",
+    "text": "我答应去赴约，",
+    "start": 113.342,
+    "end": 114.448,
+    "position": "bottom"
+  },
+  {
+    "id": 60,
+    "segmentId": "P026",
+    "text": "我决定寄出文件，",
+    "start": 114.483,
+    "end": 115.78,
+    "position": "bottom"
+  },
+  {
+    "id": 61,
+    "segmentId": "P026",
+    "text": "我知道这条消息需要回复。",
+    "start": 115.815,
+    "end": 117.872,
+    "position": "bottom"
+  }
+]
