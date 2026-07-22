@@ -67,56 +67,68 @@ export interface CreateVersionInput {
 }
 
 /**
- * 创建新版本并把 project_stages.active_version 指向它（单事务）。
- * 状态字段（generated/edited/...）由 stages.ts 的状态机负责，
- * 本函数只保证「版本行 + active_version 指针」原子一致。
- * 返回新行。
+ * 【事务内 helper】在调用方事务里执行：分配版本号 + 插入版本行 +
+ * 更新 project_stages.active_version。
+ * 版本分配（MAX(version)+1）依赖调用方以 BEGIN IMMEDIATE 持写锁（见
+ * createVersion / operations.ts 高层操作），保证 Web 与 Worker 双进程下
+ * 不产生重复版本号。
+ * 返回新行（同事务内读取）。
  */
-export function createVersion(input: CreateVersionInput): ProjectVersionRow {
+export function insertVersionTx(input: CreateVersionInput): ProjectVersionRow {
   const db = getDb();
   const id = crypto.randomUUID();
   const at = now();
-  const tx = db.transaction(() => {
-    const version = nextVersionNumber(input.projectId, input.stage);
-    db.prepare(
-      `INSERT INTO project_versions
-         (id, project_id, stage, version, content, content_type, source,
-          prompt_version, model, job_id, note, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      id,
-      input.projectId,
-      input.stage,
-      version,
-      input.content,
-      input.contentType,
-      input.source,
-      input.promptVersion ?? null,
-      input.model ?? null,
-      input.jobId ?? null,
-      input.note ?? null,
-      at,
-    );
-    db.prepare(
-      `UPDATE project_stages
-       SET active_version = ?, updated_at = ?
-       WHERE project_id = ? AND stage = ?`,
-    ).run(version, at, input.projectId, input.stage);
-    return version;
-  });
-  const version = tx();
+  const version = nextVersionNumber(input.projectId, input.stage);
+  db.prepare(
+    `INSERT INTO project_versions
+       (id, project_id, stage, version, content, content_type, source,
+        prompt_version, model, job_id, note, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    input.projectId,
+    input.stage,
+    version,
+    input.content,
+    input.contentType,
+    input.source,
+    input.promptVersion ?? null,
+    input.model ?? null,
+    input.jobId ?? null,
+    input.note ?? null,
+    at,
+  );
+  db.prepare(
+    `UPDATE project_stages
+     SET active_version = ?, updated_at = ?
+     WHERE project_id = ? AND stage = ?`,
+  ).run(version, at, input.projectId, input.stage);
   const row = getVersion(input.projectId, input.stage, version);
   if (!row) {
-    throw new Error('createVersion: inserted row not found');
+    throw new Error('insertVersionTx: inserted row not found');
   }
   return row;
 }
 
 /**
- * 回滚：复制历史版本内容为新版本（source='rollback'），历史记录不移动。
- * 状态推进（edited / stale 传播）由 stages.ts 的 rollbackToVersion 完成。
+ * 创建新版本并把 project_stages.active_version 指向它（BEGIN IMMEDIATE
+ * 单事务，写锁保护版本分配）。
+ * 状态字段（generated/edited/...）由状态机负责。
+ * 正式业务路径请优先使用 operations.ts 的高层原子操作
+ * （generateVersion / editVersion / rollbackToVersion）——
+ * 本函数是底层 helper，单独使用不会推进 stage status。
  */
-export function copyVersionAsNew(
+export function createVersion(input: CreateVersionInput): ProjectVersionRow {
+  const db = getDb();
+  const tx = db.transaction(() => insertVersionTx(input));
+  return tx.immediate();
+}
+
+/**
+ * 【事务内 helper】回滚的数据部分：复制历史版本内容为新版本
+ * （source='rollback'），历史记录不移动。不开事务，供调用方事务组合。
+ */
+export function copyVersionRowsTx(
   projectId: string,
   stage: WorkflowStage,
   targetVersion: number,
@@ -127,7 +139,7 @@ export function copyVersionAsNew(
       `rollback target not found: ${projectId}/${stage}/v${targetVersion}`,
     );
   }
-  return createVersion({
+  return insertVersionTx({
     projectId,
     stage,
     content: target.content,
@@ -138,4 +150,21 @@ export function copyVersionAsNew(
     jobId: null,
     note: `rollback from v${targetVersion}`,
   });
+}
+
+/**
+ * 回滚：复制历史版本内容为新版本（BEGIN IMMEDIATE 单事务）。
+ * 状态推进（edited / stale 传播）请使用 operations.rollbackToVersion ——
+ * 本函数是底层 helper，单独使用不会推进 stage status。
+ */
+export function copyVersionAsNew(
+  projectId: string,
+  stage: WorkflowStage,
+  targetVersion: number,
+): ProjectVersionRow {
+  const db = getDb();
+  const tx = db.transaction(() =>
+    copyVersionRowsTx(projectId, stage, targetVersion),
+  );
+  return tx.immediate();
 }

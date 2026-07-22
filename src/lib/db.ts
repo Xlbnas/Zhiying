@@ -91,8 +91,6 @@ CREATE TABLE IF NOT EXISTS project_versions ( -- 阶段产物版本快照
   note TEXT,
   created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_project_versions_stage
-  ON project_versions (project_id, stage, version);
 CREATE TABLE IF NOT EXISTS llm_usage (        -- 逐请求成本快照（架构 §6.2）
   id TEXT PRIMARY KEY,
   project_id TEXT, stage TEXT, job_id TEXT, request_id TEXT,
@@ -108,6 +106,24 @@ CREATE TABLE IF NOT EXISTS llm_usage (        -- 逐请求成本快照（架构 
 CREATE INDEX IF NOT EXISTS idx_llm_usage_project
   ON llm_usage (project_id, stage);
 `;
+
+// M2-A Hardening：版本号数据库级唯一约束（幂等）。
+// 建索引前先查重 —— 发现重复必须停止并报告，不得静默删除。
+const VERSION_DUP_CHECK_SQL = `
+SELECT project_id, stage, version, COUNT(*) AS c
+FROM project_versions
+GROUP BY project_id, stage, version
+HAVING c > 1
+LIMIT 1
+`;
+
+const VERSION_UNIQUE_INDEX_SQL = `
+CREATE UNIQUE INDEX IF NOT EXISTS uq_project_versions_project_stage_version
+  ON project_versions (project_id, stage, version)
+`;
+
+// 唯一索引完全覆盖原普通索引的查询路径，删除冗余（幂等）
+const DROP_REDUNDANT_INDEX_SQL = `DROP INDEX IF EXISTS idx_project_versions_stage`;
 
 /**
  * 获取数据库单例。首次调用时：
@@ -128,6 +144,20 @@ export function getDb(): Db {
   db.pragma('foreign_keys = ON');
   db.pragma('synchronous = NORMAL');
   db.exec(SCHEMA_SQL);
+  // M2-A Hardening 迁移（幂等）：
+  // 1. 版本号唯一索引前先查重——有重复必须停止并报告，不得静默删除
+  const dup = db.prepare(VERSION_DUP_CHECK_SQL).get() as
+    | {project_id: string; stage: string; version: number; c: number}
+    | undefined;
+  if (dup) {
+    throw new Error(
+      `project_versions 存在重复版本号，已停止：project=${dup.project_id} ` +
+        `stage=${dup.stage} version=${dup.version} 出现 ${dup.c} 次。` +
+        `请人工核查数据后再启动。`,
+    );
+  }
+  db.exec(VERSION_UNIQUE_INDEX_SQL);
+  db.exec(DROP_REDUNDANT_INDEX_SQL);
   instance = db;
   return db;
 }

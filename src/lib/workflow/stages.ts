@@ -79,7 +79,7 @@ export function listStages(projectId: string): ProjectStageRow[] {
   );
 }
 
-function requireStage(
+export function requireStage(
   projectId: string,
   stage: WorkflowStage,
 ): ProjectStageRow {
@@ -150,7 +150,10 @@ export function assertConfirmedForStage(
 // ---------- 状态推进 ----------
 
 /** 把全部已有进度的下游置 stale（同事务内调用）。 */
-function applyDownstreamStaleTx(projectId: string, stage: WorkflowStage): void {
+export function applyDownstreamStaleTx(
+  projectId: string,
+  stage: WorkflowStage,
+): void {
   const db = getDb();
   const at = now();
   const mark = db.prepare(
@@ -162,7 +165,7 @@ function applyDownstreamStaleTx(projectId: string, stage: WorkflowStage): void {
   }
 }
 
-function setStatusTx(
+export function setStatusTx(
   projectId: string,
   stage: WorkflowStage,
   status: StageStatus,
