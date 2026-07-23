@@ -117,6 +117,19 @@ export async function PATCH(
           message: clipText(`内容未通过 ${stage} schema 校验：\n${issues}`, 1200),
         });
       }
+      // M2-E-A：结构之后的语义校验（与 LLM 输出同一套规则，人工编辑不绕过）
+      if (prompt.semanticValidate) {
+        const semanticIssues = prompt.semanticValidate(safe.data);
+        if (semanticIssues.length > 0) {
+          const issues = semanticIssues
+            .slice(0, MAX_ISSUES)
+            .map((issue) => `[${issue.code}] ${issue.message}`)
+            .join('\n');
+          return jsonError(422, 'INVALID_STAGE_CONTENT', {
+            message: clipText(`内容未通过 ${stage} 语义校验：\n${issues}`, 1200),
+          });
+        }
+      }
       content = JSON.stringify(safe.data);
     }
 

@@ -81,6 +81,18 @@ function formatZodIssues(error: import('zod').ZodError): string {
   return [...issues, ...more].join('\n');
 }
 
+/** 语义校验问题格式化（M2-E-A；限长，供 repair 携带）。 */
+function formatSemanticIssues(issues: Array<{code: string; message: string}>): string {
+  const lines = issues
+    .slice(0, MAX_ISSUES_IN_ERROR)
+    .map((issue) => `- [${issue.code}] ${issue.message}`);
+  const more =
+    issues.length > MAX_ISSUES_IN_ERROR
+      ? [`- …另有 ${issues.length - MAX_ISSUES_IN_ERROR} 个问题`]
+      : [];
+  return [...lines, ...more].join('\n');
+}
+
 function buildRepairUser(
   originalUser: string,
   badOutput: string,
@@ -204,6 +216,22 @@ export async function executeStageGeneration(
 
     const safe = schema!.safeParse(parsed);
     if (safe.success) {
+      // M2-E-A：结构校验之后的语义校验（Scenes 语义门禁）——
+      // 失败走与 Zod 失败相同的有限 repair 路径；系统只校验，不自动修数据。
+      if (prompt.semanticValidate) {
+        const semanticIssues = prompt.semanticValidate(safe.data);
+        if (semanticIssues.length > 0) {
+          lastFailure = `语义校验失败：\n${formatSemanticIssues(semanticIssues)}`;
+          if (attempt === maxAttempts) {
+            throw new LLMError(
+              'VALIDATION_FAILED',
+              `阶段 ${stage} 经 ${maxRepairs} 次 repair 仍失败。\n${clipText(lastFailure, MAX_ISSUES_IN_REPAIR)}`,
+            );
+          }
+          user = buildRepairUser(originalUser, response.text, lastFailure);
+          continue;
+        }
+      }
       return {
         stage,
         content: JSON.stringify(safe.data),

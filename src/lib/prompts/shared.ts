@@ -36,8 +36,13 @@ export interface StagePrompt {
   outputKind: 'markdown' | 'json';
   system: string;
   buildUser(input: StagePromptInput): string;
-  /** outputKind='json' 时必须有。 */
+  /** outputKind='json' 时必须有（结构校验）。 */
   zodSchema?: import('zod').ZodTypeAny;
+  /**
+   * 语义校验（可选，结构校验之后执行；M2-E-A Scenes 起）。
+   * LLM 输出与人工 JSON 编辑共用同一套规则——返回问题列表（空 = 通过）。
+   */
+  semanticValidate?: (data: unknown) => Array<{code: string; message: string}>;
 }
 
 // ---------- 共享 system 片段（总控提示词全局原则的产品化） ----------

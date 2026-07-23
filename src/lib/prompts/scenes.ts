@@ -10,6 +10,10 @@
 import {z} from 'zod';
 import {chapterTimingSchema, sceneSchema} from '../scene-schema';
 import {
+  SCENES_SYSTEM_FPS,
+  scenesSemanticIssues,
+} from '../workflow/scenes-semantic-validation';
+import {
   composeSystem,
   projectVarsBlock,
   SHARED_MG_PRINCIPLES,
@@ -28,7 +32,7 @@ export const scenesAiOutputSchema = z.object({
 export type ScenesAiOutput = z.infer<typeof scenesAiOutputSchema>;
 
 /** 帧换算用的系统常量（M1 契约；AI 不控制，仅用于 startFrame/durationInFrames 计算）。 */
-export const SCENES_SYSTEM_FPS = 30;
+export {SCENES_SYSTEM_FPS};
 
 const system = composeSystem(
   SHARED_ROLE,
@@ -71,6 +75,8 @@ export const scenesPrompt: StagePrompt = {
   outputKind: 'json',
   system,
   zodSchema: scenesAiOutputSchema,
+  // M2-E-A：结构 zod 之后的确定性语义校验（LLM 输出与人工编辑共用）
+  semanticValidate: scenesSemanticIssues,
   buildUser(input) {
     return [
       projectVarsBlock(input),
