@@ -8,6 +8,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import {spawn, type ChildProcess} from 'node:child_process';
+import readline from 'node:readline';
 
 process.env.ZHIYING_DATA_DIR = path.join('data', 'test-m2d');
 process.env.LLM_PROVIDER = 'mock';
@@ -577,7 +579,7 @@ async function main(): Promise<void> {
     );
   }
   {
-    // W2 manual edit vs enqueue same stage
+    // W2a（顺序语义）manual edit vs enqueue same stage
     const pid = newProject();
     await genAndLock(pid, 'project_definition');
     await genAndLock(pid, 'research');
@@ -595,7 +597,7 @@ async function main(): Promise<void> {
     }
     ok(
       editThrew === 'JOB_ALREADY_ACTIVE' && listVersions(pid, 'research').length === vBefore,
-      '[W2] enqueue 先获得锁：后续 edit 被事务内 fence 拒绝（JOB_ALREADY_ACTIVE）',
+      '[W2a-Seq] enqueue 先获得锁：后续 edit 被事务内 fence 拒绝（JOB_ALREADY_ACTIVE）',
       editThrew,
     );
     cancelQuiet(job.id);
@@ -605,11 +607,11 @@ async function main(): Promise<void> {
       content: '# 研究 v2（先编辑）', contentType: 'markdown', source: 'manual_edit',
     }, {confirmStale: true});
     const job2 = enqueueWorkflowStageJob(pid, 'research');
-    ok(job2.status === 'queued', '[W2] edit 先完成：后续 enqueue 正常入队（无 phantom active）');
+    ok(job2.status === 'queued', '[W2a-Seq] edit 先完成：后续 enqueue 正常入队（无 phantom active）');
     cancelQuiet(job2.id);
   }
   {
-    // W3 lock vs enqueue same stage
+    // W3a（顺序语义）lock vs enqueue same stage
     const pid = newProject();
     await genAndLock(pid, 'project_definition');
     await genAndLock(pid, 'research');
@@ -623,7 +625,7 @@ async function main(): Promise<void> {
     }
     ok(
       lockThrew === 'JOB_ALREADY_ACTIVE' && getStage(pid, 'research')!.status === 'locked',
-      '[W3] enqueue 先获得锁：lock 被拒绝（JOB_ALREADY_ACTIVE）',
+      '[W3a-Seq] enqueue 先获得锁：lock 被拒绝（JOB_ALREADY_ACTIVE）',
       lockThrew,
     );
     cancelQuiet(job.id);
@@ -638,15 +640,15 @@ async function main(): Promise<void> {
     }
     ok(
       enqThrew === 'CONFIRM_STALE_REQUIRED',
-      '[W3] lock 先完成：后续 enqueue 无 confirmStale 被拒（confirm 语义不被绕过）',
+      '[W3a-Seq] lock 先完成：后续 enqueue 无 confirmStale 被拒（confirm 语义不被绕过）',
       enqThrew,
     );
     const job3 = enqueueWorkflowStageJob(pid, 'research', {confirmStale: true});
-    ok(job3.status === 'queued', '[W3] 带 confirmStale 的 enqueue 正常放行');
+    ok(job3.status === 'queued', '[W3a-Seq] 带 confirmStale 的 enqueue 正常放行');
     cancelQuiet(job3.id);
   }
   {
-    // W4 rollback vs enqueue same stage
+    // W4a（顺序语义）rollback vs enqueue same stage
     const pid = newProject();
     await genAndLock(pid, 'project_definition');
     await genAndLock(pid, 'research');
@@ -665,15 +667,216 @@ async function main(): Promise<void> {
     }
     ok(
       rbThrew === 'JOB_ALREADY_ACTIVE' && listVersions(pid, 'research').length === vBefore,
-      '[W4] enqueue 先获得锁：rollback 被拒绝（JOB_ALREADY_ACTIVE）',
+      '[W4a-Seq] enqueue 先获得锁：rollback 被拒绝（JOB_ALREADY_ACTIVE）',
       rbThrew,
     );
     cancelQuiet(job.id);
     // rollback 先完成 → 后续 enqueue 正常（rollback 落 edited，可 rerun）
     rollbackToVersion(pid, 'research', 1);
     const job4 = enqueueWorkflowStageJob(pid, 'research');
-    ok(job4.status === 'queued', '[W4] rollback 先完成：后续 enqueue 正常入队');
+    ok(job4.status === 'queued', '[W4a-Seq] rollback 先完成：后续 enqueue 正常入队');
     cancelQuiet(job4.id);
+  }
+
+  // ============ Wb. 双执行上下文竞争（真实 contention，barrier 控制锁顺序） ============
+  {
+    // W2b edit vs enqueue —— 双连接双向：
+    // 方向一（B writer 先持锁）：子进程 BEGIN IMMEDIATE 持锁期间，主进程
+    //   editVersion 必须 SQLITE_BUSY（fence/mutation 无法穿透对方写锁）；
+    //   B 提交真实 enqueue 后，editVersion → JOB_ALREADY_ACTIVE，版本数不变。
+    const pid = newProject();
+    await genAndLock(pid, 'project_definition');
+    await genAndLock(pid, 'research');
+    const vBefore = listVersions(pid, 'research').length;
+    const holder = await childHoldLock();
+    let busyErr: unknown = null;
+    try {
+      withLowBusy(() => {
+        editVersion({
+          projectId: pid, stage: 'research',
+          content: '# 穿透测试', contentType: 'markdown', source: 'manual_edit',
+        }, {confirmStale: true});
+      });
+    } catch (err) {
+      busyErr = err;
+    }
+    ok(
+      busyErr !== null && isBusyError(busyErr),
+      '[W2b-Race] B 持写锁时 editVersion 被 SQLITE_BUSY 拒绝（不穿透写入）',
+      String(busyErr),
+    );
+    ok(
+      listVersions(pid, 'research').length === vBefore,
+      '[W2b-Race] 锁竞争期间不产生版本（fence+mutation 同窗）',
+    );
+    await childRelease(holder);
+    const enqOut = await runChild(['enqueue', pid, 'research', 'true']);
+    ok(enqOut.startsWith('OK '), '[W2b-Race] B 释放后经真实 enqueueWorkflowStageJob 入队');
+    let editThrew: string | null = null;
+    try {
+      editVersion({
+        projectId: pid, stage: 'research',
+        content: '# x', contentType: 'markdown', source: 'manual_edit',
+      }, {confirmStale: true});
+    } catch (err) {
+      editThrew = err instanceof WorkflowError ? err.code : String(err);
+    }
+    ok(
+      editThrew === 'JOB_ALREADY_ACTIVE' && listVersions(pid, 'research').length === vBefore,
+      '[W2b-Race] B enqueue 提交后 editVersion → JOB_ALREADY_ACTIVE（串行化合法）',
+      editThrew,
+    );
+    const active = getDb()
+      .prepare("SELECT id FROM llm_jobs WHERE project_id = ? AND stage = 'research' AND status = 'queued'")
+      .get(pid) as {id: string};
+    cancelQuiet(active.id);
+    // 方向二（A writer 先持锁）：主进程持锁期间，子进程真实 enqueue 必须 SQLITE_BUSY；
+    // A 提交后 B 按新状态正常入队。
+    const parentHold = parentHoldLock();
+    const busyEnq = await runChild(['enqueue', pid, 'research', 'true', '150']);
+    ok(
+      busyEnq.startsWith('ERR') && busyEnq.includes('SQLITE_BUSY'),
+      '[W2b-Race] A 持写锁时 B 的真实 enqueue 被 SQLITE_BUSY 拒绝',
+      busyEnq,
+    );
+    parentHold.exec('COMMIT');
+    parentHold.close();
+    const enqOut2 = await runChild(['enqueue', pid, 'research', 'true']);
+    ok(enqOut2.startsWith('OK '), '[W2b-Race] A 提交后 B 按新状态正常入队（串行化合法）');
+    const active2 = getDb()
+      .prepare("SELECT id FROM llm_jobs WHERE project_id = ? AND stage = 'research' AND status = 'queued'")
+      .get(pid) as {id: string};
+    cancelQuiet(active2.id);
+  }
+  {
+    // W3b lock vs enqueue —— 双连接双向
+    const pid = newProject();
+    await genAndLock(pid, 'project_definition');
+    await runStageOnce(pid, 'research'); // research generated v1（未 lock）
+    // 方向一：B 持锁期间 lockStage 必须 SQLITE_BUSY
+    const holder = await childHoldLock();
+    let busyErr: unknown = null;
+    try {
+      withLowBusy(() => lockStage(pid, 'research'));
+    } catch (err) {
+      busyErr = err;
+    }
+    ok(
+      busyErr !== null && isBusyError(busyErr),
+      '[W3b-Race] B 持写锁时 lockStage 被 SQLITE_BUSY 拒绝（mutation 无法进入）',
+      String(busyErr),
+    );
+    await childRelease(holder);
+    const enqOut = await runChild(['enqueue', pid, 'research', 'false']);
+    ok(enqOut.startsWith('OK '), '[W3b-Race] B 提交真实 enqueue（generated 可直接 rerun）');
+    let lockThrew: string | null = null;
+    try {
+      lockStage(pid, 'research');
+    } catch (err) {
+      lockThrew = err instanceof WorkflowError ? err.code : String(err);
+    }
+    ok(
+      lockThrew === 'JOB_ALREADY_ACTIVE',
+      '[W3b-Race] B enqueue 提交后 lockStage → JOB_ALREADY_ACTIVE',
+      lockThrew,
+    );
+    const active = getDb()
+      .prepare("SELECT id FROM llm_jobs WHERE project_id = ? AND stage = 'research' AND status = 'queued'")
+      .get(pid) as {id: string};
+    cancelQuiet(active.id);
+    // 方向二：A 持锁期间 B 的真实 enqueue 必须 SQLITE_BUSY；
+    // A 提交（lock 完成）后，B 必须看到 locked 并遵守 CONFIRM_STALE_REQUIRED。
+    const parentHold = parentHoldLock();
+    const busyEnq = await runChild(['enqueue', pid, 'research', 'false', '150']);
+    ok(
+      busyEnq.startsWith('ERR') && busyEnq.includes('SQLITE_BUSY'),
+      '[W3b-Race] A 持写锁时 B 的 enqueue 被 SQLITE_BUSY 拒绝',
+      busyEnq,
+    );
+    parentHold.exec('COMMIT');
+    parentHold.close();
+    lockStage(pid, 'research');
+    const noConfirm = await runChild(['enqueue', pid, 'research', 'false']);
+    ok(
+      noConfirm.includes('CONFIRM_STALE_REQUIRED'),
+      '[W3b-Race] A lock 提交后 B 无 confirm 入队被拒（locked 语义不被绕过）',
+      noConfirm,
+    );
+    const withConfirm = await runChild(['enqueue', pid, 'research', 'true']);
+    ok(withConfirm.startsWith('OK '), '[W3b-Race] B 带 confirmStale 后正常入队');
+    const active3 = getDb()
+      .prepare("SELECT id FROM llm_jobs WHERE project_id = ? AND stage = 'research' AND status = 'queued'")
+      .get(pid) as {id: string};
+    cancelQuiet(active3.id);
+  }
+  {
+    // W4b rollback vs enqueue —— 双连接双向
+    const pid = newProject();
+    await genAndLock(pid, 'project_definition');
+    await genAndLock(pid, 'research');
+    editVersion({
+      projectId: pid, stage: 'research',
+      content: '# 研究 v2', contentType: 'markdown', source: 'manual_edit',
+    }, {confirmStale: true}); // research edited，active=2
+    const vBefore = listVersions(pid, 'research').length;
+    // 方向一：B 持锁期间 rollback 必须 SQLITE_BUSY
+    const holder = await childHoldLock();
+    let busyErr: unknown = null;
+    try {
+      withLowBusy(() => rollbackToVersion(pid, 'research', 1));
+    } catch (err) {
+      busyErr = err;
+    }
+    ok(
+      busyErr !== null && isBusyError(busyErr),
+      '[W4b-Race] B 持写锁时 rollback 被 SQLITE_BUSY 拒绝',
+      String(busyErr),
+    );
+    ok(
+      listVersions(pid, 'research').length === vBefore,
+      '[W4b-Race] 锁竞争期间版本数不变',
+    );
+    await childRelease(holder);
+    const enqOut = await runChild(['enqueue', pid, 'research', 'false']);
+    ok(enqOut.startsWith('OK '), '[W4b-Race] B 提交真实 enqueue');
+    let rbThrew: string | null = null;
+    try {
+      rollbackToVersion(pid, 'research', 1);
+    } catch (err) {
+      rbThrew = err instanceof WorkflowError ? err.code : String(err);
+    }
+    ok(
+      rbThrew === 'JOB_ALREADY_ACTIVE' && listVersions(pid, 'research').length === vBefore,
+      '[W4b-Race] B enqueue 提交后 rollback → JOB_ALREADY_ACTIVE 且版本数不变',
+      rbThrew,
+    );
+    const active = getDb()
+      .prepare("SELECT id FROM llm_jobs WHERE project_id = ? AND stage = 'research' AND status = 'queued'")
+      .get(pid) as {id: string};
+    cancelQuiet(active.id);
+    // 方向二：A 持锁期间 B 的 enqueue 必须 SQLITE_BUSY；
+    // rollback 提交后 B 看到 status=edited + active=新 rollback 版本，再正常入队。
+    const parentHold = parentHoldLock();
+    const busyEnq = await runChild(['enqueue', pid, 'research', 'false', '150']);
+    ok(
+      busyEnq.startsWith('ERR') && busyEnq.includes('SQLITE_BUSY'),
+      '[W4b-Race] A 持写锁时 B 的 enqueue 被 SQLITE_BUSY 拒绝',
+      busyEnq,
+    );
+    parentHold.exec('COMMIT');
+    parentHold.close();
+    const rb = rollbackToVersion(pid, 'research', 1);
+    const stageAfter = getStage(pid, 'research')!;
+    ok(
+      stageAfter.status === 'edited' && stageAfter.active_version === rb.version,
+      '[W4b-Race] A rollback 提交：status=edited 且 active=新 rollback 版本',
+    );
+    const enqOut2 = await runChild(['enqueue', pid, 'research', 'false']);
+    ok(enqOut2.startsWith('OK '), '[W4b-Race] B 看到 rollback 后的新状态并正常入队');
+    const active4 = getDb()
+      .prepare("SELECT id FROM llm_jobs WHERE project_id = ? AND stage = 'research' AND status = 'queued'")
+      .get(pid) as {id: string};
+    cancelQuiet(active4.id);
   }
 
   // ============ V. Version History / Rollback API ============
@@ -827,6 +1030,94 @@ function cancelQuiet(jobId: string): void {
   getDb()
     .prepare("UPDATE llm_jobs SET status = 'cancelled' WHERE id = ? AND status = 'queued'")
     .run(jobId);
+}
+
+// ---------- 双执行上下文竞争测试工具（确定性 barrier，不用 sleep 猜时序） ----------
+
+const CHILD_SCRIPT = path.resolve(process.cwd(), 'scripts', 'test-m2d-dual-conn-child.ts');
+
+function spawnChild(args: string[]): ChildProcess {
+  return spawn('npx', ['tsx', CHILD_SCRIPT, ...args], {
+    env: {...process.env},
+    stdio: ['pipe', 'pipe', 'inherit'],
+  });
+}
+
+/** 等待子进程 stdout 出现指定行（barrier）。 */
+function waitStdout(child: ChildProcess, marker: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let captured = '';
+    child.stdout!.on('data', (d) => {
+      captured += String(d);
+    });
+    const rl = readline.createInterface({input: child.stdout!});
+    rl.on('line', (line) => {
+      if (line.trim().startsWith(marker)) {
+        rl.close();
+        resolve();
+      }
+    });
+    child.on('exit', (code) => {
+      reject(new Error(`子进程在 ${marker} 前退出（code=${code}）: ${captured.slice(0, 300)}`));
+    });
+    child.on('error', reject);
+  });
+}
+
+/** 运行子进程并收集 stdout（短命令）。 */
+function runChild(args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawnChild(args);
+    let out = '';
+    child.stdout!.on('data', (d) => {
+      out += String(d);
+    });
+    child.on('exit', (code) => {
+      if (code === 0) resolve(out.trim());
+      else reject(new Error(`子进程退出码 ${code}: ${out}`));
+    });
+    child.on('error', reject);
+  });
+}
+
+/** 子进程 hold 持锁（BEGIN IMMEDIATE）→ READY barrier。 */
+async function childHoldLock(): Promise<ChildProcess> {
+  const child = spawnChild(['hold', getDbPath()]);
+  await waitStdout(child, 'READY');
+  return child;
+}
+
+async function childRelease(child: ChildProcess): Promise<void> {
+  child.stdin!.write('RELEASE\n');
+  await waitStdout(child, 'DONE');
+}
+
+/** 主进程内第二连接持锁（A writer 先方向）。 */
+function parentHoldLock(): Database.Database {
+  const db = new Database(getDbPath());
+  db.pragma('journal_mode = WAL');
+  db.exec('BEGIN IMMEDIATE');
+  db.prepare('UPDATE llm_jobs SET progress = progress WHERE 1 = 0').run();
+  return db;
+}
+
+/** 判断是否为写锁竞争错误（SQLITE_BUSY / database is locked）。 */
+function isBusyError(err: unknown): boolean {
+  if (err && typeof err === 'object' && 'code' in err && err.code === 'SQLITE_BUSY') {
+    return true;
+  }
+  return String(err).includes('database is locked');
+}
+
+/** 临时把主连接 busy_timeout 调低执行 fn，再恢复（见证锁竞争而非等待 5s）。 */
+function withLowBusy<T>(fn: () => T): T {
+  const db = getDb();
+  db.pragma('busy_timeout = 150');
+  try {
+    return fn();
+  } finally {
+    db.pragma('busy_timeout = 5000');
+  }
 }
 
 main().catch((err) => {
