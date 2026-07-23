@@ -20,3 +20,7 @@ scripts/frame-compare/node_modules/
 
 # 临时日志
 *.log
+
+# 任意 *.env 密钥文件（.env.example 模板除外，防 API-KEY.env 类误提交）
+*.env
+!.env.example
