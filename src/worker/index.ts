@@ -69,7 +69,10 @@ function requestShutdown(signal: string): void {
   }
   shuttingDown = true;
   log(`received ${signal}, shutting down gracefully…`);
-  // 中止正在进行的 renderMedia；runJob 的 catch 分支会把任务回 queued
+  // 统一当前任务取消句柄（M2-C Hardening §一）：render 与 llm 共用同一
+  // AbortController——renderMedia 立即中止；LLM 请求经 signal 得到
+  // CANCELLED，runLlmJob 的 catch 检测 shuttingDown 后 requeue（不回 queued 失败、
+  // 不标 cancelled、不产生 project_version）。
   currentController?.abort();
 }
 
@@ -170,10 +173,12 @@ function ensureBundleLazy(): Promise<string> {
   return bundlePromise;
 }
 
-/** 渲染单个任务（已被 claim，status=running）。 */
-async function runJob(job: RenderJobRow, bundleLocation: string): Promise<void> {
-  const controller = new AbortController();
-  currentController = controller;
+/** 渲染单个任务（已被 claim，status=running；controller 由主循环统一创建）。 */
+async function runJob(
+  job: RenderJobRow,
+  bundleLocation: string,
+  controller: AbortController,
+): Promise<void> {
   // 每个 job 独立随机端口：失败后 retry / 下一个 job 不复用旧端口（见上文说明）
   const renderPort = randomRenderPort();
   try {
@@ -289,8 +294,6 @@ async function runJob(job: RenderJobRow, bundleLocation: string): Promise<void> 
     }
     failJob(job.id, 'RENDER_ERROR', message);
     log(`job ${job.id} failed (attempt ${job.attempt}/${job.max_attempts}): ${message}`);
-  } finally {
-    currentController = null;
   }
 }
 
@@ -319,27 +322,39 @@ async function main(): Promise<void> {
   }
 
   // 2. 单调度循环：render + llm 全局 FIFO，任何时刻只跑一个；
-  //    Remotion bundle 延后到首个 render job 才初始化（LLM job 零依赖）
+  //    Remotion bundle 延后到首个 render job 才初始化（LLM job 零依赖）。
+  //    每个被 claim 的任务由主循环创建统一 AbortController（currentController），
+  //    SIGTERM/SIGINT 经 requestShutdown 同时覆盖 render 与 llm（Hardening §一）。
   while (!shuttingDown) {
     const claimed = claimNextAnyJob(WORKER_ID);
     if (!claimed) {
       await sleep(POLL_INTERVAL_MS);
       continue;
     }
-    if (claimed.type === 'llm') {
-      await runLlmJob(claimed.job, {isShuttingDown: () => shuttingDown, log});
-      continue;
-    }
-    let bundleLocation: string;
+    const controller = new AbortController();
+    currentController = controller;
     try {
-      bundleLocation = await ensureBundleLazy();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      failJob(claimed.job.id, 'BUNDLE_ERROR', message);
-      log(`render job ${claimed.job.id} bundle init failed: ${message}`);
-      continue;
+      if (claimed.type === 'llm') {
+        await runLlmJob(claimed.job, {
+          isShuttingDown: () => shuttingDown,
+          log,
+          shutdownSignal: controller.signal,
+        });
+        continue;
+      }
+      let bundleLocation: string;
+      try {
+        bundleLocation = await ensureBundleLazy();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        failJob(claimed.job.id, 'BUNDLE_ERROR', message);
+        log(`render job ${claimed.job.id} bundle init failed: ${message}`);
+        continue;
+      }
+      await runJob(claimed.job, bundleLocation, controller);
+    } finally {
+      currentController = null;
     }
-    await runJob(claimed.job, bundleLocation);
   }
 
   log('bye.');

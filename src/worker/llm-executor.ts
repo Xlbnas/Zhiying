@@ -37,6 +37,12 @@ const NON_RETRYABLE_CODES = new Set(['VALIDATION_FAILED', 'CONFIG_ERROR', 'OUTPU
 export interface LlmExecutorContext {
   isShuttingDown: () => boolean;
   log: (...args: unknown[]) => void;
+  /**
+   * Worker 统一的当前任务取消句柄（Hardening §一）：SIGTERM/SIGINT 触发。
+   * 与 cancel 轮询共用内部 controller——shutdown 与 cancel 都能真正中止
+   * 进行中的 Provider 请求，但语义不同（shutdown→requeue / cancel→cancelled）。
+   */
+  shutdownSignal?: AbortSignal;
 }
 
 /** 测试注入点（生产全部走默认值）。 */
@@ -97,6 +103,9 @@ export async function runLlmJob(
   }
 
   const controller = new AbortController();
+  // 统一 shutdown 通道：Worker 收到 SIGTERM/SIGINT 时同样中止 Provider 请求
+  const onShutdownAbort = (): void => controller.abort();
+  ctx.shutdownSignal?.addEventListener('abort', onShutdownAbort, {once: true});
   // 心跳 + 取消轮询 timer（§十三/十四）：LLM 请求可能持续几十秒，
   // 不等 Provider 返回才 heartbeat；取消请求经 AbortSignal 中断 fetch。
   const timer = setInterval(() => {
@@ -118,6 +127,20 @@ export async function runLlmJob(
       signal: controller.signal,
     });
 
+    // Commit Fence（Hardening §二）：executeStageGeneration 成功返回后、
+    // generateVersion 提交前，必须做最终 shutdown/cancel 检查——
+    // 通过 fence 才允许写业务结果，保证 cancel_requested=true 时不进入 generateVersion。
+    if (ctx.isShuttingDown()) {
+      requeueLlmJob(job.id);
+      log(`llm job ${job.id} requeued due to shutdown（fence，未提交版本）`);
+      return;
+    }
+    if (isLlmCancelRequested(job.id)) {
+      markLlmCancelled(job.id);
+      log(`llm job ${job.id} cancelled（fence，未提交版本）`);
+      return;
+    }
+
     // 业务结果落库：M2-A 原子操作（版本 + active_version + status + stale 传播）
     const version = generateVersion({
       projectId: job.project_id,
@@ -129,7 +152,9 @@ export async function runLlmJob(
       model: result.model,
       jobId: job.id,
     });
-    completeLlmJob(job.id);
+    if (!completeLlmJob(job.id)) {
+      log(`llm job ${job.id} complete 未生效（任务已不在 running，可能是并发取消）`);
+    }
     log(
       `llm job ${job.id} succeeded: ${payload.stage} v${version.version} ` +
         `(${result.contentType}, repair=${result.repairCount}, requests=${result.requestIds.length})`,
@@ -160,5 +185,6 @@ export async function runLlmJob(
     log(`llm job ${job.id} failed (attempt ${job.attempt}/${job.max_attempts}): ${message}`);
   } finally {
     clearInterval(timer);
+    ctx.shutdownSignal?.removeEventListener('abort', onShutdownAbort);
   }
 }

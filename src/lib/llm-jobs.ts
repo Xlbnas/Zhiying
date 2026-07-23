@@ -120,15 +120,19 @@ export function heartbeatLlmJob(jobId: string): void {
     .run(now(), jobId);
 }
 
-/** 任务成功。 */
-export function completeLlmJob(jobId: string): void {
-  getDb()
+/**
+ * 任务成功（Hardening §三）：仅允许 running → succeeded，
+ * 防止 cancelled/failed 被迟到的 complete 覆盖。返回是否真正生效。
+ */
+export function completeLlmJob(jobId: string): boolean {
+  const result = getDb()
     .prepare(
       `UPDATE llm_jobs
        SET status = 'succeeded', progress = 100, finished_at = ?
-       WHERE id = ?`,
+       WHERE id = ? AND status = 'running'`,
     )
     .run(now(), jobId);
+  return result.changes > 0;
 }
 
 /**

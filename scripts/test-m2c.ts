@@ -16,6 +16,7 @@ import {closeDb, getDb} from '../src/lib/db';
 import {enqueueRenderJob} from '../src/lib/jobs';
 import {
   cancelQueuedLlmJob,
+  completeLlmJob,
   enqueueLlmJob,
   getLlmJob,
   getVersionByJobId,
@@ -598,6 +599,141 @@ async function main(): Promise<void> {
       }),
     );
     ok(res9.status === 404, '[O] legacy 项目 run-stage → 404（无工作流）');
+  }
+
+  // ============ P. Hardening：shutdown abort / late cancel fence / 终态保护 ============
+  {
+    // P1：shutdown 真正 abort LLM（render 与 llm 共用统一取消句柄）
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    const claimed = claimLlm()!;
+    class ShutdownProbe implements LLMProvider {
+      readonly name = 'mock';
+      aborted = false;
+      generate(req: LLMRequest): Promise<LLMResponse> {
+        return new Promise((_resolve, reject) => {
+          const timer = setTimeout(() => {
+            reject(new LLMError('PROVIDER_TIMEOUT', '占位（不应到达）'));
+          }, 500);
+          req.signal?.addEventListener('abort', () => {
+            this.aborted = true;
+            clearTimeout(timer);
+            reject(new LLMError('CANCELLED', '请求已被取消'));
+          }, {once: true});
+        });
+      }
+    }
+    const probe = new ShutdownProbe();
+    let shuttingDown = false;
+    const workerController = new AbortController();
+    const running = runLlmJob(claimed.job, {
+      isShuttingDown: () => shuttingDown,
+      log: () => {},
+      shutdownSignal: workerController.signal,
+    }, {provider: probe});
+    await sleep(60);
+    shuttingDown = true;
+    workerController.abort(); // 模拟 Worker 收到 SIGTERM
+    await running;
+    const after = getLlmJob(job.id)!;
+    ok(probe.aborted, '[P1] shutdown → Provider 被真正 abort');
+    ok(after.status === 'queued', '[P1] shutdown → requeue（回 queued，非 cancelled/failed）', after.status);
+    ok(
+      countRows('SELECT COUNT(*) AS c FROM project_versions WHERE project_id = ?', pid) === 0,
+      '[P1] shutdown 不创建 project_version',
+    );
+    cancelQueuedLlmJob(job.id);
+  }
+  {
+    // P2：late cancel fence——Provider 已完成后、generateVersion 前 cancel 才到达
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    const claimed = claimLlm()!;
+    const before = countRows('SELECT COUNT(*) AS c FROM project_versions WHERE project_id = ?', pid);
+    // heartbeatMs 足够大，确保取消轮询 timer 不在测试窗口内触发（Provider 正常完成），
+    // 隔离验证 Commit Fence 本身。
+    const running = runLlmJob(
+      claimed.job,
+      {isShuttingDown: () => false, log: () => {}},
+      {provider: new MockLLMProvider(), heartbeatMs: 100_000},
+    );
+    // runLlmJob 同步前导（start 检查/payload/provider）已过、Provider 微任务尚未完成时
+    // 写入 cancel 标记 —— 确定性落在「Provider 已返回附近」的窗口。
+    requestCancelLlmJob(job.id);
+    await running;
+    const after = getLlmJob(job.id)!;
+    ok(after.status === 'cancelled', '[P2] late cancel → cancelled（fence 拦截）', after.status);
+    ok(
+      countRows('SELECT COUNT(*) AS c FROM project_versions WHERE project_id = ?', pid) === before,
+      '[P2] cancel_requested=true 时不进入 generateVersion（版本数不增加）',
+    );
+    ok(
+      countRows('SELECT COUNT(*) AS c FROM llm_usage WHERE job_id = ?', job.id) === 1,
+      '[P2] 已产生的 llm_usage 保留（API 费用已发生）',
+    );
+  }
+  {
+    // P3：fence shutdown 分支——Provider 完成时 shutdown 已置位 → requeue 不提交
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    const claimed = claimLlm()!;
+    let shuttingDown = false;
+    const running = runLlmJob(
+      claimed.job,
+      {isShuttingDown: () => shuttingDown, log: () => {}},
+      {provider: new MockLLMProvider(), heartbeatMs: 100_000},
+    );
+    shuttingDown = true; // Provider 微任务完成前同步置位
+    await running;
+    const after = getLlmJob(job.id)!;
+    ok(after.status === 'queued', '[P3] fence 检测 shutdown → requeue（非 cancelled）', after.status);
+    ok(
+      countRows('SELECT COUNT(*) AS c FROM project_versions WHERE project_id = ?', pid) === 0,
+      '[P3] fence shutdown 分支不创建 project_version',
+    );
+    cancelQueuedLlmJob(job.id);
+  }
+  {
+    // P4：normal success（无 cancel/shutdown，fence 正常放行）
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    const claimed = claimLlm()!;
+    await runLlmJob(
+      claimed.job,
+      {isShuttingDown: () => false, log: () => {}},
+      {provider: new MockLLMProvider()},
+    );
+    ok(getLlmJob(job.id)!.status === 'succeeded', '[P4] 无取消/退出 → succeeded');
+    ok(
+      getStage(pid, 'project_definition')!.status === 'generated' &&
+        countRows('SELECT COUNT(*) AS c FROM project_versions WHERE project_id = ?', pid) === 1,
+      '[P4] fence 放行：version 创建 + status=generated',
+    );
+  }
+  {
+    // P5：终态保护——cancelled/failed 不得被迟到的 complete 覆盖
+    const pid = newProject();
+    const j1 = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    claimLlm();
+    db.prepare("UPDATE llm_jobs SET status = 'cancelled' WHERE id = ?").run(j1.id);
+    ok(completeLlmJob(j1.id) === false, '[P5] cancelled 任务 complete 被拒绝（changes=0）');
+    ok(getLlmJob(j1.id)!.status === 'cancelled', '[P5] cancelled 不被覆盖为 succeeded');
+    const j2 = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    claimLlm();
+    db.prepare("UPDATE llm_jobs SET status = 'failed' WHERE id = ?").run(j2.id);
+    ok(completeLlmJob(j2.id) === false && getLlmJob(j2.id)!.status === 'failed', '[P5] failed 不被覆盖为 succeeded');
   }
 
   // 全局一致性：10 阶段枚举未被意外改动
