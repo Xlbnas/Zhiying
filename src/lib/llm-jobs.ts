@@ -2,7 +2,14 @@ import crypto from 'node:crypto';
 import {z} from 'zod';
 import {getDb} from './db';
 import {projectInputSchema} from './project-inputs';
-import {workflowStageSchema, type ProjectVersionRow} from './workflow/types';
+import {generateVersionTx} from './workflow/operations';
+import {
+  workflowStageSchema,
+  type ContentType,
+  type ProjectVersionRow,
+  type VersionSource,
+  type WorkflowStage,
+} from './workflow/types';
 
 /**
  * LLM 任务队列数据层（M2-C，语义与 M1 render_jobs 对齐：jobs.ts）。
@@ -246,4 +253,82 @@ export function getVersionByJobId(jobId: string): ProjectVersionRow | undefined 
   return getDb()
     .prepare('SELECT * FROM project_versions WHERE job_id = ?')
     .get(jobId) as ProjectVersionRow | undefined;
+}
+
+// ---------- 原子结果提交（Commit Atomicity Hardening） ----------
+
+export type CommitLlmJobResultCode =
+  | 'COMMITTED'
+  | 'CANCEL_REQUESTED'
+  | 'JOB_NOT_RUNNING'
+  | 'JOB_NOT_FOUND'
+  | 'JOB_MISMATCH';
+
+export type CommitLlmJobResult =
+  | {code: 'COMMITTED'; version: ProjectVersionRow}
+  | {code: Exclude<CommitLlmJobResultCode, 'COMMITTED'>};
+
+export interface CommitLlmJobResultInput {
+  jobId: string;
+  projectId: string;
+  stage: WorkflowStage;
+  content: string;
+  contentType: ContentType;
+  source: VersionSource;
+  promptVersion?: string | null;
+  model?: string | null;
+}
+
+/**
+ * 「版本落库 + job 终态」原子提交：单个 BEGIN IMMEDIATE 内完成——
+ *   1. job 前置条件（存在 / project+stage 匹配 / status=running / cancel_requested=0）
+ *   2. generateVersionTx（M2-A 事务内 helper：版本 + active_version + generated + stale 传播）
+ *   3. job → succeeded（WHERE status='running' AND cancel_requested=0，changes 必须为 1）
+ * 任一步失败整体 rollback：不存在「version 已建但 job 未 succeeded」的部分提交窗口，
+ * 也不存在 cancel fence 与 generateVersion 之间的跨进程竞态窗口。
+ *
+ * 竞争语义：
+ * - Cancel API 先提交 cancel_requested=1 → 本事务读到 → CANCEL_REQUESTED（不建版本）
+ * - 本事务先提交（running→succeeded 原子完成）→ Cancel API 的 UPDATE 匹配 0 行（JOB_NOT_ACTIVE）
+ */
+export function commitLlmJobResult(input: CommitLlmJobResultInput): CommitLlmJobResult {
+  const db = getDb();
+  const tx = db.transaction((): CommitLlmJobResult => {
+    const job = getLlmJob(input.jobId);
+    if (!job) {
+      return {code: 'JOB_NOT_FOUND'};
+    }
+    if (job.project_id !== input.projectId || job.stage !== input.stage) {
+      return {code: 'JOB_MISMATCH'};
+    }
+    if (job.status !== 'running') {
+      return {code: 'JOB_NOT_RUNNING'};
+    }
+    if (job.cancel_requested === 1) {
+      return {code: 'CANCEL_REQUESTED'};
+    }
+    const version = generateVersionTx({
+      projectId: input.projectId,
+      stage: input.stage,
+      content: input.content,
+      contentType: input.contentType,
+      source: input.source,
+      promptVersion: input.promptVersion ?? null,
+      model: input.model ?? null,
+      jobId: input.jobId,
+    });
+    const result = db
+      .prepare(
+        `UPDATE llm_jobs
+         SET status = 'succeeded', progress = 100, finished_at = ?
+         WHERE id = ? AND status = 'running' AND cancel_requested = 0`,
+      )
+      .run(new Date().toISOString(), input.jobId);
+    if (result.changes !== 1) {
+      // 单事务内理论上不可达；防线存在即验证——失败则整体回滚
+      throw new Error(`commitLlmJobResult: job ${input.jobId} success 更新丢失竞态（changes=${result.changes}）`);
+    }
+    return {code: 'COMMITTED', version};
+  });
+  return tx.immediate();
 }

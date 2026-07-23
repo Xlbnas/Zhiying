@@ -3,6 +3,7 @@ import {executeStageGeneration} from '@/lib/llm/executor';
 import {getProvider} from '@/lib/llm';
 import {clipText, LLMError, type LLMProvider} from '@/lib/llm/types';
 import {
+  commitLlmJobResult,
   completeLlmJob,
   failLlmJob,
   getVersionByJobId,
@@ -14,7 +15,6 @@ import {
   type LlmJobRow,
 } from '@/lib/llm-jobs';
 import {toStagePromptInput} from '@/lib/project-inputs';
-import {generateVersion} from '@/lib/workflow/operations';
 
 /**
  * LLM 任务执行器（M2-C §十一/十二/十三/十四/十五）。
@@ -141,8 +141,10 @@ export async function runLlmJob(
       return;
     }
 
-    // 业务结果落库：M2-A 原子操作（版本 + active_version + status + stale 传播）
-    const version = generateVersion({
+    // 业务结果 + job 终态：单个 BEGIN IMMEDIATE 原子提交（Hardening §二/九），
+    // 正常路径不再「先 generateVersion 再 completeLlmJob」。
+    const committed = commitLlmJobResult({
+      jobId: job.id,
       projectId: job.project_id,
       stage: payload.stage,
       content: result.content,
@@ -150,15 +152,32 @@ export async function runLlmJob(
       source: result.versionSource,
       promptVersion: result.promptVersion,
       model: result.model,
-      jobId: job.id,
     });
-    if (!completeLlmJob(job.id)) {
-      log(`llm job ${job.id} complete 未生效（任务已不在 running，可能是并发取消）`);
+    switch (committed.code) {
+      case 'COMMITTED':
+        log(
+          `llm job ${job.id} succeeded: ${payload.stage} v${committed.version.version} ` +
+            `(${result.contentType}, repair=${result.repairCount}, requests=${result.requestIds.length})`,
+        );
+        return;
+      case 'CANCEL_REQUESTED':
+        // Cancel 先到达：不建版本，按用户取消语义终结
+        markLlmCancelled(job.id);
+        log(`llm job ${job.id} cancelled（commit 前检测到 cancel_requested）`);
+        return;
+      case 'JOB_NOT_RUNNING':
+        log(`llm job ${job.id} commit 跳过：任务已不在 running（可能已被并发终结）`);
+        return;
+      case 'JOB_NOT_FOUND':
+        log(`llm job ${job.id} commit 跳过：任务行不存在`);
+        return;
+      case 'JOB_MISMATCH':
+        // payload 与 job 行不一致（数据 bug）：显式失败，不反复重试
+        failLlmJob(job.id, 'JOB_MISMATCH', 'commit 时 job 的 project/stage 与执行上下文不一致', {
+          retryable: false,
+        });
+        return;
     }
-    log(
-      `llm job ${job.id} succeeded: ${payload.stage} v${version.version} ` +
-        `(${result.contentType}, repair=${result.repairCount}, requests=${result.requestIds.length})`,
-    );
   } catch (err) {
     if (ctx.isShuttingDown()) {
       // 优雅退出：回 queued 交给下次启动（crash idempotency 防重复生成）

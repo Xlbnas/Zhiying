@@ -12,16 +12,19 @@ import path from 'node:path';
 process.env.ZHIYING_DATA_DIR = path.join('data', 'test-m2c');
 process.env.LLM_PROVIDER = 'mock';
 
-import {closeDb, getDb} from '../src/lib/db';
+import Database from 'better-sqlite3';
+import {closeDb, getDb, getDbPath} from '../src/lib/db';
 import {enqueueRenderJob} from '../src/lib/jobs';
 import {
   cancelQueuedLlmJob,
+  commitLlmJobResult,
   completeLlmJob,
   enqueueLlmJob,
   getLlmJob,
   getVersionByJobId,
   LlmJobError,
   llmJobPayloadSchema,
+  markLlmCancelled,
   recoverStaleLlmJobs,
   requestCancelLlmJob,
   type LlmJobRow,
@@ -735,6 +738,131 @@ async function main(): Promise<void> {
     db.prepare("UPDATE llm_jobs SET status = 'failed' WHERE id = ?").run(j2.id);
     ok(completeLlmJob(j2.id) === false && getLlmJob(j2.id)!.status === 'failed', '[P5] failed 不被覆盖为 succeeded');
   }
+
+  // ============ Q. Commit Atomicity：双连接跨进程竞态 ============
+  // Connection A = Worker（getDb 单例）；Connection B = Next.js Cancel API（独立连接）
+  const dbB = new Database(getDbPath());
+  dbB.pragma('journal_mode = WAL');
+  dbB.pragma('busy_timeout = 5000');
+  {
+    // Q1：Cancel wins——B 先提交 cancel_requested=1，A 的 commit 被拒绝、不建版本
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    claimLlm();
+    dbB.transaction(() => {
+      dbB.prepare(
+        `UPDATE llm_jobs SET cancel_requested = 1 WHERE id = ? AND status = 'running'`,
+      ).run(job.id);
+    }).immediate();
+    const result = commitLlmJobResult({
+      jobId: job.id, projectId: pid, stage: 'project_definition',
+      content: '# 内容', contentType: 'markdown', source: 'ai_generate',
+      promptVersion: 'project-definition@1.0', model: 'deepseek-v4-flash',
+    });
+    ok(result.code === 'CANCEL_REQUESTED', '[Q1] Cancel wins：commit 返回 CANCEL_REQUESTED', result.code);
+    ok(
+      countRows('SELECT COUNT(*) AS c FROM project_versions WHERE job_id = ?', job.id) === 0,
+      '[Q1] Cancel wins：不创建 project_version',
+    );
+    markLlmCancelled(job.id);
+    ok(getLlmJob(job.id)!.status === 'cancelled', '[Q1] Cancel wins：job 最终 cancelled');
+  }
+  {
+    // Q2：Worker wins——A 先原子提交，B 的 cancel 匹配 0 行、终态不变
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    claimLlm();
+    const result = commitLlmJobResult({
+      jobId: job.id, projectId: pid, stage: 'project_definition',
+      content: '# 内容', contentType: 'markdown', source: 'ai_generate',
+      promptVersion: 'project-definition@1.0', model: 'deepseek-v4-flash',
+    });
+    ok(result.code === 'COMMITTED', '[Q2] Worker 原子提交 COMMITTED', result.code);
+    const cancelChanges = dbB.transaction(() => {
+      return dbB.prepare(
+        `UPDATE llm_jobs SET cancel_requested = 1 WHERE id = ? AND status IN ('queued', 'running')`,
+      ).run(job.id).changes;
+    }).immediate();
+    ok(cancelChanges === 0, '[Q2] Worker wins：succeeded 后 cancel UPDATE 匹配 0 行');
+    const after = getLlmJob(job.id)!;
+    ok(
+      after.status === 'succeeded' && after.cancel_requested === 0,
+      '[Q2] Worker wins：终态 succeeded 不被 cancel 改变',
+    );
+    ok(
+      countRows('SELECT COUNT(*) AS c FROM project_versions WHERE job_id = ?', job.id) === 1,
+      '[Q2] Worker wins：version 恰好 1 条',
+    );
+    ok(getStage(pid, 'project_definition')!.status === 'generated', '[Q2] Worker wins：stage generated');
+  }
+  {
+    // Q3：原子 rollback——workflow 变更在事务中途抛错，job 侧零副作用
+    const bareId = crypto.randomUUID();
+    const at = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO projects (id, title, mode, schema_version, template_version, composition_id,
+         current_stage, created_at, updated_at)
+       VALUES (?, '无 stages 项目', 'rigorous', '1.0', 'freud-mg-v1.0', 'ZhiyingFullCut', 'scenes', ?, ?)`,
+    ).run(bareId, at, at);
+    const bareJobId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO llm_jobs (id, project_id, stage, status, payload_json, queued_at, started_at, attempt)
+       VALUES (?, ?, 'project_definition', 'running', '{}', ?, ?, 1)`,
+    ).run(bareJobId, bareId, at, at);
+    let threw: string | null = null;
+    try {
+      commitLlmJobResult({
+        jobId: bareJobId, projectId: bareId, stage: 'project_definition',
+        content: '# 内容', contentType: 'markdown', source: 'ai_generate',
+      });
+    } catch (err) {
+      threw = err instanceof WorkflowError ? err.code : String(err);
+    }
+    ok(threw === 'STAGE_NOT_FOUND', '[Q3] workflow 变更中途抛错（STAGE_NOT_FOUND）', threw);
+    const bareAfter = getLlmJob(bareJobId)!;
+    ok(bareAfter.status === 'running', '[Q3] rollback：job 仍 running（未 succeeded）');
+    ok(
+      countRows('SELECT COUNT(*) AS c FROM project_versions WHERE project_id = ?', bareId) === 0 &&
+        countRows('SELECT COUNT(*) AS c FROM project_stages WHERE project_id = ?', bareId) === 0,
+      '[Q3] rollback：version / stage 零变化（无部分提交）',
+    );
+    db.prepare("UPDATE llm_jobs SET status = 'cancelled' WHERE id = ?").run(bareJobId);
+  }
+  {
+    // Q4：success consistency——提交后四者一致
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    claimLlm();
+    const result = commitLlmJobResult({
+      jobId: job.id, projectId: pid, stage: 'project_definition',
+      content: '# 一致性', contentType: 'markdown', source: 'ai_generate',
+      promptVersion: 'project-definition@1.0', model: 'deepseek-v4-flash',
+    });
+    const stage = getStage(pid, 'project_definition')!;
+    const finalJob = getLlmJob(job.id)!;
+    const committedVersion = result.code === 'COMMITTED' ? result.version : null;
+    ok(
+      result.code === 'COMMITTED' &&
+        committedVersion !== null &&
+        committedVersion.job_id === job.id &&
+        stage.active_version === committedVersion.version &&
+        stage.status === 'generated' &&
+        finalJob.status === 'succeeded',
+      '[Q4] version.job_id / active_version / stage.status / job.status 四者一致',
+    );
+    // getVersionByJobId 防御性保留（历史兼容/异常 recovery）
+    ok(
+      committedVersion !== null && getVersionByJobId(job.id)?.id === committedVersion.id,
+      '[Q4] getVersionByJobId 防御性 helper 保留可用',
+    );
+  }
+  dbB.close();
 
   // 全局一致性：10 阶段枚举未被意外改动
   ok(WORKFLOW_STAGES.length === 10 && WORKFLOW_STAGES[0] === 'project_definition', '[Z] 10 阶段枚举完整');

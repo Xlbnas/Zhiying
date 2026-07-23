@@ -32,22 +32,31 @@ export interface AtomicOpOptions {
 }
 
 /**
+ * 【事务内 helper】AI 生成完成的 workflow 变更部分：
+ * 创建 version + active_version + status→generated + 必要 downstream stale。
+ * 不开事务——供调用方在更大的原子事务内组合（如 llm-jobs.commitLlmJobResult
+ * 把「版本落库 + job 终态」放进同一 BEGIN IMMEDIATE）。
+ * 需要独立事务的高层调用请用 generateVersion()。
+ */
+export function generateVersionTx(input: CreateVersionInput): ProjectVersionRow {
+  const row = requireStage(input.projectId, input.stage);
+  const wasLockedOrStale =
+    row.status === 'locked' || row.status === 'stale';
+  const created = insertVersionTx(input);
+  if (wasLockedOrStale) {
+    applyDownstreamStaleTx(input.projectId, input.stage);
+  }
+  setStatusTx(input.projectId, input.stage, 'generated');
+  return created;
+}
+
+/**
  * AI 生成完成（llm_job 成功时由 worker 调用）：
  * 创建 version + active_version + status→generated + 必要 downstream stale。
  */
 export function generateVersion(input: CreateVersionInput): ProjectVersionRow {
   const db = getDb();
-  const tx = db.transaction((): ProjectVersionRow => {
-    const row = requireStage(input.projectId, input.stage);
-    const wasLockedOrStale =
-      row.status === 'locked' || row.status === 'stale';
-    const created = insertVersionTx(input);
-    if (wasLockedOrStale) {
-      applyDownstreamStaleTx(input.projectId, input.stage);
-    }
-    setStatusTx(input.projectId, input.stage, 'generated');
-    return created;
-  });
+  const tx = db.transaction((): ProjectVersionRow => generateVersionTx(input));
   return tx.immediate();
 }
 
