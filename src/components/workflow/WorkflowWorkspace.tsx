@@ -5,6 +5,7 @@ import type {WorkflowStage} from '@/lib/workflow/types';
 import {isStageEnabled} from '@/lib/workflow/capabilities';
 import {Workbench} from '@/components/Workbench';
 import {StagePanel} from './StagePanel';
+import {VisualPreview} from './VisualPreview';
 import {WorkflowStepper} from './WorkflowStepper';
 import {STAGE_NAMES, type StagesResponse} from './shared';
 
@@ -139,7 +140,19 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
         <div style={{marginTop: 32}}>
           <Workbench projectId={projectId} />
         </div>
-      ) : null}
+      ) : (
+        <VisualPreview
+          projectId={projectId}
+          scenesStageKey={
+            (() => {
+              const scenesStage = data.stages.find((s) => s.stage === 'scenes');
+              return scenesStage
+                ? `${scenesStage.status}:${scenesStage.updated_at}`
+                : 'missing';
+            })()
+          }
+        />
+      )}
     </main>
   );
 }
