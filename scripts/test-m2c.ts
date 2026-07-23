@@ -516,15 +516,24 @@ async function main(): Promise<void> {
   // ============ O. API 边界（直接调用 Route Handler） ============
   {
     const pid = newProject();
-    // run-stage 非 project_definition → STAGE_NOT_ENABLED
+    // run-stage 未开放阶段（M2-E）→ STAGE_NOT_ENABLED
     const res1 = await runStagePOST(
+      new Request('http://test', {
+        method: 'POST',
+        body: JSON.stringify({projectId: pid, stage: 'narration_beat_map'}),
+      }),
+    );
+    const json1 = (await res1.json()) as {error?: string};
+    ok(res1.status === 422 && json1.error === 'STAGE_NOT_ENABLED', '[O] run-stage narration_beat_map → 422 STAGE_NOT_ENABLED');
+    // run-stage 上游未锁（M2-D 已开放 research，但 pd 未 locked）→ 409 UPSTREAM_NOT_LOCKED
+    const res1b = await runStagePOST(
       new Request('http://test', {
         method: 'POST',
         body: JSON.stringify({projectId: pid, stage: 'research'}),
       }),
     );
-    const json1 = (await res1.json()) as {error?: string};
-    ok(res1.status === 422 && json1.error === 'STAGE_NOT_ENABLED', '[O] run-stage research → 422 STAGE_NOT_ENABLED');
+    const json1b = (await res1b.json()) as {error?: string};
+    ok(res1b.status === 409 && json1b.error === 'UPSTREAM_NOT_LOCKED', '[O] run-stage research（pd 未锁）→ 409 UPSTREAM_NOT_LOCKED');
     // run-stage project_definition → 202
     const res2 = await runStagePOST(
       new Request('http://test', {
@@ -578,16 +587,16 @@ async function main(): Promise<void> {
       }),
     );
     ok(res7.status === 409, '[O] 未生成阶段锁定 → 409');
-    // PATCH 非 project_definition → STAGE_NOT_ENABLED
+    // PATCH 未开放阶段（M2-E）→ STAGE_NOT_ENABLED
     const res8 = await stagePATCH(
       new Request('http://test', {
         method: 'PATCH',
         body: JSON.stringify({content: 'x'}),
       }),
-      {params: Promise.resolve({id: pid, stage: 'research'})},
+      {params: Promise.resolve({id: pid, stage: 'narration_beat_map'})},
     );
     const json8 = (await res8.json()) as {error?: string};
-    ok(res8.status === 422 && json8.error === 'STAGE_NOT_ENABLED', '[O] PATCH research → 422 STAGE_NOT_ENABLED');
+    ok(res8.status === 422 && json8.error === 'STAGE_NOT_ENABLED', '[O] PATCH narration_beat_map → 422 STAGE_NOT_ENABLED');
     // legacy 项目 run-stage → 404 STAGE_NOT_FOUND
     const legacyId = crypto.randomUUID();
     const at = new Date().toISOString();
@@ -812,10 +821,16 @@ async function main(): Promise<void> {
        VALUES (?, '无 stages 项目', 'rigorous', '1.0', 'freud-mg-v1.0', 'ZhiyingFullCut', 'scenes', ?, ?)`,
     ).run(bareId, at, at);
     const bareJobId = crypto.randomUUID();
+    const barePayload = JSON.stringify({
+      schemaVersion: '2.0',
+      stage: 'project_definition',
+      promptInput: {topic: 't', coreQuestion: 'q'},
+      upstreamVersions: {},
+    });
     db.prepare(
       `INSERT INTO llm_jobs (id, project_id, stage, status, payload_json, queued_at, started_at, attempt)
-       VALUES (?, ?, 'project_definition', 'running', '{}', ?, ?, 1)`,
-    ).run(bareJobId, bareId, at, at);
+       VALUES (?, ?, 'project_definition', 'running', ?, ?, ?, 1)`,
+    ).run(bareJobId, bareId, barePayload, at, at);
     let threw: string | null = null;
     try {
       commitLlmJobResult({

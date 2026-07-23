@@ -2,6 +2,7 @@ import {getDb} from '@/lib/db';
 import {
   applyDownstreamStaleTx,
   assertConfirmedForStage,
+  assertRunnable,
   requireStage,
   setStatusTx,
   WorkflowError,
@@ -64,6 +65,7 @@ export function generateVersion(input: CreateVersionInput): ProjectVersionRow {
  * 人工编辑：
  * 创建 version + active_version + status→edited + 必要 downstream stale。
  * locked 阶段需 confirmStale；not_started 拒绝（NO_ACTIVE_VERSION）。
+ * M2-D 强化：非首阶段 edit 前所有上游必须 locked（防人工路径绕过门控）。
  */
 export function editVersion(
   input: CreateVersionInput,
@@ -83,6 +85,8 @@ export function editVersion(
       input.projectId,
       opts.confirmStale ?? false,
     );
+    // 上游门控（在 NO_ACTIVE_VERSION / CONFIRM_STALE_REQUIRED 之后，保持旧错误码语义）
+    assertRunnable(input.projectId, input.stage);
     const wasLockedOrStale =
       row.status === 'locked' || row.status === 'stale';
     const created = insertVersionTx(input);

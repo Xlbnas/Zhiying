@@ -234,6 +234,7 @@ export function markEdited(
 /**
  * 锁定当前 active_version：status → locked，locked_version = active_version。
  * stale 必须先 re-run（不能锁定失效内容）；not_started 无版本可锁。
+ * M2-D 强化：非首阶段 lock 前所有上游必须 locked（防人工路径绕过门控）。
  */
 export function lockStage(projectId: string, stage: WorkflowStage): void {
   const row = requireStage(projectId, stage);
@@ -249,6 +250,8 @@ export function lockStage(projectId: string, stage: WorkflowStage): void {
       `${stage} 已失效，必须重新生成后才能锁定`,
     );
   }
+  // 上游门控（在 stale/NO_ACTIVE 检查之后，保证旧错误码语义不变）
+  assertRunnable(projectId, stage);
   setStatusTx(projectId, stage, 'locked', row.active_version);
 }
 

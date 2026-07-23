@@ -1,27 +1,33 @@
 /**
- * GET   /api/projects/[id]/stage/[stage] — active 版本内容（M2-C §十六）。
- * PATCH /api/projects/[id]/stage/[stage] — 人工编辑 → editVersion（M2-C §十八）。
+ * GET   /api/projects/[id]/stage/[stage] — active 版本内容 + usage 汇总。
+ * PATCH /api/projects/[id]/stage/[stage] — 人工编辑 → editVersion（M2-D §十六/十七）。
  *
- * M2-C 只开放 project_definition；其余阶段一律 STAGE_NOT_ENABLED。
+ * - 仅开放 capabilities.M2D_ENABLED_STAGES；其余 → 422 STAGE_NOT_ENABLED
+ * - contentType 来自 Prompt Registry outputKind（不再硬编码 markdown）
+ * - JSON 阶段（evidence/argument_tree）：先 JSON.parse 再过阶段 zodSchema，
+ *   失败 → 422 INVALID_STAGE_CONTENT（有限长度 issues），非法 JSON 绝不入库；
+ *   通过后存储 JSON.stringify(validatedData)
  */
-import { getActiveLlmJob } from '@/lib/llm-jobs';
+import { z } from 'zod';
 import { getDb } from '@/lib/db';
+import { assertNoActiveLlmJob } from '@/lib/llm-jobs';
+import { clipText } from '@/lib/llm/types';
+import { getStagePrompt } from '@/lib/prompts/registry';
+import { isStageEnabled } from '@/lib/workflow/capabilities';
 import { editVersion } from '@/lib/workflow/operations';
 import { getStage, requireStage } from '@/lib/workflow/stages';
 import { workflowStageSchema } from '@/lib/workflow/types';
-import { z } from 'zod';
 import { getVersion } from '@/lib/workflow/versions';
 import { getProject, jsonError, workflowErrorResponse } from '../../../../_lib/shared';
 
 export const runtime = 'nodejs';
 
-/** M2-C 仅开放 project_definition（M2-D/E 逐阶段开通）。 */
-const M2C_ENABLED_STAGES = new Set(['project_definition']);
-
 const patchBodySchema = z.object({
   content: z.string().min(1, '内容不能为空'),
   confirmStale: z.boolean().optional(),
 });
+
+const MAX_ISSUES = 10;
 
 export async function GET(
   _req: Request,
@@ -70,9 +76,9 @@ export async function PATCH(
     return jsonError(422, 'invalid_stage', { message: `未知阶段: ${stageRaw}` });
   }
   const stage = stageParsed.data;
-  if (!M2C_ENABLED_STAGES.has(stage)) {
+  if (!isStageEnabled(stage)) {
     return jsonError(422, 'STAGE_NOT_ENABLED', {
-      message: `阶段 ${stage} 尚未开放（M2-C 仅开放 project_definition）`,
+      message: `阶段 ${stage} 尚未开放（当前开放前六阶段）`,
     });
   }
 
@@ -86,18 +92,39 @@ export async function PATCH(
   try {
     const input = patchBodySchema.parse(body);
     // 同阶段存在 queued/running 任务时拒绝编辑，避免 AI 回写覆盖人工语义
-    const active = getActiveLlmJob(id, stage);
-    if (active) {
-      return jsonError(409, 'JOB_ALREADY_ACTIVE', {
-        message: `${stage} 已有进行中的生成任务（${active.id}），请等待完成或先取消`,
-      });
+    assertNoActiveLlmJob(id, stage);
+
+    // contentType 唯一真相：Prompt Registry outputKind
+    const prompt = getStagePrompt(stage);
+    let content = input.content;
+    if (prompt.outputKind === 'json') {
+      let parsedJson: unknown;
+      try {
+        parsedJson = JSON.parse(content);
+      } catch (err) {
+        return jsonError(422, 'INVALID_STAGE_CONTENT', {
+          message: `JSON 解析失败：${clipText(err instanceof Error ? err.message : String(err), 300)}`,
+        });
+      }
+      const safe = prompt.zodSchema!.safeParse(parsedJson);
+      if (!safe.success) {
+        const issues = safe.error.issues
+          .slice(0, MAX_ISSUES)
+          .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+          .join('\n');
+        return jsonError(422, 'INVALID_STAGE_CONTENT', {
+          message: clipText(`内容未通过 ${stage} schema 校验：\n${issues}`, 1200),
+        });
+      }
+      content = JSON.stringify(safe.data);
     }
+
     const version = editVersion(
       {
         projectId: id,
         stage,
-        content: input.content,
-        contentType: 'markdown',
+        content,
+        contentType: prompt.outputKind,
         source: 'manual_edit',
       },
       { confirmStale: input.confirmStale ?? false },

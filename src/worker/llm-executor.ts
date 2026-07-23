@@ -11,10 +11,15 @@ import {
   isLlmCancelRequested,
   llmJobPayloadSchema,
   markLlmCancelled,
+  payloadUpstreamVersions,
   requeueLlmJob,
   type LlmJobRow,
 } from '@/lib/llm-jobs';
 import {toStagePromptInput} from '@/lib/project-inputs';
+import {
+  checkDependencySnapshotTx,
+  resolveUpstreamVersionContents,
+} from '@/lib/workflow/dependencies';
 
 /**
  * LLM 任务执行器（M2-C §十一/十二/十三/十四/十五）。
@@ -90,6 +95,23 @@ export async function runLlmJob(
     return;
   }
 
+  // Dependency Preflight（M2-D §十）：Provider 前检查上游快照仍一致——
+  // 不一致直接 failed（DEPENDENCY_STALE，non-retryable），Provider 调用次数 0。
+  const snapshot = payloadUpstreamVersions(payload);
+  const preflightIssues = checkDependencySnapshotTx(job.project_id, snapshot);
+  if (preflightIssues.length > 0) {
+    const first = preflightIssues[0]!;
+    failLlmJob(
+      job.id,
+      'DEPENDENCY_STALE',
+      `上游依赖已变化：stage=${first.stage} expectedVersion=${first.expectedVersion} ` +
+        `currentStatus=${first.currentStatus} currentLockedVersion=${first.currentLockedVersion}`,
+      {retryable: false},
+    );
+    log(`llm job ${job.id} failed: DEPENDENCY_STALE（preflight，未调用 Provider）`);
+    return;
+  }
+
   // Provider（CONFIG_ERROR：如 production 缺 Key——non-retryable）
   let provider: LLMProvider;
   try {
@@ -117,11 +139,14 @@ export async function runLlmJob(
 
   try {
     log(`llm job ${job.id} start: project=${job.project_id} stage=${payload.stage} provider=${provider.name}`);
+    // Worker 按快照精确读取上游历史版本内容（M2-D §九）：
+    // 禁止读 active/locked 当前值或 UI state——payload 快照是唯一真相。
+    const upstream = resolveUpstreamVersionContents(job.project_id, snapshot);
     const result = await executeStageGeneration({
       db: getDb(),
       provider,
       stage: payload.stage,
-      input: toStagePromptInput(payload.promptInput),
+      input: {...toStagePromptInput(payload.promptInput), upstream},
       projectId: job.project_id,
       jobId: job.id,
       signal: controller.signal,
@@ -163,6 +188,13 @@ export async function runLlmJob(
       case 'CANCELLED':
         // 取消意图已在同一事务内原子终结为 cancelled，无需再 markLlmCancelled
         log(`llm job ${job.id} cancelled（commit 事务内原子终结）`);
+        return;
+      case 'DEPENDENCY_STALE':
+        // commit fence 已同事务终结 failed（usage 保留，版本未创建）
+        log(
+          `llm job ${job.id} failed: DEPENDENCY_STALE（commit fence，` +
+            `${committed.issues.length} 个上游不一致）`,
+        );
         return;
       case 'JOB_NOT_RUNNING':
         log(`llm job ${job.id} commit 跳过：任务已不在 running（可能已被并发终结）`);

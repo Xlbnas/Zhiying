@@ -1,8 +1,15 @@
 import crypto from 'node:crypto';
 import {z} from 'zod';
 import {getDb} from './db';
-import {projectInputSchema} from './project-inputs';
+import {getProjectInput, projectInputSchema} from './project-inputs';
+import {
+  captureLockedUpstreamVersionsTx,
+  checkDependencySnapshotTx,
+  type DependencyIssue,
+  type UpstreamVersionSnapshot,
+} from './workflow/dependencies';
 import {generateVersionTx} from './workflow/operations';
+import {assertRerunAllowed, requireStage} from './workflow/stages';
 import {
   workflowStageSchema,
   type ContentType,
@@ -12,10 +19,12 @@ import {
 } from './workflow/types';
 
 /**
- * LLM 任务队列数据层（M2-C，语义与 M1 render_jobs 对齐：jobs.ts）。
+ * LLM 任务队列数据层（M2-C 建，M2-D 扩展 Payload V2）。
  * - 状态机：queued / running / succeeded / failed / cancelled
  * - 同一 (project_id, stage) 任意时刻最多一个 queued|running（enqueue 去重）
- * - payload_json 是生成输入快照（Worker 不重读 UI state）
+ * - payload_json 是生成输入快照（Worker 不重读 UI state）：
+ *   V1（1.0，M2-C legacy，仅为旧 queued/history job 保留解析）；
+ *   V2（2.0，M2-D 起所有新任务：promptInput + upstreamVersions 不可变上游锁定版本快照）。
  * - claim 原子性由 scheduler.ts 的 claimNextAnyJob（单 BEGIN IMMEDIATE）保证
  */
 
@@ -41,18 +50,38 @@ export interface LlmJobRow {
   cancel_requested: number;
 }
 
-/** run-stage 入队快照（M2-C：project_definition 无 upstream；M2-D 再扩 upstreamVersions）。 */
-export const llmJobPayloadSchema = z.object({
+/** V1（M2-C legacy）：只为兼容旧 queued/history job 的解析，新任务不得使用。 */
+export const llmJobPayloadV1Schema = z.object({
   schemaVersion: z.literal('1.0'),
   stage: workflowStageSchema,
   promptInput: projectInputSchema,
 });
 
-export type LlmJobPayload = z.infer<typeof llmJobPayloadSchema>;
+/** V2（M2-D 起所有新入队任务）：含不可变上游 locked_version 快照。 */
+export const llmJobPayloadV2Schema = z.object({
+  schemaVersion: z.literal('2.0'),
+  stage: workflowStageSchema,
+  promptInput: projectInputSchema,
+  upstreamVersions: z.record(z.string(), z.number().int().positive()),
+});
+
+export const llmJobPayloadSchema = z.discriminatedUnion('schemaVersion', [
+  llmJobPayloadV1Schema,
+  llmJobPayloadV2Schema,
+]);
+
+export type LlmJobPayloadV1 = z.infer<typeof llmJobPayloadV1Schema>;
+export type LlmJobPayloadV2 = z.infer<typeof llmJobPayloadV2Schema>;
+export type LlmJobPayload = LlmJobPayloadV1 | LlmJobPayloadV2;
+
+/** 统一取上游快照：V1 视为空快照（M2-C project_definition 无上游）。 */
+export function payloadUpstreamVersions(payload: LlmJobPayload): Record<string, number> {
+  return payload.schemaVersion === '2.0' ? payload.upstreamVersions : {};
+}
 
 export class LlmJobError extends Error {
   constructor(
-    public readonly code: 'JOB_ALREADY_ACTIVE' | 'JOB_NOT_FOUND',
+    public readonly code: 'JOB_ALREADY_ACTIVE' | 'JOB_NOT_FOUND' | 'PROJECT_INPUT_MISSING',
     message: string,
   ) {
     super(message);
@@ -81,6 +110,21 @@ export function getActiveLlmJob(projectId: string, stage: string): LlmJobRow | u
     .get(projectId, stage) as LlmJobRow | undefined;
 }
 
+/**
+ * 活跃任务保护（M2-D §二十一）：同 stage 有 queued/running 即抛
+ * JOB_ALREADY_ACTIVE——edit/lock/rollback 等人工操作的服务端统一检查，
+ * 不依赖前端 disabled。
+ */
+export function assertNoActiveLlmJob(projectId: string, stage: string): void {
+  const active = getActiveLlmJob(projectId, stage);
+  if (active) {
+    throw new LlmJobError(
+      'JOB_ALREADY_ACTIVE',
+      `${stage} 已有进行中的生成任务（${active.id}），请等待完成或先取消`,
+    );
+  }
+}
+
 /** 最近一次任务（UI 推导 failed 状态用）。 */
 export function getLatestLlmJob(projectId: string, stage: string): LlmJobRow | undefined {
   return getDb()
@@ -93,29 +137,71 @@ export function getLatestLlmJob(projectId: string, stage: string): LlmJobRow | u
 }
 
 /**
- * 入队（BEGIN IMMEDIATE）：同 (project_id, stage) 存在 queued/running
- * 即抛 JOB_ALREADY_ACTIVE——不依赖前端 disabled 保证。
+ * 【事务内 helper】去重 + INSERT（调用方负责事务/原子性）：
+ * 同 (project_id, stage) 存在 queued/running 即抛 JOB_ALREADY_ACTIVE。
+ * 供 enqueueLlmJob 与 dependencies.enqueueWorkflowStageJob 复用（SQL 唯一份）。
  */
+export function enqueueLlmJobTx(projectId: string, payload: LlmJobPayload): LlmJobRow {
+  const db = getDb();
+  const active = getActiveLlmJob(projectId, payload.stage);
+  if (active) {
+    throw new LlmJobError(
+      'JOB_ALREADY_ACTIVE',
+      `${payload.stage} 已有进行中的任务（${active.id}，${active.status}）`,
+    );
+  }
+  const id = crypto.randomUUID();
+  db.prepare(
+    `INSERT INTO llm_jobs (id, project_id, stage, status, payload_json, queued_at, attempt, max_attempts)
+     VALUES (?, ?, ?, 'queued', ?, ?, 0, 2)`,
+  ).run(id, projectId, payload.stage, JSON.stringify(payload), now());
+  const row = getLlmJob(id);
+  if (!row) {
+    throw new Error(`enqueueLlmJobTx: inserted job ${id} not found`);
+  }
+  return row;
+}
+
+/** 入队（BEGIN IMMEDIATE 独立事务）。高层原子入队请用 enqueueWorkflowStageJob。 */
 export function enqueueLlmJob(projectId: string, payload: LlmJobPayload): LlmJobRow {
   const db = getDb();
-  const id = crypto.randomUUID();
+  const tx = db.transaction((): LlmJobRow => enqueueLlmJobTx(projectId, payload));
+  return tx.immediate();
+}
+
+/**
+ * 高层原子入队（M2-D §七）：单个 BEGIN IMMEDIATE 内完成——
+ *   1. target stage 存在
+ *   2. assertRerunAllowed（上游锁门控 + locked 阶段 confirmStale）
+ *   3. 捕获全部上游 locked_version 快照
+ *   4. 读取 project_inputs（缺失即失败）
+ *   5. 同 stage 无 queued/running（enqueueLlmJobTx 去重）
+ *   6. INSERT llm_job（payload V2）
+ * Route 不得自行拆分这些步骤（快照与入队之间不得有可插入修改的窗口）。
+ */
+export function enqueueWorkflowStageJob(
+  projectId: string,
+  stage: WorkflowStage,
+  opts: {confirmStale?: boolean} = {},
+): LlmJobRow {
+  const db = getDb();
   const tx = db.transaction((): LlmJobRow => {
-    const active = getActiveLlmJob(projectId, payload.stage);
-    if (active) {
+    requireStage(projectId, stage);
+    assertRerunAllowed(projectId, stage, {confirmStale: opts.confirmStale ?? false});
+    const upstreamVersions = captureLockedUpstreamVersionsTx(projectId, stage);
+    const promptInput = getProjectInput(projectId);
+    if (!promptInput) {
       throw new LlmJobError(
-        'JOB_ALREADY_ACTIVE',
-        `${payload.stage} 已有进行中的任务（${active.id}，${active.status}）`,
+        'PROJECT_INPUT_MISSING',
+        '项目缺少生产参数（project_inputs），无法生成（Legacy M1 项目？）',
       );
     }
-    db.prepare(
-      `INSERT INTO llm_jobs (id, project_id, stage, status, payload_json, queued_at, attempt, max_attempts)
-       VALUES (?, ?, ?, 'queued', ?, ?, 0, 2)`,
-    ).run(id, projectId, payload.stage, JSON.stringify(payload), now());
-    const row = getLlmJob(id);
-    if (!row) {
-      throw new Error(`enqueueLlmJob: inserted job ${id} not found`);
-    }
-    return row;
+    return enqueueLlmJobTx(projectId, {
+      schemaVersion: '2.0',
+      stage,
+      promptInput,
+      upstreamVersions,
+    });
   });
   return tx.immediate();
 }
@@ -330,13 +416,15 @@ export function getVersionByJobId(jobId: string): ProjectVersionRow | undefined 
 export type CommitLlmJobResultCode =
   | 'COMMITTED'
   | 'CANCELLED'
+  | 'DEPENDENCY_STALE'
   | 'JOB_NOT_RUNNING'
   | 'JOB_NOT_FOUND'
   | 'JOB_MISMATCH';
 
 export type CommitLlmJobResult =
   | {code: 'COMMITTED'; version: ProjectVersionRow}
-  | {code: Exclude<CommitLlmJobResultCode, 'COMMITTED'>};
+  | {code: 'DEPENDENCY_STALE'; issues: DependencyIssue[]}
+  | {code: Exclude<CommitLlmJobResultCode, 'COMMITTED' | 'DEPENDENCY_STALE'>};
 
 export interface CommitLlmJobResultInput {
   jobId: string;
@@ -392,6 +480,41 @@ export function commitLlmJobResult(input: CommitLlmJobResultInput): CommitLlmJob
       }
       return {code: 'CANCELLED'};
     }
+
+    // Dependency Commit Fence（M2-D §十一）：同事务内从 job.payload_json 读取
+    // upstreamVersions，逐个核对当前上游仍 locked 且 locked_version 等于快照值；
+    // 任何依赖变化 → 同事务直接 failed（DEPENDENCY_STALE，non-retryable），不建版本。
+    // 顺序在 cancel 检查之后：用户 Cancel 优先于 DEPENDENCY_STALE。
+    let snapshot: UpstreamVersionSnapshot;
+    try {
+      snapshot = payloadUpstreamVersions(llmJobPayloadSchema.parse(JSON.parse(job.payload_json)));
+    } catch {
+      return {code: 'JOB_MISMATCH'};
+    }
+    const issues = checkDependencySnapshotTx(input.projectId, snapshot);
+    if (issues.length > 0) {
+      const first = issues[0]!;
+      const finalized = db
+        .prepare(
+          `UPDATE llm_jobs
+           SET status = 'failed', finished_at = ?,
+               error_code = 'DEPENDENCY_STALE', error_message = ?
+           WHERE id = ? AND status = 'running' AND cancel_requested = 0`,
+        )
+        .run(
+          new Date().toISOString(),
+          `上游依赖已变化：stage=${first.stage} expectedVersion=${first.expectedVersion} ` +
+            `currentStatus=${first.currentStatus} currentLockedVersion=${first.currentLockedVersion}`,
+          input.jobId,
+        );
+      if (finalized.changes !== 1) {
+        throw new Error(
+          `commitLlmJobResult: job ${input.jobId} DEPENDENCY_STALE 终结丢失竞态（changes=${finalized.changes}）`,
+        );
+      }
+      return {code: 'DEPENDENCY_STALE', issues};
+    }
+
     const version = generateVersionTx({
       projectId: input.projectId,
       stage: input.stage,
