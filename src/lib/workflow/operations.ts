@@ -1,4 +1,5 @@
 import {getDb} from '@/lib/db';
+import {getActiveLlmJobTx} from '../llm-job-state';
 import {
   applyDownstreamStaleTx,
   assertConfirmedForStage,
@@ -66,6 +67,8 @@ export function generateVersion(input: CreateVersionInput): ProjectVersionRow {
  * 创建 version + active_version + status→edited + 必要 downstream stale。
  * locked 阶段需 confirmStale；not_started 拒绝（NO_ACTIVE_VERSION）。
  * M2-D 强化：非首阶段 edit 前所有上游必须 locked（防人工路径绕过门控）。
+ * Final Concurrency：active-job fence 移入同一 BEGIN IMMEDIATE（authoritative），
+ * Route 的事务外预检只作 UX——fence 与 version/status mutation 无窗口。
  */
 export function editVersion(
   input: CreateVersionInput,
@@ -73,6 +76,13 @@ export function editVersion(
 ): ProjectVersionRow {
   const db = getDb();
   const tx = db.transaction((): ProjectVersionRow => {
+    const activeJob = getActiveLlmJobTx(input.projectId, input.stage);
+    if (activeJob) {
+      throw new WorkflowError(
+        'JOB_ALREADY_ACTIVE',
+        `${input.stage} 已有进行中的生成任务（${activeJob.id}），请等待完成或先取消`,
+      );
+    }
     const row = requireStage(input.projectId, input.stage);
     if (row.status === 'not_started') {
       throw new WorkflowError(
@@ -103,6 +113,9 @@ export function editVersion(
  * 回滚到历史版本：
  * 复制目标 version 为新 version（历史不移动）+ active_version +
  * status→edited + 必要 downstream stale。locked 阶段需 confirmStale。
+ * Final Concurrency：active-job fence 移入同一 BEGIN IMMEDIATE。
+ * 语义保持：rollback 本身是历史恢复动作（不要求 upstream locked）；
+ * 之后 lock 才必须经 upstream gate。
  */
 export function rollbackToVersion(
   projectId: string,
@@ -112,6 +125,13 @@ export function rollbackToVersion(
 ): ProjectVersionRow {
   const db = getDb();
   const tx = db.transaction((): ProjectVersionRow => {
+    const activeJob = getActiveLlmJobTx(projectId, stage);
+    if (activeJob) {
+      throw new WorkflowError(
+        'JOB_ALREADY_ACTIVE',
+        `${stage} 已有进行中的生成任务（${activeJob.id}），请等待完成或先取消`,
+      );
+    }
     const row = requireStage(projectId, stage);
     assertConfirmedForStage(row, projectId, opts.confirmStale ?? false);
     // copyVersionRowsTx 目标不存在则抛错，发生在任何写入之前

@@ -35,7 +35,7 @@ import {
   checkDependencySnapshotTx,
   resolveUpstreamVersionContents,
 } from '../src/lib/workflow/dependencies';
-import {editVersion, generateVersion} from '../src/lib/workflow/operations';
+import {editVersion, generateVersion, rollbackToVersion} from '../src/lib/workflow/operations';
 import {getStage, listStages, lockStage, WorkflowError} from '../src/lib/workflow/stages';
 import {getVersion, listVersions} from '../src/lib/workflow/versions';
 import {WORKFLOW_STAGES, type WorkflowStage} from '../src/lib/workflow/types';
@@ -518,6 +518,162 @@ async function main(): Promise<void> {
         `[F] ${stage} 内容通过 zod 复验`,
       );
     }
+  }
+
+  // ============ W. Final Concurrency：人工 mutation 原子门禁（双连接） ============
+  {
+    // W1 lock vs upstream edit：B 持写锁期间 A 的 lockStage 无法进入（写锁互斥，
+    // fence+gate+mutation 同一 BEGIN IMMEDIATE，不存在 TOCTOU 窗口）
+    const pid = newProject();
+    await genAndLock(pid, 'project_definition');
+    await genAndLock(pid, 'research');
+    await runStageOnce(pid, 'evidence'); // evidence generated v1
+    const dbW1 = new Database(getDbPath());
+    dbW1.pragma('journal_mode = WAL');
+    dbW1.pragma('busy_timeout = 5000');
+    db.pragma('busy_timeout = 150'); // 临时调低单例超时以快速见证互斥
+    try {
+      dbW1.transaction(() => {
+        dbW1.prepare(
+          'UPDATE project_stages SET updated_at = ? WHERE project_id = ? AND stage = ?',
+        ).run(new Date().toISOString(), pid, 'research');
+        let busyThrew: string | null = null;
+        try {
+          lockStage(pid, 'evidence');
+        } catch (err) {
+          busyThrew = String(err);
+        }
+        ok(
+          busyThrew !== null &&
+            (busyThrew.includes('database is locked') || busyThrew.includes('SQLITE_BUSY')),
+          '[W1] B 持写锁时 lockStage 整体阻塞（fence/gate/mutation 同窗不存在）',
+          busyThrew,
+        );
+      }).immediate();
+    } finally {
+      db.pragma('busy_timeout = 5000');
+      dbW1.close();
+    }
+    // B 随后完成「上游 edit」（research edited + evidence stale 的等效状态迁移）
+    editVersion({
+      projectId: pid, stage: 'research',
+      content: '# 研究 v2（并发侧）', contentType: 'markdown', source: 'manual_edit',
+    }, {confirmStale: true});
+    let lockThrew: string | null = null;
+    try {
+      lockStage(pid, 'evidence');
+    } catch (err) {
+      lockThrew = err instanceof WorkflowError ? err.code : String(err);
+    }
+    ok(
+      lockThrew === 'STALE_MUST_RERUN' || lockThrew === 'UPSTREAM_NOT_LOCKED',
+      '[W1] 上游 edit 后 lock 被拒（不产生 research edited + evidence locked 非法态）',
+      lockThrew,
+    );
+    ok(
+      getStage(pid, 'evidence')!.status !== 'locked' &&
+        getStage(pid, 'research')!.status === 'edited',
+      '[W1] 最终状态串行化合法：research edited，evidence 非 locked',
+    );
+  }
+  {
+    // W2 manual edit vs enqueue same stage
+    const pid = newProject();
+    await genAndLock(pid, 'project_definition');
+    await genAndLock(pid, 'research');
+    // (a) enqueue 先 → edit 必须 JOB_ALREADY_ACTIVE
+    const job = enqueueWorkflowStageJob(pid, 'research', {confirmStale: true});
+    const vBefore = listVersions(pid, 'research').length;
+    let editThrew: string | null = null;
+    try {
+      editVersion({
+        projectId: pid, stage: 'research',
+        content: '# x', contentType: 'markdown', source: 'manual_edit',
+      });
+    } catch (err) {
+      editThrew = err instanceof WorkflowError ? err.code : String(err);
+    }
+    ok(
+      editThrew === 'JOB_ALREADY_ACTIVE' && listVersions(pid, 'research').length === vBefore,
+      '[W2] enqueue 先获得锁：后续 edit 被事务内 fence 拒绝（JOB_ALREADY_ACTIVE）',
+      editThrew,
+    );
+    cancelQuiet(job.id);
+    // (b) edit 先完成 → 后续 enqueue 按新状态正常决定（edited 可直接 rerun）
+    editVersion({
+      projectId: pid, stage: 'research',
+      content: '# 研究 v2（先编辑）', contentType: 'markdown', source: 'manual_edit',
+    }, {confirmStale: true});
+    const job2 = enqueueWorkflowStageJob(pid, 'research');
+    ok(job2.status === 'queued', '[W2] edit 先完成：后续 enqueue 正常入队（无 phantom active）');
+    cancelQuiet(job2.id);
+  }
+  {
+    // W3 lock vs enqueue same stage
+    const pid = newProject();
+    await genAndLock(pid, 'project_definition');
+    await genAndLock(pid, 'research');
+    // enqueue 先 → lock 必须 JOB_ALREADY_ACTIVE
+    const job = enqueueWorkflowStageJob(pid, 'research', {confirmStale: true});
+    let lockThrew: string | null = null;
+    try {
+      lockStage(pid, 'research');
+    } catch (err) {
+      lockThrew = err instanceof WorkflowError ? err.code : String(err);
+    }
+    ok(
+      lockThrew === 'JOB_ALREADY_ACTIVE' && getStage(pid, 'research')!.status === 'locked',
+      '[W3] enqueue 先获得锁：lock 被拒绝（JOB_ALREADY_ACTIVE）',
+      lockThrew,
+    );
+    cancelQuiet(job.id);
+    // lock 先（重新生成 v2 后 lock）→ 后续 enqueue 按 locked 语义：无 confirm 拒绝 / 有 confirm 放行
+    await runStageOnce(pid, 'research', undefined, true);
+    lockStage(pid, 'research');
+    let enqThrew: string | null = null;
+    try {
+      enqueueWorkflowStageJob(pid, 'research');
+    } catch (err) {
+      enqThrew = err instanceof WorkflowError ? err.code : String(err);
+    }
+    ok(
+      enqThrew === 'CONFIRM_STALE_REQUIRED',
+      '[W3] lock 先完成：后续 enqueue 无 confirmStale 被拒（confirm 语义不被绕过）',
+      enqThrew,
+    );
+    const job3 = enqueueWorkflowStageJob(pid, 'research', {confirmStale: true});
+    ok(job3.status === 'queued', '[W3] 带 confirmStale 的 enqueue 正常放行');
+    cancelQuiet(job3.id);
+  }
+  {
+    // W4 rollback vs enqueue same stage
+    const pid = newProject();
+    await genAndLock(pid, 'project_definition');
+    await genAndLock(pid, 'research');
+    editVersion({
+      projectId: pid, stage: 'research',
+      content: '# 研究 v2', contentType: 'markdown', source: 'manual_edit',
+    }, {confirmStale: true});
+    // enqueue 先 → rollback 必须 JOB_ALREADY_ACTIVE
+    const job = enqueueWorkflowStageJob(pid, 'research');
+    const vBefore = listVersions(pid, 'research').length;
+    let rbThrew: string | null = null;
+    try {
+      rollbackToVersion(pid, 'research', 1);
+    } catch (err) {
+      rbThrew = err instanceof WorkflowError ? err.code : String(err);
+    }
+    ok(
+      rbThrew === 'JOB_ALREADY_ACTIVE' && listVersions(pid, 'research').length === vBefore,
+      '[W4] enqueue 先获得锁：rollback 被拒绝（JOB_ALREADY_ACTIVE）',
+      rbThrew,
+    );
+    cancelQuiet(job.id);
+    // rollback 先完成 → 后续 enqueue 正常（rollback 落 edited，可 rerun）
+    rollbackToVersion(pid, 'research', 1);
+    const job4 = enqueueWorkflowStageJob(pid, 'research');
+    ok(job4.status === 'queued', '[W4] rollback 先完成：后续 enqueue 正常入队');
+    cancelQuiet(job4.id);
   }
 
   // ============ V. Version History / Rollback API ============

@@ -1,4 +1,5 @@
 import {getDb} from '@/lib/db';
+import {getActiveLlmJobTx} from '../llm-job-state';
 import {
   WORKFLOW_STAGES,
   downstreamStages,
@@ -32,7 +33,8 @@ export class WorkflowError extends Error {
       | 'CONFIRM_STALE_REQUIRED'
       | 'STALE_MUST_RERUN'
       | 'NO_ACTIVE_VERSION'
-      | 'INVALID_TRANSITION',
+      | 'INVALID_TRANSITION'
+      | 'JOB_ALREADY_ACTIVE',
     message: string,
     public readonly detail?: Record<string, unknown>,
   ) {
@@ -96,7 +98,8 @@ export function requireStage(
 // ---------- 门控 ----------
 
 /**
- * run-stage 门控：所有上游必须 locked。
+ * run-stage 门控：所有上游必须 locked（且 locked_version ≠ null，
+ * 与 captureLockedUpstreamVersionsTx 语义一致——Final Concurrency §九）。
  * 通过时返回 void；否则抛 UPSTREAM_NOT_LOCKED（带首个未锁上游）。
  */
 export function assertRunnable(
@@ -105,7 +108,7 @@ export function assertRunnable(
 ): void {
   for (const up of upstreamStages(stage)) {
     const row = getStage(projectId, up);
-    if (!row || row.status !== 'locked') {
+    if (!row || row.status !== 'locked' || row.locked_version === null) {
       throw new WorkflowError(
         'UPSTREAM_NOT_LOCKED',
         `上游阶段未锁定，禁止执行 ${stage}`,
@@ -232,27 +235,46 @@ export function markEdited(
 }
 
 /**
- * 锁定当前 active_version：status → locked，locked_version = active_version。
- * stale 必须先 re-run（不能锁定失效内容）；not_started 无版本可锁。
- * M2-D 强化：非首阶段 lock 前所有上游必须 locked（防人工路径绕过门控）。
+ * 锁定当前 active_version（Final Concurrency Hardening：真正的高层原子 mutation）。
+ *
+ * 单个 BEGIN IMMEDIATE 内完成（顺序保持旧错误码语义）：
+ *   1. active-job fence（JOB_ALREADY_ACTIVE，authoritative——Route 预检只是 UX）
+ *   2. NO_ACTIVE_VERSION（not_started / 无 active）
+ *   3. STALE_MUST_RERUN（stale 必须先重跑）
+ *   4. assertRunnable 上游门控（UPSTREAM_NOT_LOCKED，含 locked_version ≠ null）
+ *   5. setStatusTx → locked + locked_version
+ *
+ * 修复旧 TOCTOU：此前 assertRunnable（读）与 setStatusTx（写）之间无写锁，
+ * 上游可在窗口内被 edit，产生「research edited + evidence locked」非法状态。
  */
 export function lockStage(projectId: string, stage: WorkflowStage): void {
-  const row = requireStage(projectId, stage);
-  if (row.status === 'not_started' || row.active_version === null) {
-    throw new WorkflowError(
-      'NO_ACTIVE_VERSION',
-      `${stage} 尚未生成，不能锁定`,
-    );
-  }
-  if (row.status === 'stale') {
-    throw new WorkflowError(
-      'STALE_MUST_RERUN',
-      `${stage} 已失效，必须重新生成后才能锁定`,
-    );
-  }
-  // 上游门控（在 stale/NO_ACTIVE 检查之后，保证旧错误码语义不变）
-  assertRunnable(projectId, stage);
-  setStatusTx(projectId, stage, 'locked', row.active_version);
+  const db = getDb();
+  const tx = db.transaction((): void => {
+    const activeJob = getActiveLlmJobTx(projectId, stage);
+    if (activeJob) {
+      throw new WorkflowError(
+        'JOB_ALREADY_ACTIVE',
+        `${stage} 已有进行中的生成任务（${activeJob.id}），请等待完成或先取消`,
+      );
+    }
+    const row = requireStage(projectId, stage);
+    if (row.status === 'not_started' || row.active_version === null) {
+      throw new WorkflowError(
+        'NO_ACTIVE_VERSION',
+        `${stage} 尚未生成，不能锁定`,
+      );
+    }
+    if (row.status === 'stale') {
+      throw new WorkflowError(
+        'STALE_MUST_RERUN',
+        `${stage} 已失效，必须重新生成后才能锁定`,
+      );
+    }
+    // 上游门控（在 stale/NO_ACTIVE 检查之后，保证旧错误码语义不变）
+    assertRunnable(projectId, stage);
+    setStatusTx(projectId, stage, 'locked', row.active_version);
+  });
+  tx.immediate();
 }
 
 /**

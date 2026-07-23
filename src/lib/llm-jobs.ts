@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {z} from 'zod';
 import {getDb} from './db';
+import {getActiveLlmJobTx} from './llm-job-state';
 import {getProjectInput, projectInputSchema} from './project-inputs';
 import {
   captureLockedUpstreamVersionsTx,
@@ -111,12 +112,13 @@ export function getActiveLlmJob(projectId: string, stage: string): LlmJobRow | u
 }
 
 /**
- * 活跃任务保护（M2-D §二十一）：同 stage 有 queued/running 即抛
- * JOB_ALREADY_ACTIVE——edit/lock/rollback 等人工操作的服务端统一检查，
- * 不依赖前端 disabled。
+ * 活跃任务保护（Route 层 UX 预检）：同 stage 有 queued/running 即抛
+ * JOB_ALREADY_ACTIVE。注意——这只是预检；authoritative fence 已移入
+ * editVersion / lockStage / rollbackToVersion 的 BEGIN IMMEDIATE 内
+ * （Final Concurrency Hardening），经 llm-job-state.getActiveLlmJobTx 复查。
  */
 export function assertNoActiveLlmJob(projectId: string, stage: string): void {
-  const active = getActiveLlmJob(projectId, stage);
+  const active = getActiveLlmJobTx(projectId, stage);
   if (active) {
     throw new LlmJobError(
       'JOB_ALREADY_ACTIVE',
