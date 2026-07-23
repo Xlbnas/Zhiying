@@ -34,6 +34,8 @@ export interface MockFailurePlan {
   truncated?: number;
   /** 所有调用直接抛出该错误。 */
   providerError?: LLMError;
+  /** 模拟长 LLM 请求：响应前等待 N 毫秒（配合 signal 测试取消）。 */
+  delayMs?: number;
 }
 
 /** FNV-1a 32bit → 8 位十六进制（确定性 requestId 用）。 */
@@ -58,6 +60,25 @@ function deterministicUsage(system: string, user: string, text: string, thinking
   };
 }
 
+/** 可取消的等待：signal 触发即抛 CANCELLED（Provider 真正停止，不再产生响应）。 */
+function delayWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new LLMError('CANCELLED', '请求已被取消（外部 AbortSignal）'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new LLMError('CANCELLED', '请求已被用户取消'));
+    };
+    signal?.addEventListener('abort', onAbort, {once: true});
+  });
+}
+
 export class MockLLMProvider implements LLMProvider {
   readonly name = 'mock';
 
@@ -69,9 +90,15 @@ export class MockLLMProvider implements LLMProvider {
     this.plan = plan;
   }
 
-  generate(request: LLMRequest): Promise<LLMResponse> {
+  async generate(request: LLMRequest): Promise<LLMResponse> {
     if (this.plan.providerError) {
-      return Promise.reject(this.plan.providerError);
+      throw this.plan.providerError;
+    }
+    if (request.signal?.aborted) {
+      throw new LLMError('CANCELLED', '请求在发出前已被取消');
+    }
+    if (this.plan.delayMs && this.plan.delayMs > 0) {
+      await delayWithSignal(this.plan.delayMs, request.signal);
     }
 
     const stage = (request.meta?.stage ?? 'unknown') as WorkflowStage | 'unknown';
@@ -105,6 +132,6 @@ export class MockLLMProvider implements LLMProvider {
       finishReason,
       usage: deterministicUsage(request.system, request.user, text, request.thinking),
     };
-    return Promise.resolve(response);
+    return response;
   }
 }

@@ -50,6 +50,8 @@ export interface ExecuteStageOptions {
   projectId?: string;
   jobId?: string;
   env?: LlmEnv;
+  /** Worker graceful cancel：中断中/后续请求；取消不进入 repair。 */
+  signal?: AbortSignal;
   /** 默认 2（含首次共最多 3 次真实请求）。 */
   maxRepairs?: number;
 }
@@ -119,6 +121,10 @@ export async function executeStageGeneration(
   let lastFailure = '';
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (options.signal?.aborted) {
+      // 取消不进入 repair：即使上一次输出校验失败，也立即以 CANCELLED 结束。
+      throw new LLMError('CANCELLED', `阶段 ${stage} 已被取消（第 ${attempt} 次尝试前）`);
+    }
     const request: LLMRequest = {
       model: modelConfig.model,
       system: prompt.system,
@@ -127,6 +133,7 @@ export async function executeStageGeneration(
       thinking: modelConfig.thinking,
       reasoningEffort: modelConfig.reasoningEffort,
       maxTokens: modelConfig.maxTokens,
+      signal: options.signal,
       meta: {stage},
     };
 

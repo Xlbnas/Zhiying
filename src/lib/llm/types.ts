@@ -23,6 +23,8 @@ export interface LLMRequest {
   /** thinking=enabled 时显式给出；disabled 时不发送。 */
   reasoningEffort?: LLMReasoningEffort;
   maxTokens?: number;
+  /** 外部取消信号（Worker graceful cancel）；与 Provider 内部 timeout 严格区分。 */
+  signal?: AbortSignal;
   /** 调用方元信息（如 stage），Provider 不发送给供应商，仅供 Mock/日志使用。 */
   meta?: {stage?: string};
 }
@@ -53,6 +55,7 @@ export const LLM_ERROR_CODES = [
   'EMPTY_RESPONSE',
   'OUTPUT_TRUNCATED',
   'VALIDATION_FAILED',
+  'CANCELLED',
 ] as const;
 
 export type LLMErrorCode = (typeof LLM_ERROR_CODES)[number];

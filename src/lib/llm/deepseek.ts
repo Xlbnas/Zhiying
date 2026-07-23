@@ -82,12 +82,15 @@ export class DeepSeekProvider implements LLMProvider {
   }
 
   async generate(request: LLMRequest): Promise<LLMResponse> {
+    if (request.signal?.aborted) {
+      throw new LLMError('CANCELLED', '请求在发出前已被取消');
+    }
     const body = this.buildBody(request);
     let lastError: LLMError | null = null;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
-        return await this.attemptOnce(body);
+        return await this.attemptOnce(body, request.signal);
       } catch (err) {
         const llmErr =
           err instanceof LLMError
@@ -129,8 +132,22 @@ export class DeepSeekProvider implements LLMProvider {
     return body;
   }
 
-  private async attemptOnce(body: Record<string, unknown>): Promise<LLMResponse> {
+  private async attemptOnce(
+    body: Record<string, unknown>,
+    externalSignal?: AbortSignal,
+  ): Promise<LLMResponse> {
     const controller = new AbortController();
+    // 外部取消与内部超时共用一个 controller，但以标记位严格区分来源：
+    // 外部 signal → CANCELLED（不可 retry）；内部 timer → PROVIDER_TIMEOUT（可 retry 1 次）。
+    let cancelledByUser = false;
+    const onExternalAbort = (): void => {
+      cancelledByUser = true;
+      controller.abort();
+    };
+    if (externalSignal?.aborted) {
+      throw new LLMError('CANCELLED', '请求已被取消（外部 AbortSignal）');
+    }
+    externalSignal?.addEventListener('abort', onExternalAbort, {once: true});
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     let res: Response;
     try {
@@ -146,6 +163,9 @@ export class DeepSeekProvider implements LLMProvider {
       });
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
+        if (cancelledByUser || externalSignal?.aborted) {
+          throw new LLMError('CANCELLED', '请求已被用户取消', {cause: err});
+        }
         throw new LLMError('PROVIDER_TIMEOUT', `DeepSeek 请求超时（${this.timeoutMs}ms）`, {
           retryable: true,
           cause: err,
@@ -157,6 +177,7 @@ export class DeepSeekProvider implements LLMProvider {
       });
     } finally {
       clearTimeout(timer);
+      externalSignal?.removeEventListener('abort', onExternalAbort);
     }
 
     if (!res.ok) {

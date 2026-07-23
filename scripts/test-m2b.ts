@@ -706,6 +706,118 @@ async function main(): Promise<void> {
     ok(!zodCheck.success, '[M] zod 可用（sanity）');
   }
 
+  // ============ N. Cancellation（AbortSignal，M2-C 集成补强） ============
+  {
+    // Mock：长请求进行中 abort → Provider 真正停止
+    const controller = new AbortController();
+    const provider = new MockLLMProvider({delayMs: 200});
+    const pending = provider.generate({
+      model: 'm', system: 's', user: 'u', outputMode: 'text', thinking: 'disabled',
+      signal: controller.signal, meta: {stage: 'research'},
+    });
+    setTimeout(() => controller.abort(), 30);
+    await expectLLMError(() => pending, 'CANCELLED', '[N] Mock 长请求进行中 abort → CANCELLED');
+  }
+  {
+    // Mock：signal 预 abort → 立即 CANCELLED
+    const controller = new AbortController();
+    controller.abort();
+    const provider = new MockLLMProvider({delayMs: 50});
+    await expectLLMError(
+      () =>
+        provider.generate({
+          model: 'm', system: 's', user: 'u', outputMode: 'text', thinking: 'disabled',
+          signal: controller.signal, meta: {stage: 'research'},
+        }),
+      'CANCELLED',
+      '[N] Mock 预 abort → 立即 CANCELLED',
+    );
+  }
+  {
+    // DeepSeek：外部 abort → CANCELLED（不得误判 PROVIDER_TIMEOUT），且不 retry
+    let calls = 0;
+    const fetchImpl = ((_url: string, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        calls++;
+        init.signal?.addEventListener('abort', () => {
+          const err = new Error('aborted');
+          err.name = 'AbortError';
+          reject(err);
+        });
+      })) as unknown as typeof fetch;
+    const provider = new DeepSeekProvider({apiKey: 'sk-test-dummy', timeoutMs: 5000, fetchImpl});
+    const controller = new AbortController();
+    const pending = provider.generate({
+      model: 'm', system: 's', user: 'u', outputMode: 'text', thinking: 'disabled',
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 30);
+    await expectLLMError(() => pending, 'CANCELLED', '[N] DeepSeek 外部 abort → CANCELLED（非 TIMEOUT）');
+    ok(calls === 1, '[N] CANCELLED 不触发 provider retry（仅 1 次尝试）', calls);
+  }
+  {
+    // DeepSeek：预 abort → fetch 根本未发出
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return makeOkResponse();
+    }) as unknown as typeof fetch;
+    const provider = new DeepSeekProvider({apiKey: 'sk-test-dummy', fetchImpl});
+    const controller = new AbortController();
+    controller.abort();
+    await expectLLMError(
+      () =>
+        provider.generate({
+          model: 'm', system: 's', user: 'u', outputMode: 'text', thinking: 'disabled',
+          signal: controller.signal,
+        }),
+      'CANCELLED',
+      '[N] DeepSeek 预 abort → CANCELLED',
+    );
+    ok(calls === 0, '[N] 预 abort 时 fetch 未发出（0 次网络调用）', calls);
+  }
+  {
+    // executor：首个请求进行中 abort → executor 停止，不产生 usage
+    const controller = new AbortController();
+    const before = usageRows().length;
+    const pending = executeStageGeneration({
+      db, provider: new MockLLMProvider({delayMs: 200}), stage: 'evidence',
+      input: INPUT, projectId: 'test-m2b-cancel', env: {}, signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 30);
+    await expectLLMError(() => pending, 'CANCELLED', '[N] executor 请求中 abort → CANCELLED');
+    ok(usageRows().length === before, '[N] 取消的请求无 Response → 不记 usage（0 行新增）');
+  }
+  {
+    // executor：repair 途中 abort → 不继续 repair（CANCELLED 而非 VALIDATION_FAILED）
+    const controller = new AbortController();
+    // 首次 badJson 立即返回并记 usage；repair 请求人为拉长，期间 abort
+    const slowRepair = new MockLLMProvider({badJson: 1});
+    let calls2 = 0;
+    const wrappedGenerate = slowRepair.generate.bind(slowRepair);
+    slowRepair.generate = async (req) => {
+      calls2++;
+      if (calls2 >= 2) {
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(resolve, 200);
+          req.signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new LLMError('CANCELLED', '请求已被用户取消'));
+          }, {once: true});
+        });
+      }
+      return wrappedGenerate(req);
+    };
+    const before = usageRows().length;
+    const pending2 = executeStageGeneration({
+      db, provider: slowRepair, stage: 'evidence',
+      input: INPUT, projectId: 'test-m2b-cancel2', env: {}, signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 50);
+    await expectLLMError(() => pending2, 'CANCELLED', '[N] repair 途中 abort → CANCELLED（非 VALIDATION_FAILED）');
+    ok(usageRows().length === before + 1, '[N] repair 取消：仅首次响应记 usage（repair 无响应不记）');
+  }
+
   closeDb();
   fs.rmSync(path.resolve(process.cwd(), 'data', 'test-m2b'), {recursive: true, force: true});
 
