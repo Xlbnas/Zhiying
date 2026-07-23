@@ -253,17 +253,20 @@ async function main(): Promise<void> {
       scenesPrompt.semanticValidate!(validData).length === 0,
       '[M] 合法数据过共享 semanticValidate',
     );
-    // Scenes 仍未开放：PATCH 继续 STAGE_NOT_ENABLED（capabilities 未提前放开）
+    // Scenes 已开放（M2-E-B）：PATCH 可达；给合法内容时 not_started 被状态机拒绝
     const {createProjectWithWorkflow} = await import('../src/lib/projects');
     const pid = createProjectWithWorkflow({topic: 't', coreQuestion: 'q'}).project.id;
     const res = await stagePATCH(
-      new Request('http://test', {method: 'PATCH', body: JSON.stringify({content: '{}'})}),
+      new Request('http://test', {
+        method: 'PATCH',
+        body: JSON.stringify({content: JSON.stringify(makeValid())}),
+      }),
       {params: Promise.resolve({id: pid, stage: 'scenes'})},
     );
     const json = (await res.json()) as {error?: string};
     ok(
-      res.status === 422 && json.error === 'STAGE_NOT_ENABLED',
-      '[M] capabilities 不变：scenes 仍 STAGE_NOT_ENABLED（未提前开放）',
+      res.status === 409 && json.error === 'NO_ACTIVE_VERSION',
+      '[M] capabilities 已开放 scenes（合法内容 PATCH 可达，未生成被 NO_ACTIVE_VERSION 拒绝）',
     );
   }
 

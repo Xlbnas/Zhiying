@@ -31,7 +31,11 @@ import {createProjectWithWorkflow} from '../src/lib/projects';
 import {getStagePrompt} from '../src/lib/prompts/registry';
 import {claimNextAnyJob} from '../src/lib/scheduler';
 import {runLlmJob, type LlmExecutorDeps} from '../src/worker/llm-executor';
-import {isStageEnabled, M2D_ENABLED_STAGES} from '../src/lib/workflow/capabilities';
+import {
+  ENABLED_WORKFLOW_STAGES,
+  isStageEnabled,
+  M2D_ENABLED_STAGES,
+} from '../src/lib/workflow/capabilities';
 import {
   captureLockedUpstreamVersionsTx,
   checkDependencySnapshotTx,
@@ -106,13 +110,12 @@ async function main(): Promise<void> {
   fs.rmSync(path.resolve(process.cwd(), 'data', 'test-m2d'), {recursive: true, force: true});
   const db = getDb();
 
-  // ============ S1. Stage Capability ============
+  // ============ S1. Stage Capability（M2-E-B：全部 10 阶段开放） ============
   ok(
-    M2D_ENABLED_STAGES.length === 6 &&
-      M2D_ENABLED_STAGES.every((s) => isStageEnabled(s)) &&
-      !isStageEnabled('narration_beat_map') &&
-      !isStageEnabled('scenes'),
-    '[S1] 能力表：前六阶段开放，后四阶段禁用',
+    ENABLED_WORKFLOW_STAGES.length === 10 &&
+      ENABLED_WORKFLOW_STAGES.every((s) => isStageEnabled(s)) &&
+      M2D_ENABLED_STAGES.length === 6,
+    '[S1] 能力表：10 阶段全部开放（deprecated alias 保留）',
   );
 
   // ============ D1. Snapshot 捕获正确 ============

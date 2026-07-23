@@ -516,7 +516,7 @@ async function main(): Promise<void> {
   // ============ O. API 边界（直接调用 Route Handler） ============
   {
     const pid = newProject();
-    // run-stage 未开放阶段（M2-E）→ STAGE_NOT_ENABLED
+    // run-stage 后四阶段已开放（M2-E-B），但前序未锁 → 409 UPSTREAM_NOT_LOCKED
     const res1 = await runStagePOST(
       new Request('http://test', {
         method: 'POST',
@@ -524,7 +524,7 @@ async function main(): Promise<void> {
       }),
     );
     const json1 = (await res1.json()) as {error?: string};
-    ok(res1.status === 422 && json1.error === 'STAGE_NOT_ENABLED', '[O] run-stage narration_beat_map → 422 STAGE_NOT_ENABLED');
+    ok(res1.status === 409 && json1.error === 'UPSTREAM_NOT_LOCKED', '[O] run-stage narration_beat_map（已开放，前序未锁）→ 409 UPSTREAM_NOT_LOCKED');
     // run-stage 上游未锁（M2-D 已开放 research，但 pd 未 locked）→ 409 UPSTREAM_NOT_LOCKED
     const res1b = await runStagePOST(
       new Request('http://test', {
@@ -587,7 +587,7 @@ async function main(): Promise<void> {
       }),
     );
     ok(res7.status === 409, '[O] 未生成阶段锁定 → 409');
-    // PATCH 未开放阶段（M2-E）→ STAGE_NOT_ENABLED
+    // PATCH 后四阶段已开放（M2-E-B）；not_started 阶段编辑 → 409 NO_ACTIVE_VERSION
     const res8 = await stagePATCH(
       new Request('http://test', {
         method: 'PATCH',
@@ -596,7 +596,7 @@ async function main(): Promise<void> {
       {params: Promise.resolve({id: pid, stage: 'narration_beat_map'})},
     );
     const json8 = (await res8.json()) as {error?: string};
-    ok(res8.status === 422 && json8.error === 'STAGE_NOT_ENABLED', '[O] PATCH narration_beat_map → 422 STAGE_NOT_ENABLED');
+    ok(res8.status === 409 && json8.error === 'NO_ACTIVE_VERSION', '[O] PATCH narration_beat_map（已开放，未生成）→ 409 NO_ACTIVE_VERSION');
     // legacy 项目 run-stage → 404 STAGE_NOT_FOUND
     const legacyId = crypto.randomUUID();
     const at = new Date().toISOString();
