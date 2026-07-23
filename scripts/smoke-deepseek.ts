@@ -32,6 +32,19 @@ function loadKeyFromDotenv(): string | null {
       }
     }
   }
+  // 用户提供的 API-KEY.env（gitignored）：接受 Deepseekapi= 或任意 sk- token
+  const alt = path.resolve(process.cwd(), 'API-KEY.env');
+  if (fs.existsSync(alt)) {
+    const text = fs.readFileSync(alt, 'utf8');
+    const named = /Deepseekapi\s*=\s*(.+?)\s*$/m.exec(text);
+    if (named && named[1] && named[1].length > 0) {
+      return named[1];
+    }
+    const token = /sk-[A-Za-z0-9]+/.exec(text);
+    if (token) {
+      return token[0];
+    }
+  }
   return null;
 }
 
