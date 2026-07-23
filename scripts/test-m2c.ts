@@ -20,13 +20,14 @@ import {
   commitLlmJobResult,
   completeLlmJob,
   enqueueLlmJob,
+  failLlmJob,
   getLlmJob,
   getVersionByJobId,
   LlmJobError,
   llmJobPayloadSchema,
-  markLlmCancelled,
   recoverStaleLlmJobs,
   requestCancelLlmJob,
+  requeueLlmJob,
   type LlmJobRow,
 } from '../src/lib/llm-jobs';
 import {MockLLMProvider} from '../src/lib/llm/mock';
@@ -448,7 +449,7 @@ async function main(): Promise<void> {
       "UPDATE llm_jobs SET heartbeat_at = '2020-01-01T00:00:00.000Z' WHERE id = ?",
     ).run(job.id);
     const recovered = recoverStaleLlmJobs(60_000);
-    ok(recovered === 1, '[L] stale running 任务被回收（1 个）');
+    ok(recovered.requeued === 1 && recovered.cancelled === 0, '[L] stale running 任务被回收（1 个）');
     const after = getLlmJob(job.id)!;
     ok(
       after.status === 'queued' && after.attempt === 1 && after.claimed_by === null,
@@ -761,13 +762,15 @@ async function main(): Promise<void> {
       content: '# 内容', contentType: 'markdown', source: 'ai_generate',
       promptVersion: 'project-definition@1.0', model: 'deepseek-v4-flash',
     });
-    ok(result.code === 'CANCEL_REQUESTED', '[Q1] Cancel wins：commit 返回 CANCEL_REQUESTED', result.code);
+    ok(result.code === 'CANCELLED', '[Q1] Cancel wins：commit 返回 CANCELLED', result.code);
     ok(
       countRows('SELECT COUNT(*) AS c FROM project_versions WHERE job_id = ?', job.id) === 0,
       '[Q1] Cancel wins：不创建 project_version',
     );
-    markLlmCancelled(job.id);
-    ok(getLlmJob(job.id)!.status === 'cancelled', '[Q1] Cancel wins：job 最终 cancelled');
+    ok(
+      getLlmJob(job.id)!.status === 'cancelled',
+      '[Q1] Cancel wins：事务返回时 DB 已是 cancelled（无需额外 mark）',
+    );
   }
   {
     // Q2：Worker wins——A 先原子提交，B 的 cancel 匹配 0 行、终态不变
@@ -863,6 +866,177 @@ async function main(): Promise<void> {
     );
   }
   dbB.close();
+
+  // ============ R. Cancellation Durability（cancel once accepted → never resurrect） ============
+  const dbB2 = new Database(getDbPath());
+  dbB2.pragma('journal_mode = WAL');
+  dbB2.pragma('busy_timeout = 5000');
+  const staleHeartbeat = (jobId: string): void => {
+    db.prepare("UPDATE llm_jobs SET heartbeat_at = '2020-01-01T00:00:00.000Z' WHERE id = ?").run(jobId);
+  };
+  {
+    // R1：commit cancel 原子终结
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    claimLlm();
+    requestCancelLlmJob(job.id);
+    const result = commitLlmJobResult({
+      jobId: job.id, projectId: pid, stage: 'project_definition',
+      content: '# x', contentType: 'markdown', source: 'ai_generate',
+    });
+    const after = getLlmJob(job.id)!;
+    ok(
+      result.code === 'CANCELLED' && after.status === 'cancelled' && after.finished_at !== null,
+      '[R1] commit 返回 CANCELLED 时 DB 已是 cancelled 终态',
+    );
+    ok(
+      countRows('SELECT COUNT(*) AS c FROM project_versions WHERE job_id = ?', job.id) === 0,
+      '[R1] cancel 原子终结不建版本',
+    );
+
+    // R2：crash-after-cancel-decision 模拟——之后什么都不做，recovery 也不复活
+    const rec = recoverStaleLlmJobs(0);
+    ok(
+      rec.requeued === 0 && rec.cancelled === 0 && getLlmJob(job.id)!.status === 'cancelled',
+      '[R2] 已 cancelled 任务不被 recovery 复活（0 requeue）',
+    );
+  }
+  {
+    // R3：stale + cancel 意图 → cancelled（不清零、不复活）
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    claimLlm();
+    requestCancelLlmJob(job.id);
+    staleHeartbeat(job.id);
+    const rec = recoverStaleLlmJobs(60_000);
+    const after = getLlmJob(job.id)!;
+    ok(
+      rec.cancelled === 1 && rec.requeued === 0 &&
+        after.status === 'cancelled' && after.cancel_requested === 1,
+      '[R3] stale + cancel_requested=1 → cancelled（意图保留）',
+    );
+  }
+  {
+    // R4：普通 stale → queued（原语义）
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    claimLlm();
+    staleHeartbeat(job.id);
+    const rec = recoverStaleLlmJobs(60_000);
+    ok(
+      rec.requeued === 1 && rec.cancelled === 0 && getLlmJob(job.id)!.status === 'queued',
+      '[R4] stale + cancel_requested=0 → queued',
+    );
+    cancelQueuedLlmJob(job.id);
+  }
+  {
+    // R5：retryable failure 遇上 cancel → cancelled（不回 queued）
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    claimLlm();
+    requestCancelLlmJob(job.id);
+    const outcome = failLlmJob(job.id, 'PROVIDER_HTTP_ERROR', '模拟失败', {retryable: true});
+    const after = getLlmJob(job.id)!;
+    ok(
+      outcome === 'CANCELLED' && after.status === 'cancelled' && after.cancel_requested === 1,
+      '[R5] retryable fail + cancel_requested=1 → cancelled（不复活）',
+    );
+  }
+  {
+    // R6：普通 retryable failure → queued
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    claimLlm();
+    const outcome = failLlmJob(job.id, 'PROVIDER_HTTP_ERROR', '模拟失败', {retryable: true});
+    ok(
+      outcome === 'REQUEUED' && getLlmJob(job.id)!.status === 'queued',
+      '[R6] retryable fail + 无 cancel → queued',
+    );
+    cancelQueuedLlmJob(job.id);
+  }
+  {
+    // R7：shutdown requeue 遇上 cancel → cancelled（取消优先）
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    claimLlm();
+    requestCancelLlmJob(job.id);
+    const outcome = requeueLlmJob(job.id);
+    ok(
+      outcome === 'CANCELLED' && getLlmJob(job.id)!.status === 'cancelled',
+      '[R7] shutdown requeue + cancel_requested=1 → cancelled（取消优先）',
+    );
+  }
+  {
+    // R8：普通 shutdown requeue → queued
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    claimLlm();
+    const outcome = requeueLlmJob(job.id);
+    ok(
+      outcome === 'REQUEUED' && getLlmJob(job.id)!.status === 'queued',
+      '[R8] shutdown requeue + 无 cancel → queued',
+    );
+    cancelQueuedLlmJob(job.id);
+  }
+  {
+    // R9：Worker wins——A 先原子提交，B 的 cancel 写入失败（API 409）
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    claimLlm();
+    const committed = commitLlmJobResult({
+      jobId: job.id, projectId: pid, stage: 'project_definition',
+      content: '# x', contentType: 'markdown', source: 'ai_generate',
+    });
+    ok(committed.code === 'COMMITTED', '[R9] 前置：Worker 原子提交成功');
+    const accepted = dbB2
+      .prepare(`UPDATE llm_jobs SET cancel_requested = 1 WHERE id = ? AND status = 'running'`)
+      .run(job.id).changes;
+    ok(accepted === 0 && getLlmJob(job.id)!.status === 'succeeded', '[R9] succeeded 后 cancel 写入 0 行，终态不变');
+    const res = await cancelJobPOST(
+      new Request('http://test', {method: 'POST', body: JSON.stringify({jobId: job.id})}),
+    );
+    const json = (await res.json()) as {error?: string};
+    ok(res.status === 409 && json.error === 'JOB_NOT_ACTIVE', '[R9] Cancel API 对已 succeeded 返回 409 JOB_NOT_ACTIVE');
+  }
+  {
+    // R10：Cancel wins（双连接）——B 先 cancel，A commit → cancelled 无版本
+    const pid = newProject();
+    const job = enqueueLlmJob(pid, {
+      schemaVersion: '1.0', stage: 'project_definition', promptInput: getProjectInput(pid)!,
+    });
+    claimLlm();
+    dbB2.transaction(() => {
+      dbB2.prepare(
+        `UPDATE llm_jobs SET cancel_requested = 1 WHERE id = ? AND status = 'running'`,
+      ).run(job.id);
+    }).immediate();
+    const result = commitLlmJobResult({
+      jobId: job.id, projectId: pid, stage: 'project_definition',
+      content: '# x', contentType: 'markdown', source: 'ai_generate',
+    });
+    ok(
+      result.code === 'CANCELLED' && getLlmJob(job.id)!.status === 'cancelled' &&
+        countRows('SELECT COUNT(*) AS c FROM project_versions WHERE job_id = ?', job.id) === 0,
+      '[R10] B 先 cancel → A commit 原子终结 cancelled，无版本',
+    );
+  }
+  dbB2.close();
 
   // 全局一致性：10 阶段枚举未被意外改动
   ok(WORKFLOW_STAGES.length === 10 && WORKFLOW_STAGES[0] === 'project_definition', '[Z] 10 阶段枚举完整');

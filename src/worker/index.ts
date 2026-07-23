@@ -317,8 +317,11 @@ async function main(): Promise<void> {
     log(`recovered ${recovered} stale render job(s) → queued`);
   }
   const recoveredLlm = recoverStaleLlmJobs(STALE_TIMEOUT_MS);
-  if (recoveredLlm > 0) {
-    log(`recovered ${recoveredLlm} stale llm job(s) → queued`);
+  if (recoveredLlm.requeued > 0) {
+    log(`recovered ${recoveredLlm.requeued} stale llm job(s) → queued`);
+  }
+  if (recoveredLlm.cancelled > 0) {
+    log(`finalized ${recoveredLlm.cancelled} cancelled stale llm job(s)`);
   }
 
   // 2. 单调度循环：render + llm 全局 FIFO，任何时刻只跑一个；

@@ -142,65 +142,115 @@ export function completeLlmJob(jobId: string): boolean {
   return result.changes > 0;
 }
 
+export type FinalizeLlmJobFailureCode =
+  | 'REQUEUED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'JOB_NOT_RUNNING'
+  | 'JOB_NOT_FOUND';
+
 /**
- * 任务失败：
- * - retryable 且 attempt < max_attempts → 回 queued（等下一轮 claim，attempt 保留）
- * - 否则 → failed。VALIDATION_FAILED / CONFIG_ERROR / OUTPUT_TRUNCATED / CANCELLED
- *   一律 non-retryable（避免反复烧 token）。
+ * 失败终局原子裁决（Cancellation Durability §四）：单个 BEGIN IMMEDIATE 内——
+ *   - job 不存在 → JOB_NOT_FOUND；不在 running → JOB_NOT_RUNNING
+ *   - cancel_requested=1 → cancelled（保留取消意图，绝不回 queued 清零）
+ *   - retryable 且 attempt < max_attempts → 回 queued（清 claim/heartbeat）
+ *   - 否则 → failed
+ * 不存在「cancel_requested=1 → fail → queued + cancel=0」的路径。
  */
 export function failLlmJob(
   jobId: string,
   code: string,
   msg: string,
   opts: {retryable: boolean},
-): void {
+): FinalizeLlmJobFailureCode {
   const db = getDb();
-  const job = getLlmJob(jobId);
-  if (!job) {
-    throw new LlmJobError('JOB_NOT_FOUND', `failLlmJob: job ${jobId} not found`);
-  }
-  const at = now();
-  if (opts.retryable && job.attempt < job.max_attempts) {
-    db.prepare(
-      `UPDATE llm_jobs
-       SET status = 'queued',
-           claimed_by = NULL, claimed_at = NULL, heartbeat_at = NULL,
-           cancel_requested = 0,
-           error_code = ?, error_message = ?
-       WHERE id = ?`,
-    ).run(code, msg, jobId);
-  } else {
+  const tx = db.transaction((): FinalizeLlmJobFailureCode => {
+    const job = getLlmJob(jobId);
+    if (!job) {
+      return 'JOB_NOT_FOUND';
+    }
+    if (job.status !== 'running') {
+      return 'JOB_NOT_RUNNING';
+    }
+    const at = now();
+    if (job.cancel_requested === 1) {
+      db.prepare(
+        `UPDATE llm_jobs
+         SET status = 'cancelled', finished_at = ?, error_code = ?, error_message = ?
+         WHERE id = ? AND status = 'running' AND cancel_requested = 1`,
+      ).run(at, code, msg, jobId);
+      return 'CANCELLED';
+    }
+    if (opts.retryable && job.attempt < job.max_attempts) {
+      db.prepare(
+        `UPDATE llm_jobs
+         SET status = 'queued',
+             claimed_by = NULL, claimed_at = NULL, heartbeat_at = NULL,
+             error_code = ?, error_message = ?
+         WHERE id = ?`,
+      ).run(code, msg, jobId);
+      return 'REQUEUED';
+    }
     db.prepare(
       `UPDATE llm_jobs
        SET status = 'failed', finished_at = ?, error_code = ?, error_message = ?
        WHERE id = ?`,
     ).run(at, code, msg, jobId);
-  }
+    return 'FAILED';
+  });
+  return tx.immediate();
 }
 
-/** 回收僵尸 running（heartbeat 超时）→ queued。返回回收数。 */
-export function recoverStaleLlmJobs(timeoutMs: number): number {
-  const cutoff = new Date(Date.now() - timeoutMs).toISOString();
-  const result = getDb()
-    .prepare(
-      `UPDATE llm_jobs
-       SET status = 'queued',
-           claimed_by = NULL, claimed_at = NULL, heartbeat_at = NULL,
-           cancel_requested = 0
-       WHERE status = 'running' AND heartbeat_at IS NOT NULL AND heartbeat_at < ?`,
-    )
-    .run(cutoff);
-  return result.changes;
+/**
+ * 回收僵尸 running（Cancellation Durability §五）：单个事务内区分两类——
+ *   A. stale + cancel_requested=1 → cancelled（保留取消意图，不复活）
+ *   B. stale + cancel_requested=0 → queued（原有语义）
+ */
+export function recoverStaleLlmJobs(timeoutMs: number): {
+  requeued: number;
+  cancelled: number;
+} {
+  const db = getDb();
+  const tx = db.transaction(() => {
+    const at = now();
+    const cutoff = new Date(Date.now() - timeoutMs).toISOString();
+    const cancelled = db
+      .prepare(
+        `UPDATE llm_jobs
+         SET status = 'cancelled', finished_at = ?,
+             claimed_by = NULL, claimed_at = NULL, heartbeat_at = NULL
+         WHERE status = 'running' AND heartbeat_at IS NOT NULL AND heartbeat_at < ?
+           AND cancel_requested = 1`,
+      )
+      .run(at, cutoff).changes;
+    const requeued = db
+      .prepare(
+        `UPDATE llm_jobs
+         SET status = 'queued',
+             claimed_by = NULL, claimed_at = NULL, heartbeat_at = NULL
+         WHERE status = 'running' AND heartbeat_at IS NOT NULL AND heartbeat_at < ?
+           AND cancel_requested = 0`,
+      )
+      .run(cutoff).changes;
+    return {requeued, cancelled};
+  });
+  return tx.immediate();
 }
 
-/** 请求取消（queued/running 均可标记）。 */
-export function requestCancelLlmJob(jobId: string): void {
-  getDb()
-    .prepare(
-      `UPDATE llm_jobs SET cancel_requested = 1
-       WHERE id = ? AND status IN ('queued', 'running')`,
-    )
-    .run(jobId);
+/**
+ * 请求取消（running）：返回是否真正写入（changes>0）。
+ * 写入失败说明任务已不在 running（可能已被 Worker 原子提交 succeeded），
+ * 调用方应重新读取并按 JOB_NOT_ACTIVE 处理。
+ */
+export function requestCancelLlmJob(jobId: string): boolean {
+  return (
+    getDb()
+      .prepare(
+        `UPDATE llm_jobs SET cancel_requested = 1
+         WHERE id = ? AND status = 'running'`,
+      )
+      .run(jobId).changes > 0
+  );
 }
 
 export function isLlmCancelRequested(jobId: string): boolean {
@@ -231,17 +281,37 @@ export function cancelQueuedLlmJob(jobId: string): boolean {
   return result.changes > 0;
 }
 
-/** running 任务原样回 queued（worker 优雅退出用；不记错误、attempt 保留）。 */
-export function requeueLlmJob(jobId: string): void {
-  getDb()
-    .prepare(
+/**
+ * shutdown requeue（Cancellation Durability §六）：原子事务内裁决——
+ *   running + cancel_requested=1 → cancelled（用户取消优先于 shutdown requeue）
+ *   running + cancel_requested=0 → queued（原有语义，意图不被清除）
+ *   非 running → JOB_NOT_RUNNING（调用方按日志处理）
+ */
+export function requeueLlmJob(jobId: string): 'REQUEUED' | 'CANCELLED' | 'JOB_NOT_RUNNING' {
+  const db = getDb();
+  const tx = db.transaction((): 'REQUEUED' | 'CANCELLED' | 'JOB_NOT_RUNNING' => {
+    const job = getLlmJob(jobId);
+    if (!job || job.status !== 'running') {
+      return 'JOB_NOT_RUNNING';
+    }
+    if (job.cancel_requested === 1) {
+      db.prepare(
+        `UPDATE llm_jobs
+         SET status = 'cancelled', finished_at = ?,
+             claimed_by = NULL, claimed_at = NULL, heartbeat_at = NULL
+         WHERE id = ? AND status = 'running' AND cancel_requested = 1`,
+      ).run(now(), jobId);
+      return 'CANCELLED';
+    }
+    db.prepare(
       `UPDATE llm_jobs
        SET status = 'queued',
-           claimed_by = NULL, claimed_at = NULL, heartbeat_at = NULL,
-           cancel_requested = 0
+           claimed_by = NULL, claimed_at = NULL, heartbeat_at = NULL
        WHERE id = ? AND status = 'running'`,
-    )
-    .run(jobId);
+    ).run(jobId);
+    return 'REQUEUED';
+  });
+  return tx.immediate();
 }
 
 /**
@@ -259,7 +329,7 @@ export function getVersionByJobId(jobId: string): ProjectVersionRow | undefined 
 
 export type CommitLlmJobResultCode =
   | 'COMMITTED'
-  | 'CANCEL_REQUESTED'
+  | 'CANCELLED'
   | 'JOB_NOT_RUNNING'
   | 'JOB_NOT_FOUND'
   | 'JOB_MISMATCH';
@@ -281,14 +351,16 @@ export interface CommitLlmJobResultInput {
 
 /**
  * 「版本落库 + job 终态」原子提交：单个 BEGIN IMMEDIATE 内完成——
- *   1. job 前置条件（存在 / project+stage 匹配 / status=running / cancel_requested=0）
- *   2. generateVersionTx（M2-A 事务内 helper：版本 + active_version + generated + stale 传播）
- *   3. job → succeeded（WHERE status='running' AND cancel_requested=0，changes 必须为 1）
+ *   1. job 前置条件（存在 / project+stage 匹配 / status=running / cancel_requested）
+ *   2a. cancel_requested=1 → 同事务原子终结为 cancelled（CANCELLED），不建版本——
+ *       消除「commit decision → mark cancelled」之间的 crash window
+ *   2b. 否则 generateVersionTx（M2-A 事务内 helper）→ job → succeeded
+ *      （WHERE status='running' AND cancel_requested=0，changes 必须为 1）
  * 任一步失败整体 rollback：不存在「version 已建但 job 未 succeeded」的部分提交窗口，
  * 也不存在 cancel fence 与 generateVersion 之间的跨进程竞态窗口。
  *
  * 竞争语义：
- * - Cancel API 先提交 cancel_requested=1 → 本事务读到 → CANCEL_REQUESTED（不建版本）
+ * - Cancel API 先提交 cancel_requested=1 → 本事务原子终结 cancelled（不建版本）
  * - 本事务先提交（running→succeeded 原子完成）→ Cancel API 的 UPDATE 匹配 0 行（JOB_NOT_ACTIVE）
  */
 export function commitLlmJobResult(input: CommitLlmJobResultInput): CommitLlmJobResult {
@@ -305,7 +377,20 @@ export function commitLlmJobResult(input: CommitLlmJobResultInput): CommitLlmJob
       return {code: 'JOB_NOT_RUNNING'};
     }
     if (job.cancel_requested === 1) {
-      return {code: 'CANCEL_REQUESTED'};
+      // Cancel once accepted → never resurrect：同事务直接收敛到 cancelled 终态
+      const finalized = db
+        .prepare(
+          `UPDATE llm_jobs
+           SET status = 'cancelled', finished_at = ?
+           WHERE id = ? AND status = 'running' AND cancel_requested = 1`,
+        )
+        .run(new Date().toISOString(), input.jobId);
+      if (finalized.changes !== 1) {
+        throw new Error(
+          `commitLlmJobResult: job ${input.jobId} cancel 终结丢失竞态（changes=${finalized.changes}）`,
+        );
+      }
+      return {code: 'CANCELLED'};
     }
     const version = generateVersionTx({
       projectId: input.projectId,

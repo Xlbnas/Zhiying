@@ -43,7 +43,14 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ job: getLlmJob(jobId) });
   }
   if (job.status === 'running') {
-    requestCancelLlmJob(jobId);
+    // changes 检测（Cancellation Durability §七）：写入失败 = 与 Worker commit
+    // 竞态落败（任务已 succeeded），不得谎报「已接受取消」
+    const accepted = requestCancelLlmJob(jobId);
+    if (!accepted) {
+      return jsonError(409, 'JOB_NOT_ACTIVE', {
+        message: `任务已终结（${getLlmJob(jobId)?.status ?? 'unknown'}），取消未生效`,
+      });
+    }
     return Response.json({ job: getLlmJob(jobId) }, { status: 202 });
   }
   return jsonError(409, 'JOB_NOT_ACTIVE', {

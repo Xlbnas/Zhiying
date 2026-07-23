@@ -160,10 +160,9 @@ export async function runLlmJob(
             `(${result.contentType}, repair=${result.repairCount}, requests=${result.requestIds.length})`,
         );
         return;
-      case 'CANCEL_REQUESTED':
-        // Cancel 先到达：不建版本，按用户取消语义终结
-        markLlmCancelled(job.id);
-        log(`llm job ${job.id} cancelled（commit 前检测到 cancel_requested）`);
+      case 'CANCELLED':
+        // 取消意图已在同一事务内原子终结为 cancelled，无需再 markLlmCancelled
+        log(`llm job ${job.id} cancelled（commit 事务内原子终结）`);
         return;
       case 'JOB_NOT_RUNNING':
         log(`llm job ${job.id} commit 跳过：任务已不在 running（可能已被并发终结）`);
@@ -192,16 +191,18 @@ export async function runLlmJob(
     }
     if (err instanceof LLMError) {
       const retryable = !NON_RETRYABLE_CODES.has(err.code);
-      failLlmJob(job.id, err.code, clipText(err.message, 500), {retryable});
+      const finalized = failLlmJob(job.id, err.code, clipText(err.message, 500), {retryable});
       log(
         `llm job ${job.id} failed (attempt ${job.attempt}/${job.max_attempts}, ` +
-          `${retryable ? 'retryable' : 'non-retryable'}): ${err.code}`,
+          `${retryable ? 'retryable' : 'non-retryable'}): ${err.code} → ${finalized}`,
       );
       return;
     }
     const message = err instanceof Error ? err.message : String(err);
-    failLlmJob(job.id, 'LLM_ERROR', clipText(message, 500), {retryable: true});
-    log(`llm job ${job.id} failed (attempt ${job.attempt}/${job.max_attempts}): ${message}`);
+    const finalized = failLlmJob(job.id, 'LLM_ERROR', clipText(message, 500), {retryable: true});
+    log(
+      `llm job ${job.id} failed (attempt ${job.attempt}/${job.max_attempts}): ${message} → ${finalized}`,
+    );
   } finally {
     clearInterval(timer);
     ctx.shutdownSignal?.removeEventListener('abort', onShutdownAbort);
