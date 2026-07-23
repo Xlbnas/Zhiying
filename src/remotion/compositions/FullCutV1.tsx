@@ -11,6 +11,8 @@ import {
 } from 'remotion';
 import {
   COMPOSITION_ID,
+  DEFAULT_BGM_PATH,
+  DEFAULT_SFX_PATH,
   SCHEMA_VERSION,
   TEMPLATE_VERSION,
   type ChapterTiming,
@@ -94,7 +96,11 @@ export const zhiyingFullCutDefaultProps: ZhiyingFullCutProps = {
     scenes: fullCutScenes.map(toSchemaScene),
   },
   subtitles: subtitleData as SubtitleCue[],
-  audio: {narration: 'full/audio/FullCut_TTS.wav'},
+  audio: {
+    narration: 'full/audio/FullCut_TTS.wav',
+    bgm: DEFAULT_BGM_PATH,
+    sfx: DEFAULT_SFX_PATH,
+  },
   showSubtitles: true,
 };
 
@@ -327,15 +333,16 @@ const bgmVolume = (frame: number) => {
  * 数据流：props.data.scenes/chapterTiming → 视觉轨；props.subtitles → 字幕轨；
  * props.audio.narration（staticFile 相对路径，null 不挂 Audio）→ 旁白轨；
  * props.showSubtitles=false → 不渲染字幕轨。
- * BGM / SFX 为模板固有资产，保留 staticFile 硬编码。
+ * props.audio.bgm / props.audio.sfx（M2-E-D）：Freud 示例配乐，
+ * 默认沿用原路径（Legacy 行为不变）；显式 null → 不挂载（Workflow Visual Preview）。
  */
 export const ZhiyingFullCut = ({data, subtitles, audio, showSubtitles}: ZhiyingFullCutProps) => {
   const scenes = useMemo(() => data.scenes.map(toRenderableScene), [data.scenes]);
   return (
     <AbsoluteFill style={{backgroundColor: colors.background}}>
       <FullVisualTrack scenes={scenes} chapterTiming={data.chapterTiming} />
-      <Audio src={staticFile('full/audio/FullCut_BGM.wav')} volume={bgmVolume} />
-      <Audio src={staticFile('full/audio/FullCut_SFX.wav')} volume={0.9} />
+      {audio.bgm ? <Audio src={staticFile(audio.bgm)} volume={bgmVolume} /> : null}
+      {audio.sfx ? <Audio src={staticFile(audio.sfx)} volume={0.9} /> : null}
       {audio.narration ? <Audio src={staticFile(audio.narration)} volume={1} /> : null}
       {showSubtitles ? <FullSubtitles cues={subtitles} scenes={scenes} /> : null}
     </AbsoluteFill>
@@ -347,7 +354,11 @@ export const ZhiyingFullCut = ({data, subtitles, audio, showSubtitles}: ZhiyingF
 export const FullCutV1 = ({showSubtitles = true, includeNarration = true}: {showSubtitles?: boolean; includeNarration?: boolean}) => (
   <ZhiyingFullCut
     {...zhiyingFullCutDefaultProps}
-    audio={{narration: includeNarration ? 'full/audio/FullCut_TTS.wav' : null}}
+    audio={{
+      narration: includeNarration ? 'full/audio/FullCut_TTS.wav' : null,
+      bgm: DEFAULT_BGM_PATH,
+      sfx: DEFAULT_SFX_PATH,
+    }}
     showSubtitles={showSubtitles}
   />
 );

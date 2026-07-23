@@ -9,6 +9,8 @@ import { getDb } from '@/lib/db';
 import {
   fullCutDataSchema,
   subtitleCueSchema,
+  DEFAULT_BGM_PATH,
+  DEFAULT_SFX_PATH,
   SCHEMA_VERSION,
   TEMPLATE_VERSION,
   COMPOSITION_ID,
@@ -156,7 +158,11 @@ export function buildFullCutProps(
   return {
     data: dataParsed.data,
     subtitles,
-    audio: { narration: resolveNarration() },
+    audio: {
+      narration: resolveNarration(),
+      bgm: DEFAULT_BGM_PATH,
+      sfx: DEFAULT_SFX_PATH,
+    },
     showSubtitles: opts.showSubtitles,
   };
 }

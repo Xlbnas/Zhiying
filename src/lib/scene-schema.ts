@@ -69,13 +69,25 @@ export const subtitleCueSchema = z.object({
 
 /**
  * Composition props —— Player 与 Renderer 同构使用（CONTRACT §2）。
+ *
+ * audio.bgm / audio.sfx（M2-E-D 引入，带默认值保证 Legacy M1 行为不变）：
+ * Freud 示例项目的定制配乐（bgmVolume 含该片专用时间轴），属示例遗留资产；
+ * Legacy 路径不传字段 → 默认值 = 原硬编码路径 → 行为完全不变；
+ * Workflow Visual Preview 显式置 null → 不挂载，消除对示例音频的硬依赖。
  */
+export const DEFAULT_BGM_PATH = 'full/audio/FullCut_BGM.wav';
+export const DEFAULT_SFX_PATH = 'full/audio/FullCut_SFX.wav';
+
 export const zhiyingFullCutPropsSchema = z.object({
   data: fullCutDataSchema,
   subtitles: z.array(subtitleCueSchema).default([]),
   audio: z.object({
     /** staticFile 相对路径，如 full/audio/narration.wav；null = 无旁白 */
     narration: z.string().nullable().default(null),
+    /** Freud 示例 BGM；null = 不挂载（Workflow Visual Preview） */
+    bgm: z.string().nullable().default(DEFAULT_BGM_PATH),
+    /** Freud 示例 SFX；null = 不挂载（Workflow Visual Preview） */
+    sfx: z.string().nullable().default(DEFAULT_SFX_PATH),
   }),
   showSubtitles: z.boolean().default(true),
 });

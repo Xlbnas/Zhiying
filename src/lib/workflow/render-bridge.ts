@@ -69,15 +69,11 @@ export interface RenderReadiness {
   scenesVersion: number | null;
 }
 
-// ---------- 资产规则（M2-E-C §十一调查结论） ----------
+// ---------- 资产规则（M2-E-C §十一 / M2-E-D §四调查结论） ----------
 // 仓库内没有素材 manifest 系统；当前 Renderer 真实消费的外部文件只有两类：
-// 1. 模板固有资产（ZhiyingFullCut 组件硬编码，任何渲染都必需）
+// 1. Freud 示例配乐（bgm/sfx）：ZhiyingFullCut 在 props.audio.bgm/sfx 非 null 时挂载
+//    —— M2-E-D 起 Workflow Visual Preview 显式置 null，不再是硬依赖；
 // 2. Freud 示例遗留：scene.assetIds 含 'freud_1909_loc' 时 ArchiveEditorial 引用的图片
-const TEMPLATE_REQUIRED_FILES = [
-  'full/audio/FullCut_BGM.wav',
-  'full/audio/FullCut_SFX.wav',
-] as const;
-
 const SCENE_ASSET_FILES: Readonly<Record<string, string>> = {
   freud_1909_loc: 'pilot/images/freud_1909_loc.jpg',
 };
@@ -144,15 +140,17 @@ function loadLockedScenesSource(projectId: string): LockedScenesSource {
 
 function collectAssetBlockers(
   parsed: ScenesAiOutput,
+  audioPaths: Array<string | null>,
   fileExists: AssetFileExistsFn,
 ): RenderBlocker[] {
   const blockers: RenderBlocker[] = [];
-  // 模板固有音频：组件硬编码 <Audio>，缺失则 Remotion 渲染必然失败
-  for (const rel of TEMPLATE_REQUIRED_FILES) {
-    if (!fileExists(rel)) {
+  // 实际挂载的音频资产（bgm/sfx/narration 非 null 才检查；
+  // Workflow Visual Preview 全 null → 无音频依赖）
+  for (const rel of audioPaths) {
+    if (rel !== null && !fileExists(rel)) {
       blockers.push({
         code: 'ASSET_FILE_MISSING',
-        message: `模板固有资产缺失：public/${rel}（ZhiyingFullCut 硬编码引用）`,
+        message: `音频资产缺失：public/${rel}`,
       });
     }
   }
@@ -172,6 +170,9 @@ function collectAssetBlockers(
 }
 
 // ---------- 公开 API ----------
+
+/** Workflow Visual Preview 音频策略：无旁白（无 TTS）、不挂 Freud 示例 BGM/SFX。 */
+const PREVIEW_AUDIO = {narration: null, bgm: null, sfx: null} as const;
 
 export interface RenderReadinessOptions {
   fileExists?: AssetFileExistsFn;
@@ -223,7 +224,13 @@ export function checkWorkflowRenderReadiness(
   }
 
   if (source) {
-    blockers.push(...collectAssetBlockers(source.parsed, fileExists));
+    blockers.push(
+      ...collectAssetBlockers(
+        source.parsed,
+        [PREVIEW_AUDIO.narration, PREVIEW_AUDIO.bgm, PREVIEW_AUDIO.sfx],
+        fileExists,
+      ),
+    );
   }
 
   const activeRender = getDb()
@@ -276,7 +283,11 @@ export function buildWorkflowRenderProps(
   }
 
   const source = loadLockedScenesSource(projectId);
-  const assetBlockers = collectAssetBlockers(source.parsed, fileExists);
+  const assetBlockers = collectAssetBlockers(
+    source.parsed,
+    [PREVIEW_AUDIO.narration, PREVIEW_AUDIO.bgm, PREVIEW_AUDIO.sfx],
+    fileExists,
+  );
   if (assetBlockers.length > 0) {
     throw new RenderBridgeError('ASSET_FILE_MISSING', assetBlockers[0]!.message, {
       missing: assetBlockers.map((b) => b.message),
@@ -301,7 +312,7 @@ export function buildWorkflowRenderProps(
       scenes: source.parsed.scenes,
     },
     subtitles: [],
-    audio: {narration: null},
+    audio: {...PREVIEW_AUDIO},
     showSubtitles: false,
   });
   return {props, scenesVersion: source.scenesVersion};

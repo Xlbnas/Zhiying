@@ -251,14 +251,15 @@ async function main(): Promise<void> {
   {
     const pid = newProject();
     await lockAllTen(pid);
-    const missing = checkWorkflowRenderReadiness(pid, {fileExists: ALL_FILES_MISSING});
+    // M2-E-D：Workflow Visual Preview 音频全 null（narration/bgm/sfx），
+    // 不再硬依赖 Freud 示例音频——本机无音频资产也 ready
+    const noFiles = checkWorkflowRenderReadiness(pid, {fileExists: ALL_FILES_MISSING});
     ok(
-      !missing.ready &&
-        missing.blockers.filter((b) => b.code === 'ASSET_FILE_MISSING').length === 2,
-      '[A17] 模板固有音频（BGM+SFX）缺失 → 2 个 ASSET_FILE_MISSING',
-      missing.blockers.map((b) => b.message),
+      noFiles.ready,
+      '[A17] preview 音频全 null → 无音频资产也 ready（情况 B：示例遗留不再是硬依赖）',
+      noFiles.blockers.map((b) => b.code),
     );
-    // freud_1909_loc：Renderer 真实解析的场景素材
+    // freud_1909_loc：Renderer 真实解析的场景素材仍检查
     const v1 = JSON.parse(getVersion(pid, 'scenes', 1)!.content) as {
       scenes: Array<{assetIds: string[]}>;
     };
