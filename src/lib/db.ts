@@ -105,6 +105,14 @@ CREATE TABLE IF NOT EXISTS llm_usage (        -- 逐请求成本快照（架构 
 );
 CREATE INDEX IF NOT EXISTS idx_llm_usage_project
   ON llm_usage (project_id, stage);
+-- ============ M2-C：项目生产参数（仅新增，不修改 M1 表结构） ============
+CREATE TABLE IF NOT EXISTS project_inputs ( -- 项目生产参数（非 workflow artifact）
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  schema_version TEXT NOT NULL DEFAULT '1.0',
+  config_json TEXT NOT NULL,          -- projectInputSchema JSON（写入前/读取后 zod）
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `;
 
 // M2-A Hardening：版本号数据库级唯一约束（幂等）。

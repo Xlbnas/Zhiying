@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {useCallback, useEffect, useRef, useState} from 'react';
+import {NewProjectForm} from '@/components/NewProjectForm';
 import {StatusBadge} from '@/components/StatusBadge';
 import {formatDateTime, formatDurationSec} from '@/components/format';
 
@@ -60,6 +61,7 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [showNewProject, setShowNewProject] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -130,7 +132,14 @@ export default function ProjectsPage() {
             {projects ? `共 ${projects.length} 个项目` : '加载中…'}
           </p>
         </div>
-        <div>
+        <div style={{display: 'flex', gap: 8}}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setShowNewProject((v) => !v)}
+          >
+            {showNewProject ? '收起' : '新建项目'}
+          </button>
           <input
             ref={fileRef}
             type="file"
@@ -143,7 +152,7 @@ export default function ProjectsPage() {
           />
           <button
             type="button"
-            className="btn btn-primary"
+            className="btn"
             disabled={importing}
             onClick={() => fileRef.current?.click()}
           >
@@ -152,6 +161,10 @@ export default function ProjectsPage() {
         </div>
       </div>
 
+      {showNewProject ? (
+        <NewProjectForm onClose={() => setShowNewProject(false)} />
+      ) : null}
+
       {error ? <div className="error-banner">{error}</div> : null}
 
       {projects === null ? (
@@ -159,7 +172,7 @@ export default function ProjectsPage() {
       ) : projects.length === 0 ? (
         <div className="empty">
           <p className="empty-title">还没有项目</p>
-          <p>导入一份 FullCutScenes.json，开始你的第一条知识视频。</p>
+          <p>点击「新建项目」从一个主题开始，或导入一份 FullCutScenes.json。</p>
         </div>
       ) : (
         <div className="project-grid">

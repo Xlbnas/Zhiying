@@ -123,3 +123,22 @@ production 绝不自动 fallback Mock。
 - 新增：scripts/test-m2b.ts、scripts/smoke-deepseek.ts、docs/M2-B_实现说明.md
 - 修改：.env.example（追加 LLM 配置说明）
 - 未修改：workflow transaction 层（operations.ts/stages.ts/versions.ts）、worker、API、UI、DB schema、lockfile。
+
+## 13. Deferred Hardening
+
+### DEFERRED_M2E_SCENE_SEMANTIC_VALIDATION
+
+当前 `scenesAiOutputSchema`（src/lib/prompts/scenes.ts）只验证结构形状（zod object/字段类型），
+尚未在 Schema 层强制以下语义不变量：
+
+- Scene ID 必须严格连续（S001…S00N 无跳号）
+- `end - start === duration` 逐场成立
+- `startFrame/durationInFrames` 与 FPS 换算一致
+- 全片时间轴无洞、无重叠（前场 end = 后场 start，覆盖 0 到全片时长）
+- MG Scene 的 template 必须是已注册模板 ID（与 src/remotion/templates 对齐）
+- chapterTiming 与 scenes 的 chapter 归属一致
+
+**M2-E 在 Scenes 真正进入 Renderer 前，必须增加 semantic/superRefine validator**
+（建议在 scenes prompt schema 上叠加 superRefine，或 scenesAiOutputSchema 之后
+追加独立语义校验函数，随 M2-E 批次合并逻辑一起落地）。
+

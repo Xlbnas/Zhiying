@@ -5,7 +5,6 @@ import {bundle} from '@remotion/bundler';
 import {renderMedia, selectComposition} from '@remotion/renderer';
 import {getDataDir} from '@/lib/db';
 import {
-  claimNextJob,
   completeJob,
   failJob,
   heartbeat,
@@ -15,6 +14,8 @@ import {
   requeueJob,
   type RenderJobRow,
 } from '@/lib/jobs';
+import {recoverStaleLlmJobs} from '@/lib/llm-jobs';
+import {claimNextAnyJob} from '@/lib/scheduler';
 import {
   COMPOSITION_ID,
   COMPOSITION_ID_NO_SUBTITLES,
@@ -22,11 +23,15 @@ import {
   zhiyingFullCutPropsSchema,
   type ZhiyingFullCutProps,
 } from '@/lib/scene-schema';
+import {runLlmJob} from './llm-executor';
 
 /**
- * 知影渲染 Worker（CONTRACT §4）
- * - 单调度器：每 2s claim 一次，任何时刻只跑一个任务
- * - bundle 缓存：data/bundle-cache/{templateVersion}/，无则用 @remotion/bundler 打包并缓存
+ * 知影渲染 Worker（CONTRACT §4，M2-C 扩展双队列）
+ * - 单调度器：claimNextAnyJob 对 render_jobs + llm_jobs 全局 FIFO，
+ *   任何时刻只跑一个任务（不引入并发、不拆双 scheduler）
+ * - bundle 缓存：data/bundle-cache/{templateVersion}/；
+ *   M2-C 起改为 lazy ensureBundle——只有真正 claim 到 render job 才打包，
+ *   LLM job 不依赖 Remotion bundle / Chrome / public 运行素材
  * - 渲染：selectComposition + renderMedia（h264 / crf 18）
  * - onProgress 节流（≥2s）写 heartbeat + progress，并检查 isCancelRequested
  * - SIGTERM/SIGINT 优雅退出：当前任务回 queued
@@ -146,6 +151,23 @@ async function ensureBundle(): Promise<string> {
   });
   log(`bundle ready: ${location}`);
   return location;
+}
+
+/**
+ * Lazy bundle（M2-C §十）：只有真正 claim 到 render job 才初始化 Remotion；
+ * 进程级缓存 Promise（打包一次）。失败时清空缓存让下次 render 重试。
+ * LLM job 全程不触碰本函数。
+ */
+let bundlePromise: Promise<string> | null = null;
+
+function ensureBundleLazy(): Promise<string> {
+  if (!bundlePromise) {
+    bundlePromise = ensureBundle().catch((err: unknown) => {
+      bundlePromise = null;
+      throw err;
+    });
+  }
+  return bundlePromise;
 }
 
 /** 渲染单个任务（已被 claim，status=running）。 */
@@ -286,23 +308,38 @@ async function main(): Promise<void> {
 
   log(`starting, data dir: ${getDataDir()}, role: ${role}`);
 
-  // 1. 启动：回收僵尸任务（heartbeat 超过 2min 未更新）
+  // 1. 启动：回收僵尸任务（render + llm，heartbeat 超过 2min 未更新）
   const recovered = recoverStaleJobs(STALE_TIMEOUT_MS);
   if (recovered > 0) {
-    log(`recovered ${recovered} stale job(s) → queued`);
+    log(`recovered ${recovered} stale render job(s) → queued`);
+  }
+  const recoveredLlm = recoverStaleLlmJobs(STALE_TIMEOUT_MS);
+  if (recoveredLlm > 0) {
+    log(`recovered ${recoveredLlm} stale llm job(s) → queued`);
   }
 
-  // 2. 准备 bundle（带缓存）
-  const bundleLocation = await ensureBundle();
-
-  // 3. 单调度循环：每 2s claim 一次，任何时刻只跑一个
+  // 2. 单调度循环：render + llm 全局 FIFO，任何时刻只跑一个；
+  //    Remotion bundle 延后到首个 render job 才初始化（LLM job 零依赖）
   while (!shuttingDown) {
-    const job = claimNextJob(WORKER_ID);
-    if (!job) {
+    const claimed = claimNextAnyJob(WORKER_ID);
+    if (!claimed) {
       await sleep(POLL_INTERVAL_MS);
       continue;
     }
-    await runJob(job, bundleLocation);
+    if (claimed.type === 'llm') {
+      await runLlmJob(claimed.job, {isShuttingDown: () => shuttingDown, log});
+      continue;
+    }
+    let bundleLocation: string;
+    try {
+      bundleLocation = await ensureBundleLazy();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      failJob(claimed.job.id, 'BUNDLE_ERROR', message);
+      log(`render job ${claimed.job.id} bundle init failed: ${message}`);
+      continue;
+    }
+    await runJob(claimed.job, bundleLocation);
   }
 
   log('bye.');

@@ -1,8 +1,11 @@
 /**
  * GET /api/projects — 项目列表（含每项目 render job 统计）。
+ * POST /api/projects — M2-C 新建项目（projects + project_inputs + 10 stages 原子创建）。
  * CONTRACT §5。
  */
+import { createProjectWithWorkflow } from '@/lib/projects';
 import { getDb } from '@/lib/db';
+import { jsonError, workflowErrorResponse } from '../_lib/shared';
 import type { ProjectRow } from '../_lib/shared';
 
 export const runtime = 'nodejs';
@@ -55,4 +58,29 @@ export function GET(): Response {
     .all() as ProjectListRow[];
 
   return Response.json({ projects: rows });
+}
+
+/**
+ * POST /api/projects — 新建项目（M2-C）。
+ * body: projectInputSchema（topic/coreQuestion 必填，其余高级字段有默认值）。
+ * projects + project_inputs + 10 个 project_stages 单事务原子创建，
+ * 返回 { project, inputs, stages }。
+ */
+export async function POST(req: Request): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return jsonError(400, 'invalid_json', { message: '请求体不是合法 JSON' });
+  }
+  try {
+    const result = createProjectWithWorkflow(body);
+    return Response.json(result, { status: 201 });
+  } catch (err) {
+    const mapped = workflowErrorResponse(err);
+    if (mapped) return mapped;
+    return jsonError(500, 'create_project_failed', {
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
 }

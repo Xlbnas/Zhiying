@@ -4,7 +4,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { z } from 'zod';
+import { z, ZodError } from 'zod';
 import { getDb } from '@/lib/db';
 import {
   fullCutDataSchema,
@@ -250,4 +250,27 @@ export function jsonError(
   extra?: Record<string, unknown>,
 ): Response {
   return Response.json({ error, ...extra }, { status });
+}
+
+// ---------- M2-C：workflow 错误映射 ----------
+
+/** WorkflowError / LlmJobError / ZodError → HTTP Response；未知错误返回 null。 */
+export function workflowErrorResponse(err: unknown): Response | null {
+  if (err instanceof ZodError) {
+    return jsonError(422, 'invalid_request', { message: err.message });
+  }
+  if (err instanceof Error && err.name === 'WorkflowError') {
+    const code = (err as { code?: string }).code ?? 'workflow_error';
+    const status = code === 'STAGE_NOT_FOUND' ? 404 : 409;
+    return jsonError(status, code, {
+      message: err.message,
+      ...((err as { detail?: Record<string, unknown> }).detail ?? {}),
+    });
+  }
+  if (err instanceof Error && err.name === 'LlmJobError') {
+    const code = (err as { code?: string }).code ?? 'llm_job_error';
+    const status = code === 'JOB_NOT_FOUND' ? 404 : 409;
+    return jsonError(status, code, { message: err.message });
+  }
+  return null;
 }

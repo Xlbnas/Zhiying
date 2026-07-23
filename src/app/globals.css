@@ -687,3 +687,329 @@ h1, h2, h3, h4, p {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ==========================================================================
+   M2-C：Workflow Workspace（Stepper 视觉主轴 + Stage Panel + 新建项目表单）
+   ========================================================================== */
+
+/* ---- Workflow Stepper：阶段是页面视觉主线，不是普通 Tabs ---- */
+.stepper {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin-bottom: 24px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.step {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 104px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px 12px;
+  background: transparent;
+  border: none;
+  border-top: 2px solid var(--border);
+  color: var(--muted);
+  text-align: left;
+  cursor: default;
+  transition:
+    color var(--motion-fast) var(--ease),
+    border-color var(--motion-fast) var(--ease),
+    background-color var(--motion-fast) var(--ease);
+}
+
+/* 阶段连接线：顶部 2px 轨道即连接线，current 之前为完成色 */
+.step[data-state='locked'] {
+  border-top-color: var(--status-succeeded);
+  color: var(--text-2);
+}
+
+.step[data-state='generated'],
+.step[data-state='edited'] {
+  border-top-color: var(--accent);
+  color: var(--text-2);
+}
+
+.step[data-state='stale'] {
+  border-top-color: var(--warning);
+  color: var(--text-2);
+}
+
+.step[data-current='true'] {
+  border-top-color: var(--accent-strong);
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.step[data-failed='true'] {
+  border-top-color: var(--danger);
+}
+
+.step-index {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.step[data-current='true'] .step-index {
+  color: var(--accent-strong);
+}
+
+.step-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.step-state {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.step[data-state='locked'] .step-state {
+  color: var(--status-succeeded);
+}
+
+.step[data-failed='true'] .step-state {
+  color: var(--danger);
+}
+
+.step[data-state='stale'] .step-state {
+  color: var(--warning);
+}
+
+/* ---- Stage Panel ---- */
+.stage-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.stage-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stage-panel-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.stage-panel-sub {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stage-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stage-meta {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stage-meta .mono {
+  color: var(--text-2);
+}
+
+.stage-content {
+  padding: 20px;
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-1);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.stage-editor {
+  width: 100%;
+  min-height: 320px;
+  padding: 20px;
+  background: var(--bg);
+  border: none;
+  border-top: 1px solid var(--border);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.8;
+  resize: vertical;
+  outline: none;
+}
+
+.stage-empty {
+  padding: 48px 20px;
+  text-align: center;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 阶段状态 Badge：复用全站状态系统，仅补充工作流五态 */
+.badge[data-stage-state='not_started'] {
+  color: var(--status-queued);
+  background: color-mix(in srgb, var(--status-queued) 10%, transparent);
+  border-color: color-mix(in srgb, var(--status-queued) 26%, transparent);
+}
+
+.badge[data-stage-state='generated'] {
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.badge[data-stage-state='edited'] {
+  color: var(--research);
+  background: color-mix(in srgb, var(--research) 12%, transparent);
+  border-color: color-mix(in srgb, var(--research) 30%, transparent);
+}
+
+.badge[data-stage-state='locked'] {
+  color: var(--status-succeeded);
+  background: color-mix(in srgb, var(--status-succeeded) 12%, transparent);
+  border-color: color-mix(in srgb, var(--status-succeeded) 30%, transparent);
+}
+
+.badge[data-stage-state='stale'] {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 30%, transparent);
+}
+
+/* 确认条（locked 重新生成 / 危险操作二次确认） */
+.confirm-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 20px;
+  border-bottom: 1px solid color-mix(in srgb, var(--warning) 36%, transparent);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  color: var(--warning);
+  font-size: 13px;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* 禁用提示（M2-D 尚未开放的阶段） */
+.stage-disabled-note {
+  padding: 32px 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ---- 新建项目表单 ---- */
+.new-project {
+  margin-bottom: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-field.full {
+  grid-column: 1 / -1;
+}
+
+.form-label {
+  font-size: 12px;
+  color: var(--text-2);
+  letter-spacing: 0.04em;
+}
+
+.form-input,
+.form-select {
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+  transition: border-color var(--motion-fast) var(--ease);
+}
+
+.form-input:focus,
+.form-select:focus {
+  border-color: var(--accent);
+}
+
+.form-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.form-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Legacy M1 提示条 */
+.legacy-note {
+  margin-bottom: 16px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .step {
+    min-width: 88px;
+  }
+}
