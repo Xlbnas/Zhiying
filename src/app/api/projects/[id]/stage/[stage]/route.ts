@@ -54,7 +54,8 @@ export async function GET(
          FROM llm_usage WHERE project_id = ? AND stage = ?`,
       )
       .get(id, stageParsed.data) as {requests: number; totalCostCny: number};
-    return Response.json({ stage, version, usage });
+    const {outputKind} = getStagePrompt(stageParsed.data);
+    return Response.json({ stage, version, usage, outputKind });
   } catch (err) {
     const mapped = workflowErrorResponse(err);
     if (mapped) return mapped;

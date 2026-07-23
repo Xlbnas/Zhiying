@@ -520,6 +520,142 @@ async function main(): Promise<void> {
     }
   }
 
+  // ============ V. Version History / Rollback API ============
+  {
+    const pid = newProject();
+    await genAndLock(pid, 'project_definition');
+    await genAndLock(pid, 'research');
+    // research 编辑出 v2 并锁定（历史：v1 ai_generate、v2 manual_edit）
+    editVersion({
+      projectId: pid, stage: 'research',
+      content: '# 研究 v2（人工修订）', contentType: 'markdown', source: 'manual_edit',
+    }, {confirmStale: true});
+    lockStage(pid, 'research');
+    await genAndLock(pid, 'evidence');
+
+    // V1：历史列表（metadata 倒序 + active/locked 标记 + preview）
+    const {GET: versionsGET} = await import(
+      '../src/app/api/projects/[id]/stage/[stage]/versions/route'
+    );
+    const r1 = await versionsGET(
+      new Request('http://test/api/x', {method: 'GET'}),
+      {params: Promise.resolve({id: pid, stage: 'research'})},
+    );
+    const j1 = (await r1.json()) as {
+      versions: Array<{
+        version: number; source: string; isActive: boolean; isLocked: boolean;
+        preview: string; promptVersion: string | null;
+      }>;
+    };
+    ok(
+      r1.status === 200 &&
+        j1.versions.length === 2 &&
+        j1.versions[0]!.version === 2 &&
+        j1.versions[0]!.isActive &&
+        j1.versions[0]!.isLocked &&
+        j1.versions[0]!.source === 'manual_edit' &&
+        !j1.versions[1]!.isActive &&
+        j1.versions[1]!.source === 'ai_generate',
+      '[V] 版本历史倒序 + active/locked/source 标记正确',
+    );
+    ok(
+      !('content' in j1.versions[0]!) && j1.versions[0]!.preview.length > 0,
+      '[V] metadata 模式不含完整 content，仅 preview',
+    );
+    // V2：?version=N 返回完整内容
+    const r2 = await versionsGET(
+      new Request('http://test/api/x?version=1', {method: 'GET'}),
+      {params: Promise.resolve({id: pid, stage: 'research'})},
+    );
+    const j2 = (await r2.json()) as {version: {version: number; content: string}};
+    const v1Content = getVersion(pid, 'research', 1)!.content;
+    ok(r2.status === 200 && j2.version.content === v1Content, '[V] ?version=1 返回 v1 完整内容');
+    // V3：不存在版本 → 404
+    const r3 = await versionsGET(
+      new Request('http://test/api/x?version=99', {method: 'GET'}),
+      {params: Promise.resolve({id: pid, stage: 'research'})},
+    );
+    ok(r3.status === 404, '[V] ?version=99 → 404 VERSION_NOT_FOUND');
+
+    // V4：locked rollback 无 confirmStale → 409
+    const {POST: rollbackPOST} = await import(
+      '../src/app/api/projects/[id]/stage/[stage]/rollback/route'
+    );
+    const r4 = await rollbackPOST(
+      new Request('http://test', {
+        method: 'POST',
+        body: JSON.stringify({targetVersion: 1}),
+      }),
+      {params: Promise.resolve({id: pid, stage: 'research'})},
+    );
+    ok(
+      r4.status === 409 && ((await r4.json()) as {error?: string}).error === 'CONFIRM_STALE_REQUIRED',
+      '[V] locked rollback 无 confirmStale → 409 CONFIRM_STALE_REQUIRED',
+    );
+    ok(listVersions(pid, 'research').length === 2, '[V] 拒绝后不产生版本');
+
+    // V5：confirm rollback → 复制 v1 为 v3（历史不移动）+ downstream stale
+    const r5 = await rollbackPOST(
+      new Request('http://test', {
+        method: 'POST',
+        body: JSON.stringify({targetVersion: 1, confirmStale: true}),
+      }),
+      {params: Promise.resolve({id: pid, stage: 'research'})},
+    );
+    const j5 = (await r5.json()) as {
+      stage: {status: string; active_version: number};
+      version: {version: number; source: string; content: string; note: string | null};
+    };
+    ok(
+      r5.status === 200 &&
+        j5.version.version === 3 &&
+        j5.version.source === 'rollback' &&
+        j5.version.note === 'rollback from v1' &&
+        j5.version.content === v1Content &&
+        j5.stage.status === 'edited' &&
+        j5.stage.active_version === 3,
+      '[V] rollback 复制 v1→v3（source/note/content/active/edited）',
+    );
+    ok(
+      getVersion(pid, 'research', 1)!.content === v1Content &&
+        listVersions(pid, 'research').length === 3,
+      '[V] 旧版本完全不变，版本总数 +1',
+    );
+    ok(
+      getStage(pid, 'evidence')!.status === 'stale',
+      '[V] rollback confirm 后 downstream（evidence）stale',
+    );
+    // V6：rollback 目标不存在 → 404
+    const r6 = await rollbackPOST(
+      new Request('http://test', {
+        method: 'POST',
+        body: JSON.stringify({targetVersion: 99, confirmStale: true}),
+      }),
+      {params: Promise.resolve({id: pid, stage: 'research'})},
+    );
+    ok(r6.status === 404, '[V] rollback 不存在版本 → 404');
+    // V7：rollback 后重新 lock → locked_version 指向新版本
+    lockStage(pid, 'research');
+    ok(
+      getStage(pid, 'research')!.locked_version === 3,
+      '[V] rollback 后 re-lock：locked_version=3（新版本）',
+    );
+    // V8：活跃任务期间 rollback → 409 JOB_ALREADY_ACTIVE
+    const activeJob = enqueueWorkflowStageJob(pid, 'research', {confirmStale: true});
+    const r8 = await rollbackPOST(
+      new Request('http://test', {
+        method: 'POST',
+        body: JSON.stringify({targetVersion: 1, confirmStale: true}),
+      }),
+      {params: Promise.resolve({id: pid, stage: 'research'})},
+    );
+    ok(
+      r8.status === 409 && ((await r8.json()) as {error?: string}).error === 'JOB_ALREADY_ACTIVE',
+      '[V] 活跃任务中 rollback → 409 JOB_ALREADY_ACTIVE',
+    );
+    cancelQuiet(activeJob.id);
+  }
+
   closeDb();
   fs.rmSync(path.resolve(process.cwd(), 'data', 'test-m2d'), {recursive: true, force: true});
 

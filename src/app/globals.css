@@ -1013,3 +1013,179 @@ h1, h2, h3, h4, p {
     min-width: 88px;
   }
 }
+
+/* ==========================================================================
+   M2-D：版本历史 Drawer / JSON 编辑 / Stale 提示
+   ========================================================================== */
+
+/* ---- 版本历史 Drawer（创作工作台版本轨迹，非数据库表格） ---- */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: color-mix(in srgb, #000 45%, transparent);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.drawer {
+  width: min(520px, 92vw);
+  height: 100%;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  animation: drawer-in var(--motion-slow) var(--ease) both;
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.drawer-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.version-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 12px 18px;
+  border: none;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.version-row + .version-row {
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.version-row.active {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.version-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.version-id {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.version-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.version-preview {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.version-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.badge[data-version-source='ai_generate'] {
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.badge[data-version-source='manual_edit'] {
+  color: var(--research);
+  background: color-mix(in srgb, var(--research) 12%, transparent);
+  border-color: color-mix(in srgb, var(--research) 30%, transparent);
+}
+
+.badge[data-version-source='repair'] {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 30%, transparent);
+}
+
+.badge[data-version-source='rollback'] {
+  color: var(--archive);
+  background: color-mix(in srgb, var(--archive) 14%, transparent);
+  border-color: color-mix(in srgb, var(--archive) 32%, transparent);
+}
+
+/* ---- JSON 编辑体验 ---- */
+.stage-editor.json {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  font-variant-numeric: tabular-nums;
+}
+
+.json-type-badge {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--research);
+  border: 1px solid color-mix(in srgb, var(--research) 34%, transparent);
+  border-radius: var(--radius);
+  padding: 1px 8px;
+}
+
+/* ---- Stale 提示条 ---- */
+.stale-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 20px;
+  border-bottom: 1px solid color-mix(in srgb, var(--warning) 36%, transparent);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  color: var(--warning);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ---- Drawer 内查看历史内容 ---- */
+.drawer-content-view {
+  padding: 18px;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-1);
+}
+
+.drawer-content-view.json {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}

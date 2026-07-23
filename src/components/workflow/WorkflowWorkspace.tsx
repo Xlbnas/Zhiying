@@ -2,6 +2,7 @@
 
 import {useCallback, useEffect, useRef, useState} from 'react';
 import type {WorkflowStage} from '@/lib/workflow/types';
+import {isStageEnabled} from '@/lib/workflow/capabilities';
 import {Workbench} from '@/components/Workbench';
 import {StagePanel} from './StagePanel';
 import {WorkflowStepper} from './WorkflowStepper';
@@ -114,7 +115,7 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
 
       <WorkflowStepper stages={data.stages} selected={selected} onSelect={setSelected} />
 
-      {selectedState && selected === 'project_definition' ? (
+      {selectedState && isStageEnabled(selected) ? (
         <StagePanel
           projectId={projectId}
           stageState={selectedState}
@@ -129,7 +130,7 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
             </div>
           </div>
           <div className="stage-disabled-note">
-            本阶段尚未开放（M2-C 仅开放「选题定义」，后续阶段随 M2-D/E 逐阶段开通）。
+            本阶段尚未开放（当前开放前六阶段，后续阶段随 M2-E 开通）。
           </div>
         </section>
       ) : null}
