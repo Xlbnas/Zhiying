@@ -16,6 +16,7 @@ import {
 } from '@/lib/jobs';
 import {recoverStaleLlmJobs} from '@/lib/llm-jobs';
 import {claimNextAnyJob} from '@/lib/scheduler';
+import {recoverStaleTtsJobs} from '@/lib/tts-jobs';
 import {
   COMPOSITION_ID,
   COMPOSITION_ID_NO_SUBTITLES,
@@ -24,6 +25,7 @@ import {
   type ZhiyingFullCutProps,
 } from '@/lib/scene-schema';
 import {runLlmJob} from './llm-executor';
+import {runTtsJob} from './tts-executor';
 
 /**
  * 知影渲染 Worker（CONTRACT §4，M2-C 扩展双队列）
@@ -311,7 +313,7 @@ async function main(): Promise<void> {
 
   log(`starting, data dir: ${getDataDir()}, role: ${role}`);
 
-  // 1. 启动：回收僵尸任务（render + llm，heartbeat 超过 2min 未更新）
+  // 1. 启动：回收僵尸任务（render + llm + tts，heartbeat 超过 2min 未更新）
   const recovered = recoverStaleJobs(STALE_TIMEOUT_MS);
   if (recovered > 0) {
     log(`recovered ${recovered} stale render job(s) → queued`);
@@ -323,11 +325,18 @@ async function main(): Promise<void> {
   if (recoveredLlm.cancelled > 0) {
     log(`finalized ${recoveredLlm.cancelled} cancelled stale llm job(s)`);
   }
+  const recoveredTts = recoverStaleTtsJobs(STALE_TIMEOUT_MS);
+  if (recoveredTts.requeued > 0) {
+    log(`recovered ${recoveredTts.requeued} stale tts job(s) → queued`);
+  }
+  if (recoveredTts.cancelled > 0) {
+    log(`finalized ${recoveredTts.cancelled} cancelled stale tts job(s)`);
+  }
 
-  // 2. 单调度循环：render + llm 全局 FIFO，任何时刻只跑一个；
-  //    Remotion bundle 延后到首个 render job 才初始化（LLM job 零依赖）。
+  // 2. 单调度循环：render + llm + tts 全局 FIFO，任何时刻只跑一个；
+  //    Remotion bundle 延后到首个 render job 才初始化（LLM/TTS job 零依赖）。
   //    每个被 claim 的任务由主循环创建统一 AbortController（currentController），
-  //    SIGTERM/SIGINT 经 requestShutdown 同时覆盖 render 与 llm（Hardening §一）。
+  //    SIGTERM/SIGINT 经 requestShutdown 同时覆盖三类任务。
   while (!shuttingDown) {
     const claimed = claimNextAnyJob(WORKER_ID);
     if (!claimed) {
@@ -339,6 +348,14 @@ async function main(): Promise<void> {
     try {
       if (claimed.type === 'llm') {
         await runLlmJob(claimed.job, {
+          isShuttingDown: () => shuttingDown,
+          log,
+          shutdownSignal: controller.signal,
+        });
+        continue;
+      }
+      if (claimed.type === 'tts') {
+        await runTtsJob(claimed.job, {
           isShuttingDown: () => shuttingDown,
           log,
           shutdownSignal: controller.signal,

@@ -1,8 +1,7 @@
 /**
- * GET /api/jobs — render jobs + llm jobs（M2-D §三十一），均按 queued_at 倒序。
+ * GET /api/jobs — render jobs + llm jobs + tts jobs（M3-B），均按 queued_at 倒序。
  * 可选 query: ?project_id=xxx 过滤（契约外增量，向后兼容）。
- * llmJobs 附带最近一次 llm_usage 的 provider/model（能取得则显示）。
- * CONTRACT §5。
+ * llmJobs 附带最近一次 llm_usage 的 provider/model。
  */
 import { getDb } from '@/lib/db';
 import type { RenderJobRow } from '../_lib/shared';
@@ -23,6 +22,24 @@ interface LlmJobListRow {
   error_message: string | null;
   provider: string | null;
   model: string | null;
+}
+
+interface TtsJobListRow {
+  id: string;
+  project_id: string;
+  unit_id: string;
+  provider: string;
+  voice_profile_id: string;
+  voice_profile_revision: string;
+  status: string;
+  attempt: number;
+  max_attempts: number;
+  duration_ms: number | null;
+  queued_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  error_code: string | null;
+  error_message: string | null;
 }
 
 export function GET(req: Request): Response {
@@ -67,5 +84,15 @@ export function GET(req: Request): Response {
           .all()
   ) as LlmJobListRow[];
 
-  return Response.json({ jobs, llmJobs });
+  const ttsJobs = (
+    projectId
+      ? db
+          .prepare(
+            `SELECT * FROM tts_jobs WHERE project_id = ? ORDER BY queued_at DESC`,
+          )
+          .all(projectId)
+      : db.prepare('SELECT * FROM tts_jobs ORDER BY queued_at DESC').all()
+  ) as TtsJobListRow[];
+
+  return Response.json({ jobs, llmJobs, ttsJobs });
 }

@@ -113,6 +113,30 @@ CREATE TABLE IF NOT EXISTS project_inputs ( -- 项目生产参数（非 workflow
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+-- ============ M3-B：TTS 任务队列（仅新增，不修改以上表） ============
+CREATE TABLE IF NOT EXISTS tts_jobs (   -- 一个 speech unit 一个 job（独立 retry/cancel）
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  narration_plan_artifact_id TEXT NOT NULL,
+  narration_plan_version INTEGER NOT NULL,
+  unit_id TEXT NOT NULL,              -- Narration Plan unit（N001…）
+  provider TEXT NOT NULL,             -- mock | indextts2
+  voice_profile_id TEXT NOT NULL,
+  voice_profile_revision TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',  -- queued/running/succeeded/failed/cancelled
+  payload_json TEXT NOT NULL,         -- 入队快照（source artifact/unit text/voice）
+  output_path TEXT,                   -- data 目录相对路径
+  duration_ms INTEGER,                -- ffprobe 实测（唯一时长真相）
+  audio_sha256 TEXT,
+  queued_at TEXT NOT NULL, started_at TEXT, finished_at TEXT,
+  claimed_by TEXT, claimed_at TEXT, heartbeat_at TEXT,
+  attempt INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2,
+  progress REAL DEFAULT 0,
+  error_code TEXT, error_message TEXT,
+  cancel_requested INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_tts_jobs_project_unit
+  ON tts_jobs (project_id, unit_id, status);
 `;
 
 // M2-A Hardening：版本号数据库级唯一约束（幂等）。

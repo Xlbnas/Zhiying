@@ -45,6 +45,22 @@ type LlmJobItem = {
   model: string | null;
 };
 
+type TtsJobItem = {
+  id: string;
+  projectId: string;
+  unitId: string;
+  provider: string;
+  voice: string;
+  status: string;
+  attempt: number;
+  maxAttempts: number;
+  durationMs: number | null;
+  queuedAt: string | null;
+  finishedAt: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+};
+
 const asStr = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 const asNum = (v: unknown): number | null =>
   typeof v === 'number' && Number.isFinite(v) ? v : null;
@@ -96,6 +112,31 @@ function normalizeLlmJob(raw: unknown): LlmJobItem | null {
   };
 }
 
+function normalizeTtsJob(raw: unknown): TtsJobItem | null {
+  const j = asObj(raw);
+  if (!j) return null;
+  const id = asStr(j.id);
+  const projectId = asStr(j.project_id);
+  const unitId = asStr(j.unit_id);
+  const status = asStr(j.status);
+  if (!id || !projectId || !unitId || !status) return null;
+  return {
+    id,
+    projectId,
+    unitId,
+    provider: asStr(j.provider) ?? '—',
+    voice: `${asStr(j.voice_profile_id) ?? 'default'}@${asStr(j.voice_profile_revision) ?? '1'}`,
+    status,
+    attempt: asNum(j.attempt) ?? 0,
+    maxAttempts: asNum(j.max_attempts) ?? 0,
+    durationMs: asNum(j.duration_ms),
+    queuedAt: asStr(j.queued_at),
+    finishedAt: asStr(j.finished_at),
+    errorCode: asStr(j.error_code),
+    errorMessage: asStr(j.error_message),
+  };
+}
+
 function jobDuration(job: JobItem): number | null {
   if (!job.startedAt || !job.finishedAt) return null;
   const ms = new Date(job.finishedAt).getTime() - new Date(job.startedAt).getTime();
@@ -112,6 +153,7 @@ function progressClass(status: string | null): string {
 export default function JobsPage() {
   const [jobs, setJobs] = useState<JobItem[] | null>(null);
   const [llmJobs, setLlmJobs] = useState<LlmJobItem[] | null>(null);
+  const [ttsJobs, setTtsJobs] = useState<TtsJobItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const poll = useCallback(async () => {
@@ -130,12 +172,18 @@ export default function JobsPage() {
         ? llmList.map(normalizeLlmJob).filter((j): j is LlmJobItem => j !== null)
         : [];
       setLlmJobs(llmItems);
+      const ttsList = asObj(json)?.ttsJobs;
+      const ttsItems = Array.isArray(ttsList)
+        ? ttsList.map(normalizeTtsJob).filter((j): j is TtsJobItem => j !== null)
+        : [];
+      setTtsJobs(ttsItems);
       setError(null);
     } catch {
       // 轮询失败不清空已有数据，只显示横幅
       setError('任务列表刷新失败，将持续重试');
       setJobs((prev) => prev ?? []);
       setLlmJobs((prev) => prev ?? []);
+      setTtsJobs((prev) => prev ?? []);
     }
   }, []);
 
@@ -195,6 +243,57 @@ export default function JobsPage() {
                 </div>
                 <div className="job-times mono">
                   <span>入队 {formatDateTime(job.queuedAt)}</span>
+                  {job.finishedAt ? <span>完成 {formatDateTime(job.finishedAt)}</span> : null}
+                </div>
+                <div />
+                {job.status === 'failed' && job.errorMessage ? (
+                  <div className="job-error">
+                    {job.errorCode ? `[${job.errorCode}] ` : ''}
+                    {job.errorMessage}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* TTS 音频任务区块（M3-B） */}
+      <section className="panel" aria-label="TTS 音频任务" style={{marginBottom: 20}}>
+        <div className="panel-head">
+          <span className="panel-title">TTS 音频任务</span>
+          <span className="mono" style={{fontSize: 12, color: 'var(--muted)'}}>
+            {ttsJobs?.length ?? '—'}
+          </span>
+        </div>
+        {ttsJobs === null ? (
+          <div className="loading">正在加载…</div>
+        ) : ttsJobs.length === 0 ? (
+          <div className="stage-disabled-note">暂无 TTS 音频任务</div>
+        ) : (
+          <div className="job-list">
+            {ttsJobs.map((job) => (
+              <div key={job.id} className="job-row">
+                <div>
+                  <div className="job-kind mono">{job.unitId}</div>
+                  <div className="job-id mono" title={job.id}>
+                    #{shortId(job.id)} · {shortId(job.projectId)}
+                  </div>
+                </div>
+                <div className="job-times mono">
+                  <span>
+                    尝试 {job.attempt}/{job.maxAttempts}
+                  </span>
+                  <span>
+                    {job.provider} · {job.voice}
+                  </span>
+                </div>
+                <div>
+                  <StatusBadge status={job.status} />
+                </div>
+                <div className="job-times mono">
+                  <span>入队 {formatDateTime(job.queuedAt)}</span>
+                  {job.durationMs !== null ? <span>{(job.durationMs / 1000).toFixed(1)}s</span> : null}
                   {job.finishedAt ? <span>完成 {formatDateTime(job.finishedAt)}</span> : null}
                 </div>
                 <div />
