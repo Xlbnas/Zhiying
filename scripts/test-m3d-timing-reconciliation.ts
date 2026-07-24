@@ -862,7 +862,7 @@ async function main(): Promise<void> {
 
   // H2/H6. artifact 层 semantic snapshot gate + compiler 1.1
   {
-    ok(RECONCILIATION_COMPILER_VERSION === '1.1', 'H6-0 compilerVersion = 1.1');
+    ok(RECONCILIATION_COMPILER_VERSION === '1.2', 'H6-0 compilerVersion = 1.2');
     const pid = newProject();
     await buildFullChain(pid, SCRIPT_V2);
     buildTimingReconciliation(pid);
@@ -951,15 +951,107 @@ async function main(): Promise<void> {
         getCurrentTimingReconciliation(pid) === null;
       const rebuilt = buildTimingReconciliation(pid);
       ok(
-        stale && !rebuilt.reused && rebuilt.reconciliation.compilerVersion === '1.1' &&
+        stale && !rebuilt.reused && rebuilt.reconciliation.compilerVersion === '1.2' &&
           checkTimingReconciliationReadiness(pid).status === 'ready',
-        'H6 旧 compiler 1.0 → stale → rebuild 1.1 current',
+        'H6 旧 compiler 1.0 → stale → rebuild 1.2 current',
       );
     }
     // H7. 全部被篡改 artifact 保留为历史
     {
       const rows = reconciliationArtifactRows(pid);
       ok(rows.length === 5, 'H7 被篡改 artifact 全部保留历史（不 DELETE）', rows.length);
+    }
+  }
+
+  // ===== Deterministic Output Binding Micro-Hardening（H8）=====
+  {
+    const pid = newProject();
+    await buildFullChain(pid, SCRIPT_V2);
+    const built = buildTimingReconciliation(pid);
+    const formalDurations = durationsOf(built.reconciliation);
+
+    const tamperCurrent = (
+      mutate: (rec: TimingReconciliation) => void,
+    ): {tamperedId: string; rebuilt: ReturnType<typeof buildTimingReconciliation>} => {
+      const current = getCurrentTimingReconciliation(pid);
+      if (!current) throw new Error('tamper 前提失败：无 current artifact');
+      const row = getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(current.artifact.id) as {content_json: string};
+      const json = JSON.parse(row.content_json) as TimingReconciliation;
+      mutate(json);
+      getDb().prepare('UPDATE artifacts SET content_json = ? WHERE id = ?').run(JSON.stringify(json), current.artifact.id);
+      return {tamperedId: current.artifact.id, rebuilt: buildTimingReconciliation(pid)};
+    };
+
+    // H8-A. effective timeline schema-valid semantic tamper（[100,124]→[101,123]，总量/连续性不变）
+    {
+      const current = getCurrentTimingReconciliation(pid)!;
+      const row = getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(current.artifact.id) as {content_json: string};
+      const json = JSON.parse(row.content_json) as TimingReconciliation;
+      json.scenes[0]!.effectiveEndFrame += 1;
+      json.scenes[0]!.effectiveDurationFrames += 1;
+      json.scenes[1]!.effectiveStartFrame += 1;
+      json.scenes[1]!.effectiveDurationFrames -= 1;
+      // 先断言：这不是 shape/schema corruption
+      const stillValid = timingReconciliationSchema.safeParse(json).success;
+      getDb().prepare('UPDATE artifacts SET content_json = ? WHERE id = ?').run(JSON.stringify(json), current.artifact.id);
+      const notCurrent = getCurrentTimingReconciliation(pid) === null;
+      const stale = checkTimingReconciliationReadiness(pid).status === 'stale';
+      const rebuilt = buildTimingReconciliation(pid);
+      ok(
+        stillValid && notCurrent && stale && !rebuilt.reused &&
+          rebuilt.artifact.id !== current.artifact.id,
+        'H8-A effective timeline schema-valid tamper → not current / stale / 不 reuse',
+      );
+      ok(
+        JSON.stringify(durationsOf(rebuilt.reconciliation)) === JSON.stringify(formalDurations),
+        'H8-A2 rebuild 恢复正式 compiler output（effective 未被 tamper 污染）',
+        [durationsOf(rebuilt.reconciliation), formalDurations],
+      );
+    }
+    // H8-B. unresolvedNarrationUnitIds schema-valid semantic tamper（['N004']→[]）
+    {
+      const current = getCurrentTimingReconciliation(pid)!;
+      const row = getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(current.artifact.id) as {content_json: string};
+      const json = JSON.parse(row.content_json) as TimingReconciliation;
+      json.unresolvedNarrationUnitIds = [];
+      const parsedValid = timingReconciliationSchema.safeParse(json).success;
+      getDb().prepare('UPDATE artifacts SET content_json = ? WHERE id = ?').run(JSON.stringify(json), current.artifact.id);
+      const notCurrent = getCurrentTimingReconciliation(pid) === null;
+      const stale = checkTimingReconciliationReadiness(pid).status === 'stale';
+      const rebuilt = buildTimingReconciliation(pid);
+      ok(
+        parsedValid && notCurrent && stale && !rebuilt.reused &&
+          rebuilt.artifact.id !== current.artifact.id,
+        'H8-B unresolved list schema-valid tamper → not current / stale / 不 reuse',
+      );
+      ok(
+        JSON.stringify(rebuilt.reconciliation.unresolvedNarrationUnitIds) ===
+          JSON.stringify(built.reconciliation.unresolvedNarrationUnitIds),
+        'H8-B2 rebuild 后 unresolved == current subtitle.timing.unresolvedUnitIds',
+        rebuilt.reconciliation.unresolvedNarrationUnitIds,
+      );
+    }
+    // H8-C. deterministic equality positive case：untouched artifact → idempotent reuse
+    {
+      const again = buildTimingReconciliation(pid);
+      ok(again.reused, 'H8-C 正常 artifact → second Build reused=true（gate 不破坏幂等）');
+    }
+    // H8-D. 旧 compiler 1.1 → stale → rebuild 1.2 current
+    {
+      const {tamperedId, rebuilt} = tamperCurrent((rec) => {
+        (rec as {compilerVersion: string}).compilerVersion = '1.1';
+      });
+      ok(
+        !rebuilt.reused && rebuilt.artifact.id !== tamperedId &&
+          rebuilt.reconciliation.compilerVersion === '1.2' &&
+          checkTimingReconciliationReadiness(pid).status === 'ready',
+        'H8-D 旧 compiler 1.1 → stale → rebuild 1.2 current',
+      );
+    }
+    // H8-E. historical retention：全部 tampered/old artifact 保留
+    {
+      const rows = reconciliationArtifactRows(pid);
+      ok(rows.length === 4, 'H8-E tampered/old artifact 全部保留历史（不 DELETE）', rows.length);
     }
   }
 

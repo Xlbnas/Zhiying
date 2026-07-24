@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
 import {getDb} from '../db';
 import {getCurrentNarrationAudioArtifact} from '../narration/audio';
 import {getCurrentNarrationPlan} from '../narration/plan';
@@ -8,7 +9,11 @@ import {getCurrentSubtitleTiming} from '../subtitles/timing';
 import {validateScenesSemantics} from '../workflow/scenes-semantic-validation';
 import {getStage} from '../workflow/stages';
 import {getVersion} from '../workflow/versions';
-import {compileTimingReconciliation, ReconciliationCompileError} from './compiler';
+import {
+  compileTimingReconciliation,
+  ReconciliationCompileError,
+  type ReconciliationSourceRefs,
+} from './compiler';
 import {
   RECONCILIATION_COMPILER_VERSION,
   TIMING_RECONCILIATION_ARTIFACT_KIND,
@@ -167,7 +172,51 @@ function matchesSceneSnapshot(rec: TimingReconciliation, scenes: ScenesAiOutput)
   );
 }
 
-/** current 判定：全 provenance + scene semantic snapshot 与三 current source 逐项相等 + compilerVersion。 */
+/** 由 current sources 构造与正式 build 完全相同的 compiler refs（唯一构造点，防双实现漂移）。 */
+function sourceRefsOf(src: CurrentSources): ReconciliationSourceRefs {
+  const manifestSrc = src.audio.manifest.source;
+  return {
+    scenesVersionId: src.scenes.versionId,
+    scenesVersion: src.scenes.version,
+    narrationAudioArtifactId: src.audio.artifact.id,
+    narrationAudioArtifactVersion: src.audio.artifact.version,
+    subtitleTimingArtifactId: src.subtitle.artifact.id,
+    subtitleTimingArtifactVersion: src.subtitle.artifact.version,
+    narrationPlanArtifactId: manifestSrc.narrationPlanArtifactId,
+    narrationPlanArtifactVersion: manifestSrc.narrationPlanArtifactVersion,
+    scriptV2Version: manifestSrc.scriptV2Version,
+    narrationCompilerVersion: manifestSrc.compilerVersion,
+    subtitleCompilerVersion: src.subtitle.timing.compilerVersion,
+    masterSha256: src.audio.manifest.master.sha256,
+    masterDurationMs: src.audio.manifest.master.durationMs,
+  };
+}
+
+/**
+ * Deterministic Recompile Equality Gate（M3-D Micro-Hardening）：
+ * compileTimingReconciliation 是 pure/deterministic 的唯一算法真相——
+ * current gate 不复制 allocation，而是用它对 current sources 重算 expected output，
+ * 要求 persisted artifact 与 expected 完全相等（isDeepStrictEqual）。
+ * 这样 effective timeline / unresolved / sourceVisual / target 等一切
+ * compiler-owned derived output 的 schema-valid semantic tamper 都无法蒙混。
+ * 用 current sources 重编译抛契约错误 → 该 artifact 绝不 current/reuse（返回 false，不 crash）。
+ */
+function matchesDeterministicOutput(rec: TimingReconciliation, src: CurrentSources): boolean {
+  let expected: TimingReconciliation;
+  try {
+    expected = compileTimingReconciliation({
+      scenes: src.scenes.data,
+      refs: sourceRefsOf(src),
+      unresolvedNarrationUnitIds: src.subtitle.timing.unresolvedUnitIds,
+    });
+  } catch (err) {
+    if (err instanceof ReconciliationCompileError) return false;
+    throw err;
+  }
+  return isDeepStrictEqual(rec, expected);
+}
+
+/** current 判定：cheap gates（provenance + compilerVersion + scene snapshot）→ deterministic recompile equality。 */
 function matchesCurrentSource(rec: TimingReconciliation, src: CurrentSources): boolean {
   const manifestSrc = src.audio.manifest.source;
   return (
@@ -185,7 +234,8 @@ function matchesCurrentSource(rec: TimingReconciliation, src: CurrentSources): b
     rec.source.masterSha256 === src.audio.manifest.master.sha256 &&
     rec.source.masterDurationMs === src.audio.manifest.master.durationMs &&
     rec.compilerVersion === RECONCILIATION_COMPILER_VERSION &&
-    matchesSceneSnapshot(rec, src.scenes.data)
+    matchesSceneSnapshot(rec, src.scenes.data) &&
+    matchesDeterministicOutput(rec, src)
   );
 }
 
@@ -342,21 +392,7 @@ export function buildTimingReconciliation(projectId: string): {
     try {
       reconciliation = compileTimingReconciliation({
         scenes: scenes.data,
-        refs: {
-          scenesVersionId: scenes.versionId,
-          scenesVersion: scenes.version,
-          narrationAudioArtifactId: audio.artifact.id,
-          narrationAudioArtifactVersion: audio.artifact.version,
-          subtitleTimingArtifactId: subtitle.artifact.id,
-          subtitleTimingArtifactVersion: subtitle.artifact.version,
-          narrationPlanArtifactId: audio.manifest.source.narrationPlanArtifactId,
-          narrationPlanArtifactVersion: audio.manifest.source.narrationPlanArtifactVersion,
-          scriptV2Version: audio.manifest.source.scriptV2Version,
-          narrationCompilerVersion: audio.manifest.source.compilerVersion,
-          subtitleCompilerVersion: subtitle.timing.compilerVersion,
-          masterSha256: audio.manifest.master.sha256,
-          masterDurationMs: audio.manifest.master.durationMs,
-        },
+        refs: sourceRefsOf(src),
         unresolvedNarrationUnitIds: subtitle.timing.unresolvedUnitIds,
       });
     } catch (err) {

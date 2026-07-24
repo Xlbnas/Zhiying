@@ -22,8 +22,11 @@ export const TIMING_RECONCILIATION_SCHEMA_VERSION = 'timing-reconciliation@1.0';
  * current/reuse semantic contract 变强（target exact Math.round 校验、
  * current Scenes semantic snapshot 绑定、adapter source timing 兼容性校验）——
  * 旧 compiler@1.0 artifact 不再自动 current/reuse，保留为历史，重新 Build → 1.1。
+ * M3-D Deterministic Output Binding Micro-Hardening：current/reuse 进一步要求
+ * persisted artifact === deterministic compiler(current sources) 的完整输出——
+ * 旧 compiler@1.1 artifact 保留为历史，stale 不 reuse，重新 Build → 1.2。
  */
-export const RECONCILIATION_COMPILER_VERSION = '1.1';
+export const RECONCILIATION_COMPILER_VERSION = '1.2';
 export const TIMING_RECONCILIATION_ARTIFACT_KIND = 'timing_reconciliation';
 /** bounded cumulative proportional allocation（clamp 是正式算法一部分，非 silent repair）。 */
 export const RECONCILIATION_STRATEGY = 'bounded_cumulative_proportional_frames';
