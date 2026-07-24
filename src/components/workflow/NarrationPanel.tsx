@@ -59,6 +59,39 @@ interface AudioOverview {
   }>;
 }
 
+interface SubtitleCue {
+  id: number;
+  segmentId: string;
+  unitId: string;
+  chapter: number;
+  text: string;
+  startMs: number;
+  endMs: number;
+}
+
+interface SubtitleReadiness {
+  status: 'ready' | 'stale' | 'missing' | 'not_ready';
+  compilerVersion: string;
+  sourceAudio: {
+    artifactId: string;
+    artifactVersion: number;
+    masterDurationMs: number;
+  } | null;
+  artifactVersion: number | null;
+  cueCount: number;
+  timelineDurationMs: number | null;
+  unresolvedCount: number;
+  timing: {cues: SubtitleCue[]} | null;
+}
+
+function formatCueTime(ms: number): string {
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.floor((ms % 60000) / 1000);
+  const millis = ms % 1000;
+  const pad = (n: number, w: number): string => String(n).padStart(w, '0');
+  return `${pad(minutes, 2)}:${pad(seconds, 2)}.${pad(millis, 3)}`;
+}
+
 const STATUS_LABELS: Record<string, string> = {
   ready: '已就绪',
   stale: '已失效',
@@ -73,6 +106,13 @@ const AUDIO_STATUS_LABELS: Record<string, string> = {
   stale: '已失效',
   missing: '未生成',
   not_ready: '待汇总',
+};
+
+const SUBTITLE_STATUS_LABELS: Record<string, string> = {
+  ready: '已就绪',
+  stale: '已失效',
+  missing: '未生成',
+  not_ready: '待音频',
 };
 
 const KIND_LABELS: Record<string, string> = {
@@ -92,21 +132,28 @@ export function NarrationPanel({
 }) {
   const [data, setData] = useState<NarrationReadiness | null>(null);
   const [audio, setAudio] = useState<AudioOverview | null>(null);
+  const [subtitle, setSubtitle] = useState<SubtitleReadiness | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [audioBusy, setAudioBusy] = useState<string | null>(null);
+  const [subtitleBusy, setSubtitleBusy] = useState(false);
   const [showUnits, setShowUnits] = useState(false);
+  const [showCues, setShowCues] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [planRes, audioRes] = await Promise.all([
+      const [planRes, audioRes, subtitleRes] = await Promise.all([
         fetch(`/api/projects/${projectId}/narration-plan`, {cache: 'no-store'}),
         fetch(`/api/projects/${projectId}/narration-audio`, {cache: 'no-store'}),
+        fetch(`/api/projects/${projectId}/subtitle-timing`, {cache: 'no-store'}),
       ]);
       if (!planRes.ok) throw new Error(`HTTP ${planRes.status}`);
       setData((await planRes.json()) as NarrationReadiness);
       if (audioRes.ok) {
         setAudio((await audioRes.json()) as AudioOverview);
+      }
+      if (subtitleRes.ok) {
+        setSubtitle((await subtitleRes.json()) as SubtitleReadiness);
       }
       setError(null);
     } catch {
@@ -163,6 +210,23 @@ export function NarrationPanel({
       setError(err instanceof Error ? err.message : '取消失败');
     } finally {
       setAudioBusy(null);
+    }
+  }, [projectId, load]);
+
+  const buildSubtitles = useCallback(async () => {
+    setSubtitleBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/subtitle-timing`, {method: 'POST'});
+      if (!res.ok) {
+        const json = (await res.json().catch(() => null)) as {message?: string} | null;
+        throw new Error(json?.message ?? `HTTP ${res.status}`);
+      }
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '字幕构建失败');
+    } finally {
+      setSubtitleBusy(false);
     }
   }, [projectId, load]);
 
@@ -391,6 +455,83 @@ export function NarrationPanel({
                 src={`/api/projects/${projectId}/narration-audio/master`}
                 style={{width: '100%', height: 32}}
               />
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {/* Subtitle Timing 区（M3-C）：Narration Master → deterministic 字幕时间轴 */}
+      {subtitle ? (
+        <>
+          <div className="panel-head" style={{borderTop: '1px solid var(--border)'}}>
+            <span className="panel-title">SUBTITLE TIMING（M3-C · 句级 · 实测 unit + 比例估算）</span>
+            <div className="panel-head-actions">
+              {subtitle.status === 'ready' && subtitle.timing ? (
+                <button type="button" className="btn btn-sm" onClick={() => setShowCues((v) => !v)}>
+                  {showCues ? '收起 Cues' : '查看 Cues'}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={subtitleBusy || !subtitle.sourceAudio}
+                onClick={() => void buildSubtitles()}
+              >
+                {subtitleBusy
+                  ? '构建中…'
+                  : subtitle.status === 'ready'
+                    ? '重新构建字幕'
+                    : 'Build Subtitle Timing'}
+              </button>
+            </div>
+          </div>
+          <div className="stage-meta">
+            <span className="badge" data-stage-state={subtitle.status === 'ready' ? 'locked' : subtitle.status === 'stale' ? 'stale' : 'not_started'}>
+              {SUBTITLE_STATUS_LABELS[subtitle.status]}
+            </span>
+            {subtitle.sourceAudio ? (
+              <span>
+                Source Audio Manifest <span className="mono">v{subtitle.sourceAudio.artifactVersion}</span>
+              </span>
+            ) : null}
+            <span>
+              Subtitle Compiler <span className="mono">v{subtitle.compilerVersion}</span>
+            </span>
+            {subtitle.status === 'ready' ? (
+              <>
+                <span>
+                  Cue Count <span className="mono">{subtitle.cueCount}</span>
+                </span>
+                <span>
+                  Timeline <span className="mono">{((subtitle.timelineDurationMs ?? 0) / 1000).toFixed(1)}s</span>
+                </span>
+                <span>
+                  Unresolved <span className="mono">{subtitle.unresolvedCount}</span>
+                </span>
+                <span className="mono">artifact v{subtitle.artifactVersion}</span>
+              </>
+            ) : null}
+            {subtitle.status === 'stale' ? (
+              <span>字幕已过期（source audio 或 compiler 已前进）——请重新构建</span>
+            ) : null}
+            {subtitle.status === 'not_ready' ? (
+              <span>等待 Narration Audio 就绪后才能构建字幕</span>
+            ) : null}
+          </div>
+          {showCues && subtitle.timing ? (
+            <div className="scene-list" style={{maxHeight: 320}}>
+              {subtitle.timing.cues.map((cue) => (
+                <div key={cue.id} className="scene-row" style={{cursor: 'default', gridTemplateColumns: '72px 1fr auto'}}>
+                  <span className="scene-id mono">#{cue.id}</span>
+                  <span className="scene-line">
+                    <span className="mono" style={{marginRight: 8, color: 'var(--muted)'}}>
+                      {formatCueTime(cue.startMs)} → {formatCueTime(cue.endMs)}
+                    </span>
+                    {cue.text}
+                  </span>
+                  <span className="scene-dur mono">{cue.segmentId} · 第{cue.chapter}章</span>
+                </div>
+              ))}
             </div>
           ) : null}
         </>

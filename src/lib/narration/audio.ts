@@ -368,7 +368,9 @@ interface ArtifactRow {
  * master 缺失/越界/过小的 artifact 不认作 current（skip，保留历史行，不 DELETE），
  * overview 落回 not_ready，由 finalize 重新生成。
  */
-function readCurrentManifest(projectId: string): NarrationAudioManifest | null {
+function readCurrentManifestRow(
+  projectId: string,
+): {artifact: ArtifactRow; manifest: NarrationAudioManifest} | null {
   const current = getCurrentNarrationPlan(projectId);
   if (!current) return null;
   const rows = getDb()
@@ -392,13 +394,34 @@ function readCurrentManifest(projectId: string): NarrationAudioManifest | null {
         const abs = path.resolve(dataDir, parsed.data.master.filePath);
         if (!abs.startsWith(dataDir + path.sep)) continue; // path traversal → 不认
         if (!fs.existsSync(abs) || fs.statSync(abs).size <= 44) continue; // 缺失/过小 → 不认
-        return parsed.data;
+        return {artifact: row, manifest: parsed.data};
       }
     } catch {
       // 非法 artifact 跳过
     }
   }
   return null;
+}
+
+function readCurrentManifest(projectId: string): NarrationAudioManifest | null {
+  return readCurrentManifestRow(projectId)?.manifest ?? null;
+}
+
+/**
+ * M3-C 只读扩展：暴露 current Narration Audio artifact 的 id/version + manifest。
+ * 与 readCurrentManifest 走完全相同的防线（plan current / source gate /
+ * provider/voice gate / master 路径安全 / master 文件存在），不改变 M3-B contract。
+ */
+export function getCurrentNarrationAudioArtifact(projectId: string): {
+  artifact: {id: string; version: number};
+  manifest: NarrationAudioManifest;
+} | null {
+  const row = readCurrentManifestRow(projectId);
+  if (!row) return null;
+  return {
+    artifact: {id: row.artifact.id, version: row.artifact.version},
+    manifest: row.manifest,
+  };
 }
 
 // ---------- Master 构建（ffmpeg 统一 48k/mono/s16） ----------
