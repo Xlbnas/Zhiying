@@ -10,6 +10,8 @@ import {
   enqueueTtsJobTx,
   getActiveTtsJob,
   getLatestSucceededTtsJob,
+  ttsJobResultSchema,
+  type TtsJobResult,
   type TtsJobRow,
 } from '../tts-jobs';
 import {getCurrentNarrationPlan} from './plan';
@@ -81,6 +83,7 @@ export const narrationAudioManifestSchema = z.object({
   provider: z.object({
     name: z.string(),
     model: z.string(),
+    providerVersion: z.string().nullable(),
     providerCommit: z.string().nullable(),
     voiceProfile: z.object({id: z.string(), revision: z.string()}),
     useRandom: z.literal(false),
@@ -109,7 +112,8 @@ export type NarrationAudioManifest = z.infer<typeof narrationAudioManifestSchema
 export type NarrationAudioErrorCode =
   | 'PROJECT_NOT_FOUND'
   | 'LEGACY_PROJECT'
-  | 'NARRATION_PLAN_NOT_CURRENT';
+  | 'NARRATION_PLAN_NOT_CURRENT'
+  | 'PROVIDER_SNAPSHOT_MISMATCH';
 
 export class NarrationAudioError extends Error {
   constructor(
@@ -232,6 +236,12 @@ export interface NarrationAudioOverview {
   speechComplete: number;
   speechTotal: number;
   master: {filePath: string; durationMs: number} | null;
+  /** manifest ready 时透出真实 Provider 快照（源自 job.result_json，非推断）。 */
+  providerDetail: {
+    model: string;
+    providerVersion: string | null;
+    providerCommit: string | null;
+  } | null;
   units: UnitAudioProgress[];
 }
 
@@ -298,6 +308,7 @@ export function getNarrationAudioOverview(projectId: string): NarrationAudioOver
       speechComplete: 0,
       speechTotal: 0,
       master: null,
+      providerDetail: null,
       units: [],
     };
   }
@@ -330,6 +341,13 @@ export function getNarrationAudioOverview(projectId: string): NarrationAudioOver
     speechTotal: speechUnits.length,
     master: manifest
       ? {filePath: manifest.master.filePath, durationMs: manifest.master.durationMs}
+      : null,
+    providerDetail: manifest
+      ? {
+          model: manifest.provider.model,
+          providerVersion: manifest.provider.providerVersion,
+          providerCommit: manifest.provider.providerCommit,
+        }
       : null,
     units,
   };
@@ -408,9 +426,11 @@ function wrapPcmAsWav(pcm: Buffer): Buffer {
 // ---------- Finalize ----------
 
 /**
- * 幂等 finalize（单 BEGIN IMMEDIATE 检查，文件操作在事务外完成的安全顺序）：
- * plan current + 全部 speech succeeded → 构建 master + manifest artifact。
- * 已存在同 (plan, provider, voice) manifest → 直接复用。
+ * 幂等 finalize（M3-B Hardening §十四–二十）：
+ * plan current + 全部 speech succeeded 且 result_json 合法
+ * → Provider 快照一致性校验（mixed → PROVIDER_SNAPSHOT_MISMATCH）
+ * → master 写唯一 tmp → BEGIN IMMEDIATE 内重查（plan 仍 current + 无同快照 manifest）
+ * → 赢家 rename 正式文件，输家删 tmp 复用已有。
  */
 export function tryFinalizeNarrationAudio(projectId: string): NarrationAudioManifest | null {
   const db = getDb();
@@ -423,19 +443,49 @@ export function tryFinalizeNarrationAudio(projectId: string): NarrationAudioMani
   const existing = readCurrentManifest(projectId);
   if (existing) return existing;
 
-  // 收集全部 speech 输出（必须全部 succeeded 且同源同 voice）
+  // 收集全部 speech 输出（必须全部 succeeded 且 result_json 合法——§十四唯一 metadata 来源）
   const speechUnits = plan.units.filter((u) => u.kind === 'speech');
-  const outputs: Array<{unit: NarrationUnit; job: TtsJobRow}> = [];
+  const outputs: Array<{unit: NarrationUnit; job: TtsJobRow; result: TtsJobResult}> = [];
   for (const unit of speechUnits) {
     const job = getLatestSucceededTtsJob(
       projectId, artifact.id, unit.id, provider.name, voice.id, voice.revision,
     );
-    if (!job || !job.output_path || job.duration_ms === null || !job.audio_sha256) {
-      return null; // 未全部完成
+    if (!job || !job.output_path || job.duration_ms === null || !job.audio_sha256 || !job.result_json) {
+      return null; // 未全部完成（或缺 result_json 的旧数据）→ 不允许 finalize
     }
-    outputs.push({unit, job});
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(job.result_json);
+    } catch {
+      return null;
+    }
+    const parsed = ttsJobResultSchema.safeParse(parsedJson);
+    if (!parsed.success) {
+      return null;
+    }
+    outputs.push({unit, job, result: parsed.data});
   }
   if (outputs.length === 0) return null;
+
+  // §十五/十六：同一 manifest 的 speech 输出必须属于同一生产条件快照
+  const first = outputs[0]!.result;
+  const mixed = outputs.some(
+    (o) =>
+      o.result.provider !== first.provider ||
+      o.result.model !== first.model ||
+      o.result.providerVersion !== first.providerVersion ||
+      o.result.providerCommit !== first.providerCommit ||
+      o.result.settings.voiceProfileId !== first.settings.voiceProfileId ||
+      o.result.settings.voiceProfileRevision !== first.settings.voiceProfileRevision ||
+      o.result.settings.useRandom !== first.settings.useRandom,
+  );
+  if (mixed) {
+    throw new NarrationAudioError(
+      'PROVIDER_SNAPSHOT_MISMATCH',
+      '同一 Narration Plan 的 speech 输出来自不同 provider/model/version/commit/voice 快照，' +
+        '拒绝生成混合 manifest（请核查 sidecar 是否在生成过程中被升级）',
+    );
+  }
 
   // 构建 master PCM（顺序严格按 plan units）
   const chunks: Buffer[] = [];
@@ -462,93 +512,113 @@ export function tryFinalizeNarrationAudio(projectId: string): NarrationAudioMani
     `narration-master-v${artifact.version}-${provider.name}-${voice.id}@${voice.revision}.wav`,
   );
   const absMaster = path.join(getDataDir(), relMaster);
+  // §二十：先写唯一 tmp，最终事务裁决赢家后才 rename，避免并发 finalize 写同一正式文件
+  const absTmpMaster = `${absMaster}.${crypto.randomUUID()}.tmp`;
   fs.mkdirSync(path.dirname(absMaster), {recursive: true});
-  fs.writeFileSync(absMaster, masterWav);
+  fs.writeFileSync(absTmpMaster, masterWav);
   const masterSha = crypto.createHash('sha256').update(masterWav).digest('hex');
 
-  const manifest: NarrationAudioManifest = narrationAudioManifestSchema.parse({
-    schemaVersion: NARRATION_AUDIO_SCHEMA_VERSION,
-    source: {
-      narrationPlanArtifactId: artifact.id,
-      narrationPlanArtifactVersion: artifact.version,
-      scriptV2Version: plan.source.version,
-      compilerVersion: plan.compilerVersion,
-    },
-    provider: {
-      name: provider.name,
-      model: provider.name === 'mock' ? 'mock-tone-v1' : 'IndexTTS-2',
-      providerCommit: null,
-      voiceProfile: voice,
-      useRandom: false,
-    },
-    units: plan.units.map((unit) => {
-      if (unit.kind === 'speech') {
-        const output = outputs.find((o) => o.unit.id === unit.id)!;
-        const probePath = path.join(getDataDir(), output.job.output_path!);
-        const probe = execFileSync('ffprobe', [
-          '-v', 'error', '-print_format', 'json', '-show_streams', probePath,
-        ], {encoding: 'utf8'});
-        const stream = (JSON.parse(probe) as {streams?: Array<{sample_rate?: string; channels?: number}>})
-          .streams?.[0];
-        return {
-          unitId: unit.id,
-          kind: 'speech' as const,
-          text: unit.text ?? '',
-          filePath: output.job.output_path!,
-          durationMs: output.job.duration_ms!,
-          sampleRate: Number(stream?.sample_rate ?? 0),
-          channels: stream?.channels ?? 0,
-          sha256: output.job.audio_sha256!,
-          ttsJobId: output.job.id,
-        };
-      }
-      if (unit.kind === 'pause') {
-        return {
-          unitId: unit.id,
-          kind: 'pause' as const,
-          directive: unit.directive,
-          durationMs: unit.pauseMs,
-          resolved: unit.pauseMs !== null,
-        };
-      }
-      if (unit.kind === 'visual_breath') {
-        return {unitId: unit.id, kind: 'visual_breath' as const, durationMs: null, resolved: false as const};
-      }
-      return {unitId: unit.id, kind: 'prosody' as const, directive: unit.directive ?? '', appliedToTts: false as const};
-    }),
-    master: {
-      filePath: relMaster,
-      durationMs: masterDurationMs,
-      sha256: masterSha,
-      sampleRate: MASTER_SAMPLE_RATE,
-      channels: MASTER_CHANNELS,
-    },
-  });
+  try {
+    const manifest: NarrationAudioManifest = narrationAudioManifestSchema.parse({
+      schemaVersion: NARRATION_AUDIO_SCHEMA_VERSION,
+      source: {
+        narrationPlanArtifactId: artifact.id,
+        narrationPlanArtifactVersion: artifact.version,
+        scriptV2Version: plan.source.version,
+        compilerVersion: plan.compilerVersion,
+      },
+      provider: {
+        name: first.provider,
+        model: first.model,
+        providerVersion: first.providerVersion,
+        providerCommit: first.providerCommit,
+        voiceProfile: {
+          id: first.settings.voiceProfileId,
+          revision: first.settings.voiceProfileRevision,
+        },
+        useRandom: false,
+      },
+      units: plan.units.map((unit) => {
+        if (unit.kind === 'speech') {
+          const output = outputs.find((o) => o.unit.id === unit.id)!;
+          return {
+            unitId: unit.id,
+            kind: 'speech' as const,
+            text: unit.text ?? '',
+            filePath: output.job.output_path!,
+            durationMs: output.job.duration_ms!,
+            sampleRate: output.result.audio.sampleRate,
+            channels: output.result.audio.channels,
+            sha256: output.job.audio_sha256!,
+            ttsJobId: output.job.id,
+          };
+        }
+        if (unit.kind === 'pause') {
+          return {
+            unitId: unit.id,
+            kind: 'pause' as const,
+            directive: unit.directive,
+            durationMs: unit.pauseMs,
+            resolved: unit.pauseMs !== null,
+          };
+        }
+        if (unit.kind === 'visual_breath') {
+          return {unitId: unit.id, kind: 'visual_breath' as const, durationMs: null, resolved: false as const};
+        }
+        return {unitId: unit.id, kind: 'prosody' as const, directive: unit.directive ?? '', appliedToTts: false as const};
+      }),
+      master: {
+        filePath: relMaster,
+        durationMs: masterDurationMs,
+        sha256: masterSha,
+        sampleRate: MASTER_SAMPLE_RATE,
+        channels: MASTER_CHANNELS,
+      },
+    });
 
-  // 时长一致性防线：master ≈ speech + 显式 pause（允许帧取整容差 100ms）
-  if (Math.abs(masterDurationMs - expectedMs) > 100) {
-    throw new NarrationAudioError(
-      'NARRATION_PLAN_NOT_CURRENT',
-      `master 时长 ${masterDurationMs}ms 与预期 ${expectedMs}ms 偏差过大`,
-    );
+    // 时长一致性防线：master ≈ speech + 显式 pause（允许帧取整容差 100ms）
+    if (Math.abs(masterDurationMs - expectedMs) > 100) {
+      throw new NarrationAudioError(
+        'NARRATION_PLAN_NOT_CURRENT',
+        `master 时长 ${masterDurationMs}ms 与预期 ${expectedMs}ms 偏差过大`,
+      );
+    }
+
+    // §十九：最终 INSERT 的 BEGIN IMMEDIATE 内重新裁决——plan 仍 current 且无同快照 manifest
+    type TxOutcome =
+      | {outcome: 'inserted'}
+      | {outcome: 'reuse'; manifest: NarrationAudioManifest}
+      | {outcome: 'stale'};
+    const tx = db.transaction((): TxOutcome => {
+      const still = getCurrentNarrationPlan(projectId);
+      if (!still || still.artifact.id !== artifact.id) return {outcome: 'stale'};
+      const won = readCurrentManifest(projectId);
+      if (won) return {outcome: 'reuse', manifest: won};
+      db.prepare(
+        `INSERT INTO artifacts (id, project_id, kind, version, content_json, file_path, created_at)
+         VALUES (?, ?, ?,
+           (SELECT COALESCE(MAX(version), 0) + 1 FROM artifacts WHERE project_id = ? AND kind = ?),
+           ?, NULL, ?)`,
+      ).run(
+        crypto.randomUUID(),
+        projectId,
+        NARRATION_AUDIO_ARTIFACT_KIND,
+        projectId,
+        NARRATION_AUDIO_ARTIFACT_KIND,
+        JSON.stringify(manifest),
+        new Date().toISOString(),
+      );
+      return {outcome: 'inserted'};
+    });
+    const txResult = tx.immediate();
+    if (txResult.outcome === 'inserted') {
+      fs.renameSync(absTmpMaster, absMaster);
+      return manifest;
+    }
+    fs.rmSync(absTmpMaster, {force: true});
+    return txResult.outcome === 'reuse' ? txResult.manifest : null;
+  } catch (err) {
+    fs.rmSync(absTmpMaster, {force: true});
+    throw err;
   }
-
-  const tx = db.transaction((): void => {
-    db.prepare(
-      `INSERT INTO artifacts (id, project_id, kind, version, content_json, file_path, created_at)
-       VALUES (?, ?, ?,
-         (SELECT COALESCE(MAX(version), 0) + 1 FROM artifacts WHERE project_id = ? AND kind = ?),
-         ?, NULL, ?)`,
-    ).run(
-      crypto.randomUUID(),
-      projectId,
-      NARRATION_AUDIO_ARTIFACT_KIND,
-      projectId,
-      NARRATION_AUDIO_ARTIFACT_KIND,
-      JSON.stringify(manifest),
-      new Date().toISOString(),
-    );
-  });
-  tx.immediate();
-  return manifest;
 }

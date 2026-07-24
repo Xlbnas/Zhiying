@@ -17,11 +17,20 @@ export const runtime = 'nodejs';
 
 function audioErrorResponse(err: unknown): Response {
   if (err instanceof NarrationAudioError) {
-    const status =
-      err.code === 'PROJECT_NOT_FOUND' ? 404 : err.code === 'LEGACY_PROJECT' ? 409 : 409;
+    const status = err.code === 'PROJECT_NOT_FOUND' ? 404 : 409;
     return jsonError(status, err.code, { message: err.message });
   }
   throw err;
+}
+
+/** lazy finalize 的安全包装：snapshot 冲突等契约错误 → 409，不 500。 */
+function tryFinalizeSafely(id: string): Response | null {
+  try {
+    tryFinalizeNarrationAudio(id);
+    return null;
+  } catch (err) {
+    return audioErrorResponse(err);
+  }
 }
 
 export async function GET(
@@ -36,7 +45,8 @@ export async function GET(
   // lazy finalize：全部 speech 完成但 manifest 未生成时补齐
   const overview = getNarrationAudioOverview(id);
   if (overview.status === 'not_ready') {
-    tryFinalizeNarrationAudio(id);
+    const errRes = tryFinalizeSafely(id);
+    if (errRes) return errRes;
     return Response.json(getNarrationAudioOverview(id));
   }
   return Response.json(overview);
@@ -55,7 +65,8 @@ export async function POST(
     const result = enqueueNarrationAudioJobs(id);
     // 全部已复用且已完成时尝试 finalize（无新 job 需要跑的情况）
     if (result.enqueued === 0) {
-      tryFinalizeNarrationAudio(id);
+      const errRes = tryFinalizeSafely(id);
+      if (errRes) return errRes;
     }
     return Response.json(
       { ...result, overview: getNarrationAudioOverview(id) },

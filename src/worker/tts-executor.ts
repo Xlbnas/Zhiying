@@ -3,32 +3,40 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {getDataDir} from '@/lib/db';
-import {getTtsProvider} from '@/lib/tts';
-import {TtsError} from '@/lib/tts/types';
+import {getTtsProviderByName} from '@/lib/tts';
+import {TtsError, type TtsProvider} from '@/lib/tts/types';
 import {
-  completeTtsJob,
   failTtsJob,
+  finalizeTtsJobSuccess,
   heartbeatTtsJob,
   isTtsCancelRequested,
   markTtsCancelled,
   requeueTtsJob,
   ttsJobPayloadSchema,
+  ttsJobResultSchema,
   type TtsJobRow,
 } from '@/lib/tts-jobs';
 
 /**
- * TTS 任务执行器（M3-B §三十六–四十三）。
+ * TTS 任务执行器（M3-B §三十六–四十三，M3-B Hardening §五–十三）。
  *
- * 流程：payload 校验 → cancel precheck → provider.synthesize（AbortSignal 贯通）
+ * 流程：payload 校验 → cancel precheck → 按 job.provider 快照解析 Provider（Registry）
+ * → provider.synthesize（AbortSignal 贯通）→ 返回快照与 job 一致性校验
  * → 写 tmp WAV → 验证（RIFF/大小/ffprobe audio stream/duration>0）
- * → sha256 → 原子 rename → completeTtsJob。
+ * → sha256 → rename final → finalizeTtsJobSuccess 原子裁决（cancel/success 谁先谁赢）
+ * → 非 SUCCEEDED 删除 final WAV。
  * 零 Remotion/Chrome 依赖；cancel/shutdown/recovery 语义与 llm-executor 对齐。
  * IndexTTS2 单次 infer 未承诺 mid-inference 可中断——cancel 语义为
  * 「Node 尽快停止等待/不提交结果」，不声称 GPU kernel 即时停止。
  */
 
 const HEARTBEAT_INTERVAL_MS = 5000;
-const NON_RETRYABLE_CODES = new Set(['CONFIG_ERROR', 'INVALID_AUDIO', 'PAYLOAD_INVALID']);
+const NON_RETRYABLE_CODES = new Set([
+  'CONFIG_ERROR',
+  'INVALID_AUDIO',
+  'PAYLOAD_INVALID',
+  'PROVIDER_INVALID_RESPONSE',
+]);
 
 export interface TtsExecutorContext {
   isShuttingDown: () => boolean;
@@ -37,7 +45,8 @@ export interface TtsExecutorContext {
 }
 
 export interface TtsExecutorDeps {
-  provider?: import('@/lib/tts/types').TtsProvider;
+  /** 测试注入：按 provider name 覆盖 Registry（key 必须等于 job.provider 才生效）。 */
+  providers?: Record<string, TtsProvider>;
   heartbeatMs?: number;
   ffprobeImpl?: (filePath: string) => AudioProbe;
 }
@@ -116,7 +125,8 @@ export async function runTtsJob(
       return;
     }
 
-    const provider = deps.provider ?? getTtsProvider();
+    // 执行期唯一来源：job.provider 快照（Registry）；未知 → CONFIG_ERROR（不 fallback）
+    const provider = deps.providers?.[job.provider] ?? getTtsProviderByName(job.provider);
     const controller = new AbortController();
     const onShutdownAbort = (): void => controller.abort();
     ctx.shutdownSignal?.addEventListener('abort', onShutdownAbort, {once: true});
@@ -141,6 +151,22 @@ export async function runTtsJob(
         },
         controller.signal,
       );
+
+      // 返回快照必须与 job 快照一致（§六）：否则是 Provider 契约违约，拒绝提交成功
+      if (
+        result.provider !== job.provider ||
+        result.settings.voiceProfileId !== job.voice_profile_id ||
+        result.settings.voiceProfileRevision !== job.voice_profile_revision ||
+        result.settings.useRandom !== false
+      ) {
+        throw new TtsError(
+          'PROVIDER_INVALID_RESPONSE',
+          `Provider 返回与 job 快照不一致：result.provider=${result.provider} ` +
+            `voice=${result.settings.voiceProfileId}@${result.settings.voiceProfileRevision} ` +
+            `useRandom=${result.settings.useRandom}（期望 ${job.provider} / ` +
+            `${job.voice_profile_id}@${job.voice_profile_revision} / false）`,
+        );
+      }
 
       // Commit Fence：写盘前最终 cancel/shutdown 检查（不提交已取消结果）
       if (ctx.isShuttingDown()) {
@@ -177,15 +203,49 @@ export async function runTtsJob(
       }
       const probeResult = probe(tmpPath);
       const sha256 = sha256File(tmpPath);
-      fs.renameSync(tmpPath, path.join(getDataDir(), relFinal));
+
+      // 持久化的 Provider 快照 + ffprobe 元数据（唯一 metadata 来源，zod 把关）
+      const persisted = ttsJobResultSchema.safeParse({
+        provider: result.provider,
+        model: result.model,
+        providerVersion: result.providerVersion ?? null,
+        providerCommit: result.providerCommit ?? null,
+        settings: result.settings,
+        audio: {
+          codec: probeResult.codec,
+          sampleRate: probeResult.sampleRate,
+          channels: probeResult.channels,
+        },
+      });
+      if (!persisted.success) {
+        throw new TtsError(
+          'PROVIDER_INVALID_RESPONSE',
+          `Provider 返回 metadata 不合法：${persisted.error.issues[0]?.message ?? 'schema 校验失败'}`,
+        );
+      }
+
+      const absFinal = path.join(getDataDir(), relFinal);
+      fs.renameSync(tmpPath, absFinal);
       tmpPath = null;
 
-      if (!completeTtsJob(job.id, relFinal, probeResult.durationMs, sha256)) {
-        log(`tts job ${job.id} complete 未生效（任务已不在 running）`);
+      // 终局原子裁决（§十）：cancel 与 success 谁先进入事务谁赢
+      const finalized = finalizeTtsJobSuccess(job.id, {
+        outputPath: relFinal,
+        durationMs: probeResult.durationMs,
+        audioSha256: sha256,
+        result: persisted.data,
+      });
+      if (finalized !== 'SUCCEEDED') {
+        // §十一：DB 未判成功（cancel 赢 / job 已不在 running）→ 删除刚 rename 的 final WAV
+        fs.rmSync(absFinal, {force: true});
+        log(`tts job ${job.id} finalize=${finalized}（已清理 final WAV）`);
+        return;
       }
       log(
         `tts job ${job.id} succeeded: ${payload.unitId} ${probeResult.durationMs}ms ` +
-          `${probeResult.codec}/${probeResult.sampleRate}Hz/${probeResult.channels}ch sha256=${sha256.slice(0, 12)}…`,
+          `${probeResult.codec}/${probeResult.sampleRate}Hz/${probeResult.channels}ch ` +
+          `model=${persisted.data.model} commit=${persisted.data.providerCommit ?? 'n/a'} ` +
+          `sha256=${sha256.slice(0, 12)}…`,
       );
     } catch (err) {
       cleanupTmp();

@@ -25,6 +25,7 @@ export interface TtsJobRow {
   output_path: string | null;
   duration_ms: number | null;
   audio_sha256: string | null;
+  result_json: string | null;
   queued_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -51,6 +52,30 @@ export const ttsJobPayloadSchema = z.object({
 });
 
 export type TtsJobPayload = z.infer<typeof ttsJobPayloadSchema>;
+
+/**
+ * 成功时持久化的 Provider 返回快照 + ffprobe 元数据（M3-B Hardening §三/五）。
+ * 记录的是「实际生成这一个 WAV 时 Provider 返回的 snapshot」，
+ * 不从 provider name / 环境变量推断；manifest 的唯一 metadata 来源。
+ */
+export const ttsJobResultSchema = z.object({
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  providerVersion: z.string().min(1).nullable(),
+  providerCommit: z.string().min(1).nullable(),
+  settings: z.object({
+    voiceProfileId: z.string().min(1),
+    voiceProfileRevision: z.string().min(1),
+    useRandom: z.boolean(),
+  }),
+  audio: z.object({
+    codec: z.string().min(1),
+    sampleRate: z.number().int().positive(),
+    channels: z.number().int().positive(),
+  }),
+});
+
+export type TtsJobResult = z.infer<typeof ttsJobResultSchema>;
 
 export class TtsJobError extends Error {
   constructor(
@@ -172,23 +197,53 @@ export function heartbeatTtsJob(jobId: string): void {
     .run(now(), jobId);
 }
 
-/** 任务成功：写入 output_path/duration/sha256（仅 running → succeeded）。 */
-export function completeTtsJob(
+export type FinalizeTtsJobSuccessCode =
+  | 'SUCCEEDED'
+  | 'CANCELLED'
+  | 'JOB_NOT_RUNNING'
+  | 'JOB_NOT_FOUND';
+
+/**
+ * 成功终局原子裁决（M3-B Hardening §十）：cancel 与 success 谁先进入本事务谁赢。
+ * 事务内重新读取 job：
+ * - not found → JOB_NOT_FOUND；非 running → JOB_NOT_RUNNING
+ * - cancel_requested=1 → cancelled（不写 output/result），返回 CANCELLED
+ * - 否则 succeeded + 写 output/duration/sha256/result_json，返回 SUCCEEDED
+ * 调用方负责：非 SUCCEEDED 时删除已 rename 的 final WAV（§十一文件与 DB 一致）。
+ */
+export function finalizeTtsJobSuccess(
   jobId: string,
-  outputPath: string,
-  durationMs: number,
-  audioSha256: string,
-): boolean {
-  return (
-    getDb()
-      .prepare(
-        `UPDATE tts_jobs
-         SET status = 'succeeded', progress = 100, finished_at = ?,
-             output_path = ?, duration_ms = ?, audio_sha256 = ?
-         WHERE id = ? AND status = 'running'`,
-      )
-      .run(now(), outputPath, durationMs, audioSha256, jobId).changes > 0
-  );
+  outcome: {outputPath: string; durationMs: number; audioSha256: string; result: TtsJobResult},
+): FinalizeTtsJobSuccessCode {
+  const db = getDb();
+  const tx = db.transaction((): FinalizeTtsJobSuccessCode => {
+    const job = getTtsJob(jobId);
+    if (!job) return 'JOB_NOT_FOUND';
+    if (job.status !== 'running') return 'JOB_NOT_RUNNING';
+    const at = now();
+    if (job.cancel_requested === 1) {
+      db.prepare(
+        `UPDATE tts_jobs SET status = 'cancelled', finished_at = ?
+         WHERE id = ? AND status = 'running' AND cancel_requested = 1`,
+      ).run(at, jobId);
+      return 'CANCELLED';
+    }
+    db.prepare(
+      `UPDATE tts_jobs
+       SET status = 'succeeded', progress = 100, finished_at = ?,
+           output_path = ?, duration_ms = ?, audio_sha256 = ?, result_json = ?
+       WHERE id = ? AND status = 'running' AND cancel_requested = 0`,
+    ).run(
+      at,
+      outcome.outputPath,
+      outcome.durationMs,
+      outcome.audioSha256,
+      JSON.stringify(outcome.result),
+      jobId,
+    );
+    return 'SUCCEEDED';
+  });
+  return tx.immediate();
 }
 
 export type FinalizeTtsJobFailureCode =

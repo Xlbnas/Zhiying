@@ -41,6 +41,11 @@ interface AudioOverview {
   speechComplete: number;
   speechTotal: number;
   master: {filePath: string; durationMs: number} | null;
+  providerDetail: {
+    model: string;
+    providerVersion: string | null;
+    providerCommit: string | null;
+  } | null;
   units: Array<{
     unitId: string;
     kind: 'speech' | 'pause' | 'visual_breath' | 'prosody';
@@ -318,6 +323,16 @@ export function NarrationPanel({
             {audio.master ? (
               <span>
                 Master <span className="mono">{(audio.master.durationMs / 1000).toFixed(1)}s</span>
+              </span>
+            ) : null}
+            {audio.providerDetail ? (
+              <span title={`providerVersion=${audio.providerDetail.providerVersion ?? 'n/a'}`}>
+                模型 <span className="mono">{audio.providerDetail.model}</span>
+                {audio.providerDetail.providerCommit ? (
+                  <>
+                    {' '}· commit <span className="mono">{audio.providerDetail.providerCommit.slice(0, 12)}</span>
+                  </>
+                ) : null}
               </span>
             ) : null}
           </div>

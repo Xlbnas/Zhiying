@@ -8,6 +8,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 
 process.env.ZHIYING_DATA_DIR = path.join('data', 'test-m3b');
 process.env.LLM_PROVIDER = 'mock';
@@ -32,12 +33,15 @@ import {
 } from '../src/lib/llm-jobs';
 import {buildMockWav, MockTtsProvider} from '../src/lib/tts/mock';
 import {IndexTts2Provider} from '../src/lib/tts/indextts2';
-import {TtsError} from '../src/lib/tts/types';
+import {resetTtsProviderForTest} from '../src/lib/tts';
+import {TtsError, type TtsProvider, type TtsRequest, type TtsResult} from '../src/lib/tts/types';
 import {
   getTtsJob,
   recoverStaleTtsJobs,
   requestCancelTtsJob,
   requeueTtsJob,
+  ttsJobResultSchema,
+  type TtsJobResult,
   type TtsJobRow,
 } from '../src/lib/tts-jobs';
 import {enqueueRenderJob} from '../src/lib/jobs';
@@ -45,7 +49,7 @@ import {createProjectWithWorkflow} from '../src/lib/projects';
 import {claimNextAnyJob} from '../src/lib/scheduler';
 import {zhiyingFullCutPropsSchema} from '../src/lib/scene-schema';
 import {runLlmJob} from '../src/worker/llm-executor';
-import {runTtsJob} from '../src/worker/tts-executor';
+import {probeAudio, runTtsJob} from '../src/worker/tts-executor';
 import {editVersion} from '../src/lib/workflow/operations';
 import {lockStage} from '../src/lib/workflow/stages';
 import {WORKFLOW_STAGES, type WorkflowStage} from '../src/lib/workflow/types';
@@ -128,13 +132,50 @@ function claimTts(): {type: 'tts'; job: TtsJobRow} | null {
   return claimed && claimed.type === 'tts' ? claimed : null;
 }
 
-async function runAllTtsJobs(pid: string, provider?: InstanceType<typeof MockTtsProvider>): Promise<void> {
+async function runAllTtsJobs(pid: string, providers?: Record<string, TtsProvider>): Promise<void> {
   for (;;) {
     const claimed = claimTts();
     if (!claimed) break;
     if (claimed.job.project_id !== pid) throw new Error('意外拿到其他项目 tts job');
-    await runTtsJob(claimed.job, CTX, provider ? {provider} : {});
+    await runTtsJob(claimed.job, CTX, providers ? {providers} : {});
   }
+}
+
+/** 可定制返回快照的 fake Provider（Hardening 测试：commit/model/voice/useRandom 变异）。 */
+function fakeProvider(overrides: {
+  name?: string;
+  resultProvider?: string;
+  commit?: string | null;
+  model?: string;
+  voiceId?: string;
+  voiceRevision?: string;
+  useRandom?: boolean;
+} = {}): TtsProvider {
+  const name = overrides.name ?? 'mock';
+  return {
+    name,
+    synthesize: (req: TtsRequest): Promise<TtsResult> =>
+      Promise.resolve({
+        audio: buildMockWav(req.text, req.unitId),
+        format: 'wav',
+        provider: overrides.resultProvider ?? name,
+        model: overrides.model ?? 'mock-tone-v1',
+        providerCommit:
+          overrides.commit === undefined ? 'mock-deterministic' : (overrides.commit ?? undefined),
+        settings: {
+          voiceProfileId: overrides.voiceId ?? req.voiceProfile.id,
+          voiceProfileRevision: overrides.voiceRevision ?? req.voiceProfile.revision,
+          useRandom: overrides.useRandom ?? false,
+        },
+      }),
+  };
+}
+
+/** 清理项目未完结 tts jobs（避免污染后续 claimTts 的全局 FIFO）。 */
+function cancelOpenTtsJobs(pid: string): void {
+  getDb()
+    .prepare("UPDATE tts_jobs SET status = 'cancelled' WHERE project_id = ? AND status IN ('queued','running')")
+    .run(pid);
 }
 
 function planWithAllKinds(): NarrationPlan {
@@ -147,7 +188,69 @@ function planWithAllKinds(): NarrationPlan {
 
 async function main(): Promise<void> {
   fs.rmSync(path.resolve(process.cwd(), 'data', 'test-m3b'), {recursive: true, force: true});
-  const db = getDb();
+  let db = getDb();
+
+  // ============ D. DB Migration（M3-B Hardening §四：result_json 幂等迁移） ============
+  {
+    const cols = db.prepare('PRAGMA table_info(tts_jobs)').all() as Array<{name: string}>;
+    ok(cols.some((c) => c.name === 'result_json'), '[D1] fresh DB tts_jobs 含 result_json 列');
+  }
+  {
+    // 模拟旧库：无 result_json 的 tts_jobs → 启动自动 ALTER；二次启动幂等
+    const legacyDir = path.resolve(process.cwd(), 'data', 'test-m3b-legacy');
+    fs.rmSync(legacyDir, {recursive: true, force: true});
+    fs.mkdirSync(legacyDir, {recursive: true});
+    const raw = new Database(path.join(legacyDir, 'zhiying.db'));
+    raw.exec(`
+      CREATE TABLE tts_jobs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        narration_plan_artifact_id TEXT NOT NULL,
+        narration_plan_version INTEGER NOT NULL,
+        unit_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        voice_profile_id TEXT NOT NULL,
+        voice_profile_revision TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued',
+        payload_json TEXT NOT NULL,
+        output_path TEXT, duration_ms INTEGER, audio_sha256 TEXT,
+        queued_at TEXT NOT NULL, started_at TEXT, finished_at TEXT,
+        claimed_by TEXT, claimed_at TEXT, heartbeat_at TEXT,
+        attempt INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2,
+        progress REAL DEFAULT 0,
+        error_code TEXT, error_message TEXT,
+        cancel_requested INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO tts_jobs (id, project_id, narration_plan_artifact_id, narration_plan_version,
+        unit_id, provider, voice_profile_id, voice_profile_revision, status, payload_json, queued_at)
+      VALUES ('legacy-job-1', 'legacy-project', 'a1', 1, 'N001', 'mock', 'default', '1', 'succeeded',
+        '{}', '2026-01-01T00:00:00.000Z');
+    `);
+    raw.close();
+    closeDb();
+    process.env.ZHIYING_DATA_DIR = path.join('data', 'test-m3b-legacy');
+    const legacyDb = getDb();
+    const cols2 = legacyDb.prepare('PRAGMA table_info(tts_jobs)').all() as Array<{name: string}>;
+    const row = legacyDb.prepare('SELECT * FROM tts_jobs WHERE id = ?').get('legacy-job-1') as
+      | TtsJobRow
+      | undefined;
+    ok(
+      cols2.some((c) => c.name === 'result_json') && row !== undefined && row.status === 'succeeded',
+      '[D2] 旧 tts_jobs（无 result_json）启动后自动 ALTER，历史行保留',
+    );
+    closeDb();
+    let reopened = true;
+    try {
+      getDb(); // 二次启动：列已存在，不再 ALTER（幂等）
+    } catch {
+      reopened = false;
+    }
+    ok(reopened, '[D3] 二次启动幂等（重复 migration 无错误）');
+    closeDb();
+    process.env.ZHIYING_DATA_DIR = path.join('data', 'test-m3b');
+    fs.rmSync(legacyDir, {recursive: true, force: true});
+    db = getDb(); // 恢复 test-m3b 实例（旧句柄已关闭）
+  }
 
   // ============ P. Provider（1–7） ============
   {
@@ -423,7 +526,7 @@ async function main(): Promise<void> {
     const claimed = claimTts()!;
     const errProvider = new MockTtsProvider();
     errProvider.synthesize = () => Promise.reject(new TtsError('PROVIDER_HTTP_ERROR', '模拟 500'));
-    await runTtsJob(claimed.job, CTX, {provider: errProvider});
+    await runTtsJob(claimed.job, CTX, {providers: {mock: errProvider}});
     const afterFirst = getTtsJob(claimed.job.id)!;
     ok(
       afterFirst.status === 'queued' && afterFirst.attempt === 1 && afterFirst.error_code === 'PROVIDER_HTTP_ERROR',
@@ -443,7 +546,7 @@ async function main(): Promise<void> {
     enqueueNarrationAudioJobs(pid);
     const claimed = claimTts()!;
     const slow = new MockTtsProvider({delayMs: 300});
-    const running = runTtsJob(claimed.job, CTX, {provider: slow, heartbeatMs: 30});
+    const running = runTtsJob(claimed.job, CTX, {providers: {mock: slow}, heartbeatMs: 30});
     await sleep(60);
     requestCancelTtsJob(claimed.job.id);
     await running;
@@ -466,7 +569,7 @@ async function main(): Promise<void> {
     const running = runTtsJob(
       claimed.job,
       {isShuttingDown: () => shutting, log: () => {}, shutdownSignal: workerCtl.signal},
-      {provider: slow},
+      {providers: {mock: slow}},
     );
     await sleep(60);
     shutting = true;
@@ -675,10 +778,342 @@ async function main(): Promise<void> {
     const claimed = claimTts()!;
     const errProvider = new MockTtsProvider();
     errProvider.synthesize = () => Promise.reject(new TtsError('INVALID_AUDIO', '坏音频'));
-    await runTtsJob(claimed.job, CTX, {provider: errProvider});
+    await runTtsJob(claimed.job, CTX, {providers: {mock: errProvider}});
     const after = getTtsJob(claimed.job.id)!;
     ok(after.status === 'failed' && after.error_code === 'INVALID_AUDIO', '[M35] INVALID_AUDIO 一次即 failed（不 retry）');
     ok(getNarrationAudioOverview(pid).status === 'failed', '[M35] overview = failed');
+    cancelOpenTtsJobs(pid); // 清理剩余 queued，避免污染后续 Hardening 段的全局 FIFO
+  }
+
+  // ============ H. M3-B Hardening（Provider 快照 / Registry / finish-line race / manifest 溯源） ============
+  {
+    // H51 result_json zod 契约
+    const good = ttsJobResultSchema.safeParse({
+      provider: 'mock', model: 'mock-tone-v1', providerVersion: null, providerCommit: 'x',
+      settings: {voiceProfileId: 'default', voiceProfileRevision: '1', useRandom: false},
+      audio: {codec: 'pcm_s16le', sampleRate: 48000, channels: 1},
+    });
+    const bad1 = ttsJobResultSchema.safeParse({provider: 'mock'});
+    const bad2 = ttsJobResultSchema.safeParse({
+      provider: 'mock', model: 'm', providerVersion: null, providerCommit: null,
+      settings: {voiceProfileId: 'd', voiceProfileRevision: '1', useRandom: 'no'},
+      audio: {codec: 'c', sampleRate: 48000, channels: 1},
+    });
+    ok(good.success && !bad1.success && !bad2.success, '[H51] ttsJobResultSchema zod：合法通过 / 非法拒绝');
+  }
+  {
+    // H52–H54：executor 持久化真实 Provider 快照；manifest 来自 result_json
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid);
+    const fake = (): TtsProvider => fakeProvider({commit: 'commit-test-1', model: 'Model-X'});
+    const claimed = claimTts()!;
+    await runTtsJob(claimed.job, CTX, {providers: {mock: fake()}});
+    const job = getTtsJob(claimed.job.id)!;
+    ok(job.status === 'succeeded' && job.result_json !== null, '[H52] 成功 job 持久化 result_json');
+    const r = JSON.parse(job.result_json!) as TtsJobResult;
+    ok(
+      r.provider === 'mock' && r.model === 'Model-X' && r.providerCommit === 'commit-test-1' &&
+        r.providerVersion === null && r.settings.voiceProfileId === 'default' &&
+        r.settings.voiceProfileRevision === '1' && r.settings.useRandom === false,
+      '[H52] result_json 记录真实 model/providerCommit/providerVersion/voice（非推断）',
+      r,
+    );
+    const abs = path.join(getDataDir(), job.output_path!);
+    const probe = JSON.parse(execFileSync('ffprobe', [
+      '-v', 'error', '-print_format', 'json', '-show_streams', abs,
+    ], {encoding: 'utf8'})) as {streams: Array<{codec_name: string; sample_rate: string; channels: number}>};
+    ok(
+      r.audio.codec === probe.streams[0]!.codec_name &&
+        r.audio.sampleRate === Number(probe.streams[0]!.sample_rate) &&
+        r.audio.channels === probe.streams[0]!.channels,
+      '[H53] result_json.audio 与 ffprobe 实测一致（pcm_s16le/48k/mono）',
+    );
+    await runAllTtsJobs(pid, {mock: fake()});
+    const manifest = tryFinalizeNarrationAudio(pid);
+    ok(
+      manifest !== null && manifest.provider.name === 'mock' && manifest.provider.model === 'Model-X' &&
+        manifest.provider.providerCommit === 'commit-test-1' && manifest.provider.providerVersion === null &&
+        manifest.provider.voiceProfile.id === 'default' && manifest.provider.voiceProfile.revision === '1',
+      '[H54] manifest provider metadata 来自 job.result_json（无硬编码 model/commit）',
+      manifest?.provider,
+    );
+    const su = manifest!.units.find((u) => u.kind === 'speech')!;
+    ok(
+      su.kind === 'speech' && su.sampleRate === 48000 && su.channels === 1,
+      '[H54] manifest speech unit 元数据来自 result_json.audio',
+    );
+    const ov = getNarrationAudioOverview(pid);
+    ok(
+      ov.providerDetail?.model === 'Model-X' && ov.providerDetail.providerCommit === 'commit-test-1',
+      '[H54] overview 透出真实 providerDetail（API 契约可见）',
+    );
+  }
+  {
+    // H55 Case A：enqueue=mock 后改默认 indextts2 → executor 仍按 job.provider=mock 执行
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid); // TTS_PROVIDER=mock → job.provider=mock
+    const envBefore = process.env.TTS_PROVIDER;
+    try {
+      process.env.TTS_PROVIDER = 'indextts2'; // 入队后改变默认 provider
+      process.env.INDEXTTS2_BASE_URL = 'http://127.0.0.1:9'; // 不可达——若误路由必失败
+      resetTtsProviderForTest();
+      const claimed = claimTts()!;
+      ok(claimed.job.provider === 'mock', '[H55] 入队后改变 TTS_PROVIDER 不改写已入队 job.provider');
+      await runTtsJob(claimed.job, CTX); // 无注入 → Registry 按 job.provider=mock 解析
+      const job = getTtsJob(claimed.job.id)!;
+      ok(
+        job.status === 'succeeded' && (JSON.parse(job.result_json!) as TtsJobResult).provider === 'mock',
+        '[H55] executor 按 job.provider=mock 执行（无视当前环境 indextts2）',
+        job.status,
+      );
+    } finally {
+      process.env.TTS_PROVIDER = envBefore;
+      delete process.env.INDEXTTS2_BASE_URL;
+      resetTtsProviderForTest();
+    }
+    cancelOpenTtsJobs(pid);
+  }
+  {
+    // H56 Case B：job.provider=indextts2，当前环境 default=mock → 仍调用 indextts2
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    const envBefore = process.env.TTS_PROVIDER;
+    try {
+      process.env.TTS_PROVIDER = 'indextts2';
+      process.env.INDEXTTS2_BASE_URL = 'http://fake-sidecar';
+      resetTtsProviderForTest();
+      enqueueNarrationAudioJobs(pid); // job.provider=indextts2
+    } finally {
+      process.env.TTS_PROVIDER = envBefore;
+      delete process.env.INDEXTTS2_BASE_URL;
+      resetTtsProviderForTest();
+    }
+    const claimed = claimTts()!;
+    ok(claimed.job.provider === 'indextts2', '[H56] 入队快照 provider=indextts2');
+    const fakeSidecar = fakeProvider({name: 'indextts2', resultProvider: 'indextts2', model: 'IndexTTS-2', commit: 'abc1234'});
+    await runTtsJob(claimed.job, CTX, {providers: {indextts2: fakeSidecar}});
+    const job = getTtsJob(claimed.job.id)!;
+    const r = JSON.parse(job.result_json!) as TtsJobResult;
+    ok(
+      job.status === 'succeeded' && r.provider === 'indextts2' && r.model === 'IndexTTS-2' &&
+        r.providerCommit === 'abc1234',
+      '[H56] 当前环境 default=mock 时 executor 仍调用 indextts2（job.provider 优先）',
+      {status: job.status, commit: r.providerCommit},
+    );
+    cancelOpenTtsJobs(pid);
+  }
+  {
+    // H57 Case C：未知 provider → CONFIG_ERROR（不 silent fallback）
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid);
+    const row = db.prepare('SELECT * FROM tts_jobs WHERE project_id = ? LIMIT 1').get(pid) as TtsJobRow;
+    const fakeId = 'unknown-provider-job';
+    db.prepare(
+      `INSERT INTO tts_jobs (id, project_id, narration_plan_artifact_id, narration_plan_version,
+         unit_id, provider, voice_profile_id, voice_profile_revision, status, payload_json, queued_at,
+         attempt, max_attempts)
+       VALUES (?, ?, ?, ?, ?, 'unknown-tts', ?, ?, 'queued', ?, ?, 0, 2)`,
+    ).run(
+      fakeId, pid, row.narration_plan_artifact_id, row.narration_plan_version, 'N099',
+      row.voice_profile_id, row.voice_profile_revision, row.payload_json, row.queued_at,
+    );
+    db.prepare("UPDATE tts_jobs SET status = 'cancelled' WHERE project_id = ? AND status = 'queued' AND id != ?").run(pid, fakeId);
+    const claimed = claimTts()!;
+    ok(claimed.job.provider === 'unknown-tts', '[H57] claim 到 unknown provider job');
+    await runTtsJob(claimed.job, CTX);
+    const job = getTtsJob(fakeId)!;
+    ok(
+      job.status === 'failed' && job.error_code === 'CONFIG_ERROR',
+      '[H57] 未知 provider → CONFIG_ERROR failed（不 silent fallback）',
+      {status: job.status, error: job.error_code},
+    );
+  }
+  {
+    // H58：返回 provider 名与 job 不一致 → 拒绝提交成功
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid);
+    const claimed = claimTts()!;
+    await runTtsJob(claimed.job, CTX, {providers: {mock: fakeProvider({resultProvider: 'evil'})}});
+    const job = getTtsJob(claimed.job.id)!;
+    ok(
+      job.status === 'failed' && job.error_code === 'PROVIDER_INVALID_RESPONSE',
+      '[H58] 返回 provider 名不一致 → PROVIDER_INVALID_RESPONSE（不提交成功）',
+      {status: job.status, error: job.error_code},
+    );
+    cancelOpenTtsJobs(pid);
+  }
+  {
+    // H59：voice profile / useRandom 不一致 → 拒绝
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid);
+    const c1 = claimTts()!;
+    await runTtsJob(c1.job, CTX, {providers: {mock: fakeProvider({voiceId: 'other'})}});
+    const j1 = getTtsJob(c1.job.id)!;
+    ok(
+      j1.status === 'failed' && j1.error_code === 'PROVIDER_INVALID_RESPONSE',
+      '[H59] voice profile 不一致 → PROVIDER_INVALID_RESPONSE',
+      {status: j1.status, error: j1.error_code},
+    );
+    const c2 = claimTts()!;
+    await runTtsJob(c2.job, CTX, {providers: {mock: fakeProvider({useRandom: true})}});
+    const j2 = getTtsJob(c2.job.id)!;
+    ok(
+      j2.status === 'failed' && j2.error_code === 'PROVIDER_INVALID_RESPONSE',
+      '[H59] useRandom=true → PROVIDER_INVALID_RESPONSE',
+      {status: j2.status, error: j2.error_code},
+    );
+    cancelOpenTtsJobs(pid);
+  }
+  {
+    // H60/H62：finish-line race —— cancel 在 fence 之后、最终事务之前到达 → cancel 赢且不留文件
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid);
+    const claimed = claimTts()!;
+    const jobId = claimed.job.id;
+    const unitId = claimed.job.unit_id;
+    await runTtsJob(claimed.job, CTX, {
+      ffprobeImpl: (p) => {
+        requestCancelTtsJob(jobId); // fence 已过、finalize 未至——精确落在 finish-line
+        return probeAudio(p);
+      },
+    });
+    const job = getTtsJob(jobId)!;
+    ok(
+      job.status === 'cancelled' && job.output_path === null && job.result_json === null,
+      '[H60] finish-line race：cancel 先进入最终事务 → cancelled（output/result 均空）',
+      {status: job.status, output: job.output_path},
+    );
+    const unitsDir = path.join(getDataDir(), 'projects', pid, 'audio', 'units', '1');
+    const leftovers = fs.existsSync(unitsDir)
+      ? fs.readdirSync(unitsDir).filter((f) => f.includes(unitId))
+      : [];
+    ok(leftovers.length === 0, '[H62] cancel 赢家不留 final WAV / tmp（DB 与文件系统一致）', leftovers);
+    cancelOpenTtsJobs(pid);
+  }
+  {
+    // H61：finish-line race —— success 先提交后，cancel 不再生效
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid);
+    const claimed = claimTts()!;
+    await runTtsJob(claimed.job, CTX);
+    ok(getTtsJob(claimed.job.id)!.status === 'succeeded', '[H61] success 先提交 → succeeded');
+    const cancelRes = requestCancelTtsJob(claimed.job.id);
+    ok(
+      cancelRes === false && getTtsJob(claimed.job.id)!.status === 'succeeded',
+      '[H61] 成功后再 cancel 不生效（finish-line success wins）',
+    );
+    cancelOpenTtsJobs(pid);
+  }
+  {
+    // H63：mixed provider snapshot → 阻止 manifest（模拟生成过程中 sidecar 被升级）
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid);
+    for (let i = 0; i < 4; i++) {
+      const c = claimTts()!;
+      const commit = c.job.unit_id === 'N003' ? 'commit-B' : 'commit-A';
+      await runTtsJob(c.job, CTX, {providers: {mock: fakeProvider({commit})}});
+    }
+    let threw: string | null = null;
+    try {
+      tryFinalizeNarrationAudio(pid);
+    } catch (err) {
+      threw = err instanceof NarrationAudioError ? err.code : String(err);
+    }
+    ok(threw === 'PROVIDER_SNAPSHOT_MISMATCH', '[H63] mixed provider commit → 阻止 manifest', threw);
+    const cnt = db
+      .prepare('SELECT COUNT(*) AS c FROM artifacts WHERE project_id = ? AND kind = ?')
+      .get(pid, NARRATION_AUDIO_ARTIFACT_KIND) as {c: number};
+    ok(cnt.c === 0, '[H63] mismatch 时不产生 manifest artifact');
+    ok(
+      getNarrationAudioOverview(pid).status === 'not_ready',
+      '[H63] overview = not_ready（finalize 被阻止，不 500）',
+    );
+  }
+  {
+    // H64/H65：同一 snapshot → manifest ready；重复 finalize 幂等且无 tmp 残留
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid);
+    await runAllTtsJobs(pid, {mock: fakeProvider({commit: 'commit-A', model: 'Model-Y'})});
+    const manifest = tryFinalizeNarrationAudio(pid);
+    ok(
+      manifest !== null && manifest.provider.providerCommit === 'commit-A' && manifest.provider.model === 'Model-Y',
+      '[H64] 同一 provider snapshot → manifest ready（commit 真实记录）',
+    );
+    const again = tryFinalizeNarrationAudio(pid);
+    const rows = db
+      .prepare('SELECT id FROM artifacts WHERE project_id = ? AND kind = ?')
+      .all(pid, NARRATION_AUDIO_ARTIFACT_KIND) as Array<{id: string}>;
+    ok(again !== null && rows.length === 1, '[H65] 重复 finalize 幂等（仅一个 current artifact）');
+    const audioDir = path.join(getDataDir(), 'projects', pid, 'audio');
+    const tmpLeft = fs.existsSync(audioDir)
+      ? fs.readdirSync(audioDir).filter((f) => f.endsWith('.tmp'))
+      : [];
+    ok(tmpLeft.length === 0, '[H65] master 唯一 tmp 流程无残留', tmpLeft);
+  }
+  {
+    // H66：result_json 缺失/非法 → 不允许 finalize（不 crash、不硬猜 metadata）
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid);
+    await runAllTtsJobs(pid);
+    db.prepare('UPDATE tts_jobs SET result_json = NULL WHERE project_id = ?').run(pid);
+    let threw1 = false;
+    let m1: unknown = 'unset';
+    try {
+      m1 = tryFinalizeNarrationAudio(pid);
+    } catch {
+      threw1 = true;
+    }
+    ok(!threw1 && m1 === null, '[H66] result_json 缺失 → finalize=null（不 crash）');
+    db.prepare("UPDATE tts_jobs SET result_json = 'not-json' WHERE project_id = ?").run(pid);
+    let threw2 = false;
+    let m2: unknown = 'unset';
+    try {
+      m2 = tryFinalizeNarrationAudio(pid);
+    } catch {
+      threw2 = true;
+    }
+    ok(!threw2 && m2 === null, '[H66] result_json 非 JSON → finalize=null');
+    db.prepare("UPDATE tts_jobs SET result_json = '{}' WHERE project_id = ?").run(pid);
+    let threw3 = false;
+    let m3: unknown = 'unset';
+    try {
+      m3 = tryFinalizeNarrationAudio(pid);
+    } catch {
+      threw3 = true;
+    }
+    ok(!threw3 && m3 === null, '[H66] result_json schema 非法 → finalize=null');
   }
 
   closeDb();

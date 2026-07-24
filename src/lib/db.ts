@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS tts_jobs (   -- 一个 speech unit 一个 job（独�
   output_path TEXT,                   -- data 目录相对路径
   duration_ms INTEGER,                -- ffprobe 实测（唯一时长真相）
   audio_sha256 TEXT,
+  result_json TEXT,                   -- M3-B Hardening：Provider 返回快照 + ffprobe 元数据（ttsJobResultSchema）
   queued_at TEXT NOT NULL, started_at TEXT, finished_at TEXT,
   claimed_by TEXT, claimed_at TEXT, heartbeat_at TEXT,
   attempt INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2,
@@ -190,6 +191,12 @@ export function getDb(): Db {
   }
   db.exec(VERSION_UNIQUE_INDEX_SQL);
   db.exec(DROP_REDUNDANT_INDEX_SQL);
+  // M3-B Hardening 迁移（幂等）：CREATE TABLE IF NOT EXISTS 不会给已有 tts_jobs 加列，
+  // 需 PRAGMA table_info 检查后 ALTER TABLE（旧库升级；二次启动幂等）。
+  const ttsCols = db.prepare('PRAGMA table_info(tts_jobs)').all() as Array<{name: string}>;
+  if (!ttsCols.some((c) => c.name === 'result_json')) {
+    db.exec('ALTER TABLE tts_jobs ADD COLUMN result_json TEXT');
+  }
   instance = db;
   return db;
 }
