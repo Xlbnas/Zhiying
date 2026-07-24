@@ -9,6 +9,7 @@ import {
 } from './compiler';
 import {
   NARRATION_COMPILER_VERSION,
+  narrationPlanSchema,
   type NarrationPlan,
 } from './schema';
 
@@ -66,12 +67,20 @@ function listPlanArtifacts(projectId: string): NarrationPlanArtifactRow[] {
     .all(projectId, NARRATION_PLAN_ARTIFACT_KIND) as NarrationPlanArtifactRow[];
 }
 
+/**
+ * 读取持久化 artifact：JSON.parse → narrationPlanSchema.safeParse（M3-A Hardening）。
+ * 数据库内容不凭 TypeScript as 信任——Narration Plan 是 M3-B TTS 的直接输入，
+ * narrationPlanSchema 是唯一数据契约；非法 artifact 一律返回 null。
+ */
 function parsePlan(row: NarrationPlanArtifactRow): NarrationPlan | null {
+  let raw: unknown;
   try {
-    return JSON.parse(row.content_json) as NarrationPlan;
+    raw = JSON.parse(row.content_json);
   } catch {
     return null;
   }
+  const parsed = narrationPlanSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
 
 /** 读取当前 narration plan（仅当 source 与 script_v2 locked_version 一致且仍 locked）。 */

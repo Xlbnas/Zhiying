@@ -35,6 +35,8 @@ export class NarrationCompileError extends Error {
 export const SENTENCES_PER_SPEECH_UNIT = 2;
 
 const CHAPTER_HEADING = /^##\s+第\s*(\d+)\s*章\s*(.+?)\s*$/;
+/** 正式声明时间区间（（mm:ss–mm:ss），兼容 – — - 三种破折号）；其他括号标题文本一律保留。 */
+const DECLARED_RANGE = /（\s*\d{1,2}:\d{2}\s*[–—-]\s*\d{1,2}:\d{2}\s*）\s*$/;
 const HEADING = /^#{1,6}\s+/;
 const BLOCKQUOTE = /^>/;
 const EVIDENCE_COMMENT = /<!--([\s\S]*?)-->/g;
@@ -152,8 +154,9 @@ function parseScript(markdown: string): {chapters: NarrationChapter[]; paragraph
     if (chapterMatch) {
       flush();
       const chapter = Number(chapterMatch[1]);
-      // 标题剥离尾部（mm:ss–mm:ss）声明区间（只是脚本估计，不作 timing）
-      const title = chapterMatch[2]!.replace(/（[^（）]*）\s*$/, '').trim();
+      // 标题仅剥离正式声明时间区间（mm:ss–mm:ss）；
+      // 「记忆（上）」「问题（第二部分）」等合法括号标题文本原样保留
+      const title = chapterMatch[2]!.replace(DECLARED_RANGE, '').trim();
       if (title.length === 0) {
         throw new NarrationCompileError('SCRIPT_V2_INVALID', `第 ${chapter} 章缺少标题`);
       }
@@ -198,42 +201,50 @@ export function compileNarrationPlan(input: {
   const makeId = (): string => `N${String(nextId++).padStart(3, '0')}`;
 
   for (const paragraph of paragraphs) {
-    // 按 text-run 聚合：每段 text-run 独立切句成组；evidence 归属所在 text-run
-    let pendingEvidence: string[] = [];
-    const emitSpeechRun = (runText: string, evidenceIds: string[]): void => {
+    // Evidence 绑定状态机（M3-A Hardening）：严格 paragraph 边界——
+    // trailing Evidence → 本段最近的 speech unit；
+    // leading Evidence → 本段下一个 speech unit；
+    // 段内无 speech 的 Evidence 直接丢弃，绝不跨 paragraph 偷挂。
+    const paragraphSpeeches: NarrationUnit[] = [];
+    let pendingLeading: string[] = [];
+
+    const emitSpeechRun = (runText: string): void => {
       const sentences = splitSentences(runText);
       if (sentences.length === 0) return;
       const groups = groupSentences(sentences, SENTENCES_PER_SPEECH_UNIT);
       groups.forEach((text, index) => {
-        units.push({
+        const unit: NarrationUnit = {
           id: makeId(),
           chapter: paragraph.chapter,
           kind: 'speech',
           text,
           directive: null,
           pauseMs: null,
-          // evidence 归属该 run 的首个 speech unit（deterministic）
-          evidenceIds: index === 0 ? evidenceIds : [],
+          // leading Evidence 归属本段下一个（本 run 首个）speech unit（deterministic）
+          evidenceIds: index === 0 ? [...new Set(pendingLeading)] : [],
           sourceText: paragraph.sourceText,
-        });
+        };
+        if (index === 0) pendingLeading = [];
+        units.push(unit);
+        paragraphSpeeches.push(unit);
       });
     };
 
     for (const token of paragraph.tokens) {
       if (token.type === 'text') {
-        emitSpeechRun(token.text ?? '', pendingEvidence);
-        pendingEvidence = [];
+        emitSpeechRun(token.text ?? '');
         continue;
       }
       if (token.type === 'evidence') {
-        // 并入后续 text-run（若其后没有 speech，则归属同段最后一个 speech unit）
-        pendingEvidence = [...pendingEvidence, ...(token.evidenceIds ?? [])];
-        if (pendingEvidence.length > 0) {
-          const lastSpeech = [...units].reverse().find((u) => u.kind === 'speech' && u.chapter === paragraph.chapter);
-          if (lastSpeech) {
-            lastSpeech.evidenceIds = [...new Set([...lastSpeech.evidenceIds, ...pendingEvidence])];
-            pendingEvidence = [];
-          }
+        const ids = token.evidenceIds ?? [];
+        if (ids.length === 0) continue;
+        const lastSpeech = paragraphSpeeches[paragraphSpeeches.length - 1];
+        if (lastSpeech) {
+          // trailing Evidence：归属本段最近的 speech unit
+          lastSpeech.evidenceIds = [...new Set([...lastSpeech.evidenceIds, ...ids])];
+        } else {
+          // leading Evidence：挂起，待本段下一个 speech unit
+          pendingLeading = [...new Set([...pendingLeading, ...ids])];
         }
         continue;
       }
@@ -274,13 +285,7 @@ export function compileNarrationPlan(input: {
         sourceText: paragraph.sourceText,
       });
     }
-    // 段落末尾仍挂起的 evidence：归入该段最后一个 speech unit
-    if (pendingEvidence.length > 0) {
-      const lastSpeech = [...units].reverse().find((u) => u.kind === 'speech' && u.chapter === paragraph.chapter);
-      if (lastSpeech) {
-        lastSpeech.evidenceIds = [...new Set([...lastSpeech.evidenceIds, ...pendingEvidence])];
-      }
-    }
+    // 段尾仍挂起的 leading Evidence：本段无后续 speech → 丢弃（不跨 paragraph）
   }
 
   // 章 firstUnitId / lastUnitId

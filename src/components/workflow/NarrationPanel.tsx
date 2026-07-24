@@ -163,7 +163,8 @@ export function NarrationPanel({
             ) : null}
             {data.status === 'stale' ? (
               <span>
-                已有 plan 基于 Script V2 v{data.latestPlanSourceVersion}，与当前锁定版本不一致——请重新构建
+                已有 plan 已过期（基于 Script V2 v{data.latestPlanSourceVersion} 或旧编译器，
+                与当前锁定版本/编译器不一致）——请重新构建
               </span>
             ) : null}
           </>

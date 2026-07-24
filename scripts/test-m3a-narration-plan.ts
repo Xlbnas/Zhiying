@@ -297,6 +297,123 @@ async function main(): Promise<void> {
     ok(ready2.status === 'ready' && ready2.scriptV2LockedVersion === 3, '[32] rebuild 后 readiness = ready');
   }
 
+  // ============ H. Hardening：corrupted artifact / chapter 括号 / Evidence 边界 / compiler 迁移 ============
+  {
+    // H-C：corrupted artifact 安全（不 crash、不当 current、按剩余合法 artifact 判断）
+    const pid = newProject();
+    for (const stage of WORKFLOW_STAGES.slice(0, 6)) {
+      await genAndLock(pid, stage);
+    }
+    const insertArtifact = (content: string): void => {
+      db.prepare(
+        `INSERT INTO artifacts (id, project_id, kind, version, content_json, file_path, created_at)
+         VALUES (?, ?, ?, (SELECT COALESCE(MAX(version), 0) + 1 FROM artifacts WHERE project_id = ? AND kind = ?), ?, NULL, ?)`,
+      ).run(crypto.randomUUID(), pid, NARRATION_PLAN_ARTIFACT_KIND, pid, NARRATION_PLAN_ARTIFACT_KIND, content, new Date().toISOString());
+    };
+    // A：非 JSON
+    insertArtifact('not-json');
+    let r = checkNarrationReadiness(pid);
+    ok(r.status === 'missing' && r.currentPlan === null, '[H-A] content_json 非 JSON → 不 crash 且不当 current');
+    // B：合法 JSON 但空对象
+    insertArtifact('{}');
+    r = checkNarrationReadiness(pid);
+    ok(r.status === 'missing', '[H-B] 空对象 artifact → 不当 current');
+    // C：schemaVersion 错误
+    const badSchema = JSON.parse(JSON.stringify(compile(FIXTURE_V2))) as Record<string, unknown>;
+    badSchema.schemaVersion = 'narration-plan@999';
+    insertArtifact(JSON.stringify(badSchema));
+    r = checkNarrationReadiness(pid);
+    ok(r.status === 'missing', '[H-C] schemaVersion 错误 → 不当 current');
+    // D：合法 plan 但 compilerVersion 为旧版 1.0（≠ 当前 1.1）→ stale（历史保留、不是 current）
+    const oldPlan = JSON.parse(JSON.stringify(compile(FIXTURE_V2))) as Record<string, unknown>;
+    oldPlan.compilerVersion = '1.0';
+    insertArtifact(JSON.stringify(oldPlan));
+    r = checkNarrationReadiness(pid);
+    ok(
+      r.status === 'stale' && r.currentPlan === null && r.latestPlanSourceVersion === 1,
+      '[H-D] compiler 1.0 artifact → stale（不 current，保留历史）',
+      {status: r.status, latest: r.latestPlanSourceVersion},
+    );
+    // Build：产生新的 1.1 artifact（不复用旧版），再次 build 幂等
+    const rebuilt = buildNarrationPlan(pid);
+    ok(
+      !rebuilt.reused && rebuilt.plan.compilerVersion === '1.1',
+      '[H-V] compiler 1.0 → Build 产生 1.1 新 artifact',
+    );
+    ok(checkNarrationReadiness(pid).status === 'ready', '[H-V] rebuild 后 ready');
+    const again = buildNarrationPlan(pid);
+    ok(again.reused && again.plan.compilerVersion === '1.1', '[H-V] 再次 build 幂等复用 1.1');
+  }
+  {
+    // H-P：chapter 标题只剥离正式时间区间，合法括号标题保留
+    const md = `## 第 1 章 开场（00:00–02:00）
+
+开场句。
+
+## 第 2 章 记忆（上）
+
+记忆句。
+
+## 第 3 章 一个问题（第二部分）
+
+问题句。
+
+## 第 4 章 范围（00:00-02:00）
+
+范围句。
+
+## 第 5 章 混合（00:00—02:00）
+
+混合句。
+`;
+    const p = compile(md);
+    const titles = p.chapters.map((c) => c.title);
+    ok(
+      titles[0] === '开场' && titles[1] === '记忆（上）' && titles[2] === '一个问题（第二部分）' &&
+        titles[3] === '范围' && titles[4] === '混合',
+      '[H-P] 时间区间（– - —）正确剥离，记忆（上）/（第二部分）等括号保留',
+      titles,
+    );
+  }
+  {
+    // H-E：Evidence paragraph 边界
+    const trailing = compile(`## 第 1 章 c（00:00–01:00）\n\n句子一。<!-- E01 -->\n`);
+    ok(
+      trailing.units.find((u) => u.kind === 'speech')?.evidenceIds.join(',') === 'E01',
+      '[H-E1] trailing Evidence 归属前面的 speech',
+    );
+    const leading = compile(`## 第 1 章 c（00:00–01:00）\n\n<!-- E02 -->\n句子二。\n`);
+    const leadingSpeech = leading.units.find((u) => u.kind === 'speech');
+    ok(
+      leadingSpeech?.evidenceIds.join(',') === 'E02',
+      '[H-E2] leading Evidence 归属后面的第一个 speech',
+    );
+    const twoPara = compile(`## 第 1 章 c（00:00–01:00）\n\n句子一。\n\n<!-- E02 -->\n句子二。\n`);
+    const speeches = twoPara.units.filter((u) => u.kind === 'speech');
+    ok(
+      !speeches[0]!.evidenceIds.includes('E02') && speeches[1]!.evidenceIds.join(',') === 'E02',
+      '[H-E3] 两段场景：E02 只归第二段 speech，不跨 paragraph',
+      speeches.map((s) => s.evidenceIds),
+    );
+    const multi = compile(`## 第 1 章 c（00:00–01:00）\n\n句子一。<!-- E01 E02 E01 -->\n`);
+    ok(
+      multi.units.find((u) => u.kind === 'speech')?.evidenceIds.join(',') === 'E01,E02',
+      '[H-E4] 多 ID 去重且保持首次出现顺序',
+    );
+    const orphan = compile(`## 第 1 章 c（00:00–01:00）\n\n<!-- E09 -->\n\n（停顿 1s）\n\n## 第 2 章 d（01:00–02:00）\n\n后段句子。\n`);
+    const allIds = orphan.units.flatMap((u) => u.evidenceIds);
+    ok(
+      !allIds.includes('E09') && orphan.units.some((u) => u.kind === 'speech'),
+      '[H-E5] 无 speech 段内的 Evidence 被丢弃（不跨段、不 crash）',
+      allIds,
+    );
+    // deterministic 保持
+    ok(
+      JSON.stringify(compile(FIXTURE_V2)) === JSON.stringify(compile(FIXTURE_V2)),
+      '[H-E6] 修复后编译仍 deterministic',
+    );
+  }
+
   closeDb();
   fs.rmSync(path.resolve(process.cwd(), 'data', 'test-m3a'), {recursive: true, force: true});
 

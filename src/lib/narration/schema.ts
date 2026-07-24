@@ -11,7 +11,13 @@ import {z} from 'zod';
  */
 
 export const NARRATION_PLAN_SCHEMA_VERSION = 'narration-plan@1.0';
-export const NARRATION_COMPILER_VERSION = '1.0';
+/**
+ * M3-A Hardening：Evidence 归属规则（paragraph 边界）与 chapter 时间区间
+ * 解析行为修正，compilerVersion 1.0 → 1.1（数据结构不变）。
+ * 旧 compiler@1.0 的 plan 不再视为 current（幂等键含 compilerVersion），
+ * 重新 Build 产生 1.1 artifact，旧版保留为历史。
+ */
+export const NARRATION_COMPILER_VERSION = '1.1';
 
 export const narrationUnitKindSchema = z.enum([
   'speech',
@@ -71,7 +77,8 @@ export const narrationChapterSchema = z.object({
 export const narrationPlanSchema = z
   .object({
     schemaVersion: z.literal(NARRATION_PLAN_SCHEMA_VERSION),
-    compilerVersion: z.literal(NARRATION_COMPILER_VERSION),
+    /** compilerVersion 为历史可读字段（1.0/1.1…）；是否 current 由 plan.ts 判定。 */
+    compilerVersion: z.string().min(1),
     source: z.object({
       stage: z.literal('script_v2'),
       /** script_v2.locked_version（immutable source snapshot，绝不读 active_version）。 */
