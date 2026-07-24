@@ -17,10 +17,23 @@ import {z} from 'zod';
  */
 
 export const SUBTITLE_TIMING_SCHEMA_VERSION = 'subtitle-timing@1.0';
-export const SUBTITLE_COMPILER_VERSION = '1.0';
+/**
+ * M3-C Hardening：compiler 语义升级（symmetric timeline tolerance、
+ * Manifest↔Plan 语义一致性校验、闭引号分句）——同一旧输入可能产生不同
+ * artifact，且旧 artifact 的 current/reuse 判定变化，故 1.0 → 1.1。
+ * 旧 compiler@1.0 artifact 保留为历史，不再 current、不再幂等复用。
+ */
+export const SUBTITLE_COMPILER_VERSION = '1.1';
 export const SUBTITLE_TIMING_ARTIFACT_KIND = 'subtitle_timing';
 /** unit 边界实测 + unit 内句子按文本权重比例分配（估算）。 */
 export const SUBTITLE_ALIGNMENT_METHOD = 'measured_unit_proportional_text';
+/**
+ * 全局 cursor 与 master 实测时长的 symmetric 容差（§二 Hardening 1）：
+ * 容纳多个 speech unit 各自 ffprobe integer durationMs 与 master WAV 整体
+ * ffprobe 之间累计的双向 rounding residual。schema 的 master 上界与
+ * compiler 的 AUDIO_TIMELINE_MISMATCH 防线共用同一常量，contract 对称。
+ */
+export const AUDIO_TIMELINE_TOLERANCE_MS = 100;
 
 export const subtitleTimingCueSchema = z.object({
   /** 全局连续序号 1…N（编译器顺序生成，禁止 random/UUID）。 */
@@ -86,11 +99,13 @@ export const subtitleTimingSchema = z
           message: `cue ${cue.segmentId} 与前一条重叠/乱序`,
         });
       }
-      // 不越过 master 总时长
-      if (cue.endMs > timing.source.masterDurationMs) {
+      // 不越过 master 总时长 + symmetric tolerance（与 compiler 的
+      // AUDIO_TIMELINE_MISMATCH 防线同一常量：|cursor-master|<=100ms 合法时，
+      // cue 也允许最多超出 master 100ms；>100ms 在 compiler 阶段已被拒绝）
+      if (cue.endMs > timing.source.masterDurationMs + AUDIO_TIMELINE_TOLERANCE_MS) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `cue ${cue.segmentId} endMs 超过 masterDurationMs`,
+          message: `cue ${cue.segmentId} endMs 超过 masterDurationMs + ${AUDIO_TIMELINE_TOLERANCE_MS}ms 容差`,
         });
       }
     });

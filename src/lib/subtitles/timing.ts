@@ -71,15 +71,36 @@ function parseTiming(row: SubtitleArtifactRow): SubtitleTiming | null {
   return parsed.success ? parsed.data : null;
 }
 
-/** current 判定（§二十六）：绑定 current audio artifact + masterSha256 + compilerVersion。 */
+/**
+ * current 判定（§二十六 + Hardening 3）：source snapshot 的全部 provenance
+ * 必须与 current Narration Audio Manifest 自己记录的 provenance 一致——
+ * JSON/Zod 合法但 provenance 被篡改/损坏的 artifact 绝不认 current、绝不复用。
+ */
 function matchesCurrentSource(
   timing: SubtitleTiming,
-  audio: {artifact: {id: string; version: number}; manifest: {master: {sha256: string}}},
+  audio: {
+    artifact: {id: string; version: number};
+    manifest: {
+      source: {
+        narrationPlanArtifactId: string;
+        narrationPlanArtifactVersion: number;
+        scriptV2Version: number;
+        compilerVersion: string;
+      };
+      master: {sha256: string; durationMs: number};
+    };
+  },
 ): boolean {
   return (
     timing.source.narrationAudioArtifactId === audio.artifact.id &&
     timing.source.narrationAudioArtifactVersion === audio.artifact.version &&
+    timing.source.narrationPlanArtifactId === audio.manifest.source.narrationPlanArtifactId &&
+    timing.source.narrationPlanArtifactVersion ===
+      audio.manifest.source.narrationPlanArtifactVersion &&
+    timing.source.scriptV2Version === audio.manifest.source.scriptV2Version &&
+    timing.source.narrationCompilerVersion === audio.manifest.source.compilerVersion &&
     timing.source.masterSha256 === audio.manifest.master.sha256 &&
+    timing.source.masterDurationMs === audio.manifest.master.durationMs &&
     timing.compilerVersion === SUBTITLE_COMPILER_VERSION
   );
 }

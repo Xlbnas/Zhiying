@@ -1,6 +1,7 @@
 import type {NarrationAudioManifest} from '../narration/audio';
 import type {NarrationPlan} from '../narration/schema';
 import {
+  AUDIO_TIMELINE_TOLERANCE_MS,
   SUBTITLE_ALIGNMENT_METHOD,
   SUBTITLE_COMPILER_VERSION,
   SUBTITLE_TIMING_SCHEMA_VERSION,
@@ -40,11 +41,17 @@ export class SubtitleCompileError extends Error {
   }
 }
 
-/** 与 M3-B master 时长防线一致的帧取整容差。 */
-export const AUDIO_TIMELINE_TOLERANCE_MS = 100;
+/** 与 M3-B master 时长防线一致的 symmetric 容差（schema 共用同一常量）。 */
+export {AUDIO_TIMELINE_TOLERANCE_MS} from './schema';
 
 /** 强终止符 。！？!?；句界 ；;——标点保留在前一句（deterministic，无 LLM/jieba）。 */
-const SENTENCE = /[^。！？!?；;]+[。！？!?；;]*/gs;
+const SENTENCE_TERMINATOR = '。！？!?；;';
+/** 终止符后的 closing punctuation 跟随前一句，不跑到下一 cue 开头（§五 Hardening）。 */
+const SENTENCE_CLOSERS = '”’」』）》】"';
+const SENTENCE = new RegExp(
+  `[^${SENTENCE_TERMINATOR}]+[${SENTENCE_TERMINATOR}]*[${SENTENCE_CLOSERS}]*`,
+  'gs',
+);
 
 /**
  * 自然句切分：一个自然句 = 一个 cue。无终止符时整个 speech unit = 1 cue；
@@ -138,6 +145,15 @@ export function compileSubtitleTiming(input: {
 
     if (unit.kind === 'speech') {
       const speech = mUnit as Extract<typeof mUnit, {kind: 'speech'}>;
+      // §三 Hardening 2：Manifest 必须与它引用的 Plan 语义一致（不 silent repair）。
+      // 字幕文本仍来自 Plan，但仅在 manifest.text === plan.text 时才允许 compile；
+      // duration 永远用 manifest 的 ffprobe measured truth。
+      if (speech.text !== unit.text) {
+        throw new SubtitleCompileError(
+          'NARRATION_AUDIO_INVALID',
+          `${unit.id} manifest.text 与 plan.text 不一致（semantic corruption，拒绝 compile）`,
+        );
+      }
       const sentences = splitSubtitleSentences(unit.text ?? '');
       const allocated = allocateSentences(unit.id, cursorMs, speech.durationMs, sentences);
       allocated.forEach((cue, sentenceIndex) => {
@@ -158,8 +174,16 @@ export function compileSubtitleTiming(input: {
     }
 
     if (unit.kind === 'pause') {
-      if (unit.pauseMs !== null) {
-        cursorMs += unit.pauseMs; // explicit pause：无 cue，cursor 前进
+      const pause = mUnit as Extract<typeof mUnit, {kind: 'pause'}>;
+      // manifest.durationMs 必须等于 plan.pauseMs，且 resolved 标记一致
+      if (pause.durationMs !== unit.pauseMs || pause.resolved !== (unit.pauseMs !== null)) {
+        throw new SubtitleCompileError(
+          'NARRATION_AUDIO_INVALID',
+          `${unit.id} pause duration/resolved 与 plan 不一致（manifest ${pause.durationMs}/${pause.resolved}，plan ${unit.pauseMs}）`,
+        );
+      }
+      if (pause.durationMs !== null) {
+        cursorMs += pause.durationMs; // explicit pause：无 cue，cursor 按校验后的 manifest 时长前进
       } else {
         unresolvedUnitIds.push(unit.id); // 无时长 pause：不占 master 时间，记录待 M3-D
       }
@@ -167,10 +191,18 @@ export function compileSubtitleTiming(input: {
     }
 
     if (unit.kind === 'visual_breath') {
+      // schema 已锁死 durationMs=null / resolved=false，unit 对齐即可
       unresolvedUnitIds.push(unit.id);
       return;
     }
-    // prosody：cursor 不变
+    // prosody：directive 必须与 plan 一致；cursor 不变
+    const prosody = mUnit as Extract<typeof mUnit, {kind: 'prosody'}>;
+    if (prosody.directive !== unit.directive) {
+      throw new SubtitleCompileError(
+        'NARRATION_AUDIO_INVALID',
+        `${unit.id} prosody directive 与 plan 不一致（manifest "${prosody.directive}"，plan "${unit.directive}"）`,
+      );
+    }
   });
 
   // §二十：全局 cursor 必须 ≈ master.durationMs（容差沿用 M3-B 音频取整 100ms）

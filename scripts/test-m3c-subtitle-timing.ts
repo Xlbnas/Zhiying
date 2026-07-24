@@ -18,6 +18,7 @@ import {
   enqueueNarrationAudioJobs,
   getCurrentNarrationAudioArtifact,
   NARRATION_AUDIO_ARTIFACT_KIND,
+  narrationAudioManifestSchema,
   tryFinalizeNarrationAudio,
   type NarrationAudioManifest,
 } from '../src/lib/narration/audio';
@@ -174,7 +175,7 @@ function fakeManifest(
     source: {scriptV2Version: 1, compilerVersion: '1.1'},
     units: units.map((unit) => {
       if (unit.kind === 'speech') {
-        return {unitId: unit.id, kind: 'speech', durationMs: speechDurations[unit.id]!};
+        return {unitId: unit.id, kind: 'speech', text: unit.text, durationMs: speechDurations[unit.id]!};
       }
       if (unit.kind === 'pause') {
         return {unitId: unit.id, kind: 'pause', durationMs: unit.pauseMs, resolved: unit.pauseMs !== null};
@@ -182,7 +183,7 @@ function fakeManifest(
       if (unit.kind === 'visual_breath') {
         return {unitId: unit.id, kind: 'visual_breath'};
       }
-      return {unitId: unit.id, kind: 'prosody'};
+      return {unitId: unit.id, kind: 'prosody', directive: unit.directive};
     }),
     master: {durationMs: masterDurationMs, sha256: 'fake-sha'},
   } as unknown as NarrationAudioManifest;
@@ -417,6 +418,191 @@ async function main(): Promise<void> {
     );
   }
 
+  // ===== Hardening 1：symmetric tolerance contract（schema 与 compiler 同常量）=====
+
+  // H1-1. cursor=1240 / master=1330（+90ms）→ PASS
+  {
+    const t = compile([speechUnit(1, '甲。')], {N001: 1240}, 1330);
+    ok(t.cues.length === 1 && t.cues[0]!.endMs === 1240, 'H1-1 +90ms（cursor<master）→ PASS');
+  }
+  // H1-2. cursor=1240 / master=1150（-90ms）→ PASS（cue end 允许超 master ≤ tolerance）
+  {
+    const t = compile([speechUnit(1, '甲。')], {N001: 1240}, 1150);
+    ok(
+      t.cues.length === 1 && t.cues[0]!.endMs === 1240 && t.source.masterDurationMs === 1150,
+      'H1-2 -90ms（cursor>master，cue end 超 master 90ms ≤ tolerance）→ PASS',
+    );
+  }
+  // H1-3. +101ms → AUDIO_TIMELINE_MISMATCH
+  {
+    ok(
+      throwsCode(() => compile([speechUnit(1, '甲。')], {N001: 1240}, 1341), 'AUDIO_TIMELINE_MISMATCH'),
+      'H1-3 +101ms → AUDIO_TIMELINE_MISMATCH',
+    );
+  }
+  // H1-4. -101ms → AUDIO_TIMELINE_MISMATCH
+  {
+    ok(
+      throwsCode(() => compile([speechUnit(1, '甲。')], {N001: 1240}, 1139), 'AUDIO_TIMELINE_MISMATCH'),
+      'H1-4 -101ms → AUDIO_TIMELINE_MISMATCH',
+    );
+  }
+  // H1-5. exact ±100ms boundary → PASS（含边界）
+  {
+    const plus = compile([speechUnit(1, '甲。')], {N001: 1240}, 1340);
+    const minus = compile([speechUnit(1, '甲。')], {N001: 1240}, 1140);
+    ok(
+      plus.cues.length === 1 && minus.cues.length === 1,
+      'H1-5 exact ±100ms boundary → PASS（含边界）',
+    );
+  }
+
+  // ===== Hardening 2：Manifest ↔ Plan 语义一致性（schema-valid fixture）=====
+
+  /** 构造 schema-valid manifest（证明测试针对 semantic corruption 而非 Zod shape error）。 */
+  function validManifest(
+    units: NarrationUnit[],
+    speechDurations: Record<string, number>,
+    masterDurationMs: number,
+  ): NarrationAudioManifest {
+    return narrationAudioManifestSchema.parse({
+      schemaVersion: 'narration-audio@1.0',
+      source: {
+        narrationPlanArtifactId: 'plan-artifact-1',
+        narrationPlanArtifactVersion: 1,
+        scriptV2Version: 1,
+        compilerVersion: '1.1',
+      },
+      provider: {
+        name: 'mock',
+        model: 'mock-tone-v1',
+        providerVersion: null,
+        providerCommit: 'mock-deterministic',
+        voiceProfile: {id: 'default', revision: '1'},
+        useRandom: false,
+      },
+      units: units.map((unit) => {
+        if (unit.kind === 'speech') {
+          return {
+            unitId: unit.id, kind: 'speech', text: unit.text,
+            filePath: 'projects/p/audio/u.wav', durationMs: speechDurations[unit.id]!,
+            sampleRate: 48000, channels: 1, sha256: 's', ttsJobId: 'j',
+          };
+        }
+        if (unit.kind === 'pause') {
+          return {
+            unitId: unit.id, kind: 'pause', directive: unit.directive,
+            durationMs: unit.pauseMs, resolved: unit.pauseMs !== null,
+          };
+        }
+        if (unit.kind === 'visual_breath') {
+          return {unitId: unit.id, kind: 'visual_breath', durationMs: null, resolved: false};
+        }
+        return {unitId: unit.id, kind: 'prosody', directive: unit.directive, appliedToTts: false};
+      }),
+      master: {
+        filePath: 'projects/p/audio/master.wav', durationMs: masterDurationMs,
+        sha256: 'fake-sha', sampleRate: 48000, channels: 1,
+      },
+    });
+  }
+
+  function compileValid(
+    units: NarrationUnit[],
+    manifest: NarrationAudioManifest,
+  ): SubtitleTiming {
+    return compileSubtitleTiming({
+      plan: fakePlan(units),
+      manifest,
+      narrationAudioArtifactId: 'audio-artifact-1',
+      narrationAudioArtifactVersion: 1,
+      narrationPlanArtifactId: 'plan-artifact-1',
+      narrationPlanArtifactVersion: 1,
+    });
+  }
+
+  // H2-0. 完全匹配（schema-valid）→ 正常通过
+  {
+    const units = [speechUnit(1, '甲。'), pauseUnit(2, 500), speechUnit(3, '乙。'), prosodyUnit(4), breathUnit(5)];
+    const m = validManifest(units, {N001: 1000, N003: 800}, 2300);
+    const t = compileValid(units, m);
+    ok(
+      t.cues.length === 2 && JSON.stringify(t.unresolvedUnitIds) === JSON.stringify(['N005']),
+      'H2-0 Manifest↔Plan 完全匹配 → 正常通过',
+    );
+  }
+  // H2-1. speech text mismatch（schema-valid 但语义损坏）→ NARRATION_AUDIO_INVALID
+  {
+    const units = [speechUnit(1, '甲。')];
+    const m = validManifest(units, {N001: 1000}, 1000);
+    (m.units[0] as {text: string}).text = '被篡改的文本。';
+    narrationAudioManifestSchema.parse(m); // 仍是 schema-valid
+    ok(
+      throwsCode(() => compileValid(units, m), 'NARRATION_AUDIO_INVALID'),
+      'H2-1 speech text mismatch → NARRATION_AUDIO_INVALID',
+    );
+  }
+  // H2-2. explicit pause duration mismatch → NARRATION_AUDIO_INVALID
+  {
+    const units = [speechUnit(1, '甲。'), pauseUnit(2, 500), speechUnit(3, '乙。')];
+    const m = validManifest(units, {N001: 1000, N003: 800}, 2400); // master 与篡改后 cursor 一致，隔离语义错误
+    (m.units[1] as {durationMs: number}).durationMs = 600;
+    narrationAudioManifestSchema.parse(m);
+    ok(
+      throwsCode(() => compileValid(units, m), 'NARRATION_AUDIO_INVALID'),
+      'H2-2 pause duration mismatch → NARRATION_AUDIO_INVALID',
+    );
+  }
+  // H2-3. pause resolved mismatch（duration 一致但 resolved 标记错）→ NARRATION_AUDIO_INVALID
+  {
+    const units = [speechUnit(1, '甲。'), pauseUnit(2, 500), speechUnit(3, '乙。')];
+    const m = validManifest(units, {N001: 1000, N003: 800}, 2300);
+    (m.units[1] as {resolved: boolean}).resolved = false;
+    narrationAudioManifestSchema.parse(m);
+    ok(
+      throwsCode(() => compileValid(units, m), 'NARRATION_AUDIO_INVALID'),
+      'H2-3 pause resolved mismatch → NARRATION_AUDIO_INVALID',
+    );
+  }
+  // H2-4. prosody directive mismatch → NARRATION_AUDIO_INVALID
+  {
+    const units = [speechUnit(1, '甲。'), prosodyUnit(2), speechUnit(3, '乙。')];
+    const m = validManifest(units, {N001: 1000, N003: 800}, 1800);
+    (m.units[1] as {directive: string}).directive = '加重';
+    narrationAudioManifestSchema.parse(m);
+    ok(
+      throwsCode(() => compileValid(units, m), 'NARRATION_AUDIO_INVALID'),
+      'H2-4 prosody directive mismatch → NARRATION_AUDIO_INVALID',
+    );
+  }
+
+  // ===== Hardening 4：闭引号分句（deterministic，无 NLP）=====
+
+  // H4-1. 中文双引号：终止符后的 ” 跟随前一句
+  {
+    const s = splitSubtitleSentences('他说：“你好。”然后走了。');
+    ok(
+      s.length === 2 && s[0] === '他说：“你好。”' && s[1] === '然后走了。',
+      'H4-1 中文双引号闭引号跟随前一句',
+      s,
+    );
+  }
+  // H4-2. ASCII quote 同理
+  {
+    const s = splitSubtitleSentences('甲说"你好。"乙。');
+    ok(s.length === 2 && s[0] === '甲说"你好。"' && s[1] === '乙。', 'H4-2 ASCII quote 闭引号跟随前一句', s);
+  }
+  // H4-3. compile 级：引号句 → 2 cues 且文本正确
+  {
+    const t = compile([speechUnit(1, '他说：“你好。”然后走了。')], {N001: 2000}, 2000);
+    ok(
+      t.cues.length === 2 && t.cues[0]!.text === '他说：“你好。”' && t.cues[1]!.text === '然后走了。',
+      'H4-3 compile 级引号分句 → 2 cues',
+    );
+  }
+  // H4-4. compilerVersion 升级标记（Hardening 语义变化 → 1.1）
+  ok(SUBTITLE_COMPILER_VERSION === '1.1', 'H4-4 compilerVersion 升级为 1.1');
+
   // ===== §四十七 高层 mock 闭环（Workflow → … → Audio ready）=====
 
   const pidA = newProject();
@@ -629,6 +815,40 @@ async function main(): Promise<void> {
     ok(
       getCurrentSubtitleTiming(pid)?.artifact.id === good.artifact.id,
       '41 invalid cue schema 被 skip（不认作 current）',
+    );
+  }
+
+  // ===== Hardening 3：source snapshot provenance 篡改 → 不认 current / 不复用 =====
+  {
+    const pid = newProject();
+    await buildProjectWithAudio(pid, SCRIPT_V2);
+    buildSubtitleTiming(pid); // 初始合法 artifact
+    const tampers: Array<[string, (json: {source: Record<string, unknown>}) => void]> = [
+      ['narrationPlanArtifactId', (j) => { j.source.narrationPlanArtifactId = 'tampered-plan-id'; }],
+      ['narrationPlanArtifactVersion', (j) => { j.source.narrationPlanArtifactVersion = 999; }],
+      ['scriptV2Version', (j) => { j.source.scriptV2Version = 999; }],
+      ['narrationCompilerVersion', (j) => { j.source.narrationCompilerVersion = '9.9'; }],
+      ['masterDurationMs', (j) => { j.source.masterDurationMs = 999999; }],
+    ];
+    let allNotCurrent = true;
+    let allNoReuse = true;
+    for (const [field, tamper] of tampers) {
+      const row = subtitleArtifactRows(pid)[0]!; // 最新合法 artifact
+      const json = JSON.parse(row.content_json) as {source: Record<string, unknown>};
+      tamper(json);
+      getDb().prepare('UPDATE artifacts SET content_json = ? WHERE id = ?').run(JSON.stringify(json), row.id);
+      // schema 仍合法（provenance 损坏而非 shape 损坏），但绝不认 current
+      if (getCurrentSubtitleTiming(pid) !== null) allNotCurrent = false;
+      const rebuilt = buildSubtitleTiming(pid);
+      if (rebuilt.reused || rebuilt.artifact.id === row.id) allNoReuse = false;
+    }
+    ok(allNotCurrent, 'H3-1 五种 provenance 篡改（schema-valid）→ getCurrentSubtitleTiming 均不认 current');
+    ok(allNoReuse, 'H3-2 五种 provenance 篡改 → build 均不 reuse，创建新合法 artifact');
+    const rows = subtitleArtifactRows(pid);
+    ok(
+      rows.length === tampers.length + 1 && getCurrentSubtitleTiming(pid) !== null,
+      'H3-3 被篡改 artifact 全部保留为历史（不 DELETE），新 artifact current',
+      rows.length,
     );
   }
 
