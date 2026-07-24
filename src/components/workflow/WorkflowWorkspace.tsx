@@ -4,6 +4,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import type {WorkflowStage} from '@/lib/workflow/types';
 import {isStageEnabled} from '@/lib/workflow/capabilities';
 import {Workbench} from '@/components/Workbench';
+import {NarrationPanel} from './NarrationPanel';
 import {StagePanel} from './StagePanel';
 import {VisualPreview} from './VisualPreview';
 import {WorkflowStepper} from './WorkflowStepper';
@@ -135,6 +136,16 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
           </div>
         </section>
       ) : null}
+
+      <NarrationPanel
+        projectId={projectId}
+        scriptV2StageKey={
+          (() => {
+            const sv2 = data.stages.find((s) => s.stage === 'script_v2');
+            return sv2 ? `${sv2.status}:${sv2.updated_at}` : 'missing';
+          })()
+        }
+      />
 
       {data.hasScenesArtifact ? (
         <div style={{marginTop: 32}}>
