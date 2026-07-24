@@ -25,6 +25,7 @@ import {
   type ZhiyingFullCutProps,
 } from '@/lib/scene-schema';
 import {runLlmJob} from './llm-executor';
+import {RuntimeAudioError, stageRuntimeNarrationAudio} from './runtime-audio';
 import {runTtsJob} from './tts-executor';
 
 /**
@@ -217,6 +218,21 @@ async function runJob(
       job.kind === 'no-subtitles'
         ? COMPOSITION_ID_NO_SUBTITLES
         : COMPOSITION_ID;
+
+    // M3-E：仅 Final Render（runtime-audio/... narration）进入 staging——
+    // attempt→source→exact historical audio 解析 + WAV stage 到 bundled public root；
+    // Legacy（full/audio/...）与 Preview（null）不匹配 pattern，行为零变化。
+    // 必须先于 selectComposition，保证 staticFile(logicalPath) 可被 Renderer 获取。
+    try {
+      stageRuntimeNarrationAudio(job, parsed.data, bundleLocation);
+    } catch (err) {
+      if (err instanceof RuntimeAudioError) {
+        failJob(job.id, err.code, err.message);
+        log(`job ${job.id} runtime narration staging failed: [${err.code}] ${err.message}`);
+        return;
+      }
+      throw err;
+    }
 
     const composition = await selectComposition({
       serveUrl: bundleLocation,
