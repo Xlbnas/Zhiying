@@ -135,7 +135,39 @@ function parseReconciliation(row: ReconciliationArtifactRow): TimingReconciliati
   return parsed.success ? parsed.data : null;
 }
 
-/** current 判定：全 provenance 与三 current source 逐项相等 + compilerVersion。 */
+/**
+ * current Scenes semantic snapshot 绑定（Hardening 2）：
+ * version provenance 之外，artifact 内记录的 scene source timing 必须逐项等于
+ * 当前 locked Scenes 的真内容——「artifact 内部自洽」≠「与 immutable source 一致」。
+ */
+function matchesSceneSnapshot(rec: TimingReconciliation, scenes: ScenesAiOutput): boolean {
+  if (rec.scenes.length !== scenes.scenes.length) return false;
+  for (let i = 0; i < scenes.scenes.length; i++) {
+    const source = scenes.scenes[i]!;
+    const scene = rec.scenes[i]!;
+    if (
+      scene.sceneId !== source.id ||
+      scene.chapter !== source.chapter ||
+      scene.authoredStartFrame !== source.startFrame ||
+      scene.authoredDurationInFrames !== source.durationInFrames ||
+      scene.sourceWeightDurationFrames !== source.durationInFrames
+    ) {
+      return false;
+    }
+  }
+  // 三 source totals 与 current Scenes 重推导一致
+  const last = scenes.scenes[scenes.scenes.length - 1]!;
+  const fps = rec.fps;
+  return (
+    rec.sourceVisual.authoredTotalFrames === Math.round(last.end * fps) &&
+    rec.sourceVisual.rendererEndFrame ===
+      Math.max(...scenes.scenes.map((s) => s.startFrame + s.durationInFrames)) &&
+    rec.sourceVisual.weightTotalFrames ===
+      scenes.scenes.reduce((sum, s) => sum + s.durationInFrames, 0)
+  );
+}
+
+/** current 判定：全 provenance + scene semantic snapshot 与三 current source 逐项相等 + compilerVersion。 */
 function matchesCurrentSource(rec: TimingReconciliation, src: CurrentSources): boolean {
   const manifestSrc = src.audio.manifest.source;
   return (
@@ -152,7 +184,8 @@ function matchesCurrentSource(rec: TimingReconciliation, src: CurrentSources): b
     rec.source.subtitleCompilerVersion === src.subtitle.timing.compilerVersion &&
     rec.source.masterSha256 === src.audio.manifest.master.sha256 &&
     rec.source.masterDurationMs === src.audio.manifest.master.durationMs &&
-    rec.compilerVersion === RECONCILIATION_COMPILER_VERSION
+    rec.compilerVersion === RECONCILIATION_COMPILER_VERSION &&
+    matchesSceneSnapshot(rec, src.scenes.data)
   );
 }
 

@@ -17,7 +17,13 @@ import {SCENES_SYSTEM_FPS} from '../workflow/scenes-semantic-validation';
  */
 
 export const TIMING_RECONCILIATION_SCHEMA_VERSION = 'timing-reconciliation@1.0';
-export const RECONCILIATION_COMPILER_VERSION = '1.0';
+/**
+ * M3-D Final Data-Integrity Hardening：compiler algorithm 未变，但
+ * current/reuse semantic contract 变强（target exact Math.round 校验、
+ * current Scenes semantic snapshot 绑定、adapter source timing 兼容性校验）——
+ * 旧 compiler@1.0 artifact 不再自动 current/reuse，保留为历史，重新 Build → 1.1。
+ */
+export const RECONCILIATION_COMPILER_VERSION = '1.1';
 export const TIMING_RECONCILIATION_ARTIFACT_KIND = 'timing_reconciliation';
 /** bounded cumulative proportional allocation（clamp 是正式算法一部分，非 silent repair）。 */
 export const RECONCILIATION_STRATEGY = 'bounded_cumulative_proportional_frames';
@@ -95,6 +101,15 @@ export const timingReconciliationSchema = z
     const {fps} = rec;
 
     // ---- target 派生字段语义校验（防 schema-valid-but-tampered residual）----
+    // canonical video frame truth：master ms → target frames 的唯一正式规则是
+    // Math.round——exact half-frame tie 只有一个合法答案，不允许 ±1 frame tamper
+    // 仅靠 half-frame bound 蒙混（Hardening 1）。
+    const expectedTarget = Math.round((rec.source.masterDurationMs * fps) / 1000);
+    if (rec.target.totalFrames !== expectedTarget) {
+      fail(
+        `targetTotalFrames(${rec.target.totalFrames}) != Math.round(masterDurationMs×fps/1000)(${expectedTarget})`,
+      );
+    }
     const expectedRendered = (rec.target.totalFrames / fps) * 1000;
     if (Math.abs(rec.target.renderedDurationMs - expectedRendered) > FLOAT_EPSILON) {
       fail(`renderedDurationMs(${rec.target.renderedDurationMs}) 不等于 totalFrames/fps×1000(${expectedRendered})`);

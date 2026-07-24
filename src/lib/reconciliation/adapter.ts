@@ -20,6 +20,26 @@ export function applyTimingReconciliation(input: {
 }): ScenesAiOutput {
   const {reconciliation} = input;
   const fps = reconciliation.fps;
+
+  // 入口 source 双校验（Hardening 3）：不 blind trust adapter caller
+  const inputStructural = scenesAiOutputSchema.safeParse({
+    chapterTiming: input.chapterTiming,
+    scenes: input.scenes,
+  });
+  if (!inputStructural.success) {
+    throw new ReconciliationCompileError(
+      'RECONCILIATION_INVALID',
+      `adapter 输入 scenes 未通过结构校验：${inputStructural.error.issues[0]?.message ?? 'unknown'}`,
+    );
+  }
+  const inputSemantic = validateScenesSemantics(inputStructural.data);
+  if (!inputSemantic.ok) {
+    throw new ReconciliationCompileError(
+      'RECONCILIATION_INVALID',
+      `adapter 输入 scenes 未通过语义校验：[${inputSemantic.issues[0]!.code}] ${inputSemantic.issues[0]!.message}`,
+    );
+  }
+
   if (input.scenes.length !== reconciliation.scenes.length) {
     throw new ReconciliationCompileError(
       'RECONCILIATION_INVALID',
@@ -29,10 +49,17 @@ export function applyTimingReconciliation(input: {
 
   const scenes: Scene[] = input.scenes.map((scene, index) => {
     const rec = reconciliation.scenes[index]!;
-    if (rec.sceneId !== scene.id || rec.chapter !== scene.chapter) {
+    // source timing compatibility：reconciliation 记录的 authored timing 必须等于
+    // 输入 scene 的真 timing——id/chapter 相同但 timing 不同的 scenes 不得套旧 effective
+    if (
+      rec.sceneId !== scene.id ||
+      rec.chapter !== scene.chapter ||
+      rec.authoredStartFrame !== scene.startFrame ||
+      rec.authoredDurationInFrames !== scene.durationInFrames
+    ) {
       throw new ReconciliationCompileError(
         'RECONCILIATION_INVALID',
-        `scene[${index}]（${scene.id}/第${scene.chapter}章）与 reconciliation（${rec.sceneId}/第${rec.chapter}章）不对齐`,
+        `scene[${index}]（${scene.id}）source timing 与 reconciliation snapshot 不一致，拒绝套用`,
       );
     }
     return {

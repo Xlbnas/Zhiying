@@ -35,6 +35,7 @@ import {
   RECONCILIATION_COMPILER_VERSION,
   RECONCILIATION_FPS,
   TIMING_RECONCILIATION_ARTIFACT_KIND,
+  timingReconciliationSchema,
   type TimingReconciliation,
 } from '../src/lib/reconciliation/schema';
 import {
@@ -797,6 +798,169 @@ async function main(): Promise<void> {
       if (rebuilt.reused || rebuilt.artifact.id === currentId) allOk = false;
     }
     ok(allOk, '40 篡改 provenance → 不认 current / 不 reuse / 建新 artifact');
+  }
+
+  // ===== Final Data-Integrity Hardening =====
+
+  // H1-1. exact-half-frame：master=1050ms（raw 31.5）→ Math.round → 32
+  {
+    const rec = compileRec(mkScenes([100, 100]), 1050);
+    ok(
+      rec.target.totalFrames === 32 &&
+        Math.abs(rec.target.frameResidualMs - ((32 / 30) * 1000 - 1050)) < 1e-6,
+      'H1-1 exact-half-frame（1050ms→31.5）正式 rounding = 32',
+      rec.target,
+    );
+  }
+  // H1-2. totalFrames=31 的内部全自洽 tamper → 新 schema 必须拒绝（防 ±1 frame tamper）
+  {
+    const valid = compileRec(mkScenes([100, 100]), 1050);
+    const tampered = JSON.parse(JSON.stringify(valid)) as TimingReconciliation;
+    tampered.target.totalFrames = 31;
+    tampered.target.renderedDurationMs = (31 / 30) * 1000;
+    tampered.target.frameResidualMs = tampered.target.renderedDurationMs - 1050;
+    tampered.scaleRatio = 31 / 200;
+    tampered.scenes[1]!.effectiveEndFrame = 31;
+    tampered.scenes[1]!.effectiveDurationFrames = 15;
+    // 其余 superRefine 全部自洽（residual 恰好 -half-frame，bound 内）
+    const parsed = timingReconciliationSchema.safeParse(tampered);
+    ok(
+      !parsed.success &&
+        (parsed.error?.issues.some((i) => i.message.includes('targetTotalFrames')) ?? false),
+      'H1-2 ±1 frame semantic tamper（内部自洽）→ schema 拒绝',
+      parsed.success ? 'accepted!' : parsed.error?.issues[0]?.message,
+    );
+  }
+
+  // H3. adapter source timing compatibility
+  {
+    const scenesA = mkScenes([60, 90]);
+    const recA = compileRec(scenesA, 3333); // T=100
+    // Scenes B：同 id/chapter/non-timing，timing 合法但不同
+    const scenesB = mkScenes([100, 100]);
+    ok(
+      throwsCode(
+        () => applyTimingReconciliation({scenes: scenesB, chapterTiming: mkChapterTiming(scenesB), reconciliation: recA}),
+        'RECONCILIATION_INVALID',
+      ),
+      'H3-1 adapter：同 id 但 timing 不同的 Scenes B + reconciliation A → 拒绝',
+    );
+    // 输入本身语义非法（gap）→ 拒绝（不 blind trust caller）
+    const gapScenes = mkScenes([60, 90]);
+    gapScenes[1]!.start += 1;
+    ok(
+      throwsCode(
+        () => applyTimingReconciliation({scenes: gapScenes, chapterTiming: mkChapterTiming(scenesA), reconciliation: recA}),
+        'RECONCILIATION_INVALID',
+      ),
+      'H3-2 adapter：输入 scenes 未过 frozen 语义校验 → 拒绝',
+    );
+    // 匹配 source → 正常通过
+    const outOk = applyTimingReconciliation({scenes: scenesA, chapterTiming: mkChapterTiming(scenesA), reconciliation: recA});
+    ok(validateScenesSemantics(outOk).ok, 'H3-3 adapter：匹配 source → 正常通过');
+  }
+
+  // H2/H6. artifact 层 semantic snapshot gate + compiler 1.1
+  {
+    ok(RECONCILIATION_COMPILER_VERSION === '1.1', 'H6-0 compilerVersion = 1.1');
+    const pid = newProject();
+    await buildFullChain(pid, SCRIPT_V2);
+    buildTimingReconciliation(pid);
+
+    const tamperCurrent = (
+      mutate: (rec: TimingReconciliation) => void,
+    ): {tamperedId: string; rebuilt: ReturnType<typeof buildTimingReconciliation>} | null => {
+      const current = getCurrentTimingReconciliation(pid);
+      if (!current) return null;
+      const row = getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(current.artifact.id) as
+        | {content_json: string}
+        | undefined;
+      const json = JSON.parse(row!.content_json) as TimingReconciliation;
+      mutate(json);
+      // tamper 后必须仍是 schema-valid（证明是 semantic corruption 而非 shape error）
+      if (!timingReconciliationSchema.safeParse(json).success) {
+        throw new Error('tamper 构造失败：artifact 不再 schema-valid');
+      }
+      getDb().prepare('UPDATE artifacts SET content_json = ? WHERE id = ?').run(JSON.stringify(json), current.artifact.id);
+      const rebuilt = buildTimingReconciliation(pid);
+      return {tamperedId: current.artifact.id, rebuilt};
+    };
+    const expectRejected = (
+      label: string,
+      result: {tamperedId: string; rebuilt: ReturnType<typeof buildTimingReconciliation>} | null,
+    ): void => {
+      ok(
+        result !== null &&
+          !result.rebuilt.reused &&
+          result.rebuilt.artifact.id !== result.tamperedId,
+        label,
+      );
+    };
+
+    // H2-A. authoredTotalFrames tamper（shape 合法、内部无派生约束）
+    {
+      const current = getCurrentTimingReconciliation(pid)!;
+      const row = getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(current.artifact.id) as {content_json: string};
+      const json = JSON.parse(row.content_json) as TimingReconciliation;
+      json.sourceVisual.authoredTotalFrames += 1;
+      getDb().prepare('UPDATE artifacts SET content_json = ? WHERE id = ?').run(JSON.stringify(json), current.artifact.id);
+      const notCurrent = getCurrentTimingReconciliation(pid) === null;
+      const stale = checkTimingReconciliationReadiness(pid).status === 'stale';
+      const rebuilt = buildTimingReconciliation(pid);
+      ok(
+        notCurrent && stale && !rebuilt.reused && rebuilt.artifact.id !== current.artifact.id,
+        'H2-A authoredTotalFrames tamper → not current / stale / 不 reuse / 新 artifact',
+      );
+    }
+    // H2-B. authoredStartFrame semantic tamper（同步调 rendererEnd 保持内部自洽）
+    expectRejected(
+      'H2-B authoredStartFrame+1（内部自洽）→ not current / 不 reuse / 新 artifact',
+      tamperCurrent((rec) => {
+        rec.scenes[1]!.authoredStartFrame += 1;
+        rec.sourceVisual.rendererEndFrame = Math.max(
+          ...rec.scenes.map((s) => s.authoredStartFrame + s.authoredDurationInFrames),
+        );
+      }),
+    );
+    // H2-C. authoredDuration/sourceWeight 内部全自洽 tamper（≠ current scenes）
+    expectRejected(
+      'H2-C authoredDuration+sourceWeight 内部自洽 tamper → not current / 不 reuse / 新 artifact',
+      tamperCurrent((rec) => {
+        const w0 = rec.scenes[0]!.authoredDurationInFrames - 5;
+        rec.scenes[0]!.authoredDurationInFrames = w0;
+        rec.scenes[0]!.sourceWeightDurationFrames = w0;
+        rec.scenes[0]!.sourceWeightEndFrame = rec.scenes[0]!.sourceWeightStartFrame + w0;
+        rec.scenes[1]!.sourceWeightStartFrame = rec.scenes[0]!.sourceWeightEndFrame;
+        rec.scenes[1]!.sourceWeightEndFrame =
+          rec.scenes[1]!.sourceWeightStartFrame + rec.scenes[1]!.sourceWeightDurationFrames;
+        rec.sourceVisual.weightTotalFrames = rec.scenes[1]!.sourceWeightEndFrame;
+        rec.sourceVisual.rendererEndFrame = Math.max(
+          ...rec.scenes.map((s) => s.authoredStartFrame + s.authoredDurationInFrames),
+        );
+        rec.scaleRatio = rec.target.totalFrames / rec.sourceVisual.weightTotalFrames;
+      }),
+    );
+    // H6. 旧 compiler 1.0 artifact → stale；rebuild → 1.1 current
+    {
+      const current = getCurrentTimingReconciliation(pid)!;
+      const row = getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(current.artifact.id) as {content_json: string};
+      const json = JSON.parse(row.content_json) as {compilerVersion: string};
+      json.compilerVersion = '1.0';
+      getDb().prepare('UPDATE artifacts SET content_json = ? WHERE id = ?').run(JSON.stringify(json), current.artifact.id);
+      const stale = checkTimingReconciliationReadiness(pid).status === 'stale' &&
+        getCurrentTimingReconciliation(pid) === null;
+      const rebuilt = buildTimingReconciliation(pid);
+      ok(
+        stale && !rebuilt.reused && rebuilt.reconciliation.compilerVersion === '1.1' &&
+          checkTimingReconciliationReadiness(pid).status === 'ready',
+        'H6 旧 compiler 1.0 → stale → rebuild 1.1 current',
+      );
+    }
+    // H7. 全部被篡改 artifact 保留为历史
+    {
+      const rows = reconciliationArtifactRows(pid);
+      ok(rows.length === 5, 'H7 被篡改 artifact 全部保留历史（不 DELETE）', rows.length);
+    }
   }
 
   console.log(`\nM3-D: ${pass} PASS, ${fail} FAIL`);
