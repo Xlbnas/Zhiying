@@ -6,6 +6,7 @@ import {isStageEnabled} from '@/lib/workflow/capabilities';
 import {Workbench} from '@/components/Workbench';
 import {NarrationPanel} from './NarrationPanel';
 import {StagePanel} from './StagePanel';
+import {TimingReconciliationPanel} from './TimingReconciliationPanel';
 import {VisualPreview} from './VisualPreview';
 import {WorkflowStepper} from './WorkflowStepper';
 import {STAGE_NAMES, type StagesResponse} from './shared';
@@ -143,6 +144,17 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
           (() => {
             const sv2 = data.stages.find((s) => s.stage === 'script_v2');
             return sv2 ? `${sv2.status}:${sv2.updated_at}` : 'missing';
+          })()
+        }
+      />
+
+      <TimingReconciliationPanel
+        projectId={projectId}
+        sourceStageKey={
+          (() => {
+            const sv2 = data.stages.find((s) => s.stage === 'script_v2');
+            const sc = data.stages.find((s) => s.stage === 'scenes');
+            return `${sv2 ? `${sv2.status}:${sv2.updated_at}` : 'missing'}|${sc ? `${sc.status}:${sc.updated_at}` : 'missing'}`;
           })()
         }
       />
