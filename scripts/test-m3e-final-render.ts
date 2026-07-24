@@ -24,6 +24,7 @@ import {
   FINAL_RENDER_ATTEMPT_ARTIFACT_KIND,
   FINAL_RENDER_SOURCE_ARTIFACT_KIND,
   computePropsSha256,
+  computeSourceKeyForCompilerVersion,
   finalRenderSourceSchema,
   type FinalRenderSource,
 } from '../src/lib/final-render/schema';
@@ -180,6 +181,19 @@ function sha256File(abs: string): string {
 function currentFinalSource(pid: string): {row: {id: string; version: number; content_json: string}; content: FinalRenderSource} {
   const row = artifactsOf(pid, FINAL_RENDER_SOURCE_ARTIFACT_KIND).at(-1)!;
   return {row, content: finalRenderSourceSchema.parse(JSON.parse(row.content_json))};
+}
+
+/** 查指定 job 的 attempt 行（T04 会注入额外 attempt，不能靠 at(-1) 取）。 */
+function attemptRowForJob(pid: string, jobId: string): {id: string; content_json: string} {
+  const row = artifactsOf(pid, FINAL_RENDER_ATTEMPT_ARTIFACT_KIND).find((r) => {
+    try {
+      return (JSON.parse(r.content_json) as {jobId?: string}).jobId === jobId;
+    } catch {
+      return false;
+    }
+  });
+  if (!row) throw new Error(`attempt for job ${jobId} not found`);
+  return row;
 }
 
 function updateArtifact(id: string, content: unknown): void {
@@ -662,6 +676,192 @@ async function main(): Promise<void> {
     ok(
       throwsCode(() => resolveBundledPublicRoot(path.join('data', 'test-m3e', 'no-such-bundle')), 'RUNTIME_AUDIO_STAGE_ERROR'),
       'B03 bundleLocation 缺失 → 拒绝',
+    );
+  }
+
+  // ===== Final Snapshot Integrity Hardening =====
+
+  // H1. persisted propsSha stale → 重算拒绝（早于 historical audio lookup）
+  {
+    const {row} = currentFinalSource(pidA);
+    const tampered = JSON.parse(row.content_json) as FinalRenderSource;
+    tampered.propsSha256 = '9'.repeat(64);
+    updateArtifact(row.id, JSON.stringify(tampered));
+    ok(
+      throwsCode(() => stageRuntimeNarrationAudio(jobA, parsedPayloadOf(jobA), FAKE_BUNDLE), 'FINAL_RENDER_SOURCE_INVALID'),
+      'H1 persisted propsSha256 与 props 重算不一致 → FINAL_RENDER_SOURCE_INVALID',
+    );
+    const tampered2 = JSON.parse(row.content_json) as FinalRenderSource;
+    tampered2.props.subtitles[0]!.text = 'persisted props 篡改';
+    updateArtifact(row.id, JSON.stringify(tampered2));
+    ok(
+      throwsCode(() => stageRuntimeNarrationAudio(jobA, parsedPayloadOf(jobA), FAKE_BUNDLE), 'FINAL_RENDER_SOURCE_INVALID'),
+      'H1b persisted props 被改（sha 未同步）→ FINAL_RENDER_SOURCE_INVALID',
+    );
+    updateArtifact(row.id, row.content_json);
+  }
+  // H2. sourceKey stale（metadata 改、key 不改）→ 重算拒绝（不拖到 NARRATION_SOURCE_INVALID）
+  {
+    const {row} = currentFinalSource(pidA);
+    const tampered = JSON.parse(row.content_json) as FinalRenderSource;
+    tampered.source.masterDurationMs += 1;
+    updateArtifact(row.id, JSON.stringify(tampered));
+    ok(
+      throwsCode(() => stageRuntimeNarrationAudio(jobA, parsedPayloadOf(jobA), FAKE_BUNDLE), 'FINAL_RENDER_SOURCE_INVALID'),
+      'H2 source metadata tamper + stale sourceKey → FINAL_RENDER_SOURCE_INVALID（早期拒绝）',
+    );
+    updateArtifact(row.id, row.content_json);
+  }
+  // H3. Audio A→B substitution attack：metadata 全换 B 且 sourceKey 自洽，logicalPath 仍 A → 拒绝
+  {
+    const pid = newProject();
+    await buildFullChain(pid, SCRIPT_V2);
+    const audioAA = getCurrentNarrationAudioArtifact(pid)!;
+    const enq = enqueueFinalRender(pid);
+    const job = enq.job;
+    // 模拟 worker 已 claim（running），避免全局 FIFO 先领到 render job
+    getDb().prepare("UPDATE render_jobs SET status='running', claimed_by='w-m3e', claimed_at=?, heartbeat_at=? WHERE id=?")
+      .run(new Date().toISOString(), new Date().toISOString(), job.id);
+    await rebuildNarrationChain(pid, SCRIPT_V2.replace('那条消息你看到了。', '那条消息你看到了。你真的看到了。'));
+    const audioB = getCurrentNarrationAudioArtifact(pid)!;
+    ok(audioB.artifact.id !== audioAA.artifact.id, 'H3-0 项目内已有 Audio A/B 两代');
+    const {row} = currentFinalSource(pid);
+    const tampered = JSON.parse(row.content_json) as FinalRenderSource;
+    tampered.source.narrationAudioArtifactId = audioB.artifact.id;
+    tampered.source.narrationAudioArtifactVersion = audioB.artifact.version;
+    tampered.source.masterSha256 = audioB.manifest.master.sha256;
+    tampered.source.masterDurationMs = audioB.manifest.master.durationMs;
+    tampered.narration.masterFilePath = audioB.manifest.master.filePath;
+    // 用 B metadata 重算自洽 sourceKey，并同步 attempt——除 logicalPath 绑定外全部 gate 均能通过
+    tampered.sourceKey = computeSourceKeyForCompilerVersion({
+      compilerVersion: tampered.compilerVersion,
+      projectId: pid,
+      source: tampered.source,
+      propsSha256: tampered.propsSha256,
+    });
+    updateArtifact(row.id, JSON.stringify(tampered));
+    const attemptRow = attemptRowForJob(pid, job.id);
+    const attemptJson = JSON.parse(attemptRow.content_json) as {sourceKey: string};
+    attemptJson.sourceKey = tampered.sourceKey;
+    updateArtifact(attemptRow.id, JSON.stringify(attemptJson));
+    ok(
+      throwsCode(() => stageRuntimeNarrationAudio(job, parsedPayloadOf(job), FAKE_BUNDLE), 'FINAL_RENDER_SOURCE_INVALID'),
+      'H3 Audio A→B substitution（key 自洽、logicalPath 仍 A）→ logicalPath binding 拒绝',
+    );
+    const aDest = path.join(FAKE_BUNDLE, 'public', 'runtime-audio', pid, `${audioAA.artifact.id}.wav`);
+    ok(
+      !fs.existsSync(aDest) || sha256File(aDest) === audioAA.manifest.master.sha256,
+      'H3b A 逻辑地址未被写入 B 内容',
+    );
+    getDb().prepare('DELETE FROM render_jobs WHERE id = ?').run(job.id);
+  }
+  // H4. historical source@1.0（key 按 1.0 正确计算）→ Worker 仍可执行
+  {
+    const {row} = currentFinalSource(pidA);
+    const json = JSON.parse(row.content_json) as FinalRenderSource;
+    json.compilerVersion = '1.0';
+    json.sourceKey = computeSourceKeyForCompilerVersion({
+      compilerVersion: '1.0',
+      projectId: pidA,
+      source: json.source,
+      propsSha256: json.propsSha256,
+    });
+    updateArtifact(row.id, JSON.stringify(json));
+    const attemptRow = attemptRowForJob(pidA, jobA.id);
+    const attemptJson = JSON.parse(attemptRow.content_json) as {sourceKey: string};
+    attemptJson.sourceKey = json.sourceKey;
+    updateArtifact(attemptRow.id, JSON.stringify(attemptJson));
+    const staged = stageRuntimeNarrationAudio(jobA, parsedPayloadOf(jobA), FAKE_BUNDLE);
+    ok(
+      staged !== null && staged.sha256 === audioA.manifest.master.sha256,
+      'H4 historical source compiler 1.0 → Worker staging PASS（staged sha == master sha）',
+    );
+    updateArtifact(row.id, row.content_json);
+    updateArtifact(attemptRow.id, attemptRow.content_json);
+  }
+  // H5. current 1.1 reuse 语义 + 旧 1.0 retention
+  {
+    const pid = newProject();
+    await buildFullChain(pid, SCRIPT_V2);
+    const e1 = enqueueFinalRender(pid);
+    ok(!e1.sourceReused, 'H5-1 首次 Render → source@1.1 v1');
+    // 模拟合法旧 1.0 source（key 按 1.0 重算自洽）
+    const {row} = currentFinalSource(pid);
+    const json = JSON.parse(row.content_json) as FinalRenderSource;
+    json.compilerVersion = '1.0';
+    json.sourceKey = computeSourceKeyForCompilerVersion({
+      compilerVersion: '1.0',
+      projectId: pid,
+      source: json.source,
+      propsSha256: json.propsSha256,
+    });
+    updateArtifact(row.id, JSON.stringify(json));
+    getDb().prepare("UPDATE render_jobs SET status='cancelled', finished_at=? WHERE project_id=?")
+      .run(new Date().toISOString(), pid);
+    const e2 = enqueueFinalRender(pid);
+    ok(!e2.sourceReused && e2.sourceArtifact.version === 2, 'H5-2 旧 1.0 source 不 reuse → 新 source@1.1 v2');
+    getDb().prepare("UPDATE render_jobs SET status='cancelled', finished_at=? WHERE project_id=?")
+      .run(new Date().toISOString(), pid);
+    const e3 = enqueueFinalRender(pid);
+    ok(e3.sourceReused && e3.sourceArtifact.id === e2.sourceArtifact.id, 'H5-3 同 sources → reuse source@1.1');
+    const rows = artifactsOf(pid, FINAL_RENDER_SOURCE_ARTIFACT_KIND);
+    const v1 = rows.find((r) => r.version === 1)!;
+    ok(
+      rows.length === 2 &&
+        (JSON.parse(v1.content_json) as FinalRenderSource).compilerVersion === '1.0',
+      'H5-4 旧 1.0 source 保留历史（不 DELETE/UPDATE）',
+    );
+    getDb().prepare("UPDATE render_jobs SET status='cancelled', finished_at=? WHERE project_id=?")
+      .run(new Date().toISOString(), pid);
+  }
+
+  // ===== Staging symlink 防线 =====
+  {
+    const payloadA = parsedPayloadOf(jobA);
+    // S1. public/runtime-audio → 外部 symlink
+    const b1 = path.join('data', 'test-m3e', 'bundle-s1');
+    const outside1 = path.join('data', 'test-m3e', 'outside-s1');
+    fs.mkdirSync(path.join(b1, 'public'), {recursive: true});
+    fs.mkdirSync(outside1, {recursive: true});
+    fs.symlinkSync(path.resolve(outside1), path.join(b1, 'public', 'runtime-audio'));
+    ok(
+      throwsCode(() => stageRuntimeNarrationAudio(jobA, payloadA, b1), 'RUNTIME_AUDIO_STAGE_ERROR'),
+      'S1 runtime-audio parent symlink escape → 拒绝',
+    );
+    ok(fs.readdirSync(outside1).length === 0, 'S1b 外部目录未产生 WAV');
+    // S2. runtime-audio/{pid} → 外部 symlink
+    const b2 = path.join('data', 'test-m3e', 'bundle-s2');
+    const outside2 = path.join('data', 'test-m3e', 'outside-s2');
+    fs.mkdirSync(path.join(b2, 'public', 'runtime-audio'), {recursive: true});
+    fs.mkdirSync(outside2, {recursive: true});
+    fs.symlinkSync(path.resolve(outside2), path.join(b2, 'public', 'runtime-audio', pidA));
+    ok(
+      throwsCode(() => stageRuntimeNarrationAudio(jobA, payloadA, b2), 'RUNTIME_AUDIO_STAGE_ERROR'),
+      'S2 project 目录 symlink escape → 拒绝',
+    );
+    ok(fs.readdirSync(outside2).length === 0, 'S2b 外部目录未产生 WAV');
+    // S3. destination 为外部文件 symlink
+    const b3 = path.join('data', 'test-m3e', 'bundle-s3');
+    const outsideFile = path.join('data', 'test-m3e', 'outside-s3.wav');
+    fs.mkdirSync(path.join(b3, 'public', 'runtime-audio', pidA), {recursive: true});
+    fs.writeFileSync(outsideFile, Buffer.alloc(5000, 7));
+    const outsideSha = sha256File(outsideFile);
+    fs.symlinkSync(
+      path.resolve(outsideFile),
+      path.join(b3, 'public', 'runtime-audio', pidA, `${audioA.artifact.id}.wav`),
+    );
+    ok(
+      throwsCode(() => stageRuntimeNarrationAudio(jobA, payloadA, b3), 'RUNTIME_AUDIO_STAGE_ERROR'),
+      'S3 destination symlink → 拒绝（不读取/覆盖外部目标）',
+    );
+    ok(sha256File(outsideFile) === outsideSha, 'S3b 外部文件未被读取/覆盖');
+    // S4. 正常目录 → PASS
+    const b4 = path.join('data', 'test-m3e', 'bundle-s4');
+    fs.mkdirSync(b4, {recursive: true});
+    const staged = stageRuntimeNarrationAudio(jobA, payloadA, b4);
+    ok(
+      staged !== null && staged.sha256 === audioA.manifest.master.sha256,
+      'S4 正常目录 stage PASS（回归）',
     );
   }
 

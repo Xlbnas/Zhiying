@@ -20,8 +20,12 @@ export const FINAL_RENDER_SOURCE_SCHEMA_VERSION = 'final-render-source@1.0';
 /**
  * props builder / runtime narration logical path / source snapshot contract
  * 任一变化即升级——旧 source artifact 保留历史，不再 reuse。
+ * M3-E Final Snapshot Integrity Hardening：integrity contract 从「保存 hash 字段」
+ * 升级为「Worker 消费前必须重算验证 persisted content 对应 hash」——1.0 → 1.1。
+ * 注意：Worker 验证 historical source 时按 source.compilerVersion 自己重算 key，
+ * 不要求等于本常量（已 enqueue 的 1.0 job 仍可执行）。
  */
-export const FINAL_RENDER_SOURCE_COMPILER_VERSION = '1.0';
+export const FINAL_RENDER_SOURCE_COMPILER_VERSION = '1.1';
 export const FINAL_RENDER_SOURCE_ARTIFACT_KIND = 'final_render_source';
 
 export const FINAL_RENDER_ATTEMPT_SCHEMA_VERSION = 'final-render-attempt@1.0';
@@ -83,16 +87,18 @@ export function computePropsSha256(props: ZhiyingFullCutProps): string {
 }
 
 /**
- * sourceKey：固定字段序 keyObject 的 sha256。
- * 含 FINAL_RENDER_SOURCE_COMPILER_VERSION——contract 升级即全部旧 source stale。
+ * sourceKey 底层纯函数：固定字段序 keyObject 的 sha256。
+ * compilerVersion 为显式参数——Build 传当前常量；Worker 验证 historical
+ * source 时传 source.compilerVersion。唯一 key algorithm，禁止双实现。
  */
-export function computeSourceKey(input: {
+export function computeSourceKeyForCompilerVersion(input: {
+  compilerVersion: string;
   projectId: string;
   source: FinalRenderSource['source'];
   propsSha256: string;
 }): string {
   const keyObject = {
-    compilerVersion: FINAL_RENDER_SOURCE_COMPILER_VERSION,
+    compilerVersion: input.compilerVersion,
     projectId: input.projectId,
     scenesVersionId: input.source.scenesVersionId,
     scenesVersion: input.source.scenesVersion,
@@ -109,4 +115,18 @@ export function computeSourceKey(input: {
     propsSha256: input.propsSha256,
   };
   return crypto.createHash('sha256').update(JSON.stringify(keyObject)).digest('hex');
+}
+
+/** Build 用：当前 compiler 的 sourceKey（contract 升级即全部旧 source stale）。 */
+export function computeSourceKey(input: {
+  projectId: string;
+  source: FinalRenderSource['source'];
+  propsSha256: string;
+}): string {
+  return computeSourceKeyForCompilerVersion({
+    compilerVersion: FINAL_RENDER_SOURCE_COMPILER_VERSION,
+    projectId: input.projectId,
+    source: input.source,
+    propsSha256: input.propsSha256,
+  });
 }

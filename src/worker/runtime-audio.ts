@@ -4,6 +4,9 @@ import path from 'node:path';
 import {isDeepStrictEqual} from 'node:util';
 import {getDataDir, getDb} from '@/lib/db';
 import {
+  buildRuntimeNarrationLogicalPath,
+  computePropsSha256,
+  computeSourceKeyForCompilerVersion,
   FINAL_RENDER_ATTEMPT_ARTIFACT_KIND,
   FINAL_RENDER_SOURCE_ARTIFACT_KIND,
   finalRenderAttemptSchema,
@@ -145,6 +148,41 @@ function loadFinalSource(job: RenderJobRow, attempt: FinalRenderAttempt): FinalR
       `final_render_source ${attempt.finalRenderSourceArtifactId} v${attempt.finalRenderSourceArtifactVersion} 缺失或非法`,
     );
   }
+  // ---- persisted source self-integrity gate（不信任存储的 hash 字段，全部重算）----
+  // 1. propsSha：必须确实是 source.props 的 hash
+  if (source.propsSha256 !== computePropsSha256(source.props)) {
+    throw new RuntimeAudioError(
+      'FINAL_RENDER_SOURCE_INVALID',
+      'persisted propsSha256 与 source.props 重算不一致',
+    );
+  }
+  // 2. sourceKey：按 source.compilerVersion 自己重算（historical 1.0 job 仍可执行——
+  // 不要求等于当前 compiler 常量；build/current 与 Worker 共用唯一 key algorithm）
+  const expectedKey = computeSourceKeyForCompilerVersion({
+    compilerVersion: source.compilerVersion,
+    projectId: job.project_id,
+    source: source.source,
+    propsSha256: source.propsSha256,
+  });
+  if (source.sourceKey !== expectedKey) {
+    throw new RuntimeAudioError(
+      'FINAL_RENDER_SOURCE_INVALID',
+      'persisted sourceKey 与 source 内容重算不一致',
+    );
+  }
+  // 3. logicalPath ↔ source audioArtifactId 绑定：防止 metadata 指 Audio B
+  // 而 runtime 路径仍写 Audio A 的 cross-binding
+  const boundLogical = buildRuntimeNarrationLogicalPath(
+    job.project_id,
+    source.source.narrationAudioArtifactId,
+  );
+  if (source.narration.logicalPath !== boundLogical) {
+    throw new RuntimeAudioError(
+      'FINAL_RENDER_SOURCE_INVALID',
+      `narration.logicalPath(${source.narration.logicalPath}) 与 source audioArtifactId 绑定路径(${boundLogical}) 不一致`,
+    );
+  }
+  // 4. attempt binding
   if (source.sourceKey !== attempt.sourceKey || source.propsSha256 !== attempt.propsSha256) {
     throw new RuntimeAudioError(
       'FINAL_RENDER_SOURCE_INVALID',
@@ -152,6 +190,51 @@ function loadFinalSource(job: RenderJobRow, attempt: FinalRenderAttempt): FinalR
     );
   }
   return source;
+}
+
+/**
+ * 逐层确保 staging 父目录链安全（Hardening：防 parent-chain symlink escape）：
+ * 不存在 → mkdir；存在 → 必须是目录或指向 root 内部目录的 symlink；
+ * 最终 realpath 必须 containment 在 realPublicRoot 内（不只依赖 path.resolve 字符串）。
+ */
+function ensureSafeDirectoryInsideRoot(realPublicRoot: string, segments: string[]): string {
+  let current = realPublicRoot;
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    const lst = fs.lstatSync(current, {throwIfNoEntry: false});
+    if (lst) {
+      if (lst.isSymbolicLink()) {
+        const real = fs.realpathSync(current);
+        if (real !== realPublicRoot && !real.startsWith(realPublicRoot + path.sep)) {
+          throw new RuntimeAudioError(
+            'RUNTIME_AUDIO_STAGE_ERROR',
+            `staging 父目录是指向 root 外部的 symlink: ${current} → ${real}`,
+          );
+        }
+        if (!fs.statSync(current).isDirectory()) {
+          throw new RuntimeAudioError(
+            'RUNTIME_AUDIO_STAGE_ERROR',
+            `staging 父目录 symlink 目标不是目录: ${current}`,
+          );
+        }
+      } else if (!lst.isDirectory()) {
+        throw new RuntimeAudioError(
+          'RUNTIME_AUDIO_STAGE_ERROR',
+          `staging 路径段不是目录: ${current}`,
+        );
+      }
+    } else {
+      fs.mkdirSync(current);
+    }
+  }
+  const realCurrent = fs.realpathSync(current);
+  if (realCurrent !== realPublicRoot && !realCurrent.startsWith(realPublicRoot + path.sep)) {
+    throw new RuntimeAudioError(
+      'RUNTIME_AUDIO_STAGE_ERROR',
+      `staging 父目录 realpath 越出 bundled public root: ${realCurrent}`,
+    );
+  }
+  return current;
 }
 
 /**
@@ -266,13 +349,29 @@ export function stageRuntimeNarrationAudio(
       `stage destination 越出 bundled public root: ${expectedLogical}`,
     );
   }
-  if (fs.existsSync(destAbs)) {
+  // parent-chain symlink 防线：realpath containment，逐层校验
+  const realPublicRoot = fs.realpathSync(publicRoot);
+  ensureSafeDirectoryInsideRoot(realPublicRoot, ['runtime-audio', job.project_id]);
+  // destination file 防线：已存在的 destination 不得是 symlink（不跟随读取/覆盖外部文件）
+  const destLstat = fs.lstatSync(destAbs, {throwIfNoEntry: false});
+  if (destLstat) {
+    if (destLstat.isSymbolicLink()) {
+      throw new RuntimeAudioError(
+        'RUNTIME_AUDIO_STAGE_ERROR',
+        `stage destination 是 symlink（拒绝读取/覆盖外部目标）: ${destAbs}`,
+      );
+    }
+    if (!destLstat.isFile()) {
+      throw new RuntimeAudioError(
+        'RUNTIME_AUDIO_STAGE_ERROR',
+        `stage destination 不是 regular file: ${destAbs}`,
+      );
+    }
     if (sha256File(destAbs) === masterSha) {
       return {stagedPath: destAbs, sha256: masterSha}; // 内容寻址命中，直接 reuse
     }
-    fs.rmSync(destAbs, {force: true}); // runtime cache corruption → 重建
+    fs.rmSync(destAbs, {force: true}); // corrupted regular cache → 重建
   }
-  fs.mkdirSync(path.dirname(destAbs), {recursive: true});
   const tmp = `${destAbs}.${crypto.randomUUID()}.tmp`;
   try {
     fs.copyFileSync(masterAbs, tmp);
