@@ -1116,6 +1116,159 @@ async function main(): Promise<void> {
     ok(!threw3 && m3 === null, '[H66] result_json schema 非法 → finalize=null');
   }
 
+  // ============ FC. Final File Commit Hardening（master/manifest 原子提交，fault injection） ============
+  {
+    // FC70-A：winner rename 失败 → DB 无 artifact、final 不存在、tmp 清理、overview != ready
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid);
+    await runAllTtsJobs(pid);
+    const relMaster = path.posix.join('projects', pid, 'audio', 'narration-master-v1-mock-default@1.wav');
+    const absMaster = path.join(getDataDir(), relMaster);
+    let threwA = false;
+    try {
+      tryFinalizeNarrationAudio(pid, {
+        renameImpl: () => {
+          throw new Error('EACCES 模拟 rename 失败');
+        },
+      });
+    } catch {
+      threwA = true;
+    }
+    const cntA = (
+      db.prepare('SELECT COUNT(*) AS c FROM artifacts WHERE project_id = ? AND kind = ?').get(pid, NARRATION_AUDIO_ARTIFACT_KIND) as {c: number}
+    ).c;
+    ok(
+      threwA && cntA === 0 && !fs.existsSync(absMaster),
+      '[FC70] rename 失败 → 抛出且 DB 无 artifact、final 不存在',
+      {threwA, cntA},
+    );
+    const audioDirA = path.join(getDataDir(), 'projects', pid, 'audio');
+    const tmpA = fs.existsSync(audioDirA) ? fs.readdirSync(audioDirA).filter((f) => f.endsWith('.tmp')) : [];
+    ok(tmpA.length === 0, '[FC70] rename 失败 → tmp 已清理');
+    ok(getNarrationAudioOverview(pid).status === 'not_ready', '[FC70] rename 失败 → overview != ready');
+    // FC72-C：故障移除后同 project 正常成功（tmp→rename→INSERT→commit）
+    const manifestC = tryFinalizeNarrationAudio(pid);
+    const tmpC = fs.readdirSync(audioDirA).filter((f) => f.endsWith('.tmp'));
+    ok(
+      manifestC !== null && fs.existsSync(absMaster) && tmpC.length === 0 &&
+        getNarrationAudioOverview(pid).status === 'ready',
+      '[FC72] normal success：final 存在、tmp=0、artifact=1、overview=ready',
+    );
+  }
+  {
+    // FC71-B：rename 成功后 INSERT 失败 → 事务回滚 + 补偿删除 final
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid);
+    await runAllTtsJobs(pid);
+    const relMaster = path.posix.join('projects', pid, 'audio', 'narration-master-v1-mock-default@1.wav');
+    const absMaster = path.join(getDataDir(), relMaster);
+    let threwB = false;
+    try {
+      tryFinalizeNarrationAudio(pid, {
+        insertArtifactImpl: () => {
+          throw new Error('模拟 INSERT 失败');
+        },
+      });
+    } catch {
+      threwB = true;
+    }
+    const cntB = (
+      db.prepare('SELECT COUNT(*) AS c FROM artifacts WHERE project_id = ? AND kind = ?').get(pid, NARRATION_AUDIO_ARTIFACT_KIND) as {c: number}
+    ).c;
+    const audioDirB = path.join(getDataDir(), 'projects', pid, 'audio');
+    const tmpB = fs.existsSync(audioDirB) ? fs.readdirSync(audioDirB).filter((f) => f.endsWith('.tmp')) : [];
+    ok(
+      threwB && cntB === 0 && !fs.existsSync(absMaster) && tmpB.length === 0,
+      '[FC71] INSERT 失败 → 事务回滚 artifact=0，final 补偿删除，tmp 无残留',
+      {threwB, cntB, finalExists: fs.existsSync(absMaster)},
+    );
+    ok(getNarrationAudioOverview(pid).status === 'not_ready', '[FC71] INSERT 失败 → overview != ready');
+  }
+  {
+    // FC74-E：合法 manifest artifact 但 master 缺失 → 不认 current → finalize 重新生成（旧坏 artifact 保留）
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid);
+    await runAllTtsJobs(pid);
+    const first = tryFinalizeNarrationAudio(pid)!;
+    fs.rmSync(path.join(getDataDir(), first.master.filePath)); // 制造 master 缺失（artifact JSON 仍合法）
+    ok(
+      getNarrationAudioOverview(pid).status === 'not_ready',
+      '[FC74] valid manifest + master missing → overview != ready（不认 current）',
+    );
+    const rebuilt = tryFinalizeNarrationAudio(pid);
+    const rows = db
+      .prepare('SELECT version FROM artifacts WHERE project_id = ? AND kind = ? ORDER BY version')
+      .all(pid, NARRATION_AUDIO_ARTIFACT_KIND) as Array<{version: number}>;
+    ok(
+      rebuilt !== null && rows.length === 2 && rows[1]!.version === 2 &&
+        fs.existsSync(path.join(getDataDir(), rebuilt.master.filePath)) &&
+        getNarrationAudioOverview(pid).status === 'ready',
+      '[FC74] finalize 重新生成 master + 新 artifact v2（旧坏 artifact 保留历史）',
+      {versions: rows.map((r) => r.version)},
+    );
+  }
+  {
+    // FC75-F：orphan final path（DB 无引用）→ 安全删除并替换
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid);
+    await runAllTtsJobs(pid);
+    const relMaster = path.posix.join('projects', pid, 'audio', 'narration-master-v1-mock-default@1.wav');
+    const absMaster = path.join(getDataDir(), relMaster);
+    fs.mkdirSync(path.dirname(absMaster), {recursive: true});
+    fs.writeFileSync(absMaster, Buffer.from('orphan-残留文件'));
+    const manifest = tryFinalizeNarrationAudio(pid);
+    const {createHash} = await import('node:crypto');
+    const shaNow = createHash('sha256').update(fs.readFileSync(absMaster)).digest('hex');
+    ok(
+      manifest !== null && manifest.master.sha256 === shaNow && fs.statSync(absMaster).size > 44,
+      '[FC75] orphan final path（无 artifact 引用）→ 安全替换为新 master',
+    );
+  }
+  {
+    // FC76-G：final 被历史 artifact 引用但非 current → MASTER_PATH_CONFLICT（拒绝覆盖历史文件）
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid);
+    await runAllTtsJobs(pid);
+    const first = tryFinalizeNarrationAudio(pid)!;
+    const absMaster = path.join(getDataDir(), first.master.filePath);
+    const {createHash} = await import('node:crypto');
+    const shaBefore = createHash('sha256').update(fs.readFileSync(absMaster)).digest('hex');
+    // 把该 artifact 的 source 改为非 current（但仍引用同一 master 路径）
+    const artifactRow = db
+      .prepare('SELECT id, content_json FROM artifacts WHERE project_id = ? AND kind = ?')
+      .get(pid, NARRATION_AUDIO_ARTIFACT_KIND) as {id: string; content_json: string};
+    const tampered = JSON.parse(artifactRow.content_json) as {source: {narrationPlanArtifactId: string}};
+    tampered.source.narrationPlanArtifactId = 'other-plan-artifact';
+    db.prepare('UPDATE artifacts SET content_json = ? WHERE id = ?').run(JSON.stringify(tampered), artifactRow.id);
+    let threwG: string | null = null;
+    try {
+      tryFinalizeNarrationAudio(pid);
+    } catch (err) {
+      threwG = err instanceof NarrationAudioError ? err.code : String(err);
+    }
+    const shaAfter = createHash('sha256').update(fs.readFileSync(absMaster)).digest('hex');
+    ok(
+      threwG === 'MASTER_PATH_CONFLICT' && shaBefore === shaAfter,
+      '[FC76] final 被历史 artifact 引用（非 current）→ MASTER_PATH_CONFLICT，不覆盖历史文件',
+      threwG,
+    );
+  }
+
   closeDb();
   fs.rmSync(path.resolve(process.cwd(), 'data', 'test-m3b'), {recursive: true, force: true});
 

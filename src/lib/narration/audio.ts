@@ -113,7 +113,8 @@ export type NarrationAudioErrorCode =
   | 'PROJECT_NOT_FOUND'
   | 'LEGACY_PROJECT'
   | 'NARRATION_PLAN_NOT_CURRENT'
-  | 'PROVIDER_SNAPSHOT_MISMATCH';
+  | 'PROVIDER_SNAPSHOT_MISMATCH'
+  | 'MASTER_PATH_CONFLICT';
 
 export class NarrationAudioError extends Error {
   constructor(
@@ -361,6 +362,12 @@ interface ArtifactRow {
   content_json: string;
 }
 
+/**
+ * current manifest 读取（M3-B Hardening §九–十一）：
+ * JSON.parse → zod → source/provider/voice match → master 路径安全 + 文件真实性。
+ * master 缺失/越界/过小的 artifact 不认作 current（skip，保留历史行，不 DELETE），
+ * overview 落回 not_ready，由 finalize 重新生成。
+ */
 function readCurrentManifest(projectId: string): NarrationAudioManifest | null {
   const current = getCurrentNarrationPlan(projectId);
   if (!current) return null;
@@ -370,6 +377,7 @@ function readCurrentManifest(projectId: string): NarrationAudioManifest | null {
     )
     .all(projectId, NARRATION_AUDIO_ARTIFACT_KIND) as ArtifactRow[];
   const provider = getTtsProvider();
+  const dataDir = path.resolve(getDataDir());
   for (const row of rows) {
     try {
       const parsed = narrationAudioManifestSchema.safeParse(JSON.parse(row.content_json));
@@ -380,6 +388,10 @@ function readCurrentManifest(projectId: string): NarrationAudioManifest | null {
         parsed.data.provider.voiceProfile.id === DEFAULT_VOICE_PROFILE.id &&
         parsed.data.provider.voiceProfile.revision === DEFAULT_VOICE_PROFILE.revision
       ) {
+        // §三不变量：current manifest 的 master.filePath 必须对应完整正式文件
+        const abs = path.resolve(dataDir, parsed.data.master.filePath);
+        if (!abs.startsWith(dataDir + path.sep)) continue; // path traversal → 不认
+        if (!fs.existsSync(abs) || fs.statSync(abs).size <= 44) continue; // 缺失/过小 → 不认
         return parsed.data;
       }
     } catch {
@@ -426,14 +438,48 @@ function wrapPcmAsWav(pcm: Buffer): Buffer {
 // ---------- Finalize ----------
 
 /**
- * 幂等 finalize（M3-B Hardening §十四–二十）：
+ * 测试注入（M3-B Final File Commit Hardening §十三）：确定性 fault injection。
+ * 不 monkey patch 全局 fs；仅替换 winner 路径的 rename / artifact INSERT。
+ */
+export interface FinalizeNarrationAudioDeps {
+  renameImpl?: (oldPath: string, newPath: string) => void;
+  insertArtifactImpl?: (contentJson: string) => void;
+}
+
+/**
+ * 幂等 finalize（M3-B Hardening §十四–二十 + Final File Commit Hardening §三–十二）：
  * plan current + 全部 speech succeeded 且 result_json 合法
  * → Provider 快照一致性校验（mixed → PROVIDER_SNAPSHOT_MISMATCH）
- * → master 写唯一 tmp → BEGIN IMMEDIATE 内重查（plan 仍 current + 无同快照 manifest）
- * → 赢家 rename 正式文件，输家删 tmp 复用已有。
+ * → master 写唯一 tmp 并验证（exists/size>44/RIFF/duration>0）
+ * → BEGIN IMMEDIATE：重查 plan current → 重查同快照 manifest（reuse）
+ *   → orphan 裁决（无引用安全删除 / 有引用 MASTER_PATH_CONFLICT）
+ *   → winner 先 rename tmp→final 并 verify，再 INSERT artifact（§四：DB 永不先宣布不存在的 master）
+ * → INSERT/事务失败补偿删除本次 final（§六）；reuse 只删自己的 tmp，绝不碰 existing final（§七）。
  */
-export function tryFinalizeNarrationAudio(projectId: string): NarrationAudioManifest | null {
+export function tryFinalizeNarrationAudio(
+  projectId: string,
+  deps: FinalizeNarrationAudioDeps = {},
+): NarrationAudioManifest | null {
   const db = getDb();
+  const rename = deps.renameImpl ?? ((oldPath: string, newPath: string) => fs.renameSync(oldPath, newPath));
+  const insertArtifact =
+    deps.insertArtifactImpl ??
+    ((contentJson: string): void => {
+      db.prepare(
+        `INSERT INTO artifacts (id, project_id, kind, version, content_json, file_path, created_at)
+         VALUES (?, ?, ?,
+           (SELECT COALESCE(MAX(version), 0) + 1 FROM artifacts WHERE project_id = ? AND kind = ?),
+           ?, NULL, ?)`,
+      ).run(
+        crypto.randomUUID(),
+        projectId,
+        NARRATION_AUDIO_ARTIFACT_KIND,
+        projectId,
+        NARRATION_AUDIO_ARTIFACT_KIND,
+        contentJson,
+        new Date().toISOString(),
+      );
+    });
   const current = getCurrentNarrationPlan(projectId);
   if (!current) return null;
   const {plan, artifact} = current;
@@ -512,13 +558,26 @@ export function tryFinalizeNarrationAudio(projectId: string): NarrationAudioMani
     `narration-master-v${artifact.version}-${provider.name}-${voice.id}@${voice.revision}.wav`,
   );
   const absMaster = path.join(getDataDir(), relMaster);
-  // §二十：先写唯一 tmp，最终事务裁决赢家后才 rename，避免并发 finalize 写同一正式文件
+  // §二十：先写唯一 tmp；winner rename 前不发生任何 DB 提交
   const absTmpMaster = `${absMaster}.${crypto.randomUUID()}.tmp`;
   fs.mkdirSync(path.dirname(absMaster), {recursive: true});
   fs.writeFileSync(absTmpMaster, masterWav);
   const masterSha = crypto.createHash('sha256').update(masterWav).digest('hex');
 
+  let finalOwnedByThisAttempt = false;
   try {
+    // §十二：tmp 提交前验证（exists/size>44/RIFF/duration>0）
+    const tmpStat = fs.statSync(absTmpMaster);
+    const tmpHead = Buffer.alloc(4);
+    const tmpFd = fs.openSync(absTmpMaster, 'r');
+    fs.readSync(tmpFd, tmpHead, 0, 4, 0);
+    fs.closeSync(tmpFd);
+    if (tmpStat.size <= 44 || tmpHead.toString('ascii') !== 'RIFF' || masterDurationMs <= 0) {
+      throw new Error(
+        `tmp master 验证失败：size=${tmpStat.size} head=${tmpHead.toString('ascii')} durationMs=${masterDurationMs}`,
+      );
+    }
+
     const manifest: NarrationAudioManifest = narrationAudioManifestSchema.parse({
       schemaVersion: NARRATION_AUDIO_SCHEMA_VERSION,
       source: {
@@ -584,7 +643,7 @@ export function tryFinalizeNarrationAudio(projectId: string): NarrationAudioMani
       );
     }
 
-    // §十九：最终 INSERT 的 BEGIN IMMEDIATE 内重新裁决——plan 仍 current 且无同快照 manifest
+    // §四：最终事务——winner 的正式 rename 必须发生在 manifest INSERT 之前
     type TxOutcome =
       | {outcome: 'inserted'}
       | {outcome: 'reuse'; manifest: NarrationAudioManifest}
@@ -594,30 +653,49 @@ export function tryFinalizeNarrationAudio(projectId: string): NarrationAudioMani
       if (!still || still.artifact.id !== artifact.id) return {outcome: 'stale'};
       const won = readCurrentManifest(projectId);
       if (won) return {outcome: 'reuse', manifest: won};
-      db.prepare(
-        `INSERT INTO artifacts (id, project_id, kind, version, content_json, file_path, created_at)
-         VALUES (?, ?, ?,
-           (SELECT COALESCE(MAX(version), 0) + 1 FROM artifacts WHERE project_id = ? AND kind = ?),
-           ?, NULL, ?)`,
-      ).run(
-        crypto.randomUUID(),
-        projectId,
-        NARRATION_AUDIO_ARTIFACT_KIND,
-        projectId,
-        NARRATION_AUDIO_ARTIFACT_KIND,
-        JSON.stringify(manifest),
-        new Date().toISOString(),
-      );
+      // §八：final 路径已存在时的 orphan/冲突裁决
+      if (fs.existsSync(absMaster)) {
+        const referenced = (
+          db
+            .prepare('SELECT content_json FROM artifacts WHERE project_id = ? AND kind = ?')
+            .all(projectId, NARRATION_AUDIO_ARTIFACT_KIND) as Array<{content_json: string | null}>
+        ).some((row) => {
+          try {
+            const json = JSON.parse(row.content_json ?? '') as {master?: {filePath?: string}};
+            return json.master?.filePath === relMaster;
+          } catch {
+            return false;
+          }
+        });
+        if (referenced) {
+          // 有历史 artifact 引用但未被识别为 current：拒绝覆盖历史 winner 文件
+          throw new NarrationAudioError(
+            'MASTER_PATH_CONFLICT',
+            `master 正式路径已被历史 artifact 引用但非 current，拒绝覆盖：${relMaster}`,
+          );
+        }
+        fs.rmSync(absMaster, {force: true}); // 无引用 orphan（旧中断/旧 bug 残留）→ 安全删除
+      }
+      rename(absTmpMaster, absMaster);
+      finalOwnedByThisAttempt = true;
+      if (!fs.existsSync(absMaster)) {
+        throw new Error('rename 后 final master 不存在');
+      }
+      insertArtifact(JSON.stringify(manifest));
       return {outcome: 'inserted'};
     });
     const txResult = tx.immediate();
     if (txResult.outcome === 'inserted') {
-      fs.renameSync(absTmpMaster, absMaster);
       return manifest;
     }
+    // §七：reuse/stale 只清理自己的 unique tmp，绝不删除 existing manifest 引用的正式 master
     fs.rmSync(absTmpMaster, {force: true});
     return txResult.outcome === 'reuse' ? txResult.manifest : null;
   } catch (err) {
+    // §六：rename 成功后 INSERT/事务失败 → 补偿删除本次产生的 final，不残留无 DB 记录的正式文件
+    if (finalOwnedByThisAttempt) {
+      fs.rmSync(absMaster, {force: true});
+    }
     fs.rmSync(absTmpMaster, {force: true});
     throw err;
   }
