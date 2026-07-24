@@ -21,9 +21,12 @@ export const SUBTITLE_TIMING_SCHEMA_VERSION = 'subtitle-timing@1.0';
  * M3-C Hardening：compiler 语义升级（symmetric timeline tolerance、
  * Manifest↔Plan 语义一致性校验、闭引号分句）——同一旧输入可能产生不同
  * artifact，且旧 artifact 的 current/reuse 判定变化，故 1.0 → 1.1。
- * 旧 compiler@1.0 artifact 保留为历史，不再 current、不再幂等复用。
+ * M3-C Micro-Hardening：leading terminator 分句修复 + text-conservation
+ * invariant——旧 compiler 对以终止符开头的合法 input 会丢字符，
+ * 新 compiler 产生不同 cue text，故 1.1 → 1.2。
+ * 旧 compiler artifact 保留为历史，不再 current、不再幂等复用。
  */
-export const SUBTITLE_COMPILER_VERSION = '1.1';
+export const SUBTITLE_COMPILER_VERSION = '1.2';
 export const SUBTITLE_TIMING_ARTIFACT_KIND = 'subtitle_timing';
 /** unit 边界实测 + unit 内句子按文本权重比例分配（估算）。 */
 export const SUBTITLE_ALIGNMENT_METHOD = 'measured_unit_proportional_text';

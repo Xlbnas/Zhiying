@@ -600,8 +600,71 @@ async function main(): Promise<void> {
       'H4-3 compile 级引号分句 → 2 cues',
     );
   }
-  // H4-4. compilerVersion 升级标记（Hardening 语义变化 → 1.1）
-  ok(SUBTITLE_COMPILER_VERSION === '1.1', 'H4-4 compilerVersion 升级为 1.1');
+  // H4-4. compilerVersion 升级标记（Hardening 语义变化 → 1.2）
+  ok(SUBTITLE_COMPILER_VERSION === '1.2', 'H4-4 compilerVersion 升级为 1.2');
+
+  // ===== Micro-Hardening：leading terminator 保留 + text-conservation invariant =====
+
+  // M-1. ！别急。我们继续。→ 2 cues，首 cue 完整含前导 ！
+  {
+    const s = splitSubtitleSentences('！别急。我们继续。');
+    ok(s.length === 2 && s[0] === '！别急。' && s[1] === '我们继续。', 'M-1 leading ！保留（！别急。/我们继续。）', s);
+    const t = compile([speechUnit(1, '！别急。我们继续。')], {N001: 2000}, 2000);
+    ok(t.cues.length === 2 && t.cues[0]!.text === '！别急。', 'M-1b compile 级 leading ！ → 2 cues');
+  }
+  // M-2. ？为什么会这样？→ 开头 ？不丢
+  {
+    const s = splitSubtitleSentences('？为什么会这样？');
+    ok(s.length === 1 && s[0] === '？为什么会这样？', 'M-2 leading ？完整保留', s);
+  }
+  // M-3. ；等等。→ 不丢 ；
+  {
+    const s = splitSubtitleSentences('；等等。');
+    ok(s.length === 1 && s[0] === '；等等。', 'M-3 leading ；不丢', s);
+  }
+  // M-4. 闭引号回归：他说：“你好。”然后走了。
+  {
+    const s = splitSubtitleSentences('他说：“你好。”然后走了。');
+    ok(s.length === 2 && s[0] === '他说：“你好。”' && s[1] === '然后走了。', 'M-4 闭引号规则回归');
+  }
+  // M-5. ASCII：!Wait. Really? → 全部非空白字符保留
+  {
+    const s = splitSubtitleSentences('!Wait. Really?');
+    ok(
+      s.join('') === '!Wait. Really?',
+      'M-5 ASCII leading ! 保留（!Wait. Really?）',
+      s,
+    );
+  }
+  // M-6. conservation property：代表性 fixture 全部 normalize(input)===normalize(join)
+  {
+    const stripWs = (x: string): string => x.replace(/\s+/g, '');
+    const fixtures = [
+      '！别急。我们继续。',
+      '？为什么会这样？',
+      '；等等。',
+      '他说：“你好。”然后走了。',
+      '!Wait. Really?',
+      '这是第一句话。这是第二句话？',
+      '甲。乙！丙？',
+      '甲；乙;丙。',
+      '没有终止符的句子',
+      '那条消息你看到了。',
+      '他说：“有些遗忘背后藏着不情愿。”',
+    ];
+    const bad = fixtures.filter(
+      (f) => stripWs(splitSubtitleSentences(f).join('')) !== stripWs(f),
+    );
+    ok(bad.length === 0, 'M-6 text-conservation property（11 个代表性 fixture）', bad);
+  }
+  // M-7. 新规则下 repeated compile byte-stable
+  {
+    const units = [speechUnit(1, '！别急。我们继续。'), pauseUnit(2, 500), speechUnit(3, '他说：“你好。”然后走了。')];
+    const d = {N001: 2000, N003: 2000};
+    const a = JSON.stringify(compile(units, d, 4500));
+    const b = JSON.stringify(compile(units, d, 4500));
+    ok(a === b, 'M-7 repeated compile byte-stable（leading terminator fixture）');
+  }
 
   // ===== §四十七 高层 mock 闭环（Workflow → … → Audio ready）=====
 

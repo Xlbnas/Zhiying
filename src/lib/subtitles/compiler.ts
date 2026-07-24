@@ -48,10 +48,19 @@ export {AUDIO_TIMELINE_TOLERANCE_MS} from './schema';
 const SENTENCE_TERMINATOR = '。！？!?；;';
 /** 终止符后的 closing punctuation 跟随前一句，不跑到下一 cue 开头（§五 Hardening）。 */
 const SENTENCE_CLOSERS = '”’」』）》】"';
+/**
+ * 句 = 前导终止/闭标点* + 正文+ + 终止符* + 闭标点*。
+ * 前导 [T/C]* 关键：text 以终止符开头（"！别急。"）时旧 regex [^T]+…
+ * 无法从 index 0 起匹配，global search 会静默跳过前导标点（silent text deletion）；
+ * 现在前导标点确定性并入随后第一句，由 text-conservation invariant 兜底。
+ */
 const SENTENCE = new RegExp(
-  `[^${SENTENCE_TERMINATOR}]+[${SENTENCE_TERMINATOR}]*[${SENTENCE_CLOSERS}]*`,
+  `[${SENTENCE_TERMINATOR}${SENTENCE_CLOSERS}]*[^${SENTENCE_TERMINATOR}]+[${SENTENCE_TERMINATOR}]*[${SENTENCE_CLOSERS}]*`,
   'gs',
 );
+
+/** conservation 比较只允许忽略 compiler 已明确归一化的 whitespace。 */
+const stripWhitespace = (s: string): string => s.replace(/\s+/g, '');
 
 /**
  * 自然句切分：一个自然句 = 一个 cue。无终止符时整个 speech unit = 1 cue；
@@ -67,6 +76,14 @@ export function splitSubtitleSentences(text: string): string[] {
     .filter((sentence) => sentence.length > 0);
   if (sentences.length === 0) {
     throw new SubtitleCompileError('SUBTITLE_TIMING_INVALID', `speech unit 文本无法切出自然句: ${text}`);
+  }
+  // text-conservation invariant（§三/四）：除已归一化的 whitespace 外，
+  // 输入的全部非空白字符必须按原顺序出现在输出句中——不得 silent drop/repair。
+  if (stripWhitespace(sentences.join('')) !== stripWhitespace(normalized)) {
+    throw new SubtitleCompileError(
+      'SUBTITLE_TIMING_INVALID',
+      `分句违反 text-conservation（输出丢失/改写非空白字符）: ${text}`,
+    );
   }
   return sentences;
 }
