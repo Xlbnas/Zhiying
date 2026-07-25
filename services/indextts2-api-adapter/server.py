@@ -13,8 +13,9 @@
 设计约束（M3-F spec）：
 - 极薄：不 import torch、不加载模型、不占 GPU（真实 GPU 只由 8002 进程使用）
 - useRandom=false 语义 = 不启用 emotion random sampling；不声称 byte deterministic
-- speaker identity：reference file + speaker_name 为 source of truth，
-  不硬编码 spk_xxx（speaker cache 可被清除后重建）
+- speaker identity：speaker_name = upstream lookup / cache identity；
+  reference WAV 仅作 speaker 不存在时注册的 bootstrap input；
+  speaker_id 为 runtime cache identity，不进入 Zhiying contract（详见 README）
 - per voice single-flight registration（进程内 lock，防重复 upload）
 """
 
@@ -103,13 +104,12 @@ async def health() -> Response:
         ready = res.status_code == 200
     except Exception:
         ready = False
-    # repoCommit：无法取得真实 upstream Git commit——省略，绝不伪造
+    # fp16 / repoCommit：均无法取得真实值——字段直接省略，绝不返回 null 占位、绝不伪造
     return JSONResponse(
         {
             "ready": ready,
             "provider": "indextts2",
             "model": MODEL_NAME,
-            "fp16": None,
         }
     )
 

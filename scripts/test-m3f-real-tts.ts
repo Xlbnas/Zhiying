@@ -3,7 +3,10 @@
  *
  * 用法：RUN_REAL_INDEXTTS2_SMOKE=1 npx tsx scripts/test-m3f-real-tts.ts
  * 前置：adapter 已在 127.0.0.1:9880 运行（ADAPTER_UPSTREAM 可达真实 8002）。
- * 未设置环境变量或 adapter 不可达时 SKIP。
+ * Gate 语义（fail-closed release gate）：
+ *   - 未设置 RUN_REAL_INDEXTTS2_SMOKE=1 → SKIP（exit 0）
+ *   - 已设置但 adapter 不可达 / 非 2xx / 非法 JSON / ready!=true → FAIL（非零退出）
+ *   显式真实验收的前置失败绝不降级为 SKIP。
  *
  * 真实链：10 stages（Mock LLM）→ Narration Plan → **真实 IndexTTS2**（正式
  * TTS_PROVIDER=indextts2 + 正式 Worker runTtsJob）→ Master → Subtitle →
@@ -51,7 +54,7 @@ const DATA_DIR = path.resolve(process.cwd(), 'data', 'test-m3f-real');
 const JOB_TIMEOUT_MS = 180_000;
 const RENDER_TIMEOUT_MS = 600_000;
 
-/** 短 Script：3 个 speech unit + 1 explicit pause（控制真实 GPU 成本）。 */
+/** 短 Script：2 个 speech unit + 1 explicit pause（控制真实 GPU 成本）。 */
 const SCRIPT_V2 = `# Script V2
 
 > 与 V1 差异说明：压缩书面语，零新增事实。
@@ -128,14 +131,29 @@ function gpuSample(label: string): void {
 }
 
 async function main(): Promise<void> {
-  // 前置：adapter 可达且 ready
+  // 前置（fail-closed）：显式要求真实验收时 adapter 必须 ready，任何前置失败都
+  // 是 FAIL（非零退出），绝不降级为 SKIP。
+  // 注意：必须是 function 声明——TS 仅对声明式 never 函数做 definite-assignment 流分析。
+  function failGate(reason: string): never {
+    console.error(`[m3f-real] FAIL: RUN_REAL_INDEXTTS2_SMOKE=1 but adapter is not ready（${reason}）`);
+    console.error('[m3f-real] 显式真实验收不允许 SKIP——请先启动 adapter，或取消环境变量走 SKIP 路径');
+    process.exit(1);
+  }
   {
-    const res = await fetch(`${ADAPTER_URL}/health`, {signal: AbortSignal.timeout(10_000)});
-    const json = (await res.json()) as {ready?: boolean};
-    if (!res.ok || json.ready !== true) {
-      console.log('[m3f-real] SKIP：adapter 未 ready（请先启动 services/indextts2-api-adapter）');
-      process.exit(0);
+    let res: Response;
+    try {
+      res = await fetch(`${ADAPTER_URL}/health`, {signal: AbortSignal.timeout(10_000)});
+    } catch (err) {
+      failGate(`fetch 异常: ${err instanceof Error ? err.message : String(err)}`);
     }
+    if (!res.ok) failGate(`/health HTTP ${res.status}`);
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch {
+      failGate('/health 返回非法 JSON');
+    }
+    if ((json as {ready?: unknown}).ready !== true) failGate('/health ready != true');
     console.log('[m3f-real] adapter ready');
   }
 
@@ -335,6 +353,18 @@ async function main(): Promise<void> {
   } finally {
     await stopWorker();
     closeDb();
+    // isolated test data cleanup（worker stop + DB close 之后）。
+    // KEEP_M3F_REAL_ARTIFACTS=1 显式 opt-in 保留现场供人工复核；
+    // cleanup 失败只告警，绝不覆盖原始测试异常。
+    if (process.env.KEEP_M3F_REAL_ARTIFACTS === '1') {
+      console.log(`[m3f-real] KEEP_M3F_REAL_ARTIFACTS=1：保留现场 ${DATA_DIR}`);
+    } else {
+      try {
+        fs.rmSync(DATA_DIR, {recursive: true, force: true});
+      } catch (cleanupErr) {
+        console.error('[m3f-real] WARN: test data cleanup 失败（保留现场）:', cleanupErr);
+      }
+    }
   }
 
   console.log(`\nM3-F REAL: ${pass} PASS, ${fail} FAIL`);

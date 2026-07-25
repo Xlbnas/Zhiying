@@ -14,9 +14,9 @@ Zhiying Node Worker ──HTTP──▶ 本 Adapter ──HTTP──▶ IndexTTS
 
 ## 契约（与 frozen Provider 对齐）
 
-- `GET /health` → `{ready, provider:'indextts2', model:'IndexTTS-2', fp16:null}`
-  `ready` 需要 upstream `GET /speakers` 可达；`repoCommit` 省略（无法取得真实
-  upstream Git commit，绝不伪造）。
+- `GET /health` → `{ready, provider:'indextts2', model:'IndexTTS-2'}`
+  `ready` 需要 upstream `GET /speakers` 可达；`fp16` 与 `repoCommit` 字段**省略**
+  （无法取得真实值，绝不返回 null 占位、绝不伪造）。
 - `POST /v1/synthesize` `{text, voiceProfile, voiceRevision, useRandom, emotion}`
   → `audio/wav` bytes。严格验证：text 非空、profile/revision 白名单、
   `useRandom===false`、`emotion==='none'`，否则 4xx。
@@ -36,9 +36,21 @@ Zhiying Node Worker ──HTTP──▶ 本 Adapter ──HTTP──▶ IndexTTS
 |---|---|---|---|
 | `default` | `1`（frozen DEFAULT_VOICE_PROFILE） | `zhiying-m3f-test` | `ADAPTER_REFERENCE_VOICE_PATH` |
 
-speaker identity 以 reference file + speaker_name 为 source of truth
-（不硬编码 `spk_xxx`）：请求时先 `GET /speakers` 查名，缺失才
-`POST /upload_speaker`，per-voice 进程内 single-flight 防重复注册。
+speaker identity 的诚实语义（M3-F）：
+
+- `speaker_name` = upstream speaker lookup / cache identity
+  （不硬编码 `spk_xxx`）：请求时先 `GET /speakers` 查名，缺失才
+  `POST /upload_speaker`，per-voice 进程内 single-flight 防重复注册。
+- reference WAV = speaker 不存在时用于注册的 **bootstrap input**。
+- `speaker_id` = runtime cache identity，不进入 Zhiying contract。
+
+注意：当前实现**无法验证** upstream 中已存在的同名 speaker 是否一定由
+当前 reference WAV 生成——同名即复用。
+
+> **M4 TODO**：production voice profile system must bind
+> voiceProfile + revision to an expected reference asset/SHA。
+> Production deployment must not silently assume that an existing
+> same-name upstream speaker was generated from the expected reference WAV.
 
 ## 环境变量
 

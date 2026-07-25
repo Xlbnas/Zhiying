@@ -224,13 +224,17 @@ async function main(): Promise<void> {
     await startAdapter();
     ok(true, 'S00 adapter 启动');
 
-    // health：upstream 可用 → ready=true；无 repoCommit 伪造
+    // health：upstream 可用 → ready=true；repoCommit/fp16 字段不存在（不伪造、不 null 占位）
     resetState();
     {
       const res = await fetch(`${ADAPTER}/health`);
-      const json = (await res.json()) as {ready?: boolean; provider?: string; model?: string; repoCommit?: string};
+      const json = (await res.json()) as {ready?: boolean; provider?: string; model?: string} & Record<string, unknown>;
       ok(res.status === 200 && json.ready === true && json.provider === 'indextts2', 'S01 health ready（upstream 可达）');
-      ok(json.model === 'IndexTTS-2' && json.repoCommit === undefined, 'S02 health model 正确且 repoCommit 省略（不伪造）');
+      ok(
+        json.model === 'IndexTTS-2' && !('repoCommit' in json) && !('fp16' in json),
+        'S02 health model 正确；repoCommit/fp16 字段真正不存在（未知即省略，不伪造）',
+        json,
+      );
     }
     // health：upstream 挂 → ready=false 但自身 200
     {
