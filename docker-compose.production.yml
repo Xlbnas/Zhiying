@@ -1,0 +1,121 @@
+# 知影 · M4-B Production Compose（M4-A FINAL ARCHITECTURE 落地）
+#
+# 本 Compose project 只管理：zhiying-web / zhiying-worker / indextts2-adapter。
+# indextts2 / qwen3-tts / cosyvoice3 属于独立 tts-stack Compose project，
+# 两 stack 仅共享 external network `zhiying-tts-net`（DNS/connectivity），
+# 严禁在此声明 indextts2 或对其 depends_on。
+#
+# 用法（M4-C 管理员）：
+#   docker network create zhiying-tts-net   # 一次性，管理员预创建
+#   docker compose -f docker-compose.production.yml --env-file .env.production up -d
+#
+# .env.production（chmod 600，不入 Git）需提供：
+#   DEEPSEEK_API_KEY / ZHIYING_HOST_DATA_DIR / ZHIYING_HOST_PUBLIC_DIR /
+#   ZHIYING_HOST_VOICES_DIR / ZHIYING_HOST_VOICE_REGISTRY
+
+name: zhiying-production
+
+x-zhiying-app: &zhiying-app
+  image: zhiying:latest
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  volumes:
+    - ${ZHIYING_HOST_DATA_DIR:?ZHIYING_HOST_DATA_DIR required}:/app/data
+    - ${ZHIYING_HOST_PUBLIC_DIR:?ZHIYING_HOST_PUBLIC_DIR required}:/app/public:ro
+  networks:
+    - zhiying-app-net
+
+services:
+  zhiying-web:
+    <<: *zhiying-app
+    container_name: zhiying-web
+    command: pnpm start
+    # 唯一 user-facing 入口：仅宿主 loopback，由 fnOS 反向代理转发；
+    # 不得改为 0.0.0.0 除非反代验证后另行决议（M4-A frozen）
+    ports:
+      - "127.0.0.1:3210:3000"
+    environment:
+      # web 侧实证只需这些（narration API 会实例化 TTS Provider 拿 metadata，
+      # 不发起网络调用；web 从不实例化 LLM Provider）
+      NODE_ENV: production
+      ZHIYING_DATA_DIR: /app/data
+      PORT: "3000"
+      TTS_PROVIDER: indextts2
+      INDEXTTS2_BASE_URL: http://indextts2-adapter:9880
+      # 严禁注入：DEEPSEEK_API_KEY / LLM_PROVIDER / ADAPTER_* / voice registry
+    healthcheck:
+      # 只读、不改变状态的稳定 API（GET /api/projects）
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/projects').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 5
+
+  zhiying-worker:
+    <<: *zhiying-app
+    container_name: zhiying-worker
+    command: pnpm worker
+    # 单 Scheduler/单 Worker 是 frozen 架构不变量（无代码级锁，且 stale job
+    # recovery 会让多 worker 互相回收）——本文件只定义一个 worker service，
+    # 严禁 docker compose up --scale zhiying-worker=N（N>1）
+    cpus: 4
+    mem_limit: 6g
+    environment:
+      NODE_ENV: production
+      ZHIYING_DATA_DIR: /app/data
+      WORKER_ROLE: all
+      LLM_PROVIDER: deepseek
+      TTS_PROVIDER: indextts2
+      INDEXTTS2_BASE_URL: http://indextts2-adapter:9880
+      # DEEPSEEK_API_KEY 的唯一消费者（实证：仅 src/worker/llm-executor.ts
+      # import getProvider）；绝不注入 web/adapter
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY required}
+    # 跨 stack readiness bridge（M4-A frozen）：adapter 与 worker 同属本
+    # project；adapter healthy（= upstream ready + registry 有效 + reference
+    # SHA-256 正确）才启动 worker
+    depends_on:
+      indextts2-adapter:
+        condition: service_healthy
+    healthcheck:
+      # worker 无端口；进程存活即 liveness（readiness 由 DB 队列语义保证）
+      test: ["CMD-SHELL", "pgrep -f 'src/worker/index.ts' >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+
+  indextts2-adapter:
+    image: zhiying-indextts2-adapter:latest
+    build:
+      context: services/indextts2-api-adapter
+      dockerfile: Dockerfile
+    container_name: indextts2-adapter
+    restart: unless-stopped
+    # 极薄控制面：无 GPU / 无 privileged / 无 docker.sock；rootfs 只读
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      ADAPTER_UPSTREAM_BASE_URL: http://indextts2:8002
+      ADAPTER_UPSTREAM_TIMEOUT_SEC: "90"
+      ADAPTER_HEALTH_TIMEOUT_SEC: "10"
+      ADAPTER_VOICE_REGISTRY_PATH: /config/voice-registry.json
+      ADAPTER_VOICE_ROOT: /voices
+      # 严禁注入：DEEPSEEK_API_KEY / 任何 LLM 配置
+    volumes:
+      - ${ZHIYING_HOST_VOICE_REGISTRY:?ZHIYING_HOST_VOICE_REGISTRY required}:/config/voice-registry.json:ro
+      - ${ZHIYING_HOST_VOICES_DIR:?ZHIYING_HOST_VOICES_DIR required}:/voices:ro
+    networks:
+      - zhiying-app-net
+      - zhiying-tts-net
+    # 无 ports — 仅 stack 内部可达（worker 经 zhiying-app-net 访问 9880）
+
+networks:
+  zhiying-app-net:
+    driver: bridge
+  zhiying-tts-net:
+    # 管理员预创建（普通 NAT bridge，非 --internal；M4-A FINAL NETWORK AMENDMENT）
+    external: true
+    name: zhiying-tts-net

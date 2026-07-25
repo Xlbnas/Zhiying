@@ -15,10 +15,38 @@ _skilltmp
 
 # 版本控制与本地环境
 .git
-.env
-.env.local
 *.tsbuildinfo
 next-env.d.ts
+
+# compose / 部署文档不进 build context（镜像不需要）
 Dockerfile
 docker-compose.yml
+docker-compose.production.yml
 DEPLOY.md
+docs/
+
+# 测试脚本不进镜像（container gate 测试由宿主动态挂载）
+scripts/
+
+# 任何 env 密钥文件（.env.example 模板除外）
+.env
+.env.local
+*.env
+!.env.example
+
+# 任何音频/视频/数据库二进制绝不进 build context
+**/*.wav
+**/*.mp3
+**/*.mp4
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+**/*.sqlite3
+
+# Python 本地环境
+**/.venv/
+**/__pycache__/
+
+# 真实 production voice registry（repo 只保留 *.example.json，运行时 volume 挂载）
+voice-registry.json

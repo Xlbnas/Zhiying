@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0",
+  "voices": [
+    {
+      "voiceProfile": "default",
+      "voiceRevision": "1",
+      "speakerName": "zhiying-default-1-REPLACE_WITH_SHA256_PREFIX12",
+      "referenceAssetPath": "/voices/default-v1.wav",
+      "referenceSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

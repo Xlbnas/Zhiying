@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS llm_jobs (   -- M2 用，M1 只建表不消费
 
 ## 7. Docker 契约（Docker agent 实现）
 
-- 基础 `node:20-bookworm`，按 Remotion 官方 Dockerfile 安装 Chrome Headless 依赖（libnss3 等）+ ffmpeg
+- 基础 `node:22-bookworm`（M4-B 起；pnpm@11.9.0 依赖 node:sqlite 需 Node≥22，且开发机实证 v22。M1 原为 node:20-bookworm），按 Remotion 官方 Dockerfile 安装 Chrome Headless 依赖（libnss3 等）+ ffmpeg + fonts-noto-cjk
 - corepack 启用 pnpm；`pnpm install --frozen-lockfile`；`pnpm build`（Next）+ 运行时 `npm run start` / `npm run worker`
 - compose：`web`（3000 端口）+ `worker`（cpus: 4, mem_limit: 6g），共享 volume `./data:/app/data` + `./public:/app/public:ro`（资源大，不打进镜像）
 - .dockerignore：data/、public/full、public/pilot、node_modules、.next、samples

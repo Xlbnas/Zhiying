@@ -1,0 +1,10 @@
+# Adapter image build context 排除项
+.venv/
+__pycache__/
+*.pyc
+# reference voice / 测试数据绝不进镜像
+*.wav
+*.mp3
+*.mp4
+# 真实 production registry 由 volume 挂载；repo 只保留 *.example.json
+voice-registry.json

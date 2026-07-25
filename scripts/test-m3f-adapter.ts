@@ -58,10 +58,12 @@ function buildWav(samples = 480): Buffer {
 }
 
 const MOCK_WAV = buildWav();
+const MOCK_WAV_SHA256 = crypto.createHash('sha256').update(MOCK_WAV).digest('hex');
+const MOCK_WAV_MD5 = crypto.createHash('md5').update(MOCK_WAV).digest('hex');
 
 /** mock upstream 8002 状态机（各测试用例可编程行为）。 */
 interface MockState {
-  speakers: Array<{speaker_id: string; speaker_name: string}>;
+  speakers: Array<{speaker_id: string; speaker_name: string; md5: string}>;
   uploadCount: number;
   uploadSucceeds: boolean;
   ttsMode: 'wav' | 'http500' | 'html' | 'slow' | 'unavailable';
@@ -113,9 +115,9 @@ function startMockUpstream(): Promise<http.Server> {
           return;
         }
         const id = `spk_mock${state.nextSpeakerId++}`;
-        state.speakers.push({speaker_id: id, speaker_name: 'zhiying-m3f-test'});
+        state.speakers.push({speaker_id: id, speaker_name: 'zhiying-m3f-test', md5: MOCK_WAV_MD5});
         res.writeHead(200, {'content-type': 'application/json'});
-        res.end(JSON.stringify({speaker_id: id, status: 'new'}));
+        res.end(JSON.stringify({speaker_id: id, md5: MOCK_WAV_MD5, status: 'new'}));
       });
       return;
     }
@@ -171,6 +173,18 @@ async function main(): Promise<void> {
   fs.mkdirSync(TMP_DIR, {recursive: true});
   const refWav = path.resolve(TMP_DIR, 'ref.wav');
   fs.writeFileSync(refWav, MOCK_WAV);
+  // M4-B：adapter 只从 registry 读取 voice（无硬编码 fallback），测试显式提供 test registry
+  const registryPath = path.resolve(TMP_DIR, 'voice-registry.json');
+  fs.writeFileSync(registryPath, JSON.stringify({
+    schemaVersion: '1.0',
+    voices: [{
+      voiceProfile: 'default',
+      voiceRevision: '1',
+      speakerName: 'zhiying-m3f-test',
+      referenceAssetPath: refWav,
+      referenceSha256: MOCK_WAV_SHA256,
+    }],
+  }));
 
   const upstream = await startMockUpstream();
 
@@ -186,7 +200,8 @@ async function main(): Promise<void> {
           ...process.env,
           ADAPTER_UPSTREAM_BASE_URL: `http://127.0.0.1:${UPSTREAM_PORT}`,
           ADAPTER_UPSTREAM_TIMEOUT_SEC: '1', // 测试 timeout 用短超时
-          ADAPTER_REFERENCE_VOICE_PATH: refWav,
+          ADAPTER_VOICE_REGISTRY_PATH: registryPath,
+          ADAPTER_VOICE_ROOT: path.resolve(TMP_DIR),
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
@@ -266,7 +281,7 @@ async function main(): Promise<void> {
     // 冷 cache + speaker 已在 upstream 注册 → 经 /speakers reuse，不 upload
     await restartAdapter();
     resetState();
-    state.speakers.push({speaker_id: 'spk_existing', speaker_name: 'zhiying-m3f-test'});
+    state.speakers.push({speaker_id: 'spk_existing', speaker_name: 'zhiying-m3f-test', md5: MOCK_WAV_MD5});
     {
       const r = await post(validBody);
       const last = JSON.parse(state.ttsRequestBodies.at(-1)!) as {speaker_id?: string};
