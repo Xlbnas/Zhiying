@@ -28,9 +28,9 @@ docs/
 # 测试脚本不进镜像（container gate 测试由宿主动态挂载）
 scripts/
 
-# 任何 env 密钥文件（.env.example 模板除外）
-.env
-.env.local
+# 所有环境配置文件禁止进入 build context（.env 前缀与 *.env 后缀全覆
+# .env.production、.env.production.local、API-KEY.env 等）；只保留无 secret 模板
+.env*
 *.env
 !.env.example
 
@@ -50,3 +50,7 @@ scripts/
 
 # 真实 production voice registry（repo 只保留 *.example.json，运行时 volume 挂载）
 voice-registry.json
+
+# production runtime/deployment state（reference voice、admin proposed compose）
+/voices/
+/_m4c1/

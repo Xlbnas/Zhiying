@@ -24,6 +24,14 @@ scripts/frame-compare/node_modules/
 # M3-F adapter 本地隔离依赖环境（不入库）
 services/indextts2-api-adapter/.venv/
 
-# 任意 *.env 密钥文件（.env.example 模板除外，防 API-KEY.env 类误提交）
+# 所有环境配置文件默认不入 Git（.env 前缀与 *.env 后缀全覆　.env.production、
+# .env.production.local、API-KEY.env 等）；只保留无 secret 模板
+.env*
 *.env
 !.env.example
+
+# production runtime/deployment state（根目录锚定；不入库：
+# 真实 voice registry、reference voice、admin proposed compose）
+/voice-registry.json
+/voices/
+/_m4c1/
