@@ -36,6 +36,13 @@ jobs:
       - name: Install Node dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Ensure ffmpeg/ffprobe（M3-B TTS mock job 实测依赖）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
       - name: Install adapter test venv（mock upstream，无 GPU）
         run: |
           python3 -m venv services/indextts2-api-adapter/.venv
