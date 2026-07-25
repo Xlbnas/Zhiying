@@ -21,6 +21,9 @@ scripts/frame-compare/node_modules/
 # 临时日志
 *.log
 
+# M3-F adapter 本地隔离依赖环境（不入库）
+services/indextts2-api-adapter/.venv/
+
 # 任意 *.env 密钥文件（.env.example 模板除外，防 API-KEY.env 类误提交）
 *.env
 !.env.example
