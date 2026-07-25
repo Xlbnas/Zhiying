@@ -11,16 +11,21 @@
 #
 # .env.production（chmod 600，不入 Git）需提供：
 #   DEEPSEEK_API_KEY / ZHIYING_HOST_DATA_DIR / ZHIYING_HOST_PUBLIC_DIR /
-#   ZHIYING_HOST_VOICES_DIR / ZHIYING_HOST_VOICE_REGISTRY
+#   ZHIYING_HOST_VOICES_DIR / ZHIYING_HOST_VOICE_REGISTRY / ZHIYING_RELEASE_TAG
 
 name: zhiying-production
 
 x-zhiying-app: &zhiying-app
-  image: zhiying:latest
+  # 禁止 latest：release tag 必填（M4-C 使用 M4-B FINAL FROZEN commit short SHA，
+  # rollback 通过指定上一 release tag 完成）
+  image: zhiying:${ZHIYING_RELEASE_TAG:?ZHIYING_RELEASE_TAG required}
   build:
     context: .
     dockerfile: Dockerfile
   restart: unless-stopped
+  # tini 作为 PID 1：signal forwarding + zombie reaping；业务进程直接 exec，
+  # 不经 pnpm/sh shim 链
+  init: true
   volumes:
     - ${ZHIYING_HOST_DATA_DIR:?ZHIYING_HOST_DATA_DIR required}:/app/data
     - ${ZHIYING_HOST_PUBLIC_DIR:?ZHIYING_HOST_PUBLIC_DIR required}:/app/public:ro
@@ -31,7 +36,8 @@ services:
   zhiying-web:
     <<: *zhiying-app
     container_name: zhiying-web
-    command: pnpm start
+    # 直接 exec Next server（不经 pnpm wrapper）
+    command: ["node", "node_modules/next/dist/bin/next", "start"]
     # 唯一 user-facing 入口：仅宿主 loopback，由 fnOS 反向代理转发；
     # 不得改为 0.0.0.0 除非反代验证后另行决议（M4-A frozen）
     ports:
@@ -56,7 +62,11 @@ services:
   zhiying-worker:
     <<: *zhiying-app
     container_name: zhiying-worker
-    command: pnpm worker
+    # 直接 exec worker 真实进程：node --import tsx（loader 在进程内注册，
+    # 无子进程 shim 链）——docker stop 的 SIGTERM 经 tini 直达 worker handler
+    command: ["node", "--import", "tsx", "src/worker/index.ts"]
+    # SIGTERM 优雅退出窗口：当前任务 abort → requeue → bye.（frozen worker 语义）
+    stop_grace_period: 60s
     # 单 Scheduler/单 Worker 是 frozen 架构不变量（无代码级锁，且 stale job
     # recovery 会让多 worker 互相回收）——本文件只定义一个 worker service，
     # 严禁 docker compose up --scale zhiying-worker=N（N>1）
@@ -87,7 +97,7 @@ services:
       retries: 5
 
   indextts2-adapter:
-    image: zhiying-indextts2-adapter:latest
+    image: zhiying-indextts2-adapter:${ZHIYING_RELEASE_TAG:?ZHIYING_RELEASE_TAG required}
     build:
       context: services/indextts2-api-adapter
       dockerfile: Dockerfile

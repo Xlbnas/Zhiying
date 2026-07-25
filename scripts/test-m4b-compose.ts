@@ -48,6 +48,7 @@ interface ComposeConfig {
 
 function main(): void {
   // dummy env：仅为变量替换，不含真实 secret
+  const RELEASE_TAG = 'm4b-review-tag';
   const envFile = path.join(os.tmpdir(), `m4b-compose-test-${process.pid}.env`);
   fs.writeFileSync(envFile, [
     'DEEPSEEK_API_KEY=test-dummy-not-a-real-key',
@@ -55,6 +56,7 @@ function main(): void {
     'ZHIYING_HOST_PUBLIC_DIR=/tmp/zhiying-public',
     'ZHIYING_HOST_VOICES_DIR=/tmp/zhiying-voices',
     'ZHIYING_HOST_VOICE_REGISTRY=/tmp/zhiying-voice-registry.json',
+    `ZHIYING_RELEASE_TAG=${RELEASE_TAG}`,
     '',
   ].join('\n'));
   let cfg: ComposeConfig;
@@ -173,9 +175,36 @@ function main(): void {
   // ---- adapter 加固：read_only rootfs + tmpfs ----
   ok(adapter.read_only === true, 'C28 adapter read_only rootfs');
 
-  // ---- command ----
-  ok((web.command ?? []).join(' ') === 'pnpm start', 'C29 web command = pnpm start');
-  ok((worker.command ?? []).join(' ') === 'pnpm worker', 'C30 worker command = pnpm worker');
+  // ---- command（直接 exec，不经 pnpm/sh shim 链）----
+  const webCmd = (web.command ?? []).join(' ');
+  const workerCmd = (worker.command ?? []).join(' ');
+  ok(webCmd === 'node node_modules/next/dist/bin/next start', 'C29 web command = 直接 exec next start（无 pnpm wrapper）', webCmd);
+  ok(workerCmd === 'node --import tsx src/worker/index.ts', 'C30 worker command = node --import tsx（进程内 loader，无 shim 链）', workerCmd);
+
+  // ---- image tag：禁止 latest，release tag 必填，双镜像同一 tag ----
+  const webImage = (web as unknown as {image?: string}).image ?? '';
+  const adapterImage = (adapter as unknown as {image?: string}).image ?? '';
+  ok(
+    webImage === `zhiying:${RELEASE_TAG}` && !webImage.endsWith(':latest'),
+    'C31 app image 使用 ZHIYING_RELEASE_TAG（禁止 latest）',
+    webImage,
+  );
+  ok(
+    adapterImage === `zhiying-indextts2-adapter:${RELEASE_TAG}` && !adapterImage.endsWith(':latest'),
+    'C32 adapter image 与 app 同一 release tag',
+    adapterImage,
+  );
+
+  // ---- init / stop_grace_period（signal chain 契约）----
+  ok(
+    (web as unknown as {init?: boolean}).init === true && (worker as unknown as {init?: boolean}).init === true,
+    'C33 web/worker init=true（tini signal forwarding + reaping）',
+  );
+  ok(
+    ['60s', '1m0s'].includes((worker as unknown as {stop_grace_period?: string}).stop_grace_period ?? ''),
+    'C34 worker stop_grace_period=60s（优雅退出窗口）',
+    (worker as unknown as {stop_grace_period?: string}).stop_grace_period,
+  );
 
   console.log(`\nM4-B compose: ${pass} PASS, ${fail} FAIL`);
   if (fail > 0) process.exitCode = 1;

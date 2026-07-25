@@ -1,0 +1,69 @@
+# 知影 CI（M4-B）：快速、确定、可重复的单元/契约回归
+# 边界：不需要 DEEPSEEK_API_KEY、不连真实 IndexTTS2、不访问 Feiniu、
+#       不使用 production voice、不下载 public 455MB 资产、不用 mock 冒充
+#       production E2E（真实链走 RUN_* 显式 gate，CI 不设即为 SKIP）
+name: ci
+
+on:
+  push:
+    branches:
+      - m3-audio-pipeline
+      - m4-production-deployment
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Node dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install adapter test venv（mock upstream，无 GPU）
+        run: |
+          python3 -m venv services/indextts2-api-adapter/.venv
+          services/indextts2-api-adapter/.venv/bin/pip install -r services/indextts2-api-adapter/requirements.txt
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      - name: next build
+        run: pnpm build
+
+      - name: M4-B production compose 静态检查
+        run: npx tsx scripts/test-m4b-compose.ts
+
+      - name: M4-B adapter registry/MD5 测试（mock upstream）
+        run: npx tsx scripts/test-m4b-adapter.ts
+
+      - name: M3-F adapter contract 测试（mock upstream）
+        run: npx tsx scripts/test-m3f-adapter.ts
+
+      - name: M3-A Narration Plan
+        run: npx tsx scripts/test-m3a-narration-plan.ts
+
+      - name: M3-B TTS 管线
+        run: npx tsx scripts/test-m3b-tts.ts
+
+      - name: M3-C Subtitle Timing
+        run: npx tsx scripts/test-m3c-subtitle-timing.ts
+
+      - name: M3-D Timing Reconciliation
+        run: npx tsx scripts/test-m3d-timing-reconciliation.ts

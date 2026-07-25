@@ -57,7 +57,6 @@ UPSTREAM_API_VERSION = "2.2.0"
 app = FastAPI(title="Zhiying IndexTTS2 API Adapter", version="1.1.0")
 
 _client: Optional[httpx.AsyncClient] = None
-_speaker_ids: Dict[str, str] = {}  # voiceKey -> upstream speaker_id（内存 cache）
 _voice_locks: Dict[str, asyncio.Lock] = {}
 
 
@@ -255,11 +254,12 @@ class SynthesizeRequest(BaseModel):
 
 
 async def _resolve_speaker_id(voice_key: str, voice: VoiceEntry) -> Tuple[Optional[str], Optional[JSONResponse]]:
-    """single-flight：同一 voice 并发请求只解析/注册一次。
-    identity = reference 内容 MD5（upstream cache key）；speaker_name 仅为 label。"""
+    """per-voice single-flight 内的权威解析。
+    speaker_id 只是 upstream runtime handle：upstream speaker cache 可能被清理/
+    重建，进程内缓存会在此时变成 stale——因此**不做未经验证的跨请求缓存**，
+    每次 synthesize 都按内容 MD5 重新解析（Zhiying 单 Worker 全局 FIFO，
+    一次轻量 /speakers 代价可接受）。绝不按 speaker_name 作为首要 identity。"""
     async with _voice_lock(voice_key):
-        if voice_key in _speaker_ids:
-            return _speaker_ids[voice_key], None
         client = _client_or_create()
         try:
             res = await client.get("/speakers")
@@ -306,7 +306,6 @@ async def _resolve_speaker_id(voice_key: str, voice: VoiceEntry) -> Tuple[Option
             speaker_id = payload.get("speaker_id")
             if not speaker_id:
                 return None, _err(502, "UPSTREAM_INVALID_RESPONSE", "upstream /upload_speaker 未返回 speaker_id")
-        _speaker_ids[voice_key] = speaker_id
         return speaker_id, None
 
 

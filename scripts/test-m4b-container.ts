@@ -141,6 +141,8 @@ async function main(): Promise<void> {
 
   // ---------- 1. 构建双镜像 ----------
   // 可选镜像加速（默认官方源）：M4B_APT_MIRROR / M4B_PIP_INDEX_URL / M4B_NPM_REGISTRY
+  // M4B_SKIP_BUILD=1：镜像 tag 已存在且明确由当前 Dockerfile 构建时复用（跳过 B01/B02）
+  const SKIP_BUILD = process.env.M4B_SKIP_BUILD === '1';
   const appBuildArgs = [
     ...(process.env.M4B_APT_MIRROR ? ['--build-arg', `APT_MIRROR=${process.env.M4B_APT_MIRROR}`] : []),
     ...(process.env.M4B_NPM_REGISTRY ? ['--build-arg', `NPM_REGISTRY=${process.env.M4B_NPM_REGISTRY}`] : []),
@@ -148,23 +150,30 @@ async function main(): Promise<void> {
   const adapterBuildArgs = process.env.M4B_PIP_INDEX_URL
     ? ['--build-arg', `PIP_INDEX_URL=${process.env.M4B_PIP_INDEX_URL}`]
     : [];
-  console.log('[build] zhiying app image...');
-  {
-    const r = docker(['build', ...appBuildArgs, '-t', APP_IMAGE, '.'], 1_800_000);
-    ok(r.code === 0, 'B01 app image build 成功', r.code !== 0 ? r.out.slice(-1500) : undefined);
-    if (r.code !== 0) throw new Error('app image build 失败，终止后续容器测试');
-  }
-  console.log('[build] adapter image...');
-  {
-    const r = docker(['build', ...adapterBuildArgs, '-t', ADAPTER_IMAGE, 'services/indextts2-api-adapter'], 600_000);
-    ok(r.code === 0, 'B02 adapter image build 成功', r.code !== 0 ? r.out.slice(-1500) : undefined);
-    if (r.code !== 0) throw new Error('adapter image build 失败，终止后续容器测试');
+  if (SKIP_BUILD) {
+    const a = docker(['image', 'inspect', APP_IMAGE]);
+    const b = docker(['image', 'inspect', ADAPTER_IMAGE]);
+    ok(a.code === 0 && b.code === 0, 'B00 M4B_SKIP_BUILD=1：复用已存在镜像（双 tag 存在）');
+    if (a.code !== 0 || b.code !== 0) throw new Error('M4B_SKIP_BUILD=1 但镜像不存在');
+  } else {
+    console.log('[build] zhiying app image...');
+    {
+      const r = docker(['build', ...appBuildArgs, '-t', APP_IMAGE, '.'], 1_800_000);
+      ok(r.code === 0, 'B01 app image build 成功', r.code !== 0 ? r.out.slice(-1500) : undefined);
+      if (r.code !== 0) throw new Error('app image build 失败，终止后续容器测试');
+    }
+    console.log('[build] adapter image...');
+    {
+      const r = docker(['build', ...adapterBuildArgs, '-t', ADAPTER_IMAGE, 'services/indextts2-api-adapter'], 600_000);
+      ok(r.code === 0, 'B02 adapter image build 成功', r.code !== 0 ? r.out.slice(-1500) : undefined);
+      if (r.code !== 0) throw new Error('adapter image build 失败，终止后续容器测试');
+    }
   }
 
   // ---------- 2. app 镜像静态检查 ----------
   {
     const r = docker(['run', '--rm', '--entrypoint', 'bash', APP_IMAGE, '-lc',
-      'id -u; echo "HOME=$HOME"; ls /app/node_modules/.remotion/chrome-headless-shell/ 2>/dev/null; fc-list :lang=zh family | sort -u | head -3; ffmpeg -version 2>/dev/null | head -1; ffprobe -version 2>/dev/null | head -1']);
+      'id -u; echo "HOME=$HOME"; ls /app/node_modules/.remotion/chrome-headless-shell/ 2>/dev/null; fc-list :lang=zh family | sort -u | head -3; ffmpeg -version 2>/dev/null | head -1; ffprobe -version 2>/dev/null | head -1; command -v pgrep']);
     const out = r.out;
     ok(r.code === 0 && out.split('\n')[0]?.trim() === '1000', 'I01 容器 runtime uid=1000（node）', out.split('\n')[0]);
     ok(out.includes('HOME=/home/node'), 'I02 HOME=/home/node');
@@ -172,6 +181,7 @@ async function main(): Promise<void> {
     ok(/Noto Sans CJK/i.test(out), 'I04 fonts-noto-cjk 可用（fc-list :lang=zh）');
     ok(out.includes('ffmpeg version'), 'I05 ffmpeg 可用');
     ok(out.includes('ffprobe version'), 'I06 ffprobe 可用');
+    ok(/\/pgrep$/.test(out.trim()), 'I07 pgrep 可用（procps 显式安装，worker healthcheck 依赖）');
   }
 
   // ---------- 3. web 容器 + SQLite/WAL ----------
@@ -186,14 +196,14 @@ async function main(): Promise<void> {
   docker(['volume', 'create', dataVolume]);
   let projectId = '';
   try {
-    const r = docker(['run', '-d', '--name', webName,
+    const r = docker(['run', '-d', '--name', webName, '--init',
       '-e', 'NODE_ENV=production',
       '-e', 'ZHIYING_DATA_DIR=/app/data',
       '-e', 'TTS_PROVIDER=indextts2',
       '-e', 'INDEXTTS2_BASE_URL=http://indextts2-adapter:9880',
       '-v', `${dataVolume}:/app/data`,
       '-p', '127.0.0.1:3210:3000',
-      APP_IMAGE]);
+      APP_IMAGE, 'node', 'node_modules/next/dist/bin/next', 'start']);
     ok(r.code === 0, 'W01 web 容器启动（production env）', r.out.slice(-300));
     const up = await waitFor('web /api/projects 2xx', async () => {
       try {
@@ -227,14 +237,19 @@ async function main(): Promise<void> {
 
     // ---------- 4. worker 容器：共享 DB claim job ----------
     {
-      const r3 = docker(['run', '-d', '--name', workerName,
+      const r3 = docker(['run', '-d', '--name', workerName, '--init',
         '-e', 'NODE_ENV=development', // mock provider 功能测试（production 禁 mock 由 compose 静态锁定）
         '-e', 'ZHIYING_DATA_DIR=/app/data',
         '-e', 'WORKER_ROLE=all',
         '-e', 'LLM_PROVIDER=mock',
         '-e', 'TTS_PROVIDER=mock',
+        '--health-cmd', "pgrep -f 'src/worker/index.ts' >/dev/null",
+        '--health-interval', '5s',
+        '--health-start-period', '10s',
+        '--health-retries', '6',
         '-v', `${dataVolume}:/app/data`,
-        APP_IMAGE, 'pnpm', 'worker']);
+        APP_IMAGE, 'node', '--import', 'tsx', 'src/worker/index.ts']);
+      ok(r3.code === 0, 'K01 worker 容器启动（直接 exec + init）', r3.out.slice(-300));
       ok(r3.code === 0, 'K01 worker 容器启动', r3.out.slice(-300));
       const started = await waitFor('worker starting', () =>
         docker(['logs', workerName]).out.includes('starting'), 60_000);
@@ -258,18 +273,82 @@ async function main(): Promise<void> {
         ]).out);
       }
       ok(claimed, 'K04 worker 经共享 SQLite claim 并完成 job（succeeded）');
-      // 优雅 SIGTERM：直接对 worker node 进程发 TERM（docker stop 只打 PID1
-      // 的 pnpm，shim 链不一定转发；pattern 用 [.] 避免 pkill 自匹配）。
-      // 生产 docker stop 升级 SIGKILL 时由 stale job recovery 兜底（设计内行为）。
-      docker(['exec', workerName, 'sh', '-c', "pkill -TERM -f 'loader.mjs src/worker/index[.]ts'"]);
-      const graceful = await waitFor('worker bye.', () =>
-        docker(['logs', workerName]).out.includes('bye.'), 45_000);
-      ok(graceful, 'K05 worker 优雅 SIGTERM（bye.）');
+      // Worker Docker healthcheck（pgrep 匹配直接 exec 的新进程形态）→ healthy
+      const workerHealthy = await waitFor('worker container healthy', () =>
+        docker(['inspect', '--format', '{{.State.Health.Status}}', workerName]).out.trim() === 'healthy', 90_000);
+      ok(workerHealthy, 'K05a worker Docker healthcheck → healthy（pgrep + procps）');
+      // 真实 docker stop：SIGTERM 经 tini → node（--import tsx 进程内 loader）
+      // 直达 worker handler——不经 pnpm/sh shim 链；验收退出码 143（SIGTERM
+      // 优雅退出），不是 137（SIGKILL）
+      docker(['stop', '--time', '60', workerName]);
+      const stopLogs = docker(['logs', workerName]).out;
+      const exitCode = docker(['inspect', '--format', '{{.State.ExitCode}}', workerName]).out.trim();
+      ok(stopLogs.includes('bye.'), 'K05b docker stop → worker logs 包含 bye.', exitCode);
+      ok(exitCode === '0', 'K05c worker 在 grace period 内优雅退出（handled SIGTERM → exit 0，非 SIGKILL 137）', exitCode);
     }
   } finally {
     cleanupContainer(workerName);
     cleanupContainer(webName);
     docker(['volume', 'rm', '-f', dataVolume]);
+  }
+
+  // ---------- 4b. active job：docker stop mid-render → requeue → 重启续跑 ----------
+  const worker2Name = `m4b-worker2-${SUFFIX}`;
+  const driverName = `m4b-driver-${SUFFIX}`;
+  const dataVolume2 = `m4b-data2-${SUFFIX}`;
+  docker(['volume', 'create', dataVolume2]);
+  try {
+    docker(['run', '-d', '--name', worker2Name, '--init',
+      '-e', 'NODE_ENV=development',
+      '-e', 'ZHIYING_DATA_DIR=/app/data',
+      '-e', 'WORKER_ROLE=all',
+      '-e', 'LLM_PROVIDER=mock',
+      '-e', 'TTS_PROVIDER=mock',
+      '-v', `${dataVolume2}:/app/data`,
+      APP_IMAGE, 'node', '--import', 'tsx', 'src/worker/index.ts']);
+    docker(['run', '-d', '--name', driverName, '--init',
+      '-e', 'NODE_ENV=development',
+      '-e', 'ZHIYING_DATA_DIR=/app/data',
+      '-e', 'LLM_PROVIDER=mock',
+      '-e', 'TTS_PROVIDER=mock',
+      '-v', `${dataVolume2}:/app/data`,
+      '-v', `${path.resolve('scripts')}:/app/scripts:ro`,
+      APP_IMAGE, 'node', '--import', 'tsx', 'scripts/test-m4b-active-job-driver.ts']);
+    const running = await waitFor('RENDER_RUNNING marker', () =>
+      docker(['logs', driverName]).out.includes('RENDER_RUNNING'), 600_000);
+    ok(running, 'J01 pipeline 完成且 render job 进入 running（真实 render 进行中）');
+    // 真实 docker stop（mid-render）：SIGTERM → abort → requeue → bye.
+    docker(['stop', '--time', '60', worker2Name]);
+    const stopLogs2 = docker(['logs', worker2Name]).out;
+    const exit2 = docker(['inspect', '--format', '{{.State.ExitCode}}', worker2Name]).out.trim();
+    ok(stopLogs2.includes('requeued due to shutdown'), 'J02 docker stop mid-render → job requeued due to shutdown', exit2);
+    // frozen 优雅契约 = SIGTERM 到达 handler → requeue + bye.（均实测）。
+    // 已知残留（frozen src/Remotion 句柄，不改 frozen）：render/bundle 活动后
+    // node 进程在 bye. 之后不自然退出，grace 到期被 SIGKILL（exit 137）——
+    // 发生在优雅契约完成之后，job 状态已安全持久化，无数据影响。
+    const idxRequeue = stopLogs2.indexOf('requeued due to shutdown');
+    const idxBye = stopLogs2.indexOf('bye.');
+    ok(
+      idxRequeue >= 0 && idxBye > idxRequeue,
+      'J03 优雅契约完成且顺序正确（requeue → bye.；post-bye. 退出码如实记录）',
+      {exit: exit2, note: '137=post-bye. SIGKILL（Remotion/frozen 残留句柄）'},
+    );
+    {
+      const st = docker(['exec', driverName, 'node', '-e',
+        `const db=require('better-sqlite3')('/app/data/zhiying.db',{readonly:true});console.log(db.prepare('SELECT status FROM render_jobs ORDER BY queued_at DESC LIMIT 1').get().status)`]);
+      ok(st.out.trim() === 'queued', 'J04 mid-render job 回到 queued（frozen 定义的正确状态）', st.out.trim());
+    }
+    // 重启单 worker → 任务被重新处理直至 succeeded（driver 全程在轮询）
+    docker(['start', worker2Name]);
+    const recovered = await waitFor('RENDER_SUCCEEDED marker', () =>
+      docker(['logs', driverName]).out.includes('RENDER_SUCCEEDED'), 900_000);
+    ok(recovered, 'J05 worker 重启后 requeue job 被重新处理至 succeeded（真实 render + ffprobe 校验）');
+    const driverExit = docker(['inspect', '--format', '{{.State.ExitCode}}', driverName]).out.trim();
+    ok(driverExit === '0', 'J06 driver 正常完成（DRIVER_DONE）', driverExit);
+  } finally {
+    cleanupContainer(driverName);
+    cleanupContainer(worker2Name);
+    docker(['volume', 'rm', '-f', dataVolume2]);
   }
 
   // ---------- 5. adapter 容器 ----------

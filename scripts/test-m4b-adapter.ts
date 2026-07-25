@@ -82,14 +82,16 @@ interface MockState {
   speakers: Array<{speaker_id: string; speaker_name: string; md5: string}>;
   uploadCount: number;
   uploadResponseMd5: string;
+  ttsSpeakerIds: string[];
 }
 
-const state: MockState = {speakers: [], uploadCount: 0, uploadResponseMd5: MOCK_MD5};
+const state: MockState = {speakers: [], uploadCount: 0, uploadResponseMd5: MOCK_MD5, ttsSpeakerIds: []};
 
 function resetState(): void {
   state.speakers = [];
   state.uploadCount = 0;
   state.uploadResponseMd5 = MOCK_MD5;
+  state.ttsSpeakerIds = [];
 }
 
 function startMockUpstream(): Promise<http.Server> {
@@ -116,6 +118,11 @@ function startMockUpstream(): Promise<http.Server> {
       let body = '';
       req.on('data', (c: Buffer) => { body += c.toString(); });
       req.on('end', () => {
+        try {
+          state.ttsSpeakerIds.push(String((JSON.parse(body) as {speaker_id?: string}).speaker_id));
+        } catch {
+          // ignore
+        }
         res.writeHead(200, {'content-type': 'audio/wav'});
         res.end(MOCK_WAV);
       });
@@ -388,6 +395,35 @@ async function main(): Promise<void> {
       const r = await post(VALID_BODY);
       const j = (await r.json()) as {error?: string};
       ok(r.status === 502 && j.error === 'UPSTREAM_CACHE_CONFLICT', 'T16 upload MD5 不匹配 → 502 UPSTREAM_CACHE_CONFLICT', j);
+    }
+
+    // ---- T17 stale speaker_id：adapter 不重启，upstream cache 变更后禁止发旧 ID ----
+    resetState();
+    await stopAdapter();
+    await startAdapter({registryPath: writeRegistry('reg.json', validRegistry())});
+    {
+      const r1 = await post(VALID_BODY);
+      ok(
+        r1.status === 200 && state.uploadCount === 1 && state.ttsSpeakerIds.at(-1) === 'spk_up1',
+        'T17a 首次 synthesize → upload → speaker_id A（spk_up1）',
+        {uploadCount: state.uploadCount, used: state.ttsSpeakerIds.at(-1)},
+      );
+      // upstream cache 重建：同内容 MD5 映射为新 speaker_id B
+      state.speakers = [{speaker_id: 'spk_B', speaker_name: 'rebuilt-cache', md5: MOCK_MD5}];
+      const r2 = await post(VALID_BODY);
+      ok(
+        r2.status === 200 && state.ttsSpeakerIds.at(-1) === 'spk_B' && state.uploadCount === 1,
+        'T17b cache 重建后 → 重新解析用 B，禁止发送 stale A',
+        {used: state.ttsSpeakerIds.at(-1), uploadCount: state.uploadCount},
+      );
+      // upstream cache 清空 → 必须重新 upload
+      state.speakers = [];
+      const r3 = await post(VALID_BODY);
+      ok(
+        r3.status === 200 && state.uploadCount === 2 && state.ttsSpeakerIds.at(-1) === 'spk_up2',
+        'T17c cache 清空 → 重新 upload（spk_up2），禁止发送 stale ID',
+        {uploadCount: state.uploadCount, used: state.ttsSpeakerIds.at(-1)},
+      );
     }
 
     // ---- 可选真实 gate：真实 IndexTTS2 upstream MD5 identity ----

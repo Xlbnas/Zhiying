@@ -5,8 +5,10 @@
 # M4-B 变更：
 #   - fonts-noto-cjk（Linux 容器内中文字幕渲染；此前依赖宿主字体 fallback）
 #   - USER node（uid 1000，与 Feiniu 宿主 VoicelessXlbnas 对齐）
-#   - Chrome Headless Shell → /home/node/.cache/remotion
+#   - Chrome Headless Shell 随 node_modules/.remotion/（Remotion 4.x 实证位置，
+#     不再使用 ~/.cache/remotion）
 #   - COREPACK_HOME 共享位置（root 准备的 pnpm 对 node 用户可用）
+#   - 默认 CMD 直接 exec next（不经 pnpm wrapper）
 # 说明：public/（约 455MB 媒体资源）与 data/ 不打进镜像，运行时由 compose volume 挂载。
 
 # ---------- base：pnpm 环境 ----------
@@ -19,15 +21,21 @@ RUN corepack enable && corepack prepare pnpm@11.9.0 --activate \
     && chmod -R a+rX /opt/corepack
 
 # ---------- system：Chrome Headless Shell + ffmpeg + CJK 字体运行依赖 ----------
-# 依赖清单依据 Remotion 官方 Docker 文档（node:20-bookworm）
+# 依赖清单依据 Remotion 官方 Docker 文档（node:22-bookworm）
 FROM base AS system
 # 可选 apt 镜像（默认官方 deb.debian.org；网络受限环境用 --build-arg
-# APT_MIRROR=mirrors.aliyun.com 等覆盖，不影响默认行为）
+# APT_MIRROR=mirrors.aliyun.com 等覆盖，仍走 APT signed repository metadata）
 ARG APT_MIRROR=
+# procps：worker healthcheck 使用 pgrep（显式安装，不依赖偶然软件包）
 RUN if [ -n "$APT_MIRROR" ]; then \
       sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
     fi \
-    && apt-get update && apt-get install -y --no-install-recommends \
+    && apt-get update \
+    && apt-get \
+      -o Acquire::Retries=8 \
+      -o Acquire::http::Timeout=120 \
+      -o Acquire::https::Timeout=120 \
+      install -y --no-install-recommends \
     libnss3 \
     libdbus-1-3 \
     libatk1.0-0 \
@@ -43,16 +51,9 @@ RUN if [ -n "$APT_MIRROR" ]; then \
     libcairo2 \
     ffmpeg \
     fontconfig \
-    && rm -rf /var/lib/apt/lists/* \
-    # fonts-noto-cjk 单独安装：54MB 大包在受限网络下单次 apt 下载易断，
-    # 改用 curl 断点续传 + dpkg（依赖仅 fontconfig，已在上方安装）
-    && for i in 1 2 3 4 5; do \
-      curl -fL --retry 5 --retry-delay 2 -C - -o /tmp/fonts-noto-cjk.deb \
-        "http://${APT_MIRROR:-deb.debian.org}/debian/pool/main/f/fonts-noto-cjk/fonts-noto-cjk_20220127+repack1-1_all.deb" \
-        && break || sleep 3; \
-    done \
-    && dpkg -i /tmp/fonts-noto-cjk.deb \
-    && rm -f /tmp/fonts-noto-cjk.deb
+    fonts-noto-cjk \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
 
 # ---------- deps：安装全部依赖 + 预下载 Chrome Headless Shell ----------
 FROM system AS deps
@@ -107,5 +108,5 @@ USER node
 
 EXPOSE 3000
 
-# 默认启动 web；worker 由 compose 用 `pnpm worker` 覆盖
-CMD ["pnpm", "start"]
+# 默认直接 exec Next server（不经 pnpm wrapper；signal 链干净）
+CMD ["node", "node_modules/next/dist/bin/next", "start"]
