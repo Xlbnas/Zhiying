@@ -15,6 +15,7 @@ SEMANTIC_DIFF_GATE=PASS 并 exit 0。
 """
 
 import json
+import re
 import sys
 
 IMMUTABLE = (
@@ -57,25 +58,47 @@ def norm_net_names(networks):
     return {str(n) for n in networks}
 
 
+_DURATION_RE = re.compile(r"(\d+(?:\.\d+)?)(ns|us|µs|μs|ms|s|m|h)")
+_DURATION_UNIT_SECONDS = {
+    "h": 3600.0,
+    "m": 60.0,
+    "s": 1.0,
+    "ms": 1e-3,
+    "us": 1e-6,
+    "µs": 1e-6,
+    "μs": 1e-6,
+    "ns": 1e-9,
+}
+
+
 def duration_seconds(v):
-    """compose json duration 归一化为秒（int=纳秒，str=Go duration 如 600s）。"""
+    """compose json duration 归一化为秒。
+
+    - int/float：视为纳秒（某些 Compose JSON 输出形态），除以 1e9
+    - str：Go-style duration，支持复合组件（"10m0s"/"1h15m30s"/"1m0.5s"），
+      单位 h/m/s/ms/us/µs/μs/ns（长单位优先匹配，避免 ms 拆成 m+s）；
+      特例 "0" == 0。full-consumption：任何未消费残段/非法格式/负值
+      一律 None（fail-closed，不 silent clamp、不 partial parse）。
+    """
     if v is None:
         return None
     if isinstance(v, (int, float)):
         return v / 1e9
     s = str(v).strip()
-    try:
-        if s.endswith("ns"):
-            return float(s[:-2]) / 1e9
-        if s.endswith("ms"):
-            return float(s[:-2]) / 1e3
-        if s.endswith("m"):
-            return float(s[:-1]) * 60
-        if s.endswith("s"):
-            return float(s[:-1])
-        return float(s)
-    except ValueError:
+    if s == "0":
+        return 0.0
+    if not s or s.startswith("-") or s.startswith("+"):
         return None
+    total = 0.0
+    cursor = 0
+    for m in _DURATION_RE.finditer(s):
+        if m.start() != cursor:
+            return None
+        total += float(m.group(1)) * _DURATION_UNIT_SECONDS[m.group(2)]
+        cursor = m.end()
+    if cursor != len(s) or cursor == 0:
+        return None
+    return total
 
 
 def norm_ports(ports):

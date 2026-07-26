@@ -9,6 +9,7 @@
 """
 
 import copy
+import importlib.util
 import json
 import os
 import subprocess
@@ -17,6 +18,16 @@ import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GATE = os.path.join(REPO, "scripts", "deploy", "m4c1", "semantic-compose-gate.py")
+
+# Windows GBK 控制台无法打印 µ/μ 等字符，统一 utf-8 + replace
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+# 直接载入 gate 模块以单元测试 duration_seconds（文件名含连字符，用 importlib）
+_spec = importlib.util.spec_from_file_location("semantic_compose_gate", GATE)
+_gate_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_gate_mod)
+duration_seconds = _gate_mod.duration_seconds
 
 PROXY = "http://127.0.0.1:7890"
 
@@ -141,6 +152,31 @@ def main():
     fail_cases["health retries changed"] = p
     p = copy.deepcopy(good); it(p)["healthcheck"]["timeout"] = 20000000000
     fail_cases["health timeout changed"] = p
+    # R4 — compound duration 边界（模拟 Feiniu compose normalize 输出形态）
+    p = copy.deepcopy(good); it(p)["healthcheck"]["start_period"] = "9m59s"
+    fail_cases['start_period "9m59s" (<600s)'] = p
+    p = copy.deepcopy(good); it(p)["healthcheck"]["start_period"] = "5m0s"
+    fail_cases['start_period "5m0s" (<600s)'] = p
+    p = copy.deepcopy(good); it(p)["healthcheck"]["start_period"] = "10m0sJUNK"
+    fail_cases['start_period "10m0sJUNK" (partial parse 禁止)'] = p
+    p = copy.deepcopy(good); it(p)["healthcheck"]["interval"] = "14s"
+    fail_cases['interval "14s" (!=15s)'] = p
+    p = copy.deepcopy(good); it(p)["healthcheck"]["timeout"] = "11s"
+    fail_cases['timeout "11s" (!=10s)'] = p
+
+    # R4 — 合法 compound/字符串 duration 仍应 PASS
+    pass_cases = {}
+    p = copy.deepcopy(good)
+    it(p)["healthcheck"]["start_period"] = "10m0s"   # 本次 Feiniu 真实 normalize 形态
+    it(p)["healthcheck"]["interval"] = "15s"
+    it(p)["healthcheck"]["timeout"] = "10s"
+    pass_cases['real Feiniu normalized: start_period "10m0s" interval "15s" timeout "10s"'] = p
+    p = copy.deepcopy(good); it(p)["healthcheck"]["interval"] = "0m15s"
+    pass_cases['interval "0m15s" (compound=15s)'] = p
+    p = copy.deepcopy(good); it(p)["healthcheck"]["timeout"] = "0m10s"
+    pass_cases['timeout "0m10s" (compound=10s)'] = p
+    p = copy.deepcopy(good); it(p)["healthcheck"]["start_period"] = "0h10m0s"
+    pass_cases['start_period "0h10m0s" (=600s)'] = p
 
     npass = nfail = 0
 
@@ -153,9 +189,30 @@ def main():
             nfail += 1
             print(f"FAIL  {label}  {detail}")
 
+    # ---- R4: duration_seconds 单元测试（直接 import gate 函数） ----
+    valid = {
+        "0": 0, "15s": 15, "600s": 600, "10m0s": 600, "1m30s": 90,
+        "1h0m0s": 3600, "1h15m30s": 4530, "1.5h": 5400, "500ms": 0.5,
+        "100us": 0.0001, "100µs": 0.0001, "100μs": 0.0001,
+        "100ns": 0.0000001, "1m0.5s": 60.5,
+    }
+    for s, want in valid.items():
+        got = duration_seconds(s)
+        check(f'D01 duration_seconds("{s}") == {want}',
+              got is not None and abs(got - want) < 1e-9 * max(1, abs(want)), f"got={got}")
+    check('D02 duration_seconds(600000000000) == 600 (numeric ns compat)',
+          duration_seconds(600000000000) == 600)
+    for s in ["", "abc", "10m0sJUNK", "abc10m", "10", "1x", "m10", "1..5s", "-10s"]:
+        got = duration_seconds(s)
+        check(f'D03 duration_seconds("{s}") is None', got is None, f"got={got}")
+
     with tempfile.TemporaryDirectory() as tmp:
         rc, out = run_gate(tmp, cur, good)
         check("F00 approved delta => PASS", rc == 0 and "SEMANTIC_DIFF_GATE=PASS" in out, out[-200:])
+
+        for name, p in pass_cases.items():
+            rc, out = run_gate(tmp, cur, p)
+            check(f"F01 {name} => PASS", rc == 0 and "SEMANTIC_DIFF_GATE=PASS" in out, out[-200:])
 
         for name, case in fail_cases.items():
             c, p = case if isinstance(case, tuple) else (cur, case)
