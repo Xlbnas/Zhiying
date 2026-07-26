@@ -60,6 +60,9 @@ jobs:
       - name: M4-C1 secret boundary（Git + Docker context 双边界）
         run: npx tsx scripts/test-m4c1-secret-boundary.ts
 
+      - name: M4-C1 admin deploy scripts 静态安全检查
+        run: npx tsx scripts/test-m4c1-admin-scripts.ts
+
       - name: M4-B adapter registry/MD5 测试（mock upstream）
         run: npx tsx scripts/test-m4b-adapter.ts
 

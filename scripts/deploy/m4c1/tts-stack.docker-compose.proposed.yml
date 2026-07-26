@@ -1,0 +1,125 @@
+
+services:
+
+  qwen3-tts:
+    build:
+      context: ./qwen
+      network: host
+      args:
+        HTTP_PROXY: http://127.0.0.1:7890
+        HTTPS_PROXY: http://127.0.0.1:7890
+
+    image: xlbnas/qwen3-tts:1.7b
+    container_name: qwen3-tts
+
+    network_mode: host
+
+    gpus: all
+
+    restart: unless-stopped
+
+    environment:
+      HTTP_PROXY: http://127.0.0.1:7890
+      HTTPS_PROXY: http://127.0.0.1:7890
+      http_proxy: http://127.0.0.1:7890
+      https_proxy: http://127.0.0.1:7890
+
+      NO_PROXY: localhost,127.0.0.1
+
+      HF_HOME: /models/hf
+      HUGGINGFACE_HUB_CACHE: /models/hf/hub
+
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+
+    volumes:
+      - ./models/qwen:/models/hf
+
+    shm_size: 8gb
+
+
+  indextts2:
+
+    image: neosun/indextts2:v2.2-performance-optimized
+
+    container_name: indextts2
+
+    networks:
+      - zhiying-tts-net
+
+    ports:
+      - "127.0.0.1:8002:8002"
+      - "7870:7870"
+
+    gpus: all
+
+    restart: unless-stopped
+
+    environment:
+      HTTP_PROXY: http://127.0.0.1:7890
+      HTTPS_PROXY: http://127.0.0.1:7890
+      http_proxy: http://127.0.0.1:7890
+      https_proxy: http://127.0.0.1:7890
+
+      NO_PROXY: localhost,127.0.0.1
+
+      HF_ENDPOINT: https://huggingface.co
+
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+
+      # M4-C1B0：runtime 完全 offline。镜像 build 期已完成 uv sync，
+      # 启动时禁止 uv 重新 sync/build（否则会经 proxy 去 PyPI 拉
+      # hatchling——proxy 127.0.0.1:7890 在 bridge 下不可达，这是
+      # 第一次 migration 失败的根因）
+      UV_NO_SYNC: "1"
+
+      # 禁止 uv 自身任何网络访问（uv runtime dependency resolution is
+      # offline——不宣称整个 container 无网络：8002/7870 正常服务）
+      UV_OFFLINE: "1"
+
+    volumes:
+      - ./outputs/index:/app/outputs
+
+    shm_size: 8gb
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -f http://127.0.0.1:8002/health >/dev/null || exit 1
+      interval: 15s
+      timeout: 10s
+      start_period: 600s
+      retries: 10
+
+
+  cosyvoice3:
+
+    image: neosun/cosyvoice:v3.4.0
+
+    container_name: cosyvoice3
+
+    network_mode: host
+
+    gpus: all
+
+    restart: unless-stopped
+
+    environment:
+      HTTP_PROXY: http://127.0.0.1:7890
+      HTTPS_PROXY: http://127.0.0.1:7890
+      http_proxy: http://127.0.0.1:7890
+      https_proxy: http://127.0.0.1:7890
+
+      NO_PROXY: localhost,127.0.0.1
+
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+
+    volumes:
+      - ./data/cosyvoice:/data/voices
+
+    shm_size: 8gb
+
+
+networks:
+  zhiying-tts-net:
+    external: true
+    name: zhiying-tts-net
