@@ -43,6 +43,15 @@ services:
 
     container_name: indextts2
 
+    # 与正式 compose 保持逐字一致（semantic gate 强制 command 相等，
+    # 不假设 image default CMD 等价）
+    command: >
+      bash -c "uv run python3 api_server_cached_optimized.py &
+      uv run webui_enhanced.py
+      --server_name 0.0.0.0
+      --server_port 7870
+      --use_fp16"
+
     networks:
       - zhiying-tts-net
 
@@ -66,14 +75,15 @@ services:
 
       PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
 
-      # M4-C1B0：runtime 完全 offline。镜像 build 期已完成 uv sync，
-      # 启动时禁止 uv 重新 sync/build（否则会经 proxy 去 PyPI 拉
-      # hatchling——proxy 127.0.0.1:7890 在 bridge 下不可达，这是
-      # 第一次 migration 失败的根因）
+      # M4-C1B0：uv runtime dependency resolution offline。镜像 build 期
+      # 已完成 uv sync，启动时禁止 uv 重新 sync/build（否则会经 proxy
+      # 去 PyPI 拉 hatchling——proxy 127.0.0.1:7890 在 bridge 下不可达，
+      # 这是第一次 migration 失败的根因）。不宣称整个 container 无网络：
+      # 8002/7870 正常服务。
       UV_NO_SYNC: "1"
 
       # 禁止 uv 自身任何网络访问（uv runtime dependency resolution is
-      # offline——不宣称整个 container 无网络：8002/7870 正常服务）
+      # offline——IndexTTS2 服务本身仍在普通 Docker bridge 网络）
       UV_OFFLINE: "1"
 
     volumes:
