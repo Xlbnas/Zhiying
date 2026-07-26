@@ -112,10 +112,10 @@ function main(): void {
   ok(proposed.includes('qwen3-tts') && proposed.includes('cosyvoice3'), 'S29 proposed: qwen/cosyvoice 未删改');
   ok(!proposed.includes('runtime 完全 offline'), 'R2-P01 proposed: 无「runtime 完全 offline」不准确表述');
   ok(proposed.includes('uv runtime dependency resolution offline'), 'R2-P02 proposed: 准确表述 uv runtime dependency resolution offline');
-  ok(proposed.includes('command:') && proposed.includes('api_server_cached_optimized.py') && proposed.includes('webui_enhanced.py'), 'R2-P03 proposed: 显式保留 indextts2 command（不假设 image default）');
+  ok(!/^[ \t]+command:/m.test(proposed), 'R3-P01 proposed: indextts2 无 command override（正式 compose 亦未声明，image-default CMD）');
 
   // ---- apply 纪律 ----
-  ok(apply.includes('id -u') && apply.includes('exit 1'), 'S30 apply: root precheck');
+  ok(apply.includes('id -u') && apply.includes('fail 1 "需要 root 执行"'), 'S30 apply: root precheck（fail-closed）');
   ok(apply.includes('EXPECTED_FORMAL_SHA') && apply.includes('EXPECTED_PROPOSED_SHA'), 'S31 apply: 双 SHA precheck');
   ok(apply.includes('.last-indextts2-backup'), 'S32 apply: backup path state file');
   ok(apply.includes('docker compose up -d --no-deps indextts2'), 'S33 apply: 仅 recreate indextts2');
@@ -152,6 +152,31 @@ function main(): void {
   ok(gate.includes('127.0.0.1:8002/health') && gate.includes('start_period'), 'R2-G07 gate: healthcheck 约束');
   ok(gate.includes('SEMANTIC_DIFF_GATE=PASS') && gate.includes('SEMANTIC_DIFF_GATE=FAIL'), 'R2-G08 gate: PASS/FAIL 输出');
   ok(gate.includes('external') && gate.includes('"name"'), 'R2-G09 gate: top-level external network 约束');
+
+  // ---- R3 apply：fail() expected-failure handler ----
+  ok(/fail\(\) \{/.test(apply), 'R3-A01 apply: fail() helper 存在');
+  ok(apply.includes('report_failure') && apply.includes('FAILED_STAGE=$STAGE') && apply.includes('BACKUP=${BACKUP:-NOT_CREATED}'), 'R3-A02 apply: fail 路径统一输出 FAILED_STAGE/BACKUP/ROLLBACK_SCRIPT');
+  const failCalls = (apply.match(/fail 1 "/g) ?? []).length;
+  ok(failCalls >= 12, 'R3-A03 apply: expected 检查失败均走 fail()', { failCalls });
+  const readinessBlock = apply.slice(apply.indexOf('STAGE="readiness-wait"'), apply.indexOf('STAGE="post-verify"'));
+  ok(readinessBlock.includes('fail 1 "超过 ${READINESS_DEADLINE}s 未 healthy"'), 'R3-A04 apply: readiness timeout 调 fail()');
+  ok(!/[^"]exit 1/.test(readinessBlock), 'R3-A05 apply: readiness block 无直接 exit 1');
+  const postBlock = apply.slice(apply.indexOf('STAGE="post-verify"'));
+  ok(postBlock.includes('fail 1 "迁移后 7870 不可用'), 'R3-A06 apply: post-recreate 7870 验证走 fail()');
+  ok(apply.includes('trap on_err ERR') && apply.includes('UNEXPECTED_ERROR'), 'R3-A07 apply: ERR trap 保留（unexpected fallback）');
+  ok(apply.includes('不得声明 command override'), 'R3-A08 apply: precheck 禁止 proposed command override');
+  ok(!/^[ \t]+command:/m.test(apply), 'R3-A09 apply: 自身不含 command override 字面量');
+
+  // ---- R3 gate：volumes 零 delta / networks 精确 / health 三参数 ----
+  ok(gate.includes('top-level volumes 必须零 delta'), 'R3-G01 gate: top-level volumes deep equality（禁新增/删除/修改）');
+  ok(gate.includes('必须精确为') && gate.includes('!= {NET_NAME}'), 'R3-G02 gate: service networks 精确等于 {zhiying-tts-net}');
+  ok(gate.includes('approved=15s') && gate.includes('approved=10s') && gate.includes('approved=10）'), 'R3-G03 gate: health interval=15s/timeout=10s/retries=10 锁定');
+
+  // ---- R3 fixture 测试接入 ----
+  const FIXTURE = path.resolve('scripts', 'test-m4c1-semantic-gate.py');
+  ok(fs.existsSync(FIXTURE), 'R3-T01 semantic gate fixture 测试存在');
+  const ci = fs.readFileSync(path.resolve('.github', 'workflows', 'ci.yml'), 'utf8');
+  ok(ci.includes('test-m4c1-semantic-gate.py'), 'R3-T02 CI 接入 semantic gate fixtures');
 
   // ---- rollback 纪律 ----
   ok(rollback.includes('.last-indextts2-backup'), 'S40 rollback: 读精确 backup state file');

@@ -130,8 +130,8 @@ def check_indextts2(ci, pi):
         fail(f"indextts2 当前 network_mode={ci.get('network_mode')!r}（预期 host，否则不应执行本迁移）")
     if pi.get("network_mode"):
         fail(f"indextts2 proposed 仍声明 network_mode={pi.get('network_mode')!r}")
-    if NET_NAME not in norm_net_names(pi.get("networks")):
-        fail(f"indextts2 proposed 未挂 {NET_NAME}")
+    if norm_net_names(pi.get("networks")) != {NET_NAME}:
+        fail(f"indextts2 proposed networks 必须精确为 {{{NET_NAME}}}，实际={sorted(norm_net_names(pi.get('networks')))}")
 
     # ports：必须精确包含 127.0.0.1:8002->8002 与 7870->7870；8002 不得 0.0.0.0/:: 发布
     ports = norm_ports(pi.get("ports"))
@@ -146,7 +146,8 @@ def check_indextts2(ci, pi):
     if len(ports) != 2:
         fail(f"indextts2 ports 仅允许 8002/7870 两条，实际={ports}")
 
-    # healthcheck：127.0.0.1:8002/health 且 start_period >= 600s
+    # healthcheck：127.0.0.1:8002/health，start_period>=600s，
+    # 并锁定 approved topology：interval=15s timeout=10s retries=10
     hc = pi.get("healthcheck") or {}
     test = hc.get("test")
     test_str = " ".join(str(t) for t in test) if isinstance(test, list) else str(test or "")
@@ -155,6 +156,14 @@ def check_indextts2(ci, pi):
     sp = duration_seconds(hc.get("start_period"))
     if sp is None or sp < 600:
         fail(f"indextts2 healthcheck start_period={hc.get('start_period')!r}（>=600s 必需）")
+    iv = duration_seconds(hc.get("interval"))
+    if iv != 15:
+        fail(f"indextts2 healthcheck interval={hc.get('interval')!r}（approved=15s）")
+    to = duration_seconds(hc.get("timeout"))
+    if to != 10:
+        fail(f"indextts2 healthcheck timeout={hc.get('timeout')!r}（approved=10s）")
+    if hc.get("retries") != 10:
+        fail(f"indextts2 healthcheck retries={hc.get('retries')!r}（approved=10）")
 
     # 其余 key 零 delta
     skip = set(IMMUTABLE) | set(DELTA_KEYS)
@@ -178,11 +187,10 @@ def check_top_level(cur, prop):
         if net.get("external") is not True or net.get("name") != NET_NAME:
             fail(f"{NET_NAME} 必须 external=true name={NET_NAME}，实际={net}")
     cv, pv = cur.get("volumes") or {}, prop.get("volumes") or {}
-    for k, v in cv.items():
-        if k not in pv:
-            fail(f"top-level volume 删除：{k}")
-        elif pv[k] != v:
-            fail(f"top-level volume 修改：{k}")
+    if cv != pv:
+        fail(f"top-level volumes 必须零 delta：removed={sorted(set(cv) - set(pv))} "
+             f"added={sorted(set(pv) - set(cv))} "
+             f"changed={[k for k in sorted(set(cv) & set(pv)) if cv[k] != pv[k]]}")
     for k in sorted((set(cur) | set(prop)) - {"services", "networks", "volumes"}):
         if cur.get(k) != prop.get(k):
             fail(f"top-level key {k} 变化")

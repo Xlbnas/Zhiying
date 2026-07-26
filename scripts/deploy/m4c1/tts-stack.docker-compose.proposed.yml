@@ -43,14 +43,9 @@ services:
 
     container_name: indextts2
 
-    # 与正式 compose 保持逐字一致（semantic gate 强制 command 相等，
-    # 不假设 image default CMD 等价）
-    command: >
-      bash -c "uv run python3 api_server_cached_optimized.py &
-      uv run webui_enhanced.py
-      --server_name 0.0.0.0
-      --server_port 7870
-      --use_fp16"
+    # 不声明 command：正式 compose 同样未声明，运行中使用 image-default
+    # CMD。semantic gate 将 command 列为 immutable（None == None 才允许
+    # 迁移），禁止在此手工重建"等价 command"。
 
     networks:
       - zhiying-tts-net
