@@ -81,6 +81,20 @@ services:
       # offline——IndexTTS2 服务本身仍在普通 Docker bridge 网络）
       UV_OFFLINE: "1"
 
+      # M4-C1B2-R5A：HuggingFace runtime artifact closure。HF_HUB_CACHE 指向
+      # 镜像烘焙缓存 /app/checkpoints/hf_cache（image-baked artifact，
+      # container recreate 后仍存在）；HF_HUB_OFFLINE=1 禁止任何 HF Hub
+      # 网络访问——proxy 127.0.0.1:7890 在 bridge 下不可达，这是第二次
+      # migration 失败（IndexTTS2.__init__ hf_hub_download ProxyError
+      # crash-loop）的根因。已用 --network none + HF_HUB_OFFLINE=1
+      # disposable probe 实证四个启动必需 artifact（amphion/MaskGCT、
+      # facebook/w2v-bert-2.0、funasr/campplus、
+      # nvidia/bigvgan_v2_22khz_80band_256x）全部从该缓存解析；不新增
+      # volume、不使用 /root/.cache/huggingface（writable-layer 增量
+      # recreate 即丢失）。
+      HF_HUB_CACHE: /app/checkpoints/hf_cache
+      HF_HUB_OFFLINE: "1"
+
     volumes:
       - ./outputs/index:/app/outputs
 

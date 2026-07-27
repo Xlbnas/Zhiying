@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""M4-C1B0-R3 — semantic-compose-gate.py 单元 fixture 测试（stdlib only）。
+"""M4-C1B2-R5A — semantic-compose-gate.py 单元 fixture 测试（stdlib only）。
 
 真实执行 scripts/deploy/m4c1/semantic-compose-gate.py，检查 exit code：
   approved delta          => rc 0 (SEMANTIC_DIFF_GATE=PASS)
@@ -74,7 +74,7 @@ def base_current():
 
 
 def approved_proposed(cur):
-    """唯一合法 delta：bridge 网络 + 限定 ports + UV offline env + healthcheck。"""
+    """唯一合法 delta：bridge 网络 + 限定 ports + R5A 四项 offline env + healthcheck。"""
     p = copy.deepcopy(cur)
     it = p["services"]["indextts2"]
     del it["network_mode"]
@@ -85,6 +85,8 @@ def approved_proposed(cur):
     ]
     it["environment"]["UV_NO_SYNC"] = "1"
     it["environment"]["UV_OFFLINE"] = "1"
+    it["environment"]["HF_HUB_CACHE"] = "/app/checkpoints/hf_cache"
+    it["environment"]["HF_HUB_OFFLINE"] = "1"
     it["healthcheck"] = {
         "test": ["CMD-SHELL", "curl -f http://127.0.0.1:8002/health >/dev/null || exit 1"],
         "interval": 15000000000,
@@ -164,6 +166,34 @@ def main():
     p = copy.deepcopy(good); it(p)["healthcheck"]["timeout"] = "11s"
     fail_cases['timeout "11s" (!=10s)'] = p
 
+    # R5A — HF runtime artifact closure contract 负例
+    p = copy.deepcopy(good); del it(p)["environment"]["HF_HUB_CACHE"]
+    fail_cases["R5A HF_HUB_CACHE 缺失"] = p
+    p = copy.deepcopy(good); it(p)["environment"]["HF_HUB_CACHE"] = "/root/.cache/huggingface"
+    fail_cases["R5A HF_HUB_CACHE 路径错误（writable-layer cache）"] = p
+    p = copy.deepcopy(good); del it(p)["environment"]["HF_HUB_OFFLINE"]
+    fail_cases["R5A HF_HUB_OFFLINE 缺失"] = p
+    p = copy.deepcopy(good); it(p)["environment"]["HF_HUB_OFFLINE"] = "0"
+    fail_cases["R5A HF_HUB_OFFLINE=0"] = p
+    p = copy.deepcopy(good); it(p)["environment"]["HF_HUB_OFFLINE"] = "true"
+    fail_cases["R5A HF_HUB_OFFLINE=true（contract 锁定 \"1\"）"] = p
+    p = copy.deepcopy(good); it(p)["environment"]["HF_HOME"] = "/app/checkpoints/hf_cache"
+    fail_cases["R5A 额外 HF_HOME"] = p
+    p = copy.deepcopy(good); it(p)["environment"]["HUGGINGFACE_HUB_CACHE"] = "/app/checkpoints/hf_cache"
+    fail_cases["R5A 额外 HUGGINGFACE_HUB_CACHE"] = p
+    p = copy.deepcopy(good); it(p)["environment"]["TRANSFORMERS_OFFLINE"] = "1"
+    fail_cases["R5A 额外 TRANSFORMERS_OFFLINE"] = p
+    p = copy.deepcopy(good); it(p)["environment"]["HTTP_PROXY"] = "http://192.168.31.56:7890"
+    fail_cases["R5A 修改 HTTP_PROXY"] = p
+    p = copy.deepcopy(good); del it(p)["environment"]["HTTP_PROXY"]
+    fail_cases["R5A 删除 HTTP_PROXY"] = p
+    p = copy.deepcopy(good); it(p)["volumes"].append(
+        {"type": "bind", "source": "./models/hf", "target": "/app/checkpoints/hf_cache"})
+    fail_cases["R5A 新增 HF cache volume"] = p
+    p = copy.deepcopy(good); it(p)["volumes"][0] = {
+        "type": "bind", "source": "./outputs/other", "target": "/app/outputs"}
+    fail_cases["R5A 修改现有 outputs volume"] = p
+
     # R4 — 合法 compound/字符串 duration 仍应 PASS
     pass_cases = {}
     p = copy.deepcopy(good)
@@ -177,6 +207,8 @@ def main():
     pass_cases['timeout "0m10s" (compound=10s)'] = p
     p = copy.deepcopy(good); it(p)["healthcheck"]["start_period"] = "0h10m0s"
     pass_cases['start_period "0h10m0s" (=600s)'] = p
+    # R5A — 四个 approved offline env 精确存在（显式命名，approved_proposed 即 R5A contract）
+    pass_cases["R5A 四个 approved offline env 精确存在"] = copy.deepcopy(good)
 
     npass = nfail = 0
 

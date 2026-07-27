@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""M4-C1B0-R2 — IndexTTS2 bridge migration normalized semantic diff gate。
+"""M4-C1B2-R5A — IndexTTS2 bridge migration normalized semantic diff gate。
 
 输入：两份 `docker compose config --format json` 输出（CURRENT, PROPOSED）。
 仅使用 Python stdlib。任一违规即 fail-closed（exit 1），通过时输出
@@ -9,8 +9,10 @@ SEMANTIC_DIFF_GATE=PASS 并 exit 0。
   - qwen3-tts / cosyvoice3：deep equality（零 delta）
   - indextts2：immutable 字段（image/container_name/command/entrypoint/
     gpus/device_requests/restart/volumes/shm_size/working_dir/user/build）
-    完全相等；environment 仅新增 UV_NO_SYNC=1 / UV_OFFLINE=1；
-    network_mode host -> zhiying-tts-net + 限定 ports + 限定 healthcheck
+    完全相等；environment 仅精确新增 R5A runtime offline contract 四项
+    （UV_NO_SYNC=1 / UV_OFFLINE=1 / HF_HUB_CACHE=/app/checkpoints/hf_cache /
+    HF_HUB_OFFLINE=1）；network_mode host -> zhiying-tts-net + 限定 ports
+    + 限定 healthcheck
   - top-level：仅新增 external network zhiying-tts-net
 """
 
@@ -25,7 +27,15 @@ IMMUTABLE = (
 )
 # indextts2 上允许走专门校验的 delta key（其余 key 必须完全相等）
 DELTA_KEYS = ("environment", "network_mode", "networks", "ports", "healthcheck")
-ALLOWED_ENV_ADD = {"UV_NO_SYNC": "1", "UV_OFFLINE": "1"}
+# R5A runtime offline contract：只允许精确新增这四项（值锁定，HF_HUB_OFFLINE
+# 只接受 "1"，任何 HF_HOME/HUGGINGFACE_HUB_CACHE/TRANSFORMERS_OFFLINE 等额外
+# env 均触发新增项异常 fail-closed）
+ALLOWED_ENV_ADD = {
+    "UV_NO_SYNC": "1",
+    "UV_OFFLINE": "1",
+    "HF_HUB_CACHE": "/app/checkpoints/hf_cache",
+    "HF_HUB_OFFLINE": "1",
+}
 NET_NAME = "zhiying-tts-net"
 
 errors = []
@@ -137,7 +147,7 @@ def check_indextts2(ci, pi):
         if ci.get(k) != pi.get(k):
             fail(f"indextts2.{k} 变化：{ci.get(k)!r} -> {pi.get(k)!r}")
 
-    # environment：existing 全保持，仅允许新增 UV_NO_SYNC/UV_OFFLINE=1
+    # environment：existing 全保持，仅允许精确新增 R5A 四项 offline contract
     ce, pe = norm_env(ci.get("environment")), norm_env(pi.get("environment"))
     for k, v in ce.items():
         if k not in pe:
@@ -146,7 +156,8 @@ def check_indextts2(ci, pi):
             fail(f"indextts2.environment 修改 {k}")
     added = {k: v for k, v in pe.items() if k not in ce}
     if added != ALLOWED_ENV_ADD:
-        fail(f"indextts2.environment 新增项异常：{sorted(added)}（仅允许 {sorted(ALLOWED_ENV_ADD)}=1）")
+        fail(f"indextts2.environment 新增项异常：{sorted(added)}"
+             f"（必须精确等于 R5A contract {sorted(ALLOWED_ENV_ADD)}，值锁定）")
 
     # network delta：current=host -> proposed=zhiying-tts-net
     if ci.get("network_mode") != "host":

@@ -1,8 +1,8 @@
 /**
- * M4-C1B0-R2 admin deploy scripts 静态安全测试。
+ * M4-C1B2-R5A admin deploy scripts 静态安全测试。
  *
  * 用法：npx tsx scripts/test-m4c1-admin-scripts.ts
- * 只读检查 scripts/deploy/m4c1/ 三个脚本 + proposed compose + semantic gate，
+ * 只读检查 scripts/deploy/m4c1/ 四个脚本 + proposed compose + semantic gate，
  * 不执行任何脚本、不触 Docker。任一断言失败即非零退出（fail-closed）。
  */
 
@@ -13,6 +13,7 @@ const DIR = path.resolve('scripts', 'deploy', 'm4c1');
 const DIAG = path.join(DIR, 'diagnose-indextts2-network.sh');
 const APPLY = path.join(DIR, 'apply-indextts2-bridge.sh');
 const ROLLBACK = path.join(DIR, 'rollback-indextts2-bridge.sh');
+const PREFLIGHT = path.join(DIR, 'preflight-indextts2-hf-cache.sh');
 const PROPOSED = path.join(DIR, 'tts-stack.docker-compose.proposed.yml');
 const GATE = path.join(DIR, 'semantic-compose-gate.py');
 
@@ -35,13 +36,14 @@ function read(p: string): string {
 }
 
 function main(): void {
-  for (const p of [DIAG, APPLY, ROLLBACK, PROPOSED, GATE]) {
+  for (const p of [DIAG, APPLY, ROLLBACK, PREFLIGHT, PROPOSED, GATE]) {
     ok(fs.existsSync(p), `S01 tracked 存在: ${path.basename(p)}`);
   }
 
   const diag = read(DIAG);
   const apply = read(APPLY);
   const rollback = read(ROLLBACK);
+  const preflight = read(PREFLIGHT);
   const proposed = read(PROPOSED);
   const gate = read(GATE);
 
@@ -50,7 +52,7 @@ function main(): void {
     ok(content.includes('set -euo pipefail'), `S02 ${name}: set -euo pipefail`);
   }
   // ---- 无 secret 字面量 ----
-  for (const [name, content] of [['diagnose', diag], ['apply', apply], ['rollback', rollback], ['proposed', proposed], ['gate', gate]] as const) {
+  for (const [name, content] of [['diagnose', diag], ['apply', apply], ['rollback', rollback], ['preflight', preflight], ['proposed', proposed], ['gate', gate]] as const) {
     ok(
       !/sk-[A-Za-z0-9]{10}|BEGIN [A-Z ]*PRIVATE KEY|password\s*=|token\s*=|DEEPSEEK_API_KEY=.+/.test(content),
       `S03 ${name}: 无 secret 字面量`,
@@ -177,6 +179,54 @@ function main(): void {
   ok(fs.existsSync(FIXTURE), 'R3-T01 semantic gate fixture 测试存在');
   const ci = fs.readFileSync(path.resolve('.github', 'workflows', 'ci.yml'), 'utf8');
   ok(ci.includes('test-m4c1-semantic-gate.py'), 'R3-T02 CI 接入 semantic gate fixtures');
+
+  // ---- R5A preflight 脚本静态安全 ----
+  ok(preflight.includes('set -euo pipefail'), 'R5A-F01 preflight: set -euo pipefail');
+  ok(preflight.includes('--pull=never'), 'R5A-F02 preflight: --pull=never');
+  ok(preflight.includes('--network none'), 'R5A-F03 preflight: --network none');
+  ok(preflight.includes('docker run --rm -i'), 'R5A-F04 preflight: --rm disposable container');
+  ok(!/--gpus|gpus: all/.test(preflight), 'R5A-F05 preflight: 不使用 GPU');
+  ok(preflight.includes('HF_HUB_CACHE=/app/checkpoints/hf_cache'), 'R5A-F06 preflight: HF_HUB_CACHE 指向 image-baked cache');
+  ok(preflight.includes('HF_HUB_OFFLINE=1'), 'R5A-F07 preflight: HF_HUB_OFFLINE=1');
+  ok(!preflight.includes('docker pull') && !preflight.includes('docker build'), 'R5A-F08 preflight: 禁止 pull/build');
+  ok(!/docker compose (up|down)|docker (stop|restart|kill)\b/.test(preflight), 'R5A-F09 preflight: 不触 production container/compose');
+  ok(!/(\s|^)(-v|--volume)[\s=]/.test(preflight), 'R5A-F10 preflight: 无 host HF cache mount（零 volume flag）');
+  ok(preflight.includes('HF_RUNTIME_ARTIFACT_PREFLIGHT=PASS'), 'R5A-F11 preflight: 成功唯一标记');
+  ok(preflight.includes('image ref 参数为空'), 'R5A-F12 preflight: image 参数 fail-closed');
+  ok(!preflight.includes('HF_HUB_OFFLINE=0') && !preflight.includes('--network host'), 'R5A-F13 preflight: 无 online/host-network fallback');
+  for (const item of ['amphion/MaskGCT', 'facebook/w2v-bert-2.0', 'funasr/campplus', 'nvidia/bigvgan_v2_22khz_80band_256x']) {
+    ok(preflight.includes(item), `R5A-F14 preflight: 覆盖启动依赖 ${item}`);
+  }
+  ok(!preflight.includes('/root/.cache/huggingface"'), 'R5A-F15 preflight: 不 fallback /root/.cache/huggingface');
+
+  // ---- R5A proposed compose HF env delta ----
+  ok(proposed.includes('HF_HUB_CACHE: /app/checkpoints/hf_cache'), 'R5A-P01 proposed: HF_HUB_CACHE 指向 image-baked cache');
+  ok(proposed.includes('HF_HUB_OFFLINE: "1"'), 'R5A-P02 proposed: HF_HUB_OFFLINE=1');
+  const itBlock = proposed.slice(proposed.indexOf('  indextts2:'), proposed.indexOf('  cosyvoice3:'));
+  ok(!/HF_HOME|HUGGINGFACE_HUB_CACHE|TRANSFORMERS_OFFLINE/.test(itBlock), 'R5A-P03 proposed: indextts2 无额外 HF env（qwen 既有 env 不受影响）');
+  ok(!/- .*hf_cache/.test(itBlock), 'R5A-P04 proposed: indextts2 无 HF cache volume（零 volume delta）');
+
+  // ---- R5A semantic gate allowlist ----
+  ok(gate.includes('"HF_HUB_CACHE": "/app/checkpoints/hf_cache"') && gate.includes('"HF_HUB_OFFLINE": "1"'), 'R5A-G01 gate: R5A env allowlist 精确值锁定');
+
+  // ---- R5A apply 集成 ----
+  ok(apply.includes('PREFLIGHT="$REPO_M4C1/preflight-indextts2-hf-cache.sh"'), 'R5A-A01 apply: PREFLIGHT 脚本路径');
+  ok(apply.includes('bash "$PREFLIGHT" "$PREFLIGHT_IMAGE"'), 'R5A-A02 apply: 调用 preflight 并传 image');
+  ok(apply.includes('PREFLIGHT_IMAGE') && apply.includes('PROP_JSON') && apply.includes('services') && apply.includes('indextts2'), 'R5A-A03 apply: preflight image 唯一来源 PROP_JSON');
+  const iPreflight = apply.indexOf('STAGE="hf-artifact-preflight"');
+  const iNetwork = apply.indexOf('STAGE="network-ensure"');
+  ok(
+    iGate > -1 && iGate < iPreflight && iPreflight < iNetwork && iNetwork < iBackup && iBackup < iReplace && iReplace < iRecreate,
+    'R5A-A04 apply 顺序: gate < preflight < network < backup < replace < recreate',
+  );
+  ok(apply.indexOf('STAGE="hf-artifact-preflight"') < apply.indexOf('cp -a "$FORMAL" "$BACKUP"'), 'R5A-A05 apply: preflight 早于首个 production file mutation');
+  for (const e of ['UV_NO_SYNC=1', 'UV_OFFLINE=1', 'HF_HUB_CACHE=/app/checkpoints/hf_cache', 'HF_HUB_OFFLINE=1']) {
+    ok(apply.includes(`"${e}"`), `R5A-A06 apply: postcheck 精确 env ${e}`);
+  }
+  ok(apply.includes('grep -qxF'), 'R5A-A07 apply: postcheck 精确行匹配（非模糊 grep）');
+  ok(apply.includes(`grep -q 'HF_HUB_CACHE: /app/checkpoints/hf_cache' "$PROPOSED"`), 'R5A-A08 apply: precheck 校验 proposed HF_HUB_CACHE');
+  ok(apply.includes(`grep -q 'HF_HUB_OFFLINE: "1"' "$PROPOSED"`), 'R5A-A09 apply: precheck 校验 proposed HF_HUB_OFFLINE');
+  ok(apply.includes('[11/11]'), 'R5A-A10 apply: 阶段编号更新（HF preflight 插入）');
 
   // ---- rollback 纪律 ----
   ok(rollback.includes('.last-indextts2-backup'), 'S40 rollback: 读精确 backup state file');

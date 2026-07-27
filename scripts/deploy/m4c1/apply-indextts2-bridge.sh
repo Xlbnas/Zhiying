@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# M4-C1B0-R3 — IndexTTS2 bridge migration apply（Git 受审版，offline runtime）
-# 修复根因：UV_NO_SYNC=1 + UV_OFFLINE=1 使 uv runtime dependency resolution
+# M4-C1B2-R5A — IndexTTS2 bridge migration apply（Git 受审版，offline runtime）
+# 修复根因一：UV_NO_SYNC=1 + UV_OFFLINE=1 使 uv runtime dependency resolution
 # 完全 offline（uv run 不再经 loopback proxy 拉 hatchling）。
+# 修复根因二：HF_HUB_CACHE=/app/checkpoints/hf_cache + HF_HUB_OFFLINE=1 使
+# HuggingFace runtime artifact closure（IndexTTS2.__init__ 不再经 loopback
+# proxy 访问 HF Hub）。formal compose 替换前强制执行
+# preflight-indextts2-hf-cache.sh（--network none disposable 验证四依赖）。
 # 用法（管理员）：sudo bash scripts/deploy/m4c1/apply-indextts2-bridge.sh
 # 注意：脚本只能给出 HOST_SIDE_PASS；LAN 8002 关闭/7870 保留需同网段设备复验
 # （LAN_ACCEPTANCE_PENDING），服务器自身无法可靠证明。
@@ -17,10 +21,11 @@ FORMAL="$TTS_DIR/docker-compose.yml"
 REPO_M4C1="/vol1/1000/docker/zhiying/scripts/deploy/m4c1"
 PROPOSED="$REPO_M4C1/tts-stack.docker-compose.proposed.yml"
 GATE_PY="$REPO_M4C1/semantic-compose-gate.py"
+PREFLIGHT="$REPO_M4C1/preflight-indextts2-hf-cache.sh"
 STATE_DIR="/vol1/1000/docker/zhiying/_m4c1"
 ROLLBACK_SCRIPT="$REPO_M4C1/rollback-indextts2-bridge.sh"
 EXPECTED_FORMAL_SHA="a404b1a0889556dd5b687b685569d990e25f42f3c395bac13ac646c33bcb3f88"
-EXPECTED_PROPOSED_SHA="0c51db6aa4f655610d91f8cde5540f6dab8605d15b4b21357487a58749320b62"
+EXPECTED_PROPOSED_SHA="7b6bd3c2faa5427c77f1229ce21f8cd796f65ce32d1fa0bc9934d208dd312b1a"
 READINESS_DEADLINE=900
 
 STAGE="init"
@@ -63,7 +68,7 @@ on_err() {
 trap on_err ERR
 trap cleanup EXIT
 
-echo "=== [0/10] prechecks（root / docker / python3 / SHA / UV policy） ==="
+echo "=== [0/11] prechecks（root / docker / python3 / SHA / offline contract） ==="
 STAGE="precheck-root"
 if [ "$(id -u)" != "0" ]; then fail 1 "需要 root 执行"; fi
 STAGE="precheck-docker"
@@ -71,6 +76,7 @@ if ! docker info >/dev/null 2>&1; then fail 1 "Docker daemon 不可用"; fi
 STAGE="precheck-python3"
 if ! command -v python3 >/dev/null; then fail 1 "python3 不存在（semantic gate 需要 stdlib json）"; fi
 if [ ! -f "$GATE_PY" ]; then fail 1 "semantic gate 脚本缺失：$GATE_PY"; fi
+if [ ! -f "$PREFLIGHT" ]; then fail 1 "HF preflight 脚本缺失：$PREFLIGHT"; fi
 STAGE="precheck-formal-sha"
 sha=$(sha256sum "$FORMAL" | awk '{print $1}')
 if [ "$sha" != "$EXPECTED_FORMAL_SHA" ]; then fail 1 "formal compose SHA 漂移：$sha"; fi
@@ -79,15 +85,17 @@ psha=$(sha256sum "$PROPOSED" | awk '{print $1}')
 if [ "$psha" != "$EXPECTED_PROPOSED_SHA" ]; then fail 1 "proposed SHA 不符：$psha"; fi
 if ! grep -q 'UV_NO_SYNC: "1"' "$PROPOSED"; then fail 1 "proposed 缺 UV_NO_SYNC"; fi
 if ! grep -q 'UV_OFFLINE: "1"' "$PROPOSED"; then fail 1 "proposed 缺 UV_OFFLINE"; fi
+if ! grep -q 'HF_HUB_CACHE: /app/checkpoints/hf_cache' "$PROPOSED"; then fail 1 "proposed 缺 HF_HUB_CACHE=/app/checkpoints/hf_cache"; fi
+if ! grep -q 'HF_HUB_OFFLINE: "1"' "$PROPOSED"; then fail 1 "proposed 缺 HF_HUB_OFFLINE"; fi
 if grep -qE '^[[:space:]]+command:' "$PROPOSED"; then fail 1 "proposed 不得声明 command override（正式 compose 未声明，使用 image-default CMD）"; fi
 
-echo "=== [1/10] 当前 indextts2 healthy ==="
+echo "=== [1/11] 当前 indextts2 healthy ==="
 STAGE="precheck-current-healthy"
 h=$(docker inspect --format '{{.State.Health.Status}}' indextts2 2>/dev/null || echo missing)
 if [ "$h" != "healthy" ]; then fail 1 "当前 indextts2 非 healthy：$h（不应对异常状态做迁移）"; fi
 if ! curl -fsS -m 8 http://127.0.0.1:8002/health >/dev/null; then fail 1 "当前 8002 /health 不可用"; fi
 
-echo "=== [2/10] normalized compose JSON（config --format json，不支持则 FAIL PRECHECK，零 mutation） ==="
+echo "=== [2/11] normalized compose JSON（config --format json，不支持则 FAIL PRECHECK，零 mutation） ==="
 STAGE="normalize-compose-json"
 CUR_JSON="$(mktemp)"; PROP_JSON="$(mktemp)"
 if ! docker compose -f "$FORMAL" --project-directory "$TTS_DIR" config --format json >"$CUR_JSON" 2>/dev/null; then
@@ -98,26 +106,38 @@ if ! docker compose -f "$PROPOSED" --project-directory "$TTS_DIR" config --forma
 fi
 if [ ! -s "$CUR_JSON" ] || [ ! -s "$PROP_JSON" ]; then fail 1 "normalized JSON 为空"; fi
 
-echo "=== [3/10] SEMANTIC DIFF GATE（先于任何 backup/apply mutation） ==="
+echo "=== [3/11] SEMANTIC DIFF GATE（先于任何 backup/apply mutation） ==="
 STAGE="semantic-diff-gate"
 if ! python3 "$GATE_PY" "$CUR_JSON" "$PROP_JSON"; then
   fail 1 "SEMANTIC_DIFF_GATE=FAIL（详见上方 GATE_VIOLATION）"
 fi
 # gate fail-closed：此处到达即 SEMANTIC_DIFF_GATE=PASS
 
-echo "=== [4/10] speaker cache precheck ==="
+echo "=== [4/11] speaker cache precheck ==="
 STAGE="precheck-speaker-cache"
 CACHE="$TTS_DIR/outputs/index/speaker_cache"
 for f in index.json spk_73d01a47_emb.pkl spk_73d01a47.wav; do
   if [ ! -f "$CACHE/$f" ]; then fail 1 "speaker cache 缺失：$CACHE/$f"; fi
 done
 
-echo "=== [5/10] network inspect/create（先查后建） ==="
+echo "=== [5/11] HF RUNTIME ARTIFACT PREFLIGHT（--network none disposable，先于 network/backup/formal 一切 mutation） ==="
+STAGE="hf-artifact-preflight"
+# image 唯一来源：已 normalize 的 PROP_JSON（semantic gate 已保证 current ==
+# proposed image），避免 apply 与 preflight 双处维护漂移
+PREFLIGHT_IMAGE=$(python3 -c 'import json,sys
+d=json.load(open(sys.argv[1]))
+print((d.get("services") or {}).get("indextts2", {}).get("image") or "")' "$PROP_JSON")
+if [ -z "$PREFLIGHT_IMAGE" ]; then fail 1 "PROP_JSON 无法解析 services.indextts2.image（fail-closed）"; fi
+if ! bash "$PREFLIGHT" "$PREFLIGHT_IMAGE"; then
+  fail 1 "HF_RUNTIME_ARTIFACT_PREFLIGHT=FAIL：formal compose 未动、backup 未建、production container 未触、network 零 mutation"
+fi
+
+echo "=== [6/11] network inspect/create（先查后建） ==="
 STAGE="network-ensure"
 docker network inspect zhiying-tts-net >/dev/null 2>&1 \
   || docker network create zhiying-tts-net
 
-echo "=== [6/10] 精确时间戳 backup（写入 state file） ==="
+echo "=== [7/11] 精确时间戳 backup（写入 state file） ==="
 STAGE="backup-formal-compose"
 mkdir -p "$STATE_DIR"
 BACKUP="$FORMAL.bak-m4c1-$(date +%Y%m%d-%H%M%S)"
@@ -125,20 +145,20 @@ cp -a "$FORMAL" "$BACKUP"
 echo "$BACKUP" > "$STATE_DIR/.last-indextts2-backup"
 echo "BACKUP=$BACKUP"
 
-echo "=== [7/10] 替换 formal compose 并复核 config ==="
+echo "=== [8/11] 替换 formal compose 并复核 config ==="
 STAGE="replace-formal-compose"
 cp "$PROPOSED" "$FORMAL"
 if ! docker compose -f "$FORMAL" --project-directory "$TTS_DIR" config --quiet; then
   fail 1 "替换后 formal compose config 校验失败"
 fi
 
-echo "=== [8/10] 应用（仅 recreate indextts2，--no-deps，不动 qwen/cosyvoice） ==="
+echo "=== [9/11] 应用（仅 recreate indextts2，--no-deps，不动 qwen/cosyvoice） ==="
 STAGE="recreate-indextts2"
 RECREATE_STARTED=1
 cd "$TTS_DIR"
 docker compose up -d --no-deps indextts2
 
-echo "=== [9/10] readiness（deadline ${READINESS_DEADLINE}s，每 10s 反馈；health=starting 不提前失败） ==="
+echo "=== [10/11] readiness（deadline ${READINESS_DEADLINE}s，每 10s 反馈；health=starting 不提前失败） ==="
 STAGE="readiness-wait"
 start_ts=$(date +%s)
 while :; do
@@ -155,16 +175,20 @@ while :; do
   sleep 10
 done
 
-echo "=== [10/10] localhost 服务 + offline 语义 + speaker cache + GPU 验证 ==="
+echo "=== [11/11] localhost 服务 + offline 语义 + speaker cache + GPU 验证 ==="
 STAGE="post-verify"
 if ! curl -fsS -m 10 http://127.0.0.1:8002/health; then fail 1 "迁移后 8002 /health 不可用"; fi
 echo
 c7870=$(curl -s -o /dev/null -w '%{http_code}' -m 10 http://127.0.0.1:7870/)
 echo "7870_http=$c7870"
 if [ "$c7870" != "200" ]; then fail 1 "迁移后 7870 不可用（http=$c7870）"; fi
-if ! docker inspect indextts2 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E '^UV_(NO_SYNC|OFFLINE)=1$'; then
-  fail 1 "容器内未注入 UV_NO_SYNC/UV_OFFLINE"
-fi
+# R5A runtime offline contract：四项 env 逐项精确匹配（非模糊 grep）
+container_envs=$(docker inspect indextts2 --format '{{range .Config.Env}}{{println .}}{{end}}')
+for want in "UV_NO_SYNC=1" "UV_OFFLINE=1" "HF_HUB_CACHE=/app/checkpoints/hf_cache" "HF_HUB_OFFLINE=1"; do
+  if ! printf '%s\n' "$container_envs" | grep -qxF "$want"; then
+    fail 1 "容器内 offline contract env 缺失或不精确：$want"
+  fi
+done
 ls "$CACHE/"
 if ! curl -fsS -m 10 http://127.0.0.1:8002/speakers | head -c 200; then fail 1 "迁移后 /speakers 不可用"; fi
 echo
