@@ -117,13 +117,48 @@ function ffprobeFrameCount(mp4: string): number | null {
   }
 }
 
+/** R2-R1：等待 child teardown 完成的 bounded helper——'close'（进程退出 +
+ * stdio 全关）优先，'exit'（进程本身已消亡）同样构成 teardown completion；
+ * render 期间 worker 的 Chrome/ffmpeg 子孙可能短暂继承管道 FD 延迟 'close'。 */
+function waitForChildSettled(child: ChildProcess, timeoutMs: number): Promise<'close' | 'exit' | null> {
+  return new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolve('exit');
+      return;
+    }
+    let settled = false;
+    const finish = (result: 'close' | 'exit' | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener('close', onClose);
+      child.removeListener('exit', onExit);
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    const onClose = (): void => finish('close');
+    const onExit = (): void => finish('exit');
+    child.once('close', onClose);
+    child.once('exit', onExit);
+  });
+}
+
 async function main(): Promise<void> {
   fs.rmSync(DATA_DIR, {recursive: true, force: true});
 
-  const worker: ChildProcess = spawn('pnpm', ['worker'], {
-    env: {...process.env, LLM_PROVIDER: 'mock', TTS_PROVIDER: 'mock', ZHIYING_DATA_DIR: path.join('data', 'test-m3e-real-render')},
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  // R2-R1：direct Node worker——与 production launcher（node --import tsx
+  // src/worker/index.ts）拓扑对齐。pnpm shim 链的 SIGTERM 不转发曾导致 worker
+  // 孙进程孤儿 + stdio 残留、测试进程永不退出（Linux runner 实证挂起）。
+  // 不引入新 shim：detached 默认 false，验证 production 真实模型
+  // 「SIGTERM 直达 Node worker」。
+  const worker: ChildProcess = spawn(
+    process.execPath,
+    ['--import', 'tsx', 'src/worker/index.ts'],
+    {
+      env: {...process.env, LLM_PROVIDER: 'mock', TTS_PROVIDER: 'mock', ZHIYING_DATA_DIR: path.join('data', 'test-m3e-real-render')},
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
   const workerLog: string[] = [];
   worker.stdout!.on('data', (d) => workerLog.push(String(d)));
   worker.stderr!.on('data', (d) => workerLog.push(String(d)));
@@ -134,10 +169,43 @@ async function main(): Promise<void> {
   }
   console.log('[m3e-real-render] Worker 已启动');
 
+  // Bounded teardown contract（fail-fast，不计入 assertion count）：
+  //   1. SIGTERM 直达 exact worker（production graceful contract）
+  //   2. 必须看到 bye.（缺失 = contract 失败，SIGKILL 不得掩盖）
+  //   3. bye. 后短窗口等待自然退出（含 stdio close）
+  //   4. 仅 bye. 之后允许 SIGKILL（frozen：Remotion residual handles
+  //      可致 bye. 后不自然退出）
+  //   5. SIGKILL 后仍无 close → test FAIL，输出 pid/exitCode/signalCode
   const stopWorker = async (): Promise<void> => {
-    worker.kill('SIGTERM');
-    await waitFor('worker exit', () => workerLog.join('').includes('bye.'), 15_000);
-    if (worker.exitCode === null) worker.kill('SIGKILL');
+    if (worker.exitCode === null && worker.signalCode === null) {
+      worker.kill('SIGTERM');
+      console.log('WORKER_SIGTERM_DELIVERED=yes');
+    }
+    const byeSeen = await waitFor('worker graceful bye.', () => workerLog.join('').includes('bye.'), 15_000);
+    if (!byeSeen) {
+      worker.kill('SIGKILL');
+      const settled = await waitForChildSettled(worker, 10_000);
+      throw new Error(
+        `WORKER_BYE_SEEN=no（graceful shutdown contract 失败，SIGKILL 不掩盖）`
+        + ` pid=${worker.pid} exitCode=${worker.exitCode} signalCode=${worker.signalCode} settled=${settled}`,
+      );
+    }
+    console.log('WORKER_BYE_SEEN=yes');
+    const natural = await waitForChildSettled(worker, 10_000);
+    if (natural !== null) {
+      console.log(`WORKER_EXIT_AFTER_BYE=natural WORKER_TEARDOWN_SETTLED_BY=${natural}`);
+      return;
+    }
+    if (worker.exitCode === null && worker.signalCode === null) {
+      worker.kill('SIGKILL');
+    }
+    const forced = await waitForChildSettled(worker, 10_000);
+    if (forced === null) {
+      throw new Error(
+        `worker SIGKILL 后仍未 exit/close：pid=${worker.pid} exitCode=${worker.exitCode} signalCode=${worker.signalCode}`,
+      );
+    }
+    console.log(`WORKER_EXIT_AFTER_BYE=forced-sigkill WORKER_TEARDOWN_SETTLED_BY=${forced}`);
   };
 
   try {

@@ -455,8 +455,10 @@ async function main(): Promise<void> {
       // 整个 scripts/ 目录 ro 挂载：测试脚本以 ../src 相对路径 import，
       // 单文件挂载会破坏相对布局
       '-v', `${path.resolve('scripts')}:/app/scripts:ro`,
-      // timeout 兜底：测试结束后其内部 stopWorker 经 pnpm shim 链的 SIGTERM
-      // 转发不可靠（已知环境问题，非 render 缺陷），避免容器悬挂
+      // timeout 兜底：历史 stopWorker 经 pnpm shim 链 SIGTERM 不转发曾致悬挂
+      // （R2-R1 起 test-m3e-real-render 已改 direct Node launcher，与
+      // production 对齐并自带 bounded teardown）；timeout 仅作 ultimate
+      // safety net，正常路径不依赖它
       APP_IMAGE, 'sh', '-c', 'timeout -s KILL 600 npx tsx scripts/test-m3e-real-render.ts'], 900_000);
     docker(['volume', 'rm', '-f', renderDataVolume]);
     const tail = r.out.split('\n').filter((l) => l.includes('REAL_RENDER') || l.includes('FAIL')).slice(-5);
