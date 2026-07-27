@@ -127,7 +127,14 @@ function startMockUpstream(): Promise<http.Server> {
     res.writeHead(404).end('nf');
   });
   return new Promise((resolve) => {
-    server.listen(MOCK_UPSTREAM_PORT, '127.0.0.1', () => resolve(server));
+    // R2 Linux portability：GitHub-hosted Linux Docker Engine 不提供 Docker
+    // Desktop 的 host routing magic，mock 必须对 bridge container 可达——
+    // 监听 0.0.0.0（仅测试进程生命周期内），配合 adapter 容器
+    // --add-host host.docker.internal=host-gateway
+    server.listen(MOCK_UPSTREAM_PORT, '0.0.0.0', () => {
+      console.log(`[mock] upstream listening 0.0.0.0:${MOCK_UPSTREAM_PORT}`);
+      resolve(server);
+    });
   });
 }
 
@@ -173,11 +180,18 @@ async function main(): Promise<void> {
   // ---------- 2. app 镜像静态检查 ----------
   {
     const r = docker(['run', '--rm', '--entrypoint', 'bash', APP_IMAGE, '-lc',
-      'id -u; echo "HOME=$HOME"; ls /app/node_modules/.remotion/chrome-headless-shell/ 2>/dev/null; fc-list :lang=zh family | sort -u | head -3; ffmpeg -version 2>/dev/null | head -1; ffprobe -version 2>/dev/null | head -1; command -v pgrep']);
+      'id -u; echo "HOME=$HOME"; fc-list :lang=zh family | sort -u | head -3; ffmpeg -version 2>/dev/null | head -1; ffprobe -version 2>/dev/null | head -1; command -v pgrep']);
     const out = r.out;
     ok(r.code === 0 && out.split('\n')[0]?.trim() === '1000', 'I01 容器 runtime uid=1000（node）', out.split('\n')[0]);
     ok(out.includes('HOME=/home/node'), 'I02 HOME=/home/node');
-    ok(/linux-arm64|linux-x64|chrome-headless-shell/i.test(out), 'I03 Chrome Headless Shell 存在于 node_modules/.remotion');
+    // R2：不再 ls 目录 + regex 猜平台目录名（linux64/linux-x64/linux-arm64
+    // 漂移曾致 I03 误判）——直接定位 browser executable 本体（Remotion 4.x
+    // 实际布局：chrome-headless-shell/<platform>/chrome-headless-shell-<platform>/headless_shell）
+    const rb = docker(['run', '--rm', '--entrypoint', 'bash', APP_IMAGE, '-lc',
+      'find /app/node_modules/.remotion/chrome-headless-shell -type f -name headless_shell -perm -111 -print -quit 2>/dev/null']);
+    const browserPath = rb.out.trim().split('\n')[0]?.trim() ?? '';
+    if (browserPath) console.log(`REMOTION_BROWSER_PATH=${browserPath}`);
+    ok(rb.code === 0 && browserPath.length > 0, 'I03 Chrome Headless Shell executable 存在于 node_modules/.remotion（image-baked，runtime 零下载）', browserPath || rb.out.slice(-300));
     ok(/Noto Sans CJK/i.test(out), 'I04 fonts-noto-cjk 可用（fc-list :lang=zh）');
     ok(out.includes('ffmpeg version'), 'I05 ffmpeg 可用');
     ok(out.includes('ffprobe version'), 'I06 ffprobe 可用');
@@ -368,6 +382,10 @@ async function main(): Promise<void> {
   const mock = await startMockUpstream();
   try {
     const r = docker(['run', '-d', '--name', adapterName,
+      // R2 Linux portability：Docker Desktop 自带 host.docker.internal 映射，
+      // GitHub-hosted Linux Engine 需要显式 host-gateway（test harness 专用，
+      // 不改 production compose/adapter architecture）
+      '--add-host', 'host.docker.internal=host-gateway',
       '-e', `ADAPTER_UPSTREAM_BASE_URL=http://host.docker.internal:${MOCK_UPSTREAM_PORT}`,
       '-e', 'ADAPTER_UPSTREAM_TIMEOUT_SEC=5',
       '-e', 'ADAPTER_VOICE_REGISTRY_PATH=/config/voice-registry.json',
@@ -381,6 +399,15 @@ async function main(): Promise<void> {
     ok(r.code === 0, 'A01 adapter 容器启动（read_only + tmpfs）', r.out.slice(-300));
     const healthy = await waitFor('adapter container healthy', () =>
       docker(['inspect', '--format', '{{.State.Health.Status}}', adapterName]).out.trim() === 'healthy', 120_000);
+    if (!healthy) {
+      // R2：A02 timeout 时输出可审计诊断（无 secret），随后仍走 finally 清理
+      const health = docker(['inspect', '--format', '{{json .State.Health}}', adapterName]);
+      console.log('[diag] adapter Health:\n' + health.out.slice(-2000));
+      console.log('[diag] adapter logs tail:\n' + docker(['logs', '--tail', '60', adapterName]).out.slice(-3000));
+      const dns = docker(['exec', adapterName, 'python3', '-c',
+        "import socket\nprint('host.docker.internal ->', socket.gethostbyname('host.docker.internal'))"]);
+      console.log('[diag] container resolve host.docker.internal:\n' + dns.out);
+    }
     ok(healthy, 'A02 Docker HEALTHCHECK → healthy（ready==true 语义，非 curl -f）');
     {
       const r2 = docker(['exec', adapterName, 'id', '-u']);
@@ -426,8 +453,16 @@ async function main(): Promise<void> {
       // 转发不可靠（已知环境问题，非 render 缺陷），避免容器悬挂
       APP_IMAGE, 'sh', '-c', 'timeout -s KILL 600 npx tsx scripts/test-m3e-real-render.ts'], 900_000);
     const tail = r.out.split('\n').filter((l) => l.includes('REAL_RENDER') || l.includes('FAIL')).slice(-5);
+    const renderPassed = r.out.includes('M3-E REAL_RENDER: 26 PASS, 0 FAIL');
+    if (!renderPassed) {
+      // R2：R01 失败必须给出 raw diagnostic（code=1 tail=[] 不可诊断）——
+      // 输出合并 stdout/stderr 最后 ~6KB（worker/browser/render 实际错误尾部），
+      // 同时避免无限完整日志冲刷 CI
+      console.log('RAW_RENDER_DIAGNOSTIC_TAIL（combined stdout/stderr 最后 ~6KB）:');
+      console.log(r.out.slice(-6144));
+    }
     ok(
-      r.out.includes('M3-E REAL_RENDER: 26 PASS, 0 FAIL'),
+      renderPassed,
       'R01 容器内真实 Remotion render（Chrome+Noto CJK+ffmpeg，26 assertions）',
       {code: r.code, tail},
     );

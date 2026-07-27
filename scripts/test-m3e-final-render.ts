@@ -238,6 +238,19 @@ async function main(): Promise<void> {
     'P07 narration 逻辑路径 + bgm/sfx=null',
   );
   {
+    // R2 legacy asset decoupling：modern Final props 不得引用六个不可恢复的
+    // legacy public WAV（legacy gap ≠ modern production blocker）
+    const LEGACY_AUDIO = [
+      'full/audio/FullCut_TTS.wav', 'full/audio/FullCut_BGM.wav', 'full/audio/FullCut_SFX.wav',
+      'pilot/audio/Pilot_BGM.wav', 'pilot/audio/Pilot_SFX.wav', 'pilot/audio/Pilot_VO.wav',
+    ];
+    const audioJson = JSON.stringify(props.audio);
+    ok(
+      LEGACY_AUDIO.every((p) => !audioJson.includes(p)),
+      'P07b modern Final props 不依赖 legacy public audio（六 WAV 缺失不影响）',
+    );
+  }
+  {
     const expectedSubs = toRendererSubtitleCues(subtitleA.timing);
     ok(
       JSON.stringify(props.subtitles) === JSON.stringify(expectedSubs) &&
