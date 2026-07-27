@@ -1,13 +1,16 @@
 /**
- * M4-C1B2-R5A admin deploy scripts 静态安全测试。
+ * M4-C1B2-R5A-R1 admin deploy scripts 静态安全测试。
  *
  * 用法：npx tsx scripts/test-m4c1-admin-scripts.ts
  * 只读检查 scripts/deploy/m4c1/ 四个脚本 + proposed compose + semantic gate，
- * 不执行任何脚本、不触 Docker。任一断言失败即非零退出（fail-closed）。
+ * 不执行任何真实 deploy、不触真实 Docker daemon（preflight executable fixture
+ * 使用 PATH mock docker）。任一断言失败即非零退出（fail-closed）。
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const DIR = path.resolve('scripts', 'deploy', 'm4c1');
 const DIAG = path.join(DIR, 'diagnose-indextts2-network.sh');
@@ -120,7 +123,7 @@ function main(): void {
   ok(apply.includes('id -u') && apply.includes('fail 1 "需要 root 执行"'), 'S30 apply: root precheck（fail-closed）');
   ok(apply.includes('EXPECTED_FORMAL_SHA') && apply.includes('EXPECTED_PROPOSED_SHA'), 'S31 apply: 双 SHA precheck');
   ok(apply.includes('.last-indextts2-backup'), 'S32 apply: backup path state file');
-  ok(apply.includes('docker compose up -d --no-deps indextts2'), 'S33 apply: 仅 recreate indextts2');
+  ok(apply.includes('docker compose up -d --no-deps --pull never indextts2'), 'S33 apply: 仅 recreate indextts2（--no-deps --pull never）');
   ok(apply.includes('READINESS_DEADLINE=900'), 'S34 apply: readiness deadline=900s');
   ok(apply.includes('HOST_SIDE_PASS') && apply.includes('LAN_ACCEPTANCE_PENDING'), 'S35 apply: 结束语诚实（不自宣最终 PASS）');
   ok(!/qwen3-tts|cosyvoice3/.test(apply.replace(/不动 qwen\/cosyvoice/g, '')), 'S36 apply: 不触碰 qwen/cosyvoice');
@@ -226,7 +229,78 @@ function main(): void {
   ok(apply.includes('grep -qxF'), 'R5A-A07 apply: postcheck 精确行匹配（非模糊 grep）');
   ok(apply.includes(`grep -q 'HF_HUB_CACHE: /app/checkpoints/hf_cache' "$PROPOSED"`), 'R5A-A08 apply: precheck 校验 proposed HF_HUB_CACHE');
   ok(apply.includes(`grep -q 'HF_HUB_OFFLINE: "1"' "$PROPOSED"`), 'R5A-A09 apply: precheck 校验 proposed HF_HUB_OFFLINE');
-  ok(apply.includes('[11/11]'), 'R5A-A10 apply: 阶段编号更新（HF preflight 插入）');
+  ok(apply.includes('[12/12]'), 'R5A-A10 apply: 阶段编号更新（identity + HF preflight 插入）');
+
+  // ---- R1 image identity / no-pull hardening（apply 静态） ----
+  const EXPECTED_ID = 'sha256:fa8627665733f1d0a134c928012f4ad2eb9a7cc6f19615af46018c3b1126dd0d';
+  ok(apply.includes(`EXPECTED_INDEXTTS2_IMAGE_ID="${EXPECTED_ID}"`), 'R1-A01 apply: pinned EXPECTED_INDEXTTS2_IMAGE_ID 精确 image ID');
+  ok(apply.includes("docker inspect --format '{{.Image}}' indextts2") && apply.includes('CURRENT_CONTAINER_IMAGE_ID'), 'R1-A02 apply: running container image identity check');
+  ok(apply.includes('CURRENT_CONTAINER_IMAGE_ID" != "$EXPECTED_INDEXTTS2_IMAGE_ID'), 'R1-A03 apply: running identity != pinned => fail-closed');
+  ok(apply.includes("docker image inspect --format '{{.Id}}' \"$PREFLIGHT_IMAGE\""), 'R1-A04 apply: local tag -> image identity 解析');
+  ok(apply.includes('LOCAL_IMAGE_ID" != "$EXPECTED_INDEXTTS2_IMAGE_ID') && apply.includes('LOCAL_IMAGE_ID" != "$CURRENT_CONTAINER_IMAGE_ID'), 'R1-A05 apply: local identity == pinned == running 双重比较');
+  ok(apply.includes('bash "$PREFLIGHT" "$PREFLIGHT_IMAGE" "$EXPECTED_INDEXTTS2_IMAGE_ID"'), 'R1-A06 apply: preflight 三参调用（image-ref + expected-image-id）');
+  const iPreRecreate = apply.indexOf('STAGE="pre-recreate-image-identity"');
+  const iComposeUp = apply.indexOf('docker compose up -d --no-deps --pull never indextts2');
+  ok(iPreRecreate > -1 && iComposeUp > -1 && iPreRecreate < iComposeUp, 'R1-A07 apply: pre-recreate 二次 identity check 紧邻 compose up 之前');
+  ok(apply.includes('RECREATE_IMAGE_ID" != "$EXPECTED_INDEXTTS2_IMAGE_ID'), 'R1-A08 apply: pre-recreate identity != pinned => fail-closed');
+  ok(apply.includes('docker compose up -d --no-deps --pull never indextts2'), 'R1-A09 apply: recreate 强制 --pull never');
+  ok(!apply.includes('docker compose up -d --no-deps indextts2'), 'R1-A10 apply: 无 no-pull guard 的 recreate 形式已移除');
+  ok(iPreflight > -1 && iPreflight < iPreRecreate, 'R1-A11 apply 顺序: HF preflight < pre-recreate identity');
+
+  // ---- R1 preflight 双参数 contract（静态） ----
+  ok(preflight.includes('EXPECTED_IMAGE_ID="${2:-}"') && preflight.includes('expected image ID 参数为空'), 'R1-F01 preflight: expected-image-id 参数 fail-closed');
+  ok(preflight.includes("docker image inspect --format '{{.Id}}' \"$IMG\""), 'R1-F02 preflight: actual image ID 解析');
+  const iIdCheck = preflight.indexOf('ACTUAL_IMAGE_ID" != "$EXPECTED_IMAGE_ID');
+  const iDockerRun = preflight.indexOf('docker run');
+  ok(iIdCheck > -1 && iDockerRun > -1 && iIdCheck < iDockerRun, 'R1-F03 preflight: identity mismatch 在 disposable container 启动前 fail');
+  ok(preflight.includes('image identity 漂移'), 'R1-F04 preflight: identity 漂移诊断输出');
+  ok(preflight.includes('PREFLIGHT_IMAGE_ID='), 'R1-F05 preflight: 可审计 PREFLIGHT_IMAGE_ID 输出');
+
+  // ---- R1 executable fixture：mock docker 验证 preflight identity fail-closed ----
+  const MOCK_DOCKER = `#!/usr/bin/env bash
+if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
+  if [ "\${MOCK_IMAGE_MISSING:-0}" = "1" ]; then exit 1; fi
+  for a in "$@"; do
+    case "$a" in
+      *'{{.Id}}'*) echo "\${MOCK_IMAGE_ID:-${EXPECTED_ID}}"; exit 0;;
+    esac
+  done
+  exit 0
+fi
+if [ "$1" = "run" ]; then
+  echo "MOCK_DOCKER_RUN_CALLED"
+  exit 0
+fi
+exit 0
+`;
+  function runPreflightWithMock(args: string[], extraEnv: Record<string, string>): { rc: number; out: string } {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'm4c1-mock-docker-'));
+    fs.writeFileSync(path.join(tmp, 'docker'), MOCK_DOCKER, { mode: 0o755 });
+    try {
+      const out = execFileSync('bash', [PREFLIGHT, ...args], {
+        env: { ...process.env, PATH: `${tmp}${path.delimiter}${process.env.PATH}`, ...extraEnv },
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return { rc: 0, out };
+    } catch (e) {
+      const err = e as { status?: number; stdout?: string; stderr?: string };
+      return { rc: err.status ?? 1, out: `${err.stdout ?? ''}${err.stderr ?? ''}` };
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
+  const rOk = runPreflightWithMock(['neosun/indextts2:test', EXPECTED_ID], {});
+  ok(rOk.rc === 0 && rOk.out.includes(`PREFLIGHT_IMAGE_ID=${EXPECTED_ID}`) && rOk.out.includes('HF_RUNTIME_ARTIFACT_PREFLIGHT=PASS') && rOk.out.includes('MOCK_DOCKER_RUN_CALLED'), 'R1-E01 exec: identity match => PASS 且 disposable run 执行');
+  const rMismatch = runPreflightWithMock(['neosun/indextts2:test', EXPECTED_ID], { MOCK_IMAGE_ID: 'sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef' });
+  ok(rMismatch.rc !== 0 && rMismatch.out.includes('image identity 漂移') && !rMismatch.out.includes('MOCK_DOCKER_RUN_CALLED'), 'R1-E02 exec: identity mismatch => nonzero 且不启动 disposable container');
+  const rMissing = runPreflightWithMock(['neosun/indextts2:test', EXPECTED_ID], { MOCK_IMAGE_MISSING: '1' });
+  ok(rMissing.rc !== 0 && rMissing.out.includes('image 本地不存在') && !rMissing.out.includes('MOCK_DOCKER_RUN_CALLED'), 'R1-E03 exec: image missing => nonzero 且不启动 disposable container');
+  const rNoId = runPreflightWithMock(['neosun/indextts2:test', ''], {});
+  ok(rNoId.rc !== 0 && rNoId.out.includes('expected image ID 参数为空'), 'R1-E04 exec: 空 expected-image-id => nonzero');
+  const rNoArgs = runPreflightWithMock([], {});
+  ok(rNoArgs.rc !== 0 && rNoArgs.out.includes('image ref 参数为空'), 'R1-E05 exec: 空 image-ref => nonzero');
 
   // ---- rollback 纪律 ----
   ok(rollback.includes('.last-indextts2-backup'), 'S40 rollback: 读精确 backup state file');

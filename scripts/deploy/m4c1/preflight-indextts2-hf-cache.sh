@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# M4-C1B2-R5A — IndexTTS2 HF runtime artifact preflight（canonical，fail-closed）
+# M4-C1B2-R5A-R1 — IndexTTS2 HF runtime artifact preflight（canonical，fail-closed）
 #
 # 职责：在任何 production compose mutation 前，验证目标 IndexTTS2 image 具备
 # 完整 offline HuggingFace runtime artifacts。 disposable container：
@@ -9,17 +9,26 @@
 # realpath 全部位于 /app/checkpoints/hf_cache/ 下（禁止误命中
 # /root/.cache/huggingface writable-layer 增量）。
 #
-# 用法：preflight-indextts2-hf-cache.sh <image-ref>
+# R1 image identity：tag 不是 immutable identity。启动 disposable container
+# 之前，先用 Docker image ID 校验本地 tag 未漂移——actual != expected 即
+# fail-closed，且不启动任何 container。
+#
+# 用法：preflight-indextts2-hf-cache.sh <image-ref> <expected-image-id>
 # 成功唯一标记：HF_RUNTIME_ARTIFACT_PREFLIGHT=PASS（exit 0）
-# 任一 artifact 缺失/路径错误：exit != 0 并输出 repo / filename / 失败原因。
+# 任一 artifact 缺失/路径错误/identity 漂移：exit != 0 并输出原因。
 #
 # 本脚本禁止：拉取或构建镜像、对 production compose 做任何 up/down、停止或
 # 重启任何 production container、任何 online fallback。
 set -euo pipefail
 
 IMG="${1:-}"
+EXPECTED_IMAGE_ID="${2:-}"
 if [ -z "$IMG" ]; then
-  echo "FAIL: image ref 参数为空（用法：$0 <image-ref>）" >&2
+  echo "FAIL: image ref 参数为空（用法：$0 <image-ref> <expected-image-id>）" >&2
+  exit 1
+fi
+if [ -z "$EXPECTED_IMAGE_ID" ]; then
+  echo "FAIL: expected image ID 参数为空（用法：$0 <image-ref> <expected-image-id>）" >&2
   exit 1
 fi
 
@@ -28,7 +37,17 @@ if ! docker image inspect "$IMG" >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "HF preflight image=$IMG（--rm --pull=never --network none，无 GPU，无 host mount）"
+# R1：本地 tag -> image identity 校验（在 disposable container 启动前完成）
+ACTUAL_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$IMG")"
+if [ "$ACTUAL_IMAGE_ID" != "$EXPECTED_IMAGE_ID" ]; then
+  echo "FAIL: image identity 漂移：$IMG" >&2
+  echo "  actual=$ACTUAL_IMAGE_ID" >&2
+  echo "  expected=$EXPECTED_IMAGE_ID" >&2
+  exit 1
+fi
+echo "PREFLIGHT_IMAGE_ID=$ACTUAL_IMAGE_ID"
+
+echo "HF preflight image=${IMG}（--rm --pull=never --network none，无 GPU，无 host mount）"
 
 docker run --rm -i --pull=never --network none \
   -e HF_HUB_CACHE=/app/checkpoints/hf_cache \
