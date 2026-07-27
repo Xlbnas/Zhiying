@@ -1,0 +1,62 @@
+# 知影 release gate（M4-B）：较重的容器级验收，仅手动触发
+# 边界：不跑真实 IndexTTS2 GPU gate、不做 Feiniu 网络迁移、不跑 M4-C
+#       production E2E（这些需要受控 self-hosted runner，另行配置）
+name: release-gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  container-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Node dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Ensure ffmpeg/ffprobe（M3-B TTS / Remotion 回归依赖）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
+      - name: Install adapter test venv
+        run: |
+          python3 -m venv services/indextts2-api-adapter/.venv
+          services/indextts2-api-adapter/.venv/bin/pip install -r services/indextts2-api-adapter/requirements.txt
+
+      - name: Remotion Chrome Headless Shell（宿主回归用）
+        run: npx remotion browser ensure
+
+      - name: M4-B 容器全套（双镜像 build + web/worker/adapter + docker stop + active job + render gate）
+        run: RUN_M4B_CONTAINER_RENDER=1 npx tsx scripts/test-m4b-container.ts
+
+      - name: M3 回归（unit + 真实 Remotion render，mock providers）
+        run: |
+          npx tsx scripts/test-m3a-narration-plan.ts
+          npx tsx scripts/test-m3b-tts.ts
+          npx tsx scripts/test-m3c-subtitle-timing.ts
+          npx tsx scripts/test-m3d-timing-reconciliation.ts
+          npx tsx scripts/test-m3e-final-render.ts
+          RUN_REAL_REMOTION_SMOKE=1 npx tsx scripts/test-m3e-real-render.ts
+
+      - name: M3-F adapter contract（mock upstream）
+        run: npx tsx scripts/test-m3f-adapter.ts
