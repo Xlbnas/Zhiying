@@ -185,10 +185,12 @@ async function main(): Promise<void> {
     ok(r.code === 0 && out.split('\n')[0]?.trim() === '1000', 'I01 容器 runtime uid=1000（node）', out.split('\n')[0]);
     ok(out.includes('HOME=/home/node'), 'I02 HOME=/home/node');
     // R2：不再 ls 目录 + regex 猜平台目录名（linux64/linux-x64/linux-arm64
-    // 漂移曾致 I03 误判）——直接定位 browser executable 本体（Remotion 4.x
-    // 实际布局：chrome-headless-shell/<platform>/chrome-headless-shell-<platform>/headless_shell）
+    // 漂移曾致 I03 误判）——直接定位 browser executable 本体。Remotion 4.x
+    // 布局：chrome-headless-shell/<platform>/chrome-headless-shell-<platform>/，
+    // executable 名按平台不同（linux64=chrome-headless-shell，
+    // linux-arm64=headless_shell，见 @remotion/renderer BrowserFetcher）
     const rb = docker(['run', '--rm', '--entrypoint', 'bash', APP_IMAGE, '-lc',
-      'find /app/node_modules/.remotion/chrome-headless-shell -type f -name headless_shell -perm -111 -print -quit 2>/dev/null']);
+      'find /app/node_modules/.remotion/chrome-headless-shell -type f \\( -name headless_shell -o -name chrome-headless-shell \\) -perm -111 -print -quit 2>/dev/null']);
     const browserPath = rb.out.trim().split('\n')[0]?.trim() ?? '';
     if (browserPath) console.log(`REMOTION_BROWSER_PATH=${browserPath}`);
     ok(rb.code === 0 && browserPath.length > 0, 'I03 Chrome Headless Shell executable 存在于 node_modules/.remotion（image-baked，runtime 零下载）', browserPath || rb.out.slice(-300));
@@ -440,18 +442,23 @@ async function main(): Promise<void> {
   // ---------- 6. 容器内真实 Remotion render gate（fail-closed） ----------
   if (RENDER_GATE) {
     console.log('[render] RUN_M4B_CONTAINER_RENDER=1：容器内真实 render...');
-    const renderData = path.join(TMP_ROOT, 'render-data');
-    fs.mkdirSync(renderData, {recursive: true});
+    // R2 Linux portability：bind mount 的宿主目录 owner 是 runner 用户，
+    // 容器 uid1000 mkdir EACCES（GitHub Linux 实测；macOS virtiofs 不会暴露）。
+    // 与 web/worker 段一致使用 named volume（镜像内 /app/data owner=node 初始化，
+    // 两个平台语义一致）
+    const renderDataVolume = `m4b-render-data-${SUFFIX}`;
+    docker(['volume', 'create', renderDataVolume]);
     const r = docker(['run', '--rm',
       '-e', 'RUN_REAL_REMOTION_SMOKE=1',
       '-e', 'NODE_ENV=development', // mock provider（production 禁 mock 是 frozen gate）
-      '-v', `${renderData}:/app/data`,
+      '-v', `${renderDataVolume}:/app/data`,
       // 整个 scripts/ 目录 ro 挂载：测试脚本以 ../src 相对路径 import，
       // 单文件挂载会破坏相对布局
       '-v', `${path.resolve('scripts')}:/app/scripts:ro`,
       // timeout 兜底：测试结束后其内部 stopWorker 经 pnpm shim 链的 SIGTERM
       // 转发不可靠（已知环境问题，非 render 缺陷），避免容器悬挂
       APP_IMAGE, 'sh', '-c', 'timeout -s KILL 600 npx tsx scripts/test-m3e-real-render.ts'], 900_000);
+    docker(['volume', 'rm', '-f', renderDataVolume]);
     const tail = r.out.split('\n').filter((l) => l.includes('REAL_RENDER') || l.includes('FAIL')).slice(-5);
     const renderPassed = r.out.includes('M3-E REAL_RENDER: 26 PASS, 0 FAIL');
     if (!renderPassed) {
