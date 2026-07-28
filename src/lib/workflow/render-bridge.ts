@@ -19,6 +19,7 @@ import {
   SCENES_SYSTEM_FPS,
   validateScenesSemantics,
 } from './scenes-semantic-validation';
+import {buildAssetMap, evaluateVisualReadiness, type VisualReadinessSummary} from '../assets/readiness';
 
 /**
  * Workflow → M1 Render Bridge（M2-E-C）。
@@ -46,6 +47,7 @@ export type RenderBridgeErrorCode =
   | 'RENDER_SOURCE_INVALID'
   | 'UNSUPPORTED_TEMPLATE'
   | 'ASSET_FILE_MISSING'
+  | 'VISUAL_READINESS_FAILED'
   | 'RENDER_ALREADY_ACTIVE';
 
 export class RenderBridgeError extends Error {
@@ -68,6 +70,8 @@ export interface RenderReadiness {
   ready: boolean;
   blockers: RenderBlocker[];
   scenesVersion: number | null;
+  /** M6：视觉素材就绪情况（仅 workflow 项目） */
+  visualReadiness: VisualReadinessSummary | null;
 }
 
 // ---------- 资产规则（M2-E-C §十一 / M2-E-D §四调查结论） ----------
@@ -196,13 +200,14 @@ export function checkWorkflowRenderReadiness(
     .prepare('SELECT * FROM projects WHERE id = ?')
     .get(projectId) as {id: string; template_version: string; composition_id: string} | undefined;
   if (!project) {
-    return {ready: false, blockers: [{code: 'PROJECT_NOT_FOUND', message: `项目不存在: ${projectId}`}], scenesVersion};
+    return {ready: false, blockers: [{code: 'PROJECT_NOT_FOUND', message: `项目不存在: ${projectId}`}], scenesVersion, visualReadiness: null};
   }
   if (isLegacyM1Project(projectId)) {
     return {
       ready: false,
       blockers: [{code: 'LEGACY_PROJECT', message: 'Legacy M1 项目走原渲染链，不经 Render Bridge'}],
       scenesVersion,
+      visualReadiness: null,
     };
   }
   if (project.template_version !== TEMPLATE_VERSION || project.composition_id !== COMPOSITION_ID) {
@@ -234,6 +239,12 @@ export function checkWorkflowRenderReadiness(
     );
   }
 
+  // M6：视觉素材就绪评估（Preview 不硬拦，仅报告状态；Final Render 硬拦）
+  let visualReadiness: VisualReadinessSummary | null = null;
+  if (source) {
+    visualReadiness = evaluateVisualReadiness(projectId, source.parsed.scenes);
+  }
+
   const activeRender = getDb()
     .prepare(
       `SELECT id, progress, progress_detail FROM render_jobs
@@ -248,7 +259,7 @@ export function checkWorkflowRenderReadiness(
     });
   }
 
-  return {ready: blockers.length === 0, blockers, scenesVersion};
+  return {ready: blockers.length === 0, blockers, scenesVersion, visualReadiness};
 }
 
 export interface WorkflowRenderProps {
@@ -298,6 +309,8 @@ export function buildWorkflowRenderProps(
   // System-owned metadata（AI 只负责 chapterTiming + scenes；其余系统构造）
   // width/height 由 M1 projectMetaSchema 默认值统一提供（1920×1080，不再硬编码第二份）
   const durationSec = source.parsed.scenes[source.parsed.scenes.length - 1]!.end;
+  // M6：注入 assetMap（已绑定的真实素材，含 provenance）
+  const assetMap = buildAssetMap(projectId);
   const props: ZhiyingFullCutProps = zhiyingFullCutPropsSchema.parse({
     data: {
       schemaVersion: SCHEMA_VERSION,
@@ -311,6 +324,7 @@ export function buildWorkflowRenderProps(
       },
       chapterTiming: source.parsed.chapterTiming,
       scenes: source.parsed.scenes,
+      assetMap,
     },
     subtitles: [],
     audio: {...PREVIEW_AUDIO},

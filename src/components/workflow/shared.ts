@@ -116,6 +116,7 @@ const FRIENDLY_ERROR_RULES: Array<{match: RegExp; text: string}> = [
   {match: /DEPENDENCY_STALE/, text: '上游内容已更新，本阶段需要重新生成后才能继续。'},
   {match: /RATE_LIMIT|429/, text: '生成服务繁忙，请稍后重试。'},
   {match: /TIMEOUT|ETIMEDOUT/, text: '生成服务响应超时，请稍后重试。'},
+  {match: /VISUAL_READINESS_FAILED/, text: '视觉素材尚未准备完成，请先准备素材后再进行最终渲染。'},
 ];
 
 export function friendlyStageError(

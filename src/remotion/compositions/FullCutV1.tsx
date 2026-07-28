@@ -1,8 +1,7 @@
-import {useMemo, type CSSProperties} from 'react';
+import {useMemo} from 'react';
 import {
   AbsoluteFill,
   Audio,
-  Img,
   Sequence,
   interpolate,
   staticFile,
@@ -32,9 +31,8 @@ import {
   type FullCutVisualType,
 } from '../data/fullCutScenes';
 import subtitleData from '../data/fullCutSubtitles.json';
-import type {Scene, TemplateName} from '../types/scene';
-import {SceneRenderer} from './SceneRenderer';
 import {PilotVisualTrack} from './PilotCutV1';
+import {ProductionSceneRenderer} from './ProductionSceneRenderer';
 
 const PILOT_VISUAL_END = 119.107;
 const CROSSFADE_FRAMES = 8;
@@ -52,29 +50,6 @@ const normalizeSubtitlePosition = (
   if (raw === 'lowerThird' || raw === 'midLower') return raw;
   return raw === 'mid' ? 'midLower' : 'bottom';
 };
-
-const toRenderableScene = (scene: SchemaScene): FullCutScene => ({
-  id: scene.id,
-  chapter: scene.chapter,
-  chapterTitle: scene.chapterTitle,
-  start: scene.start,
-  end: scene.end,
-  duration: scene.duration,
-  startFrame: scene.startFrame,
-  durationInFrames: scene.durationInFrames,
-  category: scene.category as FullCutCategory,
-  visualType: (scene.visualType ?? 'UI') as FullCutVisualType,
-  template: scene.template,
-  sourceTemplate: scene.sourceTemplate,
-  narrationSummary: scene.narrationSummary,
-  description: scene.description,
-  notes: scene.notes,
-  assetIds: scene.assetIds,
-  licenseStatus: scene.licenseStatus as FullCutScene['licenseStatus'],
-  subtitlePosition: normalizeSubtitlePosition(scene.subtitlePosition),
-  transitionIn: scene.transitionIn,
-  transitionOut: scene.transitionOut,
-});
 
 /**
  * 模板内置预览数据（FullCutScenes.json）→ 契约 Scene。
@@ -105,14 +80,6 @@ export const zhiyingFullCutDefaultProps: ZhiyingFullCutProps = {
   showSubtitles: true,
 };
 
-const texture = (warm: boolean, research: boolean): CSSProperties => ({
-  backgroundImage: warm
-    ? 'radial-gradient(circle at 26% 32%,rgba(155,145,131,.16),transparent 35%),repeating-linear-gradient(0deg,transparent 0 6px,rgba(255,255,255,.015) 7px)'
-    : research
-      ? 'radial-gradient(circle at 74% 28%,rgba(84,116,138,.16),transparent 34%),repeating-linear-gradient(90deg,transparent 0 39px,rgba(84,116,138,.025) 40px)'
-      : 'radial-gradient(circle at 70% 30%,rgba(179,58,66,.08),transparent 28%),repeating-linear-gradient(0deg,transparent 0 6px,rgba(255,255,255,.012) 7px)',
-});
-
 const ChapterLabel = ({scene, chapterTiming}: {scene: FullCutScene; chapterTiming: ChapterTiming[]}) => {
   const frame = useCurrentFrame();
   const chapter = chapterTiming.find((item) => item.chapter === scene.chapter);
@@ -132,162 +99,90 @@ const ChapterLabel = ({scene, chapterTiming}: {scene: FullCutScene; chapterTimin
   );
 };
 
-const ModernEditorial = ({scene, chapterTiming}: {scene: FullCutScene; chapterTiming: ChapterTiming[]}) => {
-  const frame = useCurrentFrame();
-  const {durationInFrames} = useVideoConfig();
-  const research = scene.chapter === 7;
-  const accent = research ? colors.research : colors.accent;
-  const progress = interpolate(frame, [0, Math.max(1, durationInFrames - 1)], [0, 1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  });
-  const cards = Array.from({length: 5}, (_, index) => index);
-  const mode = scene.chapter >= 8 ? 'boundary' : scene.chapter === 7 ? 'research' : scene.chapter === 6 ? 'model' : 'interface';
-  return (
-    <AbsoluteFill style={{background: `linear-gradient(135deg,${colors.background},${research ? '#101820' : '#15151a'})`, overflow: 'hidden'}}>
-      <div style={{position: 'absolute', inset: 0, opacity: 0.38, ...texture(false, research)}} />
-      <div
-        style={{
-          position: 'absolute', left: 118, top: 154, width: 1060, height: 690,
-          borderRadius: 28, border: `1px solid ${research ? colors.researchSoft : '#34343b'}`,
-          background: research ? '#101820' : '#111217', boxShadow: '0 28px 90px rgba(0,0,0,.5)', overflow: 'hidden',
-        }}
-      >
-        <div style={{height: 72, borderBottom: `1px solid ${research ? colors.researchSoft : '#303039'}`, display: 'flex', alignItems: 'center', padding: '0 30px'}}>
-          <div style={{fontFamily, color: colors.secondary, fontSize: 18, letterSpacing: 2}}>{mode === 'research' ? 'RESEARCH CONDITION' : mode === 'model' ? 'ACTION MODEL' : mode === 'boundary' ? 'EVIDENCE BOUNDARY' : 'EVERYDAY CONTEXT'}</div>
-          <div style={{marginLeft: 'auto', display: 'flex', gap: 8}}>
-            {cards.slice(0, 3).map((item) => <div key={item} style={{width: 7, height: 7, borderRadius: 9, background: item === 0 ? accent : colors.muted}} />)}
-          </div>
-        </div>
-        <div style={{padding: '38px 42px', display: 'grid', gridTemplateColumns: '1.12fr .88fr', gap: 30}}>
-          <div>
-            {cards.map((item) => {
-              const enter = interpolate(frame, [item * 9, item * 9 + 20], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
-              const active = item === Math.min(4, Math.floor(progress * 5));
-              return (
-                <div key={item} style={{height: 82, marginBottom: 17, borderRadius: 14, border: `1px solid ${active ? accent : '#363741'}`, background: active ? `${accent}14` : '#181920', opacity: .35 + .65 * enter, transform: `translateX(${14 * (1 - enter)}px)`, display: 'flex', alignItems: 'center', padding: '0 24px'}}>
-                  <div style={{width: 13, height: 13, borderRadius: 13, background: active ? accent : colors.muted}} />
-                  <div style={{marginLeft: 20, width: `${62 - item * 5}%`, height: 7, background: active ? colors.primary : colors.secondary, opacity: active ? .72 : .26}} />
-                </div>
-              );
-            })}
-          </div>
-          <div style={{borderRadius: 20, border: `1px solid ${research ? colors.researchSoft : '#363741'}`, background: '#14151a', padding: 30}}>
-            <div style={{fontFamily, fontSize: 18, color: research ? colors.research : colors.secondary, letterSpacing: 2}}>CURRENT THOUGHT</div>
-            <div style={{width: 56, height: 3, background: accent, margin: '26px 0 34px'}} />
-            <Typography variant="SectionTitle" color={colors.primary} style={{fontSize: 40}}>{scene.narrationSummary}</Typography>
-            <div style={{position: 'absolute', right: 38, bottom: 34, width: 170, height: 2, background: colors.muted}}>
-              <div style={{width: `${progress * 100}%`, height: '100%', background: accent}} />
-            </div>
-          </div>
-        </div>
-      </div>
-      <div style={{position: 'absolute', left: 1310, top: 350, width: 440}}>
-        <div style={{fontFamily, fontSize: 20, color: colors.secondary, lineHeight: 1.55}}>同一问题，在不同情境里反复出现。</div>
-        <div style={{height: 1, background: colors.muted, margin: '28px 0'}} />
-        <div style={{fontFamily, fontSize: 18, color: research ? colors.research : colors.secondary, lineHeight: 1.55}}>画面提供结构；旁白保留判断边界。</div>
-      </div>
-      <ChapterLabel scene={scene} chapterTiming={chapterTiming} />
-    </AbsoluteFill>
-  );
-};
-
-const ArchiveEditorial = ({scene, chapterTiming}: {scene: FullCutScene; chapterTiming: ChapterTiming[]}) => {
-  const frame = useCurrentFrame();
-  const {durationInFrames} = useVideoConfig();
-  const progress = interpolate(frame, [0, Math.max(1, durationInFrames - 1)], [0, 1], {extrapolateRight: 'clamp'});
-  const isPortrait = scene.assetIds.includes('freud_1909_loc');
-  if (isPortrait) {
-    return (
-      <AbsoluteFill style={{backgroundColor: colors.historicalSurface, overflow: 'hidden'}}>
-        <Img src={staticFile('pilot/images/freud_1909_loc.jpg')} style={{position: 'absolute', left: 0, top: 0, width: 1040, height: 1080, objectFit: 'cover', objectPosition: '48% 30%', filter: 'grayscale(1) sepia(.13) contrast(1.12)', transform: `scale(${1.02 + progress * .06})`}} />
-        <AbsoluteFill style={{background: 'linear-gradient(90deg,transparent 30%,#191714 58%)'}} />
-        <div style={{position: 'absolute', left: 1080, top: 270, width: 700}}>
-          <div style={{fontFamily, fontSize: 19, color: colors.historical, letterSpacing: 2.4}}>HISTORICAL CONTEXT</div>
-          <div style={{width: 70, height: 3, background: colors.accent, margin: '32px 0'}} />
-          <Typography variant="Title" color={colors.primary}>{scene.narrationSummary}</Typography>
-        </div>
-        <div style={{position: 'absolute', inset: 0, opacity: .32, ...texture(true, false)}} />
-      </AbsoluteFill>
-    );
-  }
-  return (
-    <AbsoluteFill style={{background: '#171512', overflow: 'hidden'}}>
-      <div style={{position: 'absolute', inset: 0, opacity: .42, ...texture(true, false)}} />
-      <div style={{position: 'absolute', left: 180, top: 120, width: 1510, height: 780, background: '#ded6c8', border: '1px solid #5b554d', boxShadow: '0 34px 110px rgba(0,0,0,.56)', transform: `rotate(${-0.6 + progress * .3}deg)`, padding: '78px 100px', boxSizing: 'border-box'}}>
-        <div style={{fontFamily: 'Georgia, serif', color: '#4b443c', fontSize: 21, letterSpacing: 2.2}}>ARCHIVAL RECONSTRUCTION · SOURCE-BOUND</div>
-        <div style={{fontFamily, color: '#201d19', fontSize: 54, fontWeight: 650, marginTop: 66, width: 1040}}>{scene.narrationSummary}</div>
-        <div style={{marginTop: 68, width: 1030}}>
-          {[0, 1, 2, 3, 4].map((line) => (
-            <div key={line} style={{height: 2, background: '#8d8579', marginTop: 27, width: `${94 - line * 7}%`, opacity: .55}} />
-          ))}
-        </div>
-        <div style={{position: 'absolute', right: 100, bottom: 85, width: 210, height: 126, border: '2px solid #8f3e42', color: '#8f3e42', fontFamily, fontSize: 22, letterSpacing: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-4deg)', opacity: .7}}>INTERPRETATION</div>
-      </div>
-      <ChapterLabel scene={scene} chapterTiming={chapterTiming} />
-    </AbsoluteFill>
-  );
-};
-
-const MinimalEditorial = ({scene, chapterTiming}: {scene: FullCutScene; chapterTiming: ChapterTiming[]}) => {
-  const frame = useCurrentFrame();
-  const opacity = interpolate(frame, [0, 16], [0, 1], {extrapolateRight: 'clamp'});
-  if (scene.id === 'S085') return <AbsoluteFill style={{backgroundColor: '#000'}} />;
-  const isBoundary = scene.chapter >= 7;
-  return (
-    <AbsoluteFill style={{backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center'}}>
-      <div style={{width: 1420, textAlign: 'center', opacity, transform: `translateY(${8 * (1 - opacity)}px)`}}>
-        <Typography variant={scene.narrationSummary.length > 24 ? 'SectionTitle' : 'Question'} color={colors.primary}>
-          {scene.narrationSummary}
-        </Typography>
-        <div style={{width: isBoundary ? 84 : 44, height: 3, background: isBoundary ? colors.secondary : colors.accent, margin: '42px auto 0'}} />
-      </div>
-      <div style={{position: 'absolute', inset: 0, opacity: .25, ...texture(false, false)}} />
-      <ChapterLabel scene={scene} chapterTiming={chapterTiming} />
-    </AbsoluteFill>
-  );
-};
-
-const MGEditorial = ({scene, chapterTiming}: {scene: FullCutScene; chapterTiming: ChapterTiming[]}) => {
-  const mapped: Scene = {
+const SceneContent = ({scene, chapterTiming, assetMap}: {
+  scene: FullCutScene;
+  chapterTiming: ChapterTiming[];
+  assetMap?: Record<string, unknown>;
+}) => {
+  // 重建 SchemaScene（包含 templateProps / assetRequirements）
+  const schemaScene: SchemaScene = {
     id: scene.id,
+    chapter: scene.chapter,
+    chapterTitle: scene.chapterTitle,
     start: scene.start,
     end: scene.end,
     duration: scene.duration,
-    chapter: scene.chapter,
-    visualType: 'A',
-    template: scene.template as TemplateName,
+    startFrame: scene.startFrame,
+    durationInFrames: scene.durationInFrames,
+    category: scene.category,
+    visualType: scene.visualType as SchemaScene['visualType'],
+    template: scene.template as SchemaScene['template'],
+    sourceTemplate: scene.sourceTemplate,
+    templateProps: (scene as unknown as Record<string, unknown>).templateProps as SchemaScene['templateProps'],
+    assetRequirements: (scene as unknown as Record<string, unknown>).assetRequirements as SchemaScene['assetRequirements'] ?? [],
     narrationSummary: scene.narrationSummary,
-    visual: {description: scene.description, elements: []},
-    assets: scene.assetIds,
+    description: scene.description,
+    notes: scene.notes,
+    assetIds: scene.assetIds,
+    licenseStatus: scene.licenseStatus as SchemaScene['licenseStatus'],
+    subtitlePosition: scene.subtitlePosition as SchemaScene['subtitlePosition'],
     transitionIn: scene.transitionIn,
     transitionOut: scene.transitionOut,
-    notes: scene.notes,
   };
   return (
     <AbsoluteFill>
-      <SceneRenderer scene={mapped} />
+      <ProductionSceneRenderer scene={schemaScene} assetMap={assetMap as Record<string, import('@/lib/scene-schema').ResolvedAsset[]>} />
       <ChapterLabel scene={scene} chapterTiming={chapterTiming} />
     </AbsoluteFill>
   );
 };
 
-const SceneContent = ({scene, chapterTiming}: {scene: FullCutScene; chapterTiming: ChapterTiming[]}) => {
-  if (scene.category === 'MG') return <MGEditorial scene={scene} chapterTiming={chapterTiming} />;
-  if (scene.category === 'Archive') return <ArchiveEditorial scene={scene} chapterTiming={chapterTiming} />;
-  if (scene.category === 'Minimal') return <MinimalEditorial scene={scene} chapterTiming={chapterTiming} />;
-  return <ModernEditorial scene={scene} chapterTiming={chapterTiming} />;
-};
-
-const TimedScene = ({scene, lead, tail, chapterTiming}: {scene: FullCutScene; lead: number; tail: number; chapterTiming: ChapterTiming[]}) => {
+const TimedScene = ({scene, lead, tail, chapterTiming, assetMap}: {
+  scene: SchemaScene;
+  lead: number;
+  tail: number;
+  chapterTiming: ChapterTiming[];
+  assetMap?: Record<string, unknown>;
+}) => {
   const frame = useCurrentFrame();
   const {durationInFrames} = useVideoConfig();
   const fadeIn = lead === 0 ? 1 : interpolate(frame, [0, lead], [0, 1], {extrapolateRight: 'clamp'});
   const fadeOut = tail === 0 ? 1 : interpolate(frame, [durationInFrames - tail, durationInFrames - 1], [1, 0], {extrapolateLeft: 'clamp'});
-  return <AbsoluteFill style={{opacity: Math.min(fadeIn, fadeOut)}}><SceneContent scene={scene} chapterTiming={chapterTiming} /></AbsoluteFill>;
+  const fcs: FullCutScene = {
+    id: scene.id,
+    chapter: scene.chapter,
+    chapterTitle: scene.chapterTitle,
+    start: scene.start,
+    end: scene.end,
+    duration: scene.duration,
+    startFrame: scene.startFrame,
+    durationInFrames: scene.durationInFrames,
+    category: scene.category as FullCutCategory,
+    visualType: (scene.visualType ?? 'UI') as FullCutVisualType,
+    template: scene.template,
+    sourceTemplate: scene.sourceTemplate,
+    narrationSummary: scene.narrationSummary,
+    description: scene.description,
+    notes: scene.notes,
+    assetIds: scene.assetIds,
+    licenseStatus: scene.licenseStatus as FullCutScene['licenseStatus'],
+    subtitlePosition: normalizeSubtitlePosition(scene.subtitlePosition),
+    transitionIn: scene.transitionIn,
+    transitionOut: scene.transitionOut,
+  };
+  return (
+    <AbsoluteFill style={{opacity: Math.min(fadeIn, fadeOut)}}>
+      <SceneContent scene={fcs} chapterTiming={chapterTiming} assetMap={assetMap} />
+    </AbsoluteFill>
+  );
 };
 
-const FullVisualTrack = ({scenes, chapterTiming, showPilotIntro = false}: {scenes: FullCutScene[]; chapterTiming: ChapterTiming[]; showPilotIntro?: boolean}) => (
+const FullVisualTrack = ({scenes, chapterTiming, assetMap, showPilotIntro = false}: {
+  scenes: SchemaScene[];
+  chapterTiming: ChapterTiming[];
+  assetMap?: Record<string, unknown>;
+  showPilotIntro?: boolean;
+}) => (
   <AbsoluteFill>
     {scenes.map((scene, index) => {
       const logicalStart = scene.startFrame;
@@ -296,7 +191,7 @@ const FullVisualTrack = ({scenes, chapterTiming, showPilotIntro = false}: {scene
       const from = Math.max(0, logicalStart - lead);
       return (
         <Sequence key={scene.id} from={from} durationInFrames={scene.durationInFrames + lead + tail} layout="none">
-          <TimedScene scene={scene} lead={lead} tail={tail} chapterTiming={chapterTiming} />
+          <TimedScene scene={scene} lead={lead} tail={tail} chapterTiming={chapterTiming} assetMap={assetMap} />
         </Sequence>
       );
     })}
@@ -342,10 +237,22 @@ const bgmVolume = (frame: number) => {
  * 默认沿用原路径（Legacy 行为不变）；显式 null → 不挂载（Workflow Visual Preview）。
  */
 export const ZhiyingFullCut = ({data, subtitles, audio, showSubtitles}: ZhiyingFullCutProps) => {
-  const scenes = useMemo(() => data.scenes.map(toRenderableScene), [data.scenes]);
+  const scenes = useMemo(() => data.scenes.map((s): FullCutScene => ({
+    id: s.id, chapter: s.chapter, chapterTitle: s.chapterTitle,
+    start: s.start, end: s.end, duration: s.duration,
+    startFrame: s.startFrame, durationInFrames: s.durationInFrames,
+    category: s.category as FullCutCategory,
+    visualType: (s.visualType ?? 'UI') as FullCutVisualType,
+    template: s.template, sourceTemplate: s.sourceTemplate,
+    narrationSummary: s.narrationSummary, description: s.description,
+    notes: s.notes, assetIds: s.assetIds,
+    licenseStatus: s.licenseStatus as FullCutScene['licenseStatus'],
+    subtitlePosition: normalizeSubtitlePosition(s.subtitlePosition),
+    transitionIn: s.transitionIn, transitionOut: s.transitionOut,
+  })), [data.scenes]);
   return (
     <AbsoluteFill style={{backgroundColor: colors.background}}>
-      <FullVisualTrack scenes={scenes} chapterTiming={data.chapterTiming} showPilotIntro={data.project.showPilotIntro === true} />
+      <FullVisualTrack scenes={data.scenes} chapterTiming={data.chapterTiming} assetMap={data.assetMap as Record<string, unknown>} showPilotIntro={data.project.showPilotIntro === true} />
       {audio.bgm ? <Audio src={staticFile(audio.bgm)} volume={bgmVolume} /> : null}
       {audio.sfx ? <Audio src={staticFile(audio.sfx)} volume={0.9} /> : null}
       {audio.narration ? <Audio src={staticFile(audio.narration)} volume={1} /> : null}

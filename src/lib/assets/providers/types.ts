@@ -3,7 +3,7 @@
  * 任何具体素材网站只实现本接口，不进入 renderer/scene 层。
  */
 
-import type {AssetRequirement} from '../scene-schema';
+import type {AssetRequirement} from '../../scene-schema';
 
 export interface AssetSearchHit {
   provider: string;

@@ -13,10 +13,20 @@ import {friendlyStageError} from './shared';
  * 未 ready 时展示结构化 blockers。本轮产物 = Visual Preview Render（非最终成片）。
  */
 
+interface VisualReadinessInfo {
+  ready: boolean;
+  total: number;
+  noAssetNeeded: number;
+  needAssets: number;
+  readyScenes: number;
+  missing: Array<{sceneId: string; reason: string}>;
+}
+
 interface PreviewResponse {
   ready: boolean;
   blockers: Array<{code: string; message: string}>;
   scenesVersion: number | null;
+  visualReadiness: VisualReadinessInfo | null;
   props: ZhiyingFullCutProps | null;
 }
 
@@ -32,6 +42,8 @@ export function VisualPreview({
   const [data, setData] = useState<PreviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [acquiring, setAcquiring] = useState(false);
+  const [acquireResult, setAcquireResult] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -69,6 +81,26 @@ export function VisualPreview({
     }
   }, [projectId, router, load]);
 
+  const acquireAssets = useCallback(async () => {
+    setAcquiring(true);
+    setAcquireResult(null);
+    setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/assets`, {method: 'POST'});
+      if (!res.ok) {
+        const json = (await res.json().catch(() => null)) as {message?: string} | null;
+        throw new Error(json?.message ?? `HTTP ${res.status}`);
+      }
+      const result = (await res.json()) as {acquired: number; reused: number; failed: number};
+      setAcquireResult(`新增 ${result.acquired}，复用 ${result.reused}，失败 ${result.failed}`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '素材获取失败');
+    } finally {
+      setAcquiring(false);
+    }
+  }, [projectId, load]);
+
   return (
     <section className="stage-panel" style={{marginTop: 20}} aria-label="画面预览">
       <div className="stage-panel-head">
@@ -76,6 +108,18 @@ export function VisualPreview({
           <h2 className="stage-panel-title">画面预览</h2>
           <p className="stage-panel-sub">
             根据已锁定的场景数据生成预览（暂无配音字幕）
+            {data?.visualReadiness ? (
+              <span style={{marginLeft: 12}}>
+                {' · '}视觉素材{' '}
+                <span style={{
+                  color: data.visualReadiness.ready ? 'var(--success)' : 'var(--accent)',
+                  fontWeight: 600,
+                }}>
+                  {data.visualReadiness.readyScenes}/{data.visualReadiness.total}
+                </span>
+                {' 已准备'}
+              </span>
+            ) : null}
             {data?.scenesVersion !== null && data?.scenesVersion !== undefined ? (
               <details style={{marginTop: 6}}>
                 <summary style={{cursor: 'pointer', opacity: 0.75}}>技术详情</summary>
@@ -100,6 +144,53 @@ export function VisualPreview({
 
       {error ? (
         <div className="error-banner" style={{margin: 0, borderRadius: 0}}>{error}</div>
+      ) : null}
+
+      {/* M6：视觉素材准备 */}
+      {data?.visualReadiness && data.visualReadiness.needAssets > 0 ? (
+        <div style={{
+          padding: '12px 16px', margin: '8px 0',
+          background: 'var(--surface-raised)', borderRadius: 8,
+          border: '1px solid var(--border)',
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+        }}>
+          <span style={{fontSize: 14, fontWeight: 600}}>
+            视觉素材{' '}
+            <span style={{color: data.visualReadiness.ready ? 'var(--success)' : 'var(--accent)'}}>
+              {data.visualReadiness.readyScenes}/{data.visualReadiness.total}
+            </span>
+            {' '}已准备
+            {data.visualReadiness.missing.length > 0 ? (
+              <span style={{color: 'var(--muted)', fontSize: 12, marginLeft: 6}}>
+                （{data.visualReadiness.missing.length} 个待准备）
+              </span>
+            ) : null}
+          </span>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={acquiring}
+            onClick={() => void acquireAssets()}
+            style={{marginLeft: 'auto'}}
+          >
+            {acquiring ? '获取中…' : '准备素材'}
+          </button>
+          {data.visualReadiness.missing.length > 0 ? (
+            <details style={{width: '100%', marginTop: 4}}>
+              <summary style={{cursor: 'pointer', fontSize: 12, opacity: 0.75}}>
+                查看缺失镜头（{data.visualReadiness.missing.length}）
+              </summary>
+              <ul style={{fontSize: 12, margin: '4px 0 0 16px', lineHeight: 1.8}}>
+                {data.visualReadiness.missing.map((m) => (
+                  <li key={m.sceneId}>{m.sceneId}: {m.reason}</li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+          {acquireResult ? (
+            <span style={{fontSize: 12, color: 'var(--success)', width: '100%'}}>{acquireResult}</span>
+          ) : null}
+        </div>
       ) : null}
 
       {data === null ? (

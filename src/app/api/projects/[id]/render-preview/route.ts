@@ -47,6 +47,7 @@ export async function GET(
         ready: false,
         blockers: readiness.blockers,
         scenesVersion: readiness.scenesVersion,
+        visualReadiness: readiness.visualReadiness,
         props: null,
       });
     }
@@ -55,6 +56,7 @@ export async function GET(
       ready: true,
       blockers: [],
       scenesVersion,
+      visualReadiness: readiness.visualReadiness,
       props,
     });
   } catch (err) {
