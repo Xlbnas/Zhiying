@@ -91,7 +91,7 @@ export const zhiyingFullCutDefaultProps: ZhiyingFullCutProps = {
   data: {
     schemaVersion: SCHEMA_VERSION,
     templateVersion: TEMPLATE_VERSION,
-    project: {...fullCutProject, composition: COMPOSITION_ID},
+    project: {...fullCutProject, composition: COMPOSITION_ID, showPilotIntro: true},
     chapterTiming: fullCutChapterTiming,
     scenes: fullCutScenes.map(toSchemaScene),
   },
@@ -286,7 +286,7 @@ const TimedScene = ({scene, lead, tail, chapterTiming}: {scene: FullCutScene; le
   return <AbsoluteFill style={{opacity: Math.min(fadeIn, fadeOut)}}><SceneContent scene={scene} chapterTiming={chapterTiming} /></AbsoluteFill>;
 };
 
-const FullVisualTrack = ({scenes, chapterTiming}: {scenes: FullCutScene[]; chapterTiming: ChapterTiming[]}) => (
+const FullVisualTrack = ({scenes, chapterTiming, showPilotIntro = false}: {scenes: FullCutScene[]; chapterTiming: ChapterTiming[]; showPilotIntro?: boolean}) => (
   <AbsoluteFill>
     {scenes.map((scene, index) => {
       const logicalStart = scene.startFrame;
@@ -299,9 +299,13 @@ const FullVisualTrack = ({scenes, chapterTiming}: {scenes: FullCutScene[]; chapt
         </Sequence>
       );
     })}
-    <Sequence from={0} durationInFrames={Math.ceil(PILOT_VISUAL_END * 30)} layout="none">
-      <PilotVisualTrack />
-    </Sequence>
+    {/* M1 demo 专用 Pilot 开场（拖延示例手机界面）：仅 defaultProps / Legacy M1
+        链路经 showPilotIntro 显式开启；workflow 项目渲染不得携带该残留 */}
+    {showPilotIntro ? (
+      <Sequence from={0} durationInFrames={Math.ceil(PILOT_VISUAL_END * 30)} layout="none">
+        <PilotVisualTrack />
+      </Sequence>
+    ) : null}
   </AbsoluteFill>
 );
 
@@ -340,7 +344,7 @@ export const ZhiyingFullCut = ({data, subtitles, audio, showSubtitles}: ZhiyingF
   const scenes = useMemo(() => data.scenes.map(toRenderableScene), [data.scenes]);
   return (
     <AbsoluteFill style={{backgroundColor: colors.background}}>
-      <FullVisualTrack scenes={scenes} chapterTiming={data.chapterTiming} />
+      <FullVisualTrack scenes={scenes} chapterTiming={data.chapterTiming} showPilotIntro={data.project.showPilotIntro === true} />
       {audio.bgm ? <Audio src={staticFile(audio.bgm)} volume={bgmVolume} /> : null}
       {audio.sfx ? <Audio src={staticFile(audio.sfx)} volume={0.9} /> : null}
       {audio.narration ? <Audio src={staticFile(audio.narration)} volume={1} /> : null}

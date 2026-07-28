@@ -202,6 +202,11 @@ async function main(): Promise<void> {
     );
     const meta = props.data;
     ok(
+      meta.project.showPilotIntro !== true,
+      '[M13b] workflow preview props 不携带 Pilot demo 开场（showPilotIntro 缺省=false）',
+      {showPilotIntro: meta.project.showPilotIntro},
+    );
+    ok(
       meta.schemaVersion === '1.0' &&
         meta.templateVersion === 'freud-mg-v1.0' &&
         meta.project.composition === 'ZhiyingFullCut' &&

@@ -47,6 +47,9 @@ export const projectMetaSchema = z.object({
   timingBasis: z.string().optional(),
   sceneCount: z.number().optional(),
   categoryCounts: z.record(z.string(), z.number()).optional(),
+  /** M1 demo 专用 Pilot 开场覆盖层开关：仅 defaultProps / Legacy M1 链路显式
+      置 true；workflow 项目缺省 = 不出现（M5 残留修复）。 */
+  showPilotIntro: z.boolean().optional(),
 });
 
 export const fullCutDataSchema = z.object({

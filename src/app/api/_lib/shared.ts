@@ -156,7 +156,15 @@ export function buildFullCutProps(
   }
 
   return {
-    data: dataParsed.data,
+    data: {
+      ...dataParsed.data,
+      project: {
+        ...dataParsed.data.project,
+        // Legacy M1 链路：保留 M1 demo Pilot 开场覆盖层（M1 验收输出不变）；
+        // workflow 项目不走本函数（render-bridge 构造 props 时缺省 = 无残留）
+        showPilotIntro: true,
+      },
+    },
     subtitles,
     audio: {
       narration: resolveNarration(),
