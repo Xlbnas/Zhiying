@@ -28,6 +28,7 @@
  */
 
 import {
+  MG_TEMPLATE_REGISTRY,
   SCENE_CATEGORIES,
   SCENE_LICENSE_STATUSES,
   SCENE_VISUAL_TYPES,
@@ -122,6 +123,29 @@ function normalizeEnum(
   const hit = aliases[trimmed.toLowerCase()];
   if (hit !== undefined) return hit;
   return (canonical as readonly string[]).includes(trimmed) ? trimmed : value;
+}
+
+/**
+ * MG 模板 ID 归一：注册表 ID 的「仅小写字母数字」形态是唯一键，
+ * 大小写 / 下划线 / 连字符 / 空格 / 多余前缀变体均可确定性归一到注册 ID；
+ * 归一不了的是模型编造的 ID（如 MG_FreudCouch），原样留给语义校验 → LLM repair
+ * （repair prompt 现在携带完整注册表，可正确选择）。
+ */
+const TEMPLATE_CANONICAL_BY_KEY: Map<string, string> = (() => {
+  const keyOf = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const map = new Map<string, string>();
+  for (const id of MG_TEMPLATE_REGISTRY) {
+    map.set(keyOf(id), id);
+  }
+  return map;
+})();
+
+function normalizeTemplateId(value: string | null): string | null {
+  if (value === null) return null;
+  const trimmed = value.trim();
+  if (MG_TEMPLATE_REGISTRY.has(trimmed)) return trimmed;
+  const key = trimmed.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return TEMPLATE_CANONICAL_BY_KEY.get(key) ?? value;
 }
 
 function round3(n: number): number {
@@ -223,6 +247,14 @@ export function compileScenesAiOutput(input: unknown): SceneCompileResult {
     if (licenseStatus !== null && licenseStatus !== scene.licenseStatus) {
       fixes.push(`${scene.id} licenseStatus "${scene.licenseStatus}" → "${licenseStatus}"`);
       scene.licenseStatus = licenseStatus ?? scene.licenseStatus;
+    }
+    for (const field of ['template', 'sourceTemplate'] as const) {
+      const current = (scene[field] as string | null) ?? null;
+      const normalized = normalizeTemplateId(current);
+      if (normalized !== current) {
+        fixes.push(`${scene.id} ${field} "${current}" → "${normalized}"`);
+        scene[field] = normalized;
+      }
     }
   }
 

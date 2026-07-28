@@ -43,6 +43,25 @@ export const MG_TEMPLATE_REGISTRY: ReadonlySet<string> = new Set([
   'MG_WorthQuestioning',
 ]);
 
+/**
+ * 注册模板的语义提示（供 scenes prompt 注入：模型只能在注册表内选择，
+ * 提示取自 M1 模板 props 的真实结构）。修改模板集合时同步更新。
+ */
+export const MG_TEMPLATE_HINTS: ReadonlyArray<{id: string; hint: string}> = [
+  {id: 'MG_ActionDelay', hint: '意图与行动之间的拖延清单（意图 label + 逐项 delay）'},
+  {id: 'MG_ConceptSeparation', hint: '两个易混概念的区分对比（left ≠ right + 注释）'},
+  {id: 'MG_IntentConflict', hint: '意图与行动的冲突/干扰（含冲突标注）'},
+  {id: 'MG_IntentPath', hint: '从意图到行动的路径推进（pathProgress）'},
+  {id: 'MG_InwardQuestion', hint: '从外部现象转向向内的自我追问'},
+  {id: 'MG_LastStepThreshold', hint: '步骤推进到最后一步的门槛与后果'},
+  {id: 'MG_LocalConflictSpread', hint: '一条核心信息/局部冲突的扩散与冻结（支持历史模式）'},
+  {id: 'MG_MessageFocus', hint: '多条信息中聚焦一条关键信息（其余压暗）'},
+  {id: 'MG_ScheduleNodes', hint: '日程/清单节点的完成与错过'},
+  {id: 'MG_ThinkNoThink', hint: '压抑一个念头反而被想起（提示与记忆的拉扯）'},
+  {id: 'MG_TimePass', hint: '时间流逝的视觉表达'},
+  {id: 'MG_WorthQuestioning', hint: '对习以为常的说法提出质疑'},
+];
+
 /** Scenes Prompt 契约允许的取值（M1 历史数据为其子集，无冲突）。 */
 export const SCENE_CATEGORIES = ['MG', 'B-roll', 'Archive', 'Minimal', 'Editorial Graphic'] as const;
 export const SCENE_VISUAL_TYPES = ['MG', 'Asset', 'Archive', 'Minimal', 'UI'] as const;

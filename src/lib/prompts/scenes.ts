@@ -16,6 +16,7 @@ import {z} from 'zod';
 import {chapterTimingSchema, sceneSchema} from '../scene-schema';
 import {normalizeScenesOutput} from '../scenes/compiler';
 import {
+  MG_TEMPLATE_HINTS,
   SCENES_SYSTEM_FPS,
   scenesSemanticIssues,
 } from '../workflow/scenes-semantic-validation';
@@ -56,7 +57,9 @@ const system = composeSystem(
   visualType 必须精确取 {MG, Asset, Archive, Minimal, UI} 之一（注意两套词表
   不同：上游 Shot 的 "Reality B-roll" 在 Scene 层是 category="B-roll"、
   visualType="Asset"）。
-- MG Scene 必须给出 template（稳定英文模板 ID）与 sourceTemplate；非 MG 为 null。
+- MG Scene 的 template 与 sourceTemplate 必须**从以下 12 个已注册模板 ID 中原样选择一个**（禁止自造、禁止改写；系统只接受这些 ID）：
+${MG_TEMPLATE_HINTS.map((t) => `  · ${t.id} —— ${t.hint}`).join('\n')}
+  非 MG Scene 的 template/sourceTemplate 一律为 null。
 - narrationSummary 是该 Scene 对应旁白的语义摘要，不是旁白原文。
 - description 写画面职责与构成（可执行、具体），不是生成式空话。
 - assetIds 指向素材 manifest 的 ID；未知素材不得编造 ID，留空数组并在 notes 说明需求。
@@ -79,12 +82,12 @@ chapterTiming 按章节顺序给出各章的**估算时长**（start/end 仅表�
 - 禁止编造 assetIds、模板 ID 或授权状态。
 - 不得改动 Shot List 的节奏与功能分配。
 - 不得输出 JSON 以外的任何文字。`,
-  `【自检】输出前确认：ID 连续？每个 Scene 都明确归属一个存在的 chapter？时长权重符合叙事节奏？MG 必有 template？授权状态无 unknown？JSON 可解析？`,
+  `【自检】输出前确认：ID 连续？每个 Scene 都明确归属一个存在的 chapter？时长权重符合叙事节奏？MG 的 template/sourceTemplate 全部来自注册表 12 个 ID？授权状态无 unknown？JSON 可解析？`,
 );
 
 export const scenesPrompt: StagePrompt = {
   stage: 'scenes',
-  promptVersion: 'scenes@1.1',
+  promptVersion: 'scenes@1.2',
   outputKind: 'json',
   system,
   zodSchema: scenesAiOutputSchema,

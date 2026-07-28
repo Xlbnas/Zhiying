@@ -23,6 +23,7 @@ import type {LLMProvider, LLMRequest, LLMResponse} from '../src/lib/llm/types';
 import {compileScenesAiOutput} from '../src/lib/scenes/compiler';
 import {scenesAiOutputSchema} from '../src/lib/prompts/scenes';
 import {
+  MG_TEMPLATE_REGISTRY,
   SCENES_SYSTEM_FPS,
   validateScenesSemantics,
   type ScenesSemanticInput,
@@ -256,6 +257,39 @@ async function main(): Promise<void> {
   }
 
   // ---------- 7. 无法 deterministic 修复的问题仍留语义校验 ----------
+  {
+    // MG 模板 ID 变体归一（生产故障类别：模型改写注册 ID 的大小写/分隔符）
+    const parsed = scenesAiOutputSchema.parse(mutate((v) => {
+      v.scenes[3]!.template = 'mg_message_focus';
+      v.scenes[3]!.sourceTemplate = 'MG-MessageFocus';
+    }));
+    const {output} = compileScenesAiOutput(parsed);
+    ok(output.scenes[3]!.template === 'MG_MessageFocus', '[26a] template mg_message_focus → MG_MessageFocus');
+    ok(output.scenes[3]!.sourceTemplate === 'MG_MessageFocus', '[26b] sourceTemplate MG-MessageFocus → MG_MessageFocus');
+    const result = validateScenesSemantics(output as ScenesSemanticInput);
+    ok(result.ok, '[26c] 模板 ID 变体归一后语义校验 PASS', result.ok ? undefined : result.issues.slice(0, 3));
+  }
+  {
+    // 模型编造的模板 ID：归一不了 → 仍报 MG_TEMPLATE_NOT_REGISTERED（留 repair；
+    // scenes@1.2 起 repair prompt 携带完整注册表）
+    const parsed = scenesAiOutputSchema.parse(mutate((v) => {
+      v.scenes[3]!.template = 'MG_FreudCouch';
+      v.scenes[3]!.sourceTemplate = 'MG_FreudCouch';
+    }));
+    const {output} = compileScenesAiOutput(parsed);
+    const result = validateScenesSemantics(output as ScenesSemanticInput);
+    ok(
+      !result.ok && result.issues.some((i) => i.code === 'MG_TEMPLATE_NOT_REGISTERED'),
+      '[26d] 编造模板 ID 仍报 MG_TEMPLATE_NOT_REGISTERED（留 LLM repair）',
+    );
+  }
+  {
+    // scenes@1.2：system prompt 必须携带完整注册表（生产根因：此前模型看不到合法 ID）
+    const {scenesPrompt} = await import('../src/lib/prompts/scenes');
+    const missing = [...MG_TEMPLATE_REGISTRY].filter((id) => !scenesPrompt.system.includes(id));
+    ok(missing.length === 0 && scenesPrompt.promptVersion === 'scenes@1.2', '[26e] system prompt 携带全部 12 个注册模板 ID（scenes@1.2）', missing);
+  }
+
   {
     const parsed = scenesAiOutputSchema.parse(mutate((v) => {
       v.scenes[0]!.category = '全息投影'; // 无法映射
