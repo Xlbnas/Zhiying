@@ -135,8 +135,9 @@ function main(): void {
   );
 
   // ---- worker contract：cpus/mem_limit/depends_on/单 service ----
-  ok(worker.cpus === 4, 'C15 worker cpus=4', worker.cpus);
-  ok(worker.mem_limit === String(6 * 1024 ** 3), 'C16 worker mem_limit=6g', worker.mem_limit);
+  // M5-PERF：资源默认值经生产 benchmark 提升（4c/6g → 8c/8g），可 env 覆盖
+  ok(worker.cpus === 8, 'C15 worker cpus=8（M5-PERF 默认值，可 ZHIYING_WORKER_CPUS 覆盖）', worker.cpus);
+  ok(worker.mem_limit === String(8 * 1024 ** 3), 'C16 worker mem_limit=8g（M5-PERF 默认值，可 ZHIYING_WORKER_MEM 覆盖）', worker.mem_limit);
   ok(
     worker.depends_on?.['indextts2-adapter']?.condition === 'service_healthy',
     'C17 worker depends_on adapter: service_healthy（跨 stack readiness bridge）',
@@ -144,6 +145,24 @@ function main(): void {
   );
   ok(worker.depends_on?.['indextts2'] === undefined, 'C18 worker 不 depends_on indextts2（禁止跨 stack 生命周期）');
   ok(!('deploy' in worker), 'C19 worker 无 deploy/scale 配置（单 worker 不变量）');
+
+  // ---- M5-PERF：GPU override 只透传 worker 且默认不参与 ----
+  {
+    const gpuPath = path.resolve('docker-compose.production.gpu.yml');
+    ok(fs.existsSync(gpuPath), 'C19b GPU override 文件存在（实验可回退）');
+    const gpuText = fs.readFileSync(gpuPath, 'utf8')
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('#'))
+      .join('\n');
+    ok(
+      gpuText.includes('zhiying-worker') && !gpuText.includes('zhiying-web') && !gpuText.includes('indextts2-adapter'),
+      'C19c GPU override 仅包含 zhiying-worker（web/adapter 不透传 GPU）',
+    );
+    ok(
+      gpuText.includes('gpus: all') && gpuText.includes('REMOTION_GPU_ENABLED: "true"'),
+      'C19d GPU override = gpus:all + REMOTION_GPU_ENABLED=true',
+    );
+  }
 
   // ---- secret scoping：DEEPSEEK_API_KEY 只在 worker ----
   ok(

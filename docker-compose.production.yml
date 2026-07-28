@@ -71,8 +71,10 @@ services:
     # 单 Scheduler/单 Worker 是 frozen 架构不变量（无代码级锁，且 stale job
     # recovery 会让多 worker 互相回收）——本文件只定义一个 worker service，
     # 严禁 docker compose up --scale zhiying-worker=N（N>1）
-    cpus: 4
-    mem_limit: 6g
+    # M5-PERF：资源与并发默认值经生产 benchmark 确定，可经 env 覆盖；
+    # GPU 实验走 docker-compose.production.gpu.yml override（默认不透传）
+    cpus: ${ZHIYING_WORKER_CPUS:-8}
+    mem_limit: ${ZHIYING_WORKER_MEM:-8g}
     environment:
       NODE_ENV: production
       ZHIYING_DATA_DIR: /app/data
@@ -80,6 +82,11 @@ services:
       LLM_PROVIDER: deepseek
       TTS_PROVIDER: indextts2
       INDEXTTS2_BASE_URL: http://indextts2-adapter:9880
+      # M5-PERF：显式渲染并发（默认 6；非法值代码内 fail-safe 回退）
+      REMOTION_CONCURRENCY: ${REMOTION_CONCURRENCY:-6}
+      # M5-PERF：Chromium 硬件 GL 实验开关（默认关闭 = software path）；
+      # 开启需同时挂 GPU override 提供 /dev/nvidia*
+      REMOTION_GPU_ENABLED: ${REMOTION_GPU_ENABLED:-false}
       # DEEPSEEK_API_KEY 的唯一消费者（实证：仅 src/worker/llm-executor.ts
       # import getProvider）；绝不注入 web/adapter
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY required}

@@ -16,6 +16,7 @@ import {
 } from '@/lib/jobs';
 import {recoverStaleLlmJobs} from '@/lib/llm-jobs';
 import {buildStageDetail, detailFromRemotionProgress} from '@/lib/render/progress-detail';
+import {describeRenderPerfConfig, loadRenderPerfConfig} from '@/lib/render/render-config';
 import {claimNextAnyJob} from '@/lib/scheduler';
 import {recoverStaleTtsJobs} from '@/lib/tts-jobs';
 import {
@@ -28,6 +29,13 @@ import {
 import {runLlmJob} from './llm-executor';
 import {RuntimeAudioError, stageRuntimeNarrationAudio} from './runtime-audio';
 import {runTtsJob} from './tts-executor';
+
+/**
+ * Final Render 性能配置（M5-PERF）：见 src/lib/render/render-config.ts。
+ * REMOTION_CONCURRENCY 显式并发（缺失/非法 → Remotion 默认）；
+ * REMOTION_GPU_ENABLED=true → ANGLE/EGL 硬件 GL（software path 可一键回退）。
+ */
+const PERF_CONFIG = loadRenderPerfConfig();
 
 /**
  * 知影渲染 Worker（CONTRACT §4，M2-C 扩展双队列）
@@ -243,6 +251,7 @@ async function runJob(
       id: compositionId,
       inputProps,
       port: renderPort,
+      ...(PERF_CONFIG.chromiumOptions ? {chromiumOptions: PERF_CONFIG.chromiumOptions} : {}),
     });
 
     // 输出：data/projects/{projectId}/renders/{jobId}.mp4
@@ -271,6 +280,10 @@ async function runJob(
       outputLocation: outputAbs,
       inputProps,
       port: renderPort,
+      // M5-PERF：显式并发（env 可配；null = Remotion 默认）
+      concurrency: PERF_CONFIG.concurrency,
+      // M5-PERF：GPU 硬件后端实验（REMOTION_GPU_ENABLED=true 时启用，可回退）
+      ...(PERF_CONFIG.chromiumOptions ? {chromiumOptions: PERF_CONFIG.chromiumOptions} : {}),
       // Remotion 的 CancelSignal 是回调注册函数，不是 DOM AbortSignal；在此适配
       cancelSignal: (callback) => {
         if (controller.signal.aborted) {
@@ -343,6 +356,9 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => requestShutdown('SIGINT'));
 
   log(`starting, data dir: ${getDataDir()}, role: ${role}`);
+  log(
+    describeRenderPerfConfig(PERF_CONFIG),
+  );
 
   // 1. 启动：回收僵尸任务（render + llm + tts，heartbeat 超过 2min 未更新）
   const recovered = recoverStaleJobs(STALE_TIMEOUT_MS);

@@ -1,0 +1,26 @@
+# 知影 · M5-PERF GPU 实验 override（可控制、可回退）
+#
+# 作用：仅给 zhiying-worker 透传 NVIDIA GPU 并开启 Chromium 硬件 GL 后端
+# （angle-egl）。base compose 默认不透传、GPU_ENABLED=false（software path）。
+#
+# 启用：
+#   docker compose \
+#     -f docker-compose.production.yml \
+#     -f docker-compose.production.gpu.yml \
+#     --env-file .env.production \
+#     up -d --no-build --pull never --no-deps zhiying-worker
+#
+# 回退：只用 base compose 重新 up zhiying-worker 即可（override 不再参与，
+# 容器重建后回到无 GPU + software rendering）。
+#
+# 注意：
+# - 只透传 worker；zhiying-web 不需要 GPU，不加入本文件。
+# - 与 IndexTTS2 共享同一张 RTX 2080 Ti（TTS 常驻 ~14.2GB/22GB）：
+#   Chrome GL 占用小，但需监控 VRAM，防止 TTS OOM。
+# - 需要宿主已安装 nvidia-container-toolkit（tts-stack 已在用，已验证）。
+
+services:
+  zhiying-worker:
+    gpus: all
+    environment:
+      REMOTION_GPU_ENABLED: "true"
