@@ -60,6 +60,7 @@ function scene(partial: Partial<Scene> & Pick<Scene, 'id' | 'chapter' | 'chapter
     description: '画面职责描述',
     notes: '',
     assetIds: [],
+      assetRequirements: [],
     licenseStatus: 'not-applicable',
     subtitlePosition: 'bottom',
     transitionIn: 'none',
@@ -80,7 +81,7 @@ function baseInput(): ScenesSemanticInput {
       scene({id: 'S003', chapter: 2, chapterTitle: '深入', start: 30, end: 60}),
       scene({
         id: 'S004', chapter: 2, chapterTitle: '深入', start: 60, end: 90,
-        category: 'MG', visualType: 'MG', template: 'MG_MessageFocus', sourceTemplate: 'MG_MessageFocus',
+        category: 'MG', visualType: 'MG', template: 'MG_MessageFocus', templateProps: {message: '聚焦信息'}, sourceTemplate: 'MG_MessageFocus',
       }),
     ],
   };
@@ -287,7 +288,7 @@ async function main(): Promise<void> {
     // scenes@1.2：system prompt 必须携带完整注册表（生产根因：此前模型看不到合法 ID）
     const {scenesPrompt} = await import('../src/lib/prompts/scenes');
     const missing = [...MG_TEMPLATE_REGISTRY].filter((id) => !scenesPrompt.system.includes(id));
-    ok(missing.length === 0 && scenesPrompt.promptVersion === 'scenes@1.2', '[26e] system prompt 携带全部 12 个注册模板 ID（scenes@1.2）', missing);
+    ok(missing.length === 0 && scenesPrompt.promptVersion === 'scenes@1.3', '[26e] system prompt 携带全部 production 注册模板 ID（scenes@1.3）', missing);
   }
 
   {

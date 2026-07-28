@@ -56,6 +56,7 @@ function scene(partial: Partial<Scene> & Pick<Scene, 'id' | 'chapter' | 'chapter
     description: '画面职责描述',
     notes: '',
     assetIds: [],
+      assetRequirements: [],
     licenseStatus: 'not-applicable',
     subtitlePosition: 'bottom',
     transitionIn: 'none',
@@ -73,7 +74,7 @@ function makeValid(): ScenesSemanticInput {
     scene({id: 'S001', chapter: 1, chapterTitle: '开篇', start: 0, end: 6.5}),
     scene({
       id: 'S002', chapter: 2, chapterTitle: '深入', start: 6.5, end: 14.5,
-      category: 'MG', visualType: 'MG', template: 'MG_MessageFocus', sourceTemplate: 'MG_MessageFocus',
+      category: 'MG', visualType: 'MG', template: 'MG_MessageFocus', templateProps: {message: '聚焦信息'}, sourceTemplate: 'MG_MessageFocus',
     }),
   ];
   return {chapterTiming, scenes};
@@ -171,12 +172,13 @@ async function main(): Promise<void> {
   // ============ MG 模板（27–30） ============
   expectFail(mutate((v) => { v.scenes[1]!.template = null; }), 'MG_TEMPLATE_REQUIRED', '[27] MG template null FAIL');
   expectFail(mutate((v) => { v.scenes[1]!.template = 'cool-3d-chart-v7'; }), 'MG_TEMPLATE_NOT_REGISTERED', '[28] MG template 未注册 FAIL');
-  ok(MG_TEMPLATE_REGISTRY.size === 12, '[29] Registry 含 12 个 M1 真实模板');
+  ok(MG_TEMPLATE_REGISTRY.size === 6, '[29] Registry 含 6 个 production 数据驱动模板（M6）');
   expectPass(makeValid(), '[29] 合法 MG template PASS');
   {
     expectFail(mutate((v) => { v.scenes[0]!.template = 'MG_TimePass'; }), 'NON_MG_TEMPLATE_NOT_NULL', '[30] 非 MG template 非 null FAIL');
-    const withSource = mutate((v) => { v.scenes[0]!.sourceTemplate = 'MG_TimePass'; });
-    expectPass(withSource, '[30] 非 MG sourceTemplate 为已注册 ID PASS（M1 真实语义）');
+    expectFail(mutate((v) => { v.scenes[0]!.sourceTemplate = 'MG_TimePass'; }), 'MG_TEMPLATE_NOT_REGISTERED', '[30] M1 demo 模板不再是合法值（M6）FAIL');
+    const withSource = mutate((v) => { v.scenes[0]!.sourceTemplate = 'MG_MessageFocus'; });
+    expectPass(withSource, '[30] 非 MG sourceTemplate 为 production 已注册 ID PASS');
     expectFail(mutate((v) => { v.scenes[0]!.sourceTemplate = 'made-up-template'; }), 'MG_TEMPLATE_NOT_REGISTERED', '[30] 非 MG sourceTemplate 未注册 FAIL');
   }
 

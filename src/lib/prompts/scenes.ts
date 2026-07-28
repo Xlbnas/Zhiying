@@ -15,8 +15,8 @@
 import {z} from 'zod';
 import {chapterTimingSchema, sceneSchema} from '../scene-schema';
 import {normalizeScenesOutput} from '../scenes/compiler';
+import {describeMgTemplatesForPrompt} from '../scenes/mg-templates';
 import {
-  MG_TEMPLATE_HINTS,
   SCENES_SYSTEM_FPS,
   scenesSemanticIssues,
 } from '../workflow/scenes-semantic-validation';
@@ -57,12 +57,27 @@ const system = composeSystem(
   visualType 必须精确取 {MG, Asset, Archive, Minimal, UI} 之一（注意两套词表
   不同：上游 Shot 的 "Reality B-roll" 在 Scene 层是 category="B-roll"、
   visualType="Asset"）。
-- MG Scene 的 template 与 sourceTemplate 必须**从以下 12 个已注册模板 ID 中原样选择一个**（禁止自造、禁止改写；系统只接受这些 ID）：
-${MG_TEMPLATE_HINTS.map((t) => `  · ${t.id} —— ${t.hint}`).join('\n')}
+- MG Scene 的 template 与 sourceTemplate 必须**从以下 production 模板中原样选择一个**
+  （按视觉意图做语义匹配；禁止自造 ID；找不到合适模板就换 category，不得乱配）：
+${describeMgTemplatesForPrompt()}
   非 MG Scene 的 template/sourceTemplate 一律为 null。
+- MG Scene 必须同时给出 templateProps（结构化参数，是画面文字与图形的唯一来源）：
+  · MG_LayeredDiagram（分层模型如冰山）：{"title":"意识的冰山","layers":[{"label":"意识"},{"label":"前意识"},{"label":"潜意识"}],"caption":"…"}
+  · MG_RelationGraph（关系/冲突图如本我自我超我）：{"title":"…","nodes":[{"id":"id","label":"本我"},{"id":"ego","label":"自我"},{"id":"superego","label":"超我"}],"edges":[{"from":"id","to":"superego","label":"冲突"}],"caption":"…"}
+  · MG_Timeline（时间线）：{"title":"…","events":[{"label":"《梦的解析》出版","time":"1900"},{"label":"现代心理学评价","time":"今天"}]}
+  · MG_ConceptCompare（双概念对比）：{"left":"…","right":"…","note":"…"}
+  · MG_MessageFocus（单点聚焦）：{"message":"…","context":"…"}
+  · MG_ScheduleNodes（清单/步骤）：{"title":"…","items":[{"label":"…"}]}
+  templateProps 的文字必须与 description 表达的画面一致。
+- Archive / B-roll Scene 必须给出 assetRequirements（真实素材需求，系统将据此
+  获取档案/授权素材）：[{"kind":"image","subject":"画面主体（中文）","query":"检索关键词（英文优先）","usage":"primary","policy":"public_domain"}]
+  policy：历史照片/手稿/古籍/建筑用 public_domain；明确需要 AI 生成的概念画面
+  用 generated；禁止请求电影/电视剧/商业摄影片段（版权不可自动使用）。
+- Minimal / Editorial Graphic 不需要 assetRequirements（Minimal 用排版；
+  Editorial Graphic 按 MG 规则给 template + templateProps）。
 - narrationSummary 是该 Scene 对应旁白的语义摘要，不是旁白原文。
 - description 写画面职责与构成（可执行、具体），不是生成式空话。
-- assetIds 指向素材 manifest 的 ID；未知素材不得编造 ID，留空数组并在 notes 说明需求。
+- assetIds 一律留空数组（素材由系统获取后绑定，禁止编造 ID）。
 - licenseStatus ∈ {verified, review-required, not-applicable}；不得用 unknown。
 - subtitlePosition ∈ {bottom, mid, lowerThird, midLower}；transitionIn/Out 写转场语义。
 - 避免连续相同布局与连续纯 MG（遵守 Visual Breakdown 上限）。`,
@@ -87,7 +102,7 @@ chapterTiming 按章节顺序给出各章的**估算时长**（start/end 仅表�
 
 export const scenesPrompt: StagePrompt = {
   stage: 'scenes',
-  promptVersion: 'scenes@1.2',
+  promptVersion: 'scenes@1.3',
   outputKind: 'json',
   system,
   zodSchema: scenesAiOutputSchema,

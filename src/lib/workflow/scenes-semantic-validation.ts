@@ -1,4 +1,5 @@
 import type {ChapterTiming, Scene} from '../scene-schema';
+import {MG_TEMPLATE_IDS, validateTemplateProps} from '../scenes/mg-templates';
 
 /**
  * Scenes 语义校验（M2-E-A，DEFERRED_M2E_SCENE_SEMANTIC_VALIDATION 落地）。
@@ -28,39 +29,7 @@ export const SECONDS_EPSILON = 0.001;
  * 已注册 MG 模板 ID（从 M1 Remotion 实现提取：
  * src/remotion/templates/MG_*.tsx × 12 = types/scene.ts TemplateName = SceneRenderer case）。
  */
-export const MG_TEMPLATE_REGISTRY: ReadonlySet<string> = new Set([
-  'MG_ActionDelay',
-  'MG_ConceptSeparation',
-  'MG_IntentConflict',
-  'MG_IntentPath',
-  'MG_InwardQuestion',
-  'MG_LastStepThreshold',
-  'MG_LocalConflictSpread',
-  'MG_MessageFocus',
-  'MG_ScheduleNodes',
-  'MG_ThinkNoThink',
-  'MG_TimePass',
-  'MG_WorthQuestioning',
-]);
-
-/**
- * 注册模板的语义提示（供 scenes prompt 注入：模型只能在注册表内选择，
- * 提示取自 M1 模板 props 的真实结构）。修改模板集合时同步更新。
- */
-export const MG_TEMPLATE_HINTS: ReadonlyArray<{id: string; hint: string}> = [
-  {id: 'MG_ActionDelay', hint: '意图与行动之间的拖延清单（意图 label + 逐项 delay）'},
-  {id: 'MG_ConceptSeparation', hint: '两个易混概念的区分对比（left ≠ right + 注释）'},
-  {id: 'MG_IntentConflict', hint: '意图与行动的冲突/干扰（含冲突标注）'},
-  {id: 'MG_IntentPath', hint: '从意图到行动的路径推进（pathProgress）'},
-  {id: 'MG_InwardQuestion', hint: '从外部现象转向向内的自我追问'},
-  {id: 'MG_LastStepThreshold', hint: '步骤推进到最后一步的门槛与后果'},
-  {id: 'MG_LocalConflictSpread', hint: '一条核心信息/局部冲突的扩散与冻结（支持历史模式）'},
-  {id: 'MG_MessageFocus', hint: '多条信息中聚焦一条关键信息（其余压暗）'},
-  {id: 'MG_ScheduleNodes', hint: '日程/清单节点的完成与错过'},
-  {id: 'MG_ThinkNoThink', hint: '压抑一个念头反而被想起（提示与记忆的拉扯）'},
-  {id: 'MG_TimePass', hint: '时间流逝的视觉表达'},
-  {id: 'MG_WorthQuestioning', hint: '对习以为常的说法提出质疑'},
-];
+export const MG_TEMPLATE_REGISTRY: ReadonlySet<string> = MG_TEMPLATE_IDS;
 
 /** Scenes Prompt 契约允许的取值（M1 历史数据为其子集，无冲突）。 */
 export const SCENE_CATEGORIES = ['MG', 'B-roll', 'Archive', 'Minimal', 'Editorial Graphic'] as const;
@@ -82,6 +51,7 @@ export type SceneSemanticIssueCode =
   | 'SCENE_LICENSE_STATUS_INVALID'
   | 'MG_TEMPLATE_REQUIRED'
   | 'MG_TEMPLATE_NOT_REGISTERED'
+  | 'MG_TEMPLATE_PROPS_INVALID'
   | 'NON_MG_TEMPLATE_NOT_NULL';
 
 export interface SceneSemanticIssue {
@@ -322,7 +292,7 @@ export function validateScenesSemantics(
     }
   });
 
-  // ---------- 8. MG 模板 ----------
+  // ---------- 8. MG 模板（M6：production 注册表 + templateProps 契约） ----------
   scenes.forEach((scene, index) => {
     const ref = {sceneId: scene.id, sceneIndex: index, chapter: scene.chapter};
     if (scene.category === 'MG') {
@@ -330,6 +300,12 @@ export function validateScenesSemantics(
         issues.push({code: 'MG_TEMPLATE_REQUIRED', message: `${scene.id} 是 MG 场景，template 不得为 null`, ...ref});
       } else if (!registry.has(scene.template)) {
         issues.push({code: 'MG_TEMPLATE_NOT_REGISTERED', message: `${scene.id} template 未注册`, ...ref, expected: '已注册 MG 模板 ID', actual: scene.template});
+      } else {
+        // M6：已注册模板必须有合法 templateProps（renderer 唯一文案来源）
+        const propsCheck = validateTemplateProps(scene.template, scene.templateProps);
+        if (!propsCheck.ok) {
+          issues.push({code: 'MG_TEMPLATE_PROPS_INVALID', message: `${scene.id} ${propsCheck.message}`, ...ref});
+        }
       }
       if (scene.sourceTemplate === null) {
         issues.push({code: 'MG_TEMPLATE_REQUIRED', message: `${scene.id} 是 MG 场景，sourceTemplate 不得为 null`, ...ref});

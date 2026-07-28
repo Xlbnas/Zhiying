@@ -169,7 +169,7 @@ const SCENES_JSON = JSON.stringify({
       durationInFrames: 240,
       category: 'MG',
       visualType: 'MG',
-      template: 'MG_MessageFocus',
+      template: 'MG_MessageFocus', templateProps: {message: '聚焦信息'},
       sourceTemplate: 'MG_MessageFocus',
       narrationSummary: '示例旁白摘要：解释两层关系',
       description: '示例画面职责：快动作呈现两节点关系后长 Hold。',

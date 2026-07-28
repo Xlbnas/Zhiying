@@ -83,6 +83,7 @@ const toRenderableScene = (scene: SchemaScene): FullCutScene => ({
  */
 const toSchemaScene = (scene: FullCutScene): SchemaScene => ({
   ...scene,
+  assetRequirements: [],
   subtitlePosition: scene.subtitlePosition as string as SchemaScene['subtitlePosition'],
 });
 

@@ -115,8 +115,26 @@ CREATE TABLE IF NOT EXISTS project_inputs ( -- 项目生产参数（非 workflow
   updated_at TEXT NOT NULL
 );
 -- ============ M3-B：TTS 任务队列（仅新增，不修改以上表） ============
-CREATE TABLE IF NOT EXISTS tts_jobs (   -- 一个 speech unit 一个 job（独立 retry/cancel）
+CREATE TABLE IF NOT EXISTS assets (
   id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  scene_id TEXT,                    -- 绑定的 scene（M6；null = 项目级素材预留）
+  media_type TEXT NOT NULL,         -- image | video
+  source_type TEXT NOT NULL,        -- archive | stock | generated | upload | local
+  source_provider TEXT NOT NULL,    -- wikimedia | ...
+  source_url TEXT,
+  local_path TEXT NOT NULL,         -- public/assets/{projectId}/{id}.{ext}
+  mime_type TEXT,
+  width INTEGER, height INTEGER, duration_ms INTEGER,
+  license_status TEXT NOT NULL,     -- usable | review_required | blocked
+  license_note TEXT,
+  attribution TEXT,
+  description TEXT,
+  requirement_json TEXT,            -- 来源 assetRequirement 快照
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_assets_project_scene ON assets(project_id, scene_id);
+CREATE TABLE IF NOT EXISTS tts_jobs (   -- 一个 speech unit 一个 job（独立 retry/cancel）  id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id),
   narration_plan_artifact_id TEXT NOT NULL,
   narration_plan_version INTEGER NOT NULL,
