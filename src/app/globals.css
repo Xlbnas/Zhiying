@@ -938,6 +938,72 @@ h1, h2, h3, h4, p {
   font-size: 14px;
 }
 
+/* Jobs 页项目分组收纳（M5） */
+.job-group {
+  margin-bottom: 12px;
+  border: 1px solid var(--border, #2a2c33);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.job-group-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.job-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.job-group-summary::before {
+  content: '▸';
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.job-group[open] > .job-group-summary::before {
+  transform: rotate(90deg);
+}
+
+.job-group-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46%;
+}
+
+.job-group-counts {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.job-group-body {
+  border-top: 1px solid var(--border, #2a2c33);
+  padding: 12px 16px 16px;
+}
+
+.job-kind-heading {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 8px 0 6px;
+}
+
+.job-stage-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
 /* ---- 新建项目表单 ---- */
 .new-project {
   margin-bottom: 24px;

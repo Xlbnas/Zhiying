@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {getDb} from '../db';
 import {enqueueRenderJob, type RenderJobRow} from '../jobs';
+import {summarizeRenderProgress} from '../render/progress-detail';
 import {
   COMPOSITION_ID,
   SCHEMA_VERSION,
@@ -235,15 +236,15 @@ export function checkWorkflowRenderReadiness(
 
   const activeRender = getDb()
     .prepare(
-      `SELECT id FROM render_jobs
+      `SELECT id, progress, progress_detail FROM render_jobs
        WHERE project_id = ? AND status IN ('queued', 'running')
        ORDER BY queued_at ASC LIMIT 1`,
     )
-    .get(projectId) as {id: string} | undefined;
+    .get(projectId) as {id: string; progress: number; progress_detail: string | null} | undefined;
   if (activeRender) {
     blockers.push({
       code: 'RENDER_ALREADY_ACTIVE',
-      message: `已有进行中的渲染任务（${activeRender.id}）`,
+      message: `已有渲染任务进行中：${summarizeRenderProgress(activeRender.progress, activeRender.progress_detail)}`,
     });
   }
 
@@ -335,15 +336,15 @@ export function enqueueWorkflowPreviewRender(
     const {props, scenesVersion} = buildWorkflowRenderProps(projectId, options);
     const active = db
       .prepare(
-        `SELECT id FROM render_jobs
+        `SELECT id, progress, progress_detail FROM render_jobs
          WHERE project_id = ? AND status IN ('queued', 'running')
          ORDER BY queued_at ASC LIMIT 1`,
       )
-      .get(projectId) as {id: string} | undefined;
+      .get(projectId) as {id: string; progress: number; progress_detail: string | null} | undefined;
     if (active) {
       throw new RenderBridgeError(
         'RENDER_ALREADY_ACTIVE',
-        `已有进行中的渲染任务（${active.id}）`,
+        `已有渲染任务进行中：${summarizeRenderProgress(active.progress, active.progress_detail)}`,
       );
     }
     const job = enqueueRenderJob(projectId, 'no-subtitles', props);

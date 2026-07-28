@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS render_jobs (
   kind TEXT NOT NULL DEFAULT 'fullcut',   -- 'fullcut' | 'no-subtitles'
   status TEXT NOT NULL DEFAULT 'queued',  -- queued/running/succeeded/failed/cancelled
   progress REAL NOT NULL DEFAULT 0,       -- 0-100
+  progress_detail TEXT,                   -- M5：步骤级进度 JSON（render/progress-detail.ts）
   payload_json TEXT NOT NULL,             -- ZhiyingFullCutProps JSON
   output_path TEXT,
   error_code TEXT, error_message TEXT,
@@ -196,6 +197,11 @@ export function getDb(): Db {
   const ttsCols = db.prepare('PRAGMA table_info(tts_jobs)').all() as Array<{name: string}>;
   if (!ttsCols.some((c) => c.name === 'result_json')) {
     db.exec('ALTER TABLE tts_jobs ADD COLUMN result_json TEXT');
+  }
+  // M5 迁移（幂等，同模式）：render_jobs 增加步骤级进度列。
+  const renderCols = db.prepare('PRAGMA table_info(render_jobs)').all() as Array<{name: string}>;
+  if (!renderCols.some((c) => c.name === 'progress_detail')) {
+    db.exec('ALTER TABLE render_jobs ADD COLUMN progress_detail TEXT');
   }
   instance = db;
   return db;

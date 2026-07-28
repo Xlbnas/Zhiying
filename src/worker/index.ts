@@ -15,6 +15,7 @@ import {
   type RenderJobRow,
 } from '@/lib/jobs';
 import {recoverStaleLlmJobs} from '@/lib/llm-jobs';
+import {buildStageDetail, detailFromRemotionProgress} from '@/lib/render/progress-detail';
 import {claimNextAnyJob} from '@/lib/scheduler';
 import {recoverStaleTtsJobs} from '@/lib/tts-jobs';
 import {
@@ -193,6 +194,7 @@ async function runJob(
     }
 
     // payload 解析 + zod 校验（契约：payload_json = ZhiyingFullCutProps JSON）
+    heartbeat(job.id, 0, JSON.stringify(buildStageDetail('prepare')));
     let payloadRaw: unknown;
     try {
       payloadRaw = JSON.parse(job.payload_json);
@@ -223,6 +225,7 @@ async function runJob(
     // attempt→source→exact historical audio 解析 + WAV stage 到 bundled public root；
     // Legacy（full/audio/...）与 Preview（null）不匹配 pattern，行为零变化。
     // 必须先于 selectComposition，保证 staticFile(logicalPath) 可被 Renderer 获取。
+    heartbeat(job.id, 0, JSON.stringify(buildStageDetail('staging')));
     try {
       stageRuntimeNarrationAudio(job, parsed.data, bundleLocation);
     } catch (err) {
@@ -234,6 +237,7 @@ async function runJob(
       throw err;
     }
 
+    heartbeat(job.id, 0, JSON.stringify(buildStageDetail('compose')));
     const composition = await selectComposition({
       serveUrl: bundleLocation,
       id: compositionId,
@@ -275,14 +279,25 @@ async function runJob(
         }
         controller.signal.addEventListener('abort', callback, {once: true});
       },
-      onProgress: ({progress}: {progress: number}) => {
+      onProgress: (mediaProgress: {
+        progress: number;
+        renderedFrames: number;
+        encodedFrames: number;
+        stitchStage: 'encoding' | 'muxing';
+        renderEstimatedTime: number | null;
+      }) => {
         const nowMs = Date.now();
         if (nowMs - lastBeat < HEARTBEAT_INTERVAL_MS) {
           return;
         }
         lastBeat = nowMs;
-        // 节流上报：heartbeat 兼作进度（0-100）
-        heartbeat(job.id, Math.round(progress * 1000) / 10);
+        // M5：帧级步骤明细随心跳落库（渲染画面/编码/封装 + 预计剩余）
+        const detail = detailFromRemotionProgress(mediaProgress, composition.durationInFrames);
+        heartbeat(
+          job.id,
+          Math.round(mediaProgress.progress * 1000) / 10,
+          JSON.stringify({...detail, updatedAt: new Date().toISOString()}),
+        );
         // 每轮检查取消请求 → 中止 renderMedia
         if (isCancelRequested(job.id)) {
           controller.abort();
@@ -380,6 +395,8 @@ async function main(): Promise<void> {
       }
       let bundleLocation: string;
       try {
+        // M5：bundle 阶段写入步骤明细（首次打包可能数分钟，用户可见而非黑窗）
+        heartbeat(claimed.job.id, 0, JSON.stringify(buildStageDetail('bundle')));
         bundleLocation = await ensureBundleLazy();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

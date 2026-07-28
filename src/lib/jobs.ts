@@ -112,17 +112,17 @@ export function claimNextJob(workerId: string): Job | null {
 }
 
 /**
- * 心跳 + 进度上报（progress 0-100）。仅对 running 任务生效，
- * 避免任务已被取消/回收后又被心跳覆写。
+ * 心跳 + 进度上报（progress 0-100；M5 起可附带步骤级 progress_detail JSON）。
+ * 仅对 running 任务生效，避免任务已被取消/回收后又被心跳覆写。
  */
-export function heartbeat(jobId: string, progress: number): void {
+export function heartbeat(jobId: string, progress: number, progressDetail?: string): void {
   getDb()
     .prepare(
       `UPDATE render_jobs
-       SET heartbeat_at = ?, progress = ?
+       SET heartbeat_at = ?, progress = ?, progress_detail = COALESCE(?, progress_detail)
        WHERE id = ? AND status = 'running'`,
     )
-    .run(now(), progress, jobId);
+    .run(now(), progress, progressDetail ?? null, jobId);
 }
 
 /**

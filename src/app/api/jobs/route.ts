@@ -94,5 +94,8 @@ export function GET(req: Request): Response {
       : db.prepare('SELECT * FROM tts_jobs ORDER BY queued_at DESC').all()
   ) as TtsJobListRow[];
 
-  return Response.json({ jobs, llmJobs, ttsJobs });
+  // M5：附带项目 id→title 映射，供 Jobs 页按项目分组收纳
+  const projects = db.prepare('SELECT id, title FROM projects ORDER BY created_at DESC').all() as Array<{id: string; title: string}>;
+
+  return Response.json({ jobs, llmJobs, ttsJobs, projects });
 }

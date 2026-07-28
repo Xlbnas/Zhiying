@@ -9,6 +9,7 @@ import {isLegacyM1Project} from '../projects';
 import {applyTimingReconciliation} from '../reconciliation/adapter';
 import type {TimingReconciliation} from '../reconciliation/schema';
 import {getCurrentTimingReconciliation} from '../reconciliation/timing';
+import {summarizeRenderProgress} from '../render/progress-detail';
 import {
   COMPOSITION_ID,
   SCHEMA_VERSION,
@@ -271,6 +272,7 @@ export interface FinalRenderReadiness {
     id: string;
     status: string;
     progress: number;
+    progressDetail: string | null;
     outputPath: string | null;
     sourceArtifactVersion: number | null;
   } | null;
@@ -294,6 +296,7 @@ function latestFinalJob(projectId: string): FinalRenderReadiness['latestJob'] {
         id: job.id,
         status: job.status,
         progress: job.progress,
+        progressDetail: (job as {progress_detail?: string | null}).progress_detail ?? null,
         outputPath: job.output_path,
         sourceArtifactVersion: parsed.data.finalRenderSourceArtifactVersion,
       };
@@ -338,12 +341,15 @@ export function checkFinalRenderReadiness(projectId: string): FinalRenderReadine
   }
   const active = getDb()
     .prepare(
-      `SELECT id FROM render_jobs WHERE project_id = ? AND status IN ('queued','running')
+      `SELECT id, progress, progress_detail FROM render_jobs WHERE project_id = ? AND status IN ('queued','running')
        ORDER BY queued_at ASC LIMIT 1`,
     )
-    .get(projectId) as {id: string} | undefined;
+    .get(projectId) as {id: string; progress: number; progress_detail: string | null} | undefined;
   if (active) {
-    base.blockers.push({code: 'RENDER_ALREADY_ACTIVE', message: `已有进行中的渲染任务（${active.id}）`});
+    base.blockers.push({
+      code: 'RENDER_ALREADY_ACTIVE',
+      message: `已有渲染任务进行中：${summarizeRenderProgress(active.progress, active.progress_detail)}`,
+    });
     return base;
   }
   const rec = src.reconciliation.reconciliation;
@@ -457,12 +463,15 @@ export function enqueueFinalRender(projectId: string): EnqueueFinalRenderResult 
     // active guard（在 source INSERT 之前：冲突时事务整体回滚，不留 orphan source）
     const active = db
       .prepare(
-        `SELECT id FROM render_jobs WHERE project_id = ? AND status IN ('queued','running')
+        `SELECT id, progress, progress_detail FROM render_jobs WHERE project_id = ? AND status IN ('queued','running')
          ORDER BY queued_at ASC LIMIT 1`,
       )
-      .get(projectId) as {id: string} | undefined;
+      .get(projectId) as {id: string; progress: number; progress_detail: string | null} | undefined;
     if (active) {
-      throw new FinalRenderError('RENDER_ALREADY_ACTIVE', `已有进行中的渲染任务（${active.id}）`);
+      throw new FinalRenderError(
+        'RENDER_ALREADY_ACTIVE',
+        `已有渲染任务进行中：${summarizeRenderProgress(active.progress, active.progress_detail)}`,
+      );
     }
 
     if (!sourceArtifact) {

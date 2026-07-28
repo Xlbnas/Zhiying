@@ -2,6 +2,7 @@
 
 import {useCallback, useEffect, useState} from 'react';
 import {FullCutPlayer} from '@/components/FullCutPlayer';
+import {parseRenderProgressDetail} from '@/lib/render/progress-detail';
 import type {ZhiyingFullCutProps} from '@/lib/scene-schema';
 import {friendlyStageError} from './shared';
 
@@ -32,6 +33,7 @@ interface FinalRenderReadiness {
     id: string;
     status: string;
     progress: number;
+    progressDetail: string | null;
     outputPath: string | null;
     sourceArtifactVersion: number | null;
   } | null;
@@ -164,6 +166,11 @@ export function FinalRenderPanel({
               {JOB_STATUS_LABELS[job.status] ?? job.status}
               {job.status === 'running' ? ` ${job.progress}%` : ''}
             </span>
+            {job.status === 'running' && parseRenderProgressDetail(job.progressDetail) ? (
+              <span style={{marginLeft: 6, color: 'var(--muted)', fontSize: 12}}>
+                {parseRenderProgressDetail(job.progressDetail)!.label}
+              </span>
+            ) : null}
             {job.sourceArtifactVersion !== null ? (
               <span className="mono" style={{marginLeft: 6}}>素材 第{job.sourceArtifactVersion}版</span>
             ) : null}
