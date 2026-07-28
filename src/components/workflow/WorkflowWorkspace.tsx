@@ -9,6 +9,7 @@ import {FinalRenderPanel} from './FinalRenderPanel';
 import {StagePanel} from './StagePanel';
 import {TimingReconciliationPanel} from './TimingReconciliationPanel';
 import {VisualPreview} from './VisualPreview';
+import {UsageSummaryPanel} from './UsageSummaryPanel';
 import {WorkflowStepper} from './WorkflowStepper';
 import {nextStageAfter, STAGE_NAMES, type StagesResponse} from './shared';
 
@@ -218,6 +219,8 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
           }
         />
       )}
+
+      <UsageSummaryPanel projectId={projectId} />
     </main>
   );
 }

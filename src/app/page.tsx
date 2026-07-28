@@ -62,6 +62,8 @@ export default function ProjectsPage() {
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [showNewProject, setShowNewProject] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -123,6 +125,24 @@ export default function ProjectsPage() {
     [refresh, router],
   );
 
+  const onDelete = useCallback(async (projectId: string) => {
+    setDeleting(projectId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {method: 'DELETE'});
+      if (!res.ok) {
+        const json = (await res.json().catch(() => null)) as {error?: string; message?: string} | null;
+        throw new Error(json?.message ?? `HTTP ${res.status}`);
+      }
+      setDeleteConfirm(null);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除失败');
+    } finally {
+      setDeleting(null);
+    }
+  }, [refresh]);
+
   return (
     <main className="container fade-in">
       <div className="page-head">
@@ -167,6 +187,31 @@ export default function ProjectsPage() {
 
       {error ? <div className="error-banner">{error}</div> : null}
 
+      {/* 删除确认弹窗 */}
+      {deleteConfirm ? (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }} onClick={() => setDeleteConfirm(null)}>
+          <div style={{
+            background: 'var(--surface)', borderRadius: 16, padding: '32px 40px',
+            maxWidth: 460, width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,.4)',
+          }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{margin: 0, fontSize: 20}}>确定删除这个项目吗？</h3>
+            <p style={{margin: '16px 0 24px', color: 'var(--muted)', lineHeight: 1.7}}>
+              项目、脚本、素材、旁白、字幕、预览和最终视频都会永久删除，此操作无法撤销。
+            </p>
+            <div style={{display: 'flex', gap: 10, justifyContent: 'flex-end'}}>
+              <button type="button" className="btn" onClick={() => setDeleteConfirm(null)}>取消</button>
+              <button type="button" className="btn btn-danger" disabled={deleting === deleteConfirm}
+                onClick={() => void onDelete(deleteConfirm)}>
+                {deleting === deleteConfirm ? '删除中…' : '永久删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {projects === null ? (
         <div className="loading">正在加载项目列表…</div>
       ) : projects.length === 0 ? (
@@ -177,37 +222,39 @@ export default function ProjectsPage() {
       ) : (
         <div className="project-grid">
           {projects.map((p, i) => (
-            <Link
-              key={p.id}
-              href={`/project/${p.id}`}
-              className="project-card"
-              aria-label={`打开项目 ${p.title}`}
-            >
-              <div className="project-card-top">
-                <span className="project-index mono">
-                  {String(i + 1).padStart(2, '0')}
-                </span>
-                {p.lastJobStatus ? (
-                  <StatusBadge status={p.lastJobStatus} />
-                ) : (
-                  <span className="badge" data-status="unknown">
-                    未渲染
+            <div key={p.id} className="project-card" style={{position: 'relative'}}>
+              <Link href={`/project/${p.id}`} style={{textDecoration: 'none', color: 'inherit', display: 'block'}} aria-label={`打开项目 ${p.title}`}>
+                <div className="project-card-top">
+                  <span className="project-index mono">
+                    {String(i + 1).padStart(2, '0')}
                   </span>
-                )}
-              </div>
-              <h2 className="project-title">{p.title}</h2>
-              <div className="project-meta">
-                <span>
-                  场景 <span className="mono">{p.sceneCount ?? '—'}</span>
-                </span>
-                <span>
-                  时长 <span className="mono">{formatDurationSec(p.durationSec)}</span>
-                </span>
-                <span>
-                  更新 <span className="mono">{formatDateTime(p.updatedAt)}</span>
-                </span>
-              </div>
-            </Link>
+                  {p.lastJobStatus ? (
+                    <StatusBadge status={p.lastJobStatus} />
+                  ) : (
+                    <span className="badge" data-status="unknown">未渲染</span>
+                  )}
+                </div>
+                <h2 className="project-title">{p.title}</h2>
+                <div className="project-meta">
+                  <span>场景 <span className="mono">{p.sceneCount ?? '—'}</span></span>
+                  <span>时长 <span className="mono">{formatDurationSec(p.durationSec)}</span></span>
+                  <span>更新 <span className="mono">{formatDateTime(p.updatedAt)}</span></span>
+                </div>
+              </Link>
+              <button
+                type="button"
+                className="btn btn-sm"
+                style={{
+                  position: 'absolute', right: 10, bottom: 10,
+                  opacity: 0.5, fontSize: 12, padding: '4px 10px',
+                }}
+                disabled={deleting === p.id}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeleteConfirm(p.id); }}
+                title="删除项目"
+              >
+                删除
+              </button>
+            </div>
           ))}
         </div>
       )}

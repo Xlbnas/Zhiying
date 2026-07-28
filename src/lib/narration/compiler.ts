@@ -34,7 +34,16 @@ export class NarrationCompileError extends Error {
 /** 每个 speech unit 聚合的自然句数（deterministic 常量，测试锁定）。 */
 export const SENTENCES_PER_SPEECH_UNIT = 2;
 
-const CHAPTER_HEADING = /^##\s+第\s*(\d+)\s*章\s*(.+?)\s*$/;
+/** 章标题识别。支持：
+ *   - `## 第1章 标题`
+ *   - `## 第 1 章 标题`
+ *   - `## 第1章：标题`
+ *   - `## 第1章（00:00–01:20）标题`
+ *   - `## 第1章标题`（无空格）
+ *   章号必须是正整数，空格（含全角空格 U+3000）和冒号（:：）在「章」后均视为分隔。
+ *   时间范围后缀由 DECLARED_RANGE 在 title 提取阶段处理。
+ */
+const CHAPTER_HEADING = /^##[\u3000\s]+第[\u3000\s]*(\d+)[\u3000\s]*章[\u3000\s:：]*(.+?)[\u3000\s]*$/;
 /** 正式声明时间区间（（mm:ss–mm:ss），兼容 – — - 三种破折号）；其他括号标题文本一律保留。 */
 const DECLARED_RANGE = /（\s*\d{1,2}:\d{2}\s*[–—-]\s*\d{1,2}:\d{2}\s*）\s*$/;
 const HEADING = /^#{1,6}\s+/;
@@ -132,6 +141,8 @@ function groupSentences(sentences: string[], perUnit: number): string[] {
 }
 
 function parseScript(markdown: string): {chapters: NarrationChapter[]; paragraphs: ParsedParagraph[]} {
+  // CRLF → LF 归一化；trim BOM（\uFEFF）
+  const normalized = markdown.replace(/\r\n/g, '\n').replace(/^\uFEFF/, '');
   const chapters: NarrationChapter[] = [];
   const paragraphs: ParsedParagraph[] = [];
   let currentChapter: number | null = null;
@@ -148,7 +159,7 @@ function parseScript(markdown: string): {chapters: NarrationChapter[]; paragraph
     });
   };
 
-  for (const line of markdown.split('\n')) {
+  for (const line of normalized.split('\n')) {
     const trimmed = line.trim();
     const chapterMatch = CHAPTER_HEADING.exec(trimmed);
     if (chapterMatch) {
@@ -192,7 +203,7 @@ export function compileNarrationPlan(input: {
   if (chapters.length === 0) {
     throw new NarrationCompileError(
       'SCRIPT_V2_INVALID',
-      'Script V2 不含任何 `## 第 N 章 标题` 章节标记',
+      '没有识别到脚本章节，请检查脚本定稿中的章节标题。',
     );
   }
 

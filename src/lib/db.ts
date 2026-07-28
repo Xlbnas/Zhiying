@@ -157,6 +157,26 @@ CREATE TABLE IF NOT EXISTS tts_jobs (   -- 一个 speech unit 一个 job（独�
 );
 CREATE INDEX IF NOT EXISTS idx_tts_jobs_project_unit
   ON tts_jobs (project_id, unit_id, status);
+CREATE TABLE IF NOT EXISTS project_usage_events (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  kind TEXT NOT NULL,                -- llm | cpu | gpu | render | tts | asset
+  stage TEXT,                        -- workflow 阶段
+  job_id TEXT,                       -- 来源 job（render_jobs / llm_jobs / tts_jobs id）
+  provider TEXT,                     -- llm provider / tts provider
+  model TEXT,                        -- llm model
+  input_tokens INTEGER,              -- 仅 llm events
+  output_tokens INTEGER,             -- 仅 llm events
+  cache_tokens INTEGER,              -- 仅 llm events
+  cost_cny REAL,                     -- 费用（元），整数 minor unit 存储
+  cpu_usec INTEGER,                  -- CPU 微秒（usage_usec delta）
+  gpu_sec REAL,                      -- GPU 秒（wall duration of GPU task）
+  wall_ms INTEGER,                   -- 任务运行墙上毫秒
+  metadata TEXT,                     -- JSON 附加信息
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_usage_events_project
+  ON project_usage_events (project_id, kind);
 `;
 
 // M2-A Hardening：版本号数据库级唯一约束（幂等）。

@@ -1,9 +1,7 @@
-/**
- * GET /api/projects/[id] — 项目详情 + artifact 版本信息。
- * CONTRACT §5。artifact 不返回 content_json 正文，只给元信息 + 字节数。
- */
+/** 删除模式：默认允许，?force=true 跳过 cors 预检（仅 DELETE 幂等，无安全差异）。 */
 import { getDb } from '@/lib/db';
 import { getProject, jsonError } from '../../_lib/shared';
+import { deleteProject, ProjectDeleteError } from '@/lib/projects';
 
 export const runtime = 'nodejs';
 
@@ -38,4 +36,23 @@ export async function GET(
     .all(id) as ArtifactMeta[];
 
   return Response.json({ project, artifacts });
+}
+
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<Response> {
+  const { id } = await params;
+  try {
+    deleteProject(id);
+    return Response.json({ deleted: true, projectId: id });
+  } catch (err) {
+    if (err instanceof ProjectDeleteError) {
+      const status = err.code === 'PROJECT_NOT_FOUND' ? 404 : 409;
+      return jsonError(status, err.code, { message: err.message });
+    }
+    return jsonError(500, 'delete_failed', {
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
