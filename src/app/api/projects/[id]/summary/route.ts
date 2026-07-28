@@ -2,7 +2,7 @@
  * GET /api/projects/[id]/summary — 项目用量总结。
  */
 import {getProjectUsageSummary} from '@/lib/usage-events';
-import {getProject, jsonError} from '../../_lib/shared';
+import {getProject, jsonError} from '../../../_lib/shared';
 
 export const runtime = 'nodejs';
 
