@@ -66,6 +66,12 @@ jobs:
       - name: M4-C1 semantic compose gate 单元 fixtures
         run: python3 scripts/test-m4c1-semantic-gate.py
 
+      - name: M5 scenes deterministic compiler
+        run: npx tsx scripts/test-m2e-scenes-compiler.ts
+
+      - name: M5 UI 逻辑（表单/进阶/竞态/友好错误）
+        run: npx tsx scripts/test-m5-ui-logic.ts
+
       - name: M4-B adapter registry/MD5 测试（mock upstream）
         run: npx tsx scripts/test-m4b-adapter.ts
 

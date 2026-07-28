@@ -927,6 +927,17 @@ h1, h2, h3, h4, p {
   font-size: 13px;
 }
 
+/* 锁定成功进阶提示（M5） */
+.advance-notice {
+  margin-top: 14px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--status-locked, #2f9e6e) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--status-locked, #2f9e6e) 40%, transparent);
+  color: var(--text);
+  font-size: 14px;
+}
+
 /* ---- 新建项目表单 ---- */
 .new-project {
   margin-bottom: 24px;

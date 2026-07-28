@@ -107,7 +107,7 @@ const EXPECTED_META: Record<WorkflowStage, {promptVersion: string; model: string
   narration_beat_map: {promptVersion: 'narration-beat-map@1.0', model: 'deepseek-v4-flash', contentType: 'markdown'},
   visual_breakdown: {promptVersion: 'visual-breakdown@1.0', model: 'deepseek-v4-flash', contentType: 'markdown'},
   shot_list: {promptVersion: 'shot-list@1.0', model: 'deepseek-v4-flash', contentType: 'json'},
-  scenes: {promptVersion: 'scenes@1.0', model: 'deepseek-v4-flash', contentType: 'json'},
+  scenes: {promptVersion: 'scenes@1.1', model: 'deepseek-v4-flash', contentType: 'json'},
 };
 
 /** 完整链：十阶段依次 generate + lock（真实 enqueue → claim → runLlmJob → lockStage）。 */

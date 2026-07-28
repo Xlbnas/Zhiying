@@ -1,6 +1,7 @@
 'use client';
 
 import {useCallback, useEffect, useState} from 'react';
+import {STAGE_STATE_LABELS} from './shared';
 
 /**
  * Narration 区（M3-A §二十三/二十四）：Script V2 → Narration Plan。
@@ -112,7 +113,7 @@ const SUBTITLE_STATUS_LABELS: Record<string, string> = {
   ready: '已就绪',
   stale: '已失效',
   missing: '未生成',
-  not_ready: '待音频',
+  not_ready: '待配音',
 };
 
 const KIND_LABELS: Record<string, string> = {
@@ -157,7 +158,7 @@ export function NarrationPanel({
       }
       setError(null);
     } catch {
-      setError('Narration 数据加载失败');
+      setError('旁白数据加载失败');
     }
   }, [projectId]);
 
@@ -241,18 +242,18 @@ export function NarrationPanel({
     : null;
 
   return (
-    <section className="stage-panel" style={{marginTop: 20}} aria-label="Narration">
+    <section id="narration-panel" className="stage-panel" style={{marginTop: 20}} aria-label="旁白">
       <div className="stage-panel-head">
         <div>
-          <h2 className="stage-panel-title">Narration</h2>
+          <h2 className="stage-panel-title">旁白</h2>
           <p className="stage-panel-sub">
-            Script V2 → Narration Plan（TTS 输入契约 · 音频阶段 M3-A）
+            把脚本整理成可以配音的旁白文本
           </p>
         </div>
         <div className="stage-actions">
           {plan ? (
             <button type="button" className="btn btn-sm" onClick={() => setShowUnits((v) => !v)}>
-              {showUnits ? '收起 Units' : '查看 Units'}
+              {showUnits ? '收起分段' : '查看分段'}
             </button>
           ) : null}
           <button
@@ -261,7 +262,7 @@ export function NarrationPanel({
             disabled={busy || data?.status === 'not_locked'}
             onClick={() => void build()}
           >
-            {busy ? '构建中…' : plan ? '重新构建 Plan' : 'Build Narration Plan'}
+            {busy ? '生成中…' : plan ? '重新生成旁白' : '生成旁白'}
           </button>
         </div>
       </div>
@@ -277,10 +278,12 @@ export function NarrationPanel({
               {STATUS_LABELS[data.status]}
             </span>
             <span>
-              Source{' '}
-              <span className="mono">
-                Script V2 {data.scriptV2LockedVersion !== null ? `v${data.scriptV2LockedVersion}` : '—'}（{data.scriptV2Status ?? '—'}）
-              </span>
+              基于脚本 V2 第{' '}
+              {data.scriptV2LockedVersion !== null ? data.scriptV2LockedVersion : '—'} 版（
+              {data.scriptV2Status
+                ? (STAGE_STATE_LABELS[data.scriptV2Status as keyof typeof STAGE_STATE_LABELS] ?? data.scriptV2Status)
+                : '—'}
+              ）
             </span>
             {plan ? (
               <>
@@ -290,20 +293,20 @@ export function NarrationPanel({
                   <span className="mono">{counts!.visual_breath}</span> · 韵律{' '}
                   <span className="mono">{counts!.prosody}</span>
                 </span>
-                <span className="mono">
-                  {plan.schemaVersion} · compiler@{plan.compilerVersion} · artifact v
-                  {data.artifactVersion}
-                </span>
+                <details style={{alignSelf: 'center'}}>
+                  <summary style={{cursor: 'pointer', opacity: 0.75, fontSize: 12}}>技术详情</summary>
+                  <div className="mono" style={{marginTop: 4, fontSize: 12}}>
+                    {plan.schemaVersion} · compiler@{plan.compilerVersion} · artifact v
+                    {data.artifactVersion}
+                  </div>
+                </details>
               </>
             ) : null}
             {data.status === 'not_locked' ? (
-              <span>先锁定 Script V2，才能构建 Narration Plan</span>
+              <span>先锁定脚本 V2，才能生成旁白</span>
             ) : null}
             {data.status === 'stale' ? (
-              <span>
-                已有 plan 已过期（基于 Script V2 v{data.latestPlanSourceVersion} 或旧编译器，
-                与当前锁定版本/编译器不一致）——请重新构建
-              </span>
+              <span>旁白已过期（脚本已更新），请重新生成</span>
             ) : null}
           </>
         ) : (
@@ -324,7 +327,7 @@ export function NarrationPanel({
                   ? unit.text
                   : unit.kind === 'pause'
                     ? unit.pauseMs !== null
-                      ? `停顿 ${unit.pauseMs}ms`
+                      ? `停顿 ${unit.pauseMs} 毫秒`
                       : `停顿（${unit.directive}）`
                     : unit.kind === 'visual_breath'
                       ? '画面留白（时长由后续阶段决定）'
@@ -345,7 +348,7 @@ export function NarrationPanel({
       {audio && data?.status === 'ready' ? (
         <>
           <div className="panel-head" style={{borderTop: '1px solid var(--border)'}}>
-            <span className="panel-title">NARRATION AUDIO（M3-B · 无字幕/时长以实测为准）</span>
+            <span className="panel-title">配音</span>
             <div className="panel-head-actions">
               {audio.units.some((u) => u.jobStatus === 'queued' || u.jobStatus === 'running') ? (
                 <button
@@ -354,7 +357,7 @@ export function NarrationPanel({
                   disabled={audioBusy !== null}
                   onClick={() => void cancelAudio()}
                 >
-                  {audioBusy === 'cancel' ? '取消中…' : '取消音频任务'}
+                  {audioBusy === 'cancel' ? '取消中…' : '取消配音任务'}
                 </button>
               ) : null}
               <button
@@ -366,8 +369,8 @@ export function NarrationPanel({
                 {audioBusy === 'generate'
                   ? '提交中…'
                   : audio.status === 'ready'
-                    ? '音频已就绪'
-                    : 'Generate Audio'}
+                    ? '配音已就绪'
+                    : '生成配音'}
               </button>
             </div>
           </div>
@@ -376,7 +379,7 @@ export function NarrationPanel({
               {AUDIO_STATUS_LABELS[audio.status]}
             </span>
             <span>
-              Provider <span className="mono">{audio.providerName}</span> · Voice{' '}
+              配音服务 <span className="mono">{audio.providerName}</span> · 声音{' '}
               <span className="mono">
                 {audio.voiceProfile.id}@{audio.voiceProfile.revision}
               </span>
@@ -386,18 +389,20 @@ export function NarrationPanel({
             </span>
             {audio.master ? (
               <span>
-                Master <span className="mono">{(audio.master.durationMs / 1000).toFixed(1)}s</span>
+                母版 <span className="mono">{(audio.master.durationMs / 1000).toFixed(1)} 秒</span>
               </span>
             ) : null}
             {audio.providerDetail ? (
-              <span title={`providerVersion=${audio.providerDetail.providerVersion ?? 'n/a'}`}>
-                模型 <span className="mono">{audio.providerDetail.model}</span>
-                {audio.providerDetail.providerCommit ? (
-                  <>
-                    {' '}· commit <span className="mono">{audio.providerDetail.providerCommit.slice(0, 12)}</span>
-                  </>
-                ) : null}
-              </span>
+              <details style={{alignSelf: 'center'}}>
+                <summary style={{cursor: 'pointer', opacity: 0.75, fontSize: 12}}>技术详情</summary>
+                <div className="mono" style={{marginTop: 4, fontSize: 12}}>
+                  模型 {audio.providerDetail.model}
+                  {audio.providerDetail.providerCommit
+                    ? ` · commit ${audio.providerDetail.providerCommit.slice(0, 12)}`
+                    : ''}
+                  {` · providerVersion=${audio.providerDetail.providerVersion ?? 'n/a'}`}
+                </div>
+              </details>
             ) : null}
           </div>
           <div className="scene-list" style={{maxHeight: 280}}>
@@ -412,11 +417,11 @@ export function NarrationPanel({
                     ? (unit.text ?? '').slice(0, 42)
                     : unit.kind === 'pause'
                       ? unit.pauseMs !== null
-                        ? `停顿 ${unit.pauseMs}ms`
+                        ? `停顿 ${unit.pauseMs} 毫秒`
                         : `停顿（${unit.directive}）· 未解析`
                       : unit.kind === 'prosody'
                         ? `韵律：${unit.directive}（未应用）`
-                        : '画面留白（待 timing）'}
+                        : '画面留白（时长待定）'}
                 </span>
                 <span className="scene-dur mono" style={{display: 'flex', alignItems: 'center', gap: 8}}>
                   {unit.kind === 'speech' && unit.jobStatus ? (
@@ -464,11 +469,11 @@ export function NarrationPanel({
       {subtitle ? (
         <>
           <div className="panel-head" style={{borderTop: '1px solid var(--border)'}}>
-            <span className="panel-title">SUBTITLE TIMING（M3-C · 句级 · 实测 unit + 比例估算）</span>
+            <span className="panel-title">字幕</span>
             <div className="panel-head-actions">
               {subtitle.status === 'ready' && subtitle.timing ? (
                 <button type="button" className="btn btn-sm" onClick={() => setShowCues((v) => !v)}>
-                  {showCues ? '收起 Cues' : '查看 Cues'}
+                  {showCues ? '收起字幕' : '查看字幕'}
                 </button>
               ) : null}
               <button
@@ -478,10 +483,10 @@ export function NarrationPanel({
                 onClick={() => void buildSubtitles()}
               >
                 {subtitleBusy
-                  ? '构建中…'
+                  ? '生成中…'
                   : subtitle.status === 'ready'
-                    ? '重新构建字幕'
-                    : 'Build Subtitle Timing'}
+                    ? '重新生成字幕'
+                    : '生成字幕'}
               </button>
             </div>
           </div>
@@ -490,32 +495,33 @@ export function NarrationPanel({
               {SUBTITLE_STATUS_LABELS[subtitle.status]}
             </span>
             {subtitle.sourceAudio ? (
-              <span>
-                Source Audio Manifest <span className="mono">v{subtitle.sourceAudio.artifactVersion}</span>
-              </span>
+              <details style={{alignSelf: 'center'}}>
+                <summary style={{cursor: 'pointer', opacity: 0.75, fontSize: 12}}>技术详情</summary>
+                <div className="mono" style={{marginTop: 4, fontSize: 12}}>
+                  Source Audio Manifest v{subtitle.sourceAudio.artifactVersion} · Subtitle Compiler v
+                  {subtitle.compilerVersion}
+                  {subtitle.artifactVersion !== null ? ` · artifact v${subtitle.artifactVersion}` : ''}
+                </div>
+              </details>
             ) : null}
-            <span>
-              Subtitle Compiler <span className="mono">v{subtitle.compilerVersion}</span>
-            </span>
             {subtitle.status === 'ready' ? (
               <>
                 <span>
-                  Cue Count <span className="mono">{subtitle.cueCount}</span>
+                  字幕条数 <span className="mono">{subtitle.cueCount}</span>
                 </span>
                 <span>
-                  Timeline <span className="mono">{((subtitle.timelineDurationMs ?? 0) / 1000).toFixed(1)}s</span>
+                  总时长 <span className="mono">{((subtitle.timelineDurationMs ?? 0) / 1000).toFixed(1)} 秒</span>
                 </span>
                 <span>
-                  Unresolved <span className="mono">{subtitle.unresolvedCount}</span>
+                  待确认 <span className="mono">{subtitle.unresolvedCount}</span>
                 </span>
-                <span className="mono">artifact v{subtitle.artifactVersion}</span>
               </>
             ) : null}
             {subtitle.status === 'stale' ? (
-              <span>字幕已过期（source audio 或 compiler 已前进）——请重新构建</span>
+              <span>字幕已过期（配音已更新），请重新生成</span>
             ) : null}
             {subtitle.status === 'not_ready' ? (
-              <span>等待 Narration Audio 就绪后才能构建字幕</span>
+              <span>生成配音后才能生成字幕</span>
             ) : null}
           </div>
           {showCues && subtitle.timing ? (

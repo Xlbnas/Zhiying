@@ -5,10 +5,16 @@
  * 系统数据边界：AI 只负责 chapterTiming 与 scenes[]；
  * schemaVersion / templateVersion / composition / fps / width / height 是系统数据，
  * 不在输出契约内（FPS 仅作为帧换算常量经 user 告知）。
+ *
+ * M5 确定性分层：AI 输出经 zod 后先过 deterministic compiler
+ * （src/lib/scenes/compiler.ts）——enum alias、chapter 边界、scene 绝对时间轴、
+ * chapterTitle、duration、帧字段全部由程序归一；AI 只需专注场景内容、chapter
+ * 归属、category/visualType 语义、模板与时长权重。
  */
 
 import {z} from 'zod';
 import {chapterTimingSchema, sceneSchema} from '../scene-schema';
+import {normalizeScenesOutput} from '../scenes/compiler';
 import {
   SCENES_SYSTEM_FPS,
   scenesSemanticIssues,
@@ -41,9 +47,15 @@ const system = composeSystem(
   SHARED_MG_PRINCIPLES,
   `【目标】产出 Scenes JSON：稳定 Scene ID、时间、章节、类型、模板、旁白摘要、画面描述、assetIds、licenseStatus、字幕位置和转场。`,
   `【推理与输出行为】
-- Scene ID 稳定且连续：S001、S002 … 顺序递增，时间轴无重叠无空洞（前一场 end = 后一场 start）。
-- duration 必须等于 end - start；startFrame = round(start × FPS)，durationInFrames = round(duration × FPS)。
-- category ∈ {MG, B-roll, Archive, Minimal, Editorial Graphic}；visualType ∈ {MG, Asset, Archive, Minimal, UI}。
+- Scene ID 稳定且连续：S001、S002 … 顺序递增。
+- start/end/duration 只给**估算时长权重**：系统会按 chapter 归属与时间权重
+  程序化重排绝对时间轴（保证 chapter 内连续、不跨章、末场收在章末），
+  你不需要、也不应该追求毫秒级自洽；但每个 Scene 必须明确归属一个 chapter，
+  且给出符合叙事节奏的相对时长。
+- category 必须精确取 {MG, B-roll, Archive, Minimal, Editorial Graphic} 之一；
+  visualType 必须精确取 {MG, Asset, Archive, Minimal, UI} 之一（注意两套词表
+  不同：上游 Shot 的 "Reality B-roll" 在 Scene 层是 category="B-roll"、
+  visualType="Asset"）。
 - MG Scene 必须给出 template（稳定英文模板 ID）与 sourceTemplate；非 MG 为 null。
 - narrationSummary 是该 Scene 对应旁白的语义摘要，不是旁白原文。
 - description 写画面职责与构成（可执行、具体），不是生成式空话。
@@ -60,21 +72,25 @@ const system = composeSystem(
     "assetIds": [], "licenseStatus": "not-applicable", "subtitlePosition": "bottom",
     "transitionIn": "none", "transitionOut": "cut"}]
 }
-chapterTiming 覆盖全部章节且时间连续；scenes 覆盖 0 到全片时长。`,
+chapterTiming 按章节顺序给出各章的**估算时长**（start/end 仅表达相对比例，
+系统会重建连续边界）；scenes 按叙事顺序覆盖全部章节。`,
   `【禁止行为】
 - 禁止输出 schemaVersion / templateVersion / composition / fps / width / height —— 这些是系统数据，由系统补齐。
 - 禁止编造 assetIds、模板 ID 或授权状态。
 - 不得改动 Shot List 的节奏与功能分配。
 - 不得输出 JSON 以外的任何文字。`,
-  `【自检】输出前确认：ID 连续？时间轴无重叠无空洞？帧字段与 FPS 换算一致？MG 必有 template？授权状态无 unknown？JSON 可解析？`,
+  `【自检】输出前确认：ID 连续？每个 Scene 都明确归属一个存在的 chapter？时长权重符合叙事节奏？MG 必有 template？授权状态无 unknown？JSON 可解析？`,
 );
 
 export const scenesPrompt: StagePrompt = {
   stage: 'scenes',
-  promptVersion: 'scenes@1.0',
+  promptVersion: 'scenes@1.1',
   outputKind: 'json',
   system,
   zodSchema: scenesAiOutputSchema,
+  // M5：zod 之后的 deterministic normalize（enum alias / chapter 边界 /
+  // 绝对时间轴 / 帧字段由程序归一），再进语义门禁
+  normalizeOutput: normalizeScenesOutput,
   // M2-E-A：结构 zod 之后的确定性语义校验（LLM 输出与人工编辑共用）
   semanticValidate: scenesSemanticIssues,
   buildUser(input) {

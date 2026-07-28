@@ -216,10 +216,15 @@ export async function executeStageGeneration(
 
     const safe = schema!.safeParse(parsed);
     if (safe.success) {
+      // M5：deterministic normalize（Scenes：enum alias / chapter 边界 /
+      // 绝对时间轴由程序归一）——先于语义校验，归一结果持久化为 artifact。
+      const normalized = prompt.normalizeOutput
+        ? prompt.normalizeOutput(safe.data)
+        : safe.data;
       // M2-E-A：结构校验之后的语义校验（Scenes 语义门禁）——
       // 失败走与 Zod 失败相同的有限 repair 路径；系统只校验，不自动修数据。
       if (prompt.semanticValidate) {
-        const semanticIssues = prompt.semanticValidate(safe.data);
+        const semanticIssues = prompt.semanticValidate(normalized);
         if (semanticIssues.length > 0) {
           lastFailure = `语义校验失败：\n${formatSemanticIssues(semanticIssues)}`;
           if (attempt === maxAttempts) {
@@ -234,9 +239,9 @@ export async function executeStageGeneration(
       }
       return {
         stage,
-        content: JSON.stringify(safe.data),
+        content: JSON.stringify(normalized),
         contentType: 'json',
-        parsed: safe.data,
+        parsed: normalized,
         provider: provider.name,
         model: response.model,
         promptVersion: prompt.promptVersion,

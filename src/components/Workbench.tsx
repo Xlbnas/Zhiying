@@ -136,7 +136,7 @@ export function Workbench({projectId}: {projectId: string}) {
           <h1 className="page-title">{title ?? project.title}</h1>
           <p className="page-sub mono">
             {scenes.length} 个场景 · {formatDurationSec(project.durationSec)} ·{' '}
-            {project.width}×{project.height} · {project.fps}fps
+            {project.width}×{project.height} · {project.fps} 帧/秒
           </p>
         </div>
       </div>
@@ -147,7 +147,7 @@ export function Workbench({projectId}: {projectId: string}) {
         {/* 左：Scene 列表（只读） */}
         <section className="panel" aria-label="场景列表">
           <div className="panel-head">
-            <span className="panel-title">场景 SCENES</span>
+            <span className="panel-title">场景</span>
             <span className="mono" style={{fontSize: 12, color: 'var(--muted)'}}>
               {scenes.length}
             </span>
@@ -183,7 +183,7 @@ export function Workbench({projectId}: {projectId: string}) {
         {/* 右：Player + 导出 */}
         <section className="panel" aria-label="预览与导出">
           <div className="panel-head">
-            <span className="panel-title">预览 PREVIEW</span>
+            <span className="panel-title">预览</span>
             <div className="panel-head-actions">
               <button
                 type="button"

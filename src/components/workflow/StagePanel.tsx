@@ -1,8 +1,11 @@
 'use client';
 
-import {useCallback, useEffect, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {formatDateTime} from '@/components/format';
+import type {WorkflowStage} from '@/lib/workflow/types';
 import {
+  createLatestOnlyGuard,
+  friendlyStageError,
   LLM_JOB_STATUS_LABELS,
   STAGE_NAMES,
   STAGE_STATE_LABELS,
@@ -15,6 +18,8 @@ import {
  * - Markdown 普通编辑区；JSON monospace + pretty print + 类型标记 + 服务端校验错误展示
  * - 版本历史 Drawer（查看历史 / 回滚：复制为新版本，历史不移动）
  * - stale 阶段：失效提示 + 旧内容保留 + 重新生成
+ * - M5：切换阶段由父级 key 强制重挂载（旧内容零残留）；load 带序号防竞态；
+ *   锁定成功经 onLocked 通知父级自动进入下一阶段
  */
 
 interface StageVersion {
@@ -57,8 +62,8 @@ interface ApiErrorBody {
 const VERSION_SOURCE_LABELS: Record<string, string> = {
   ai_generate: 'AI 生成',
   manual_edit: '人工编辑',
-  repair: 'Repair',
-  rollback: 'Rollback',
+  repair: '修复生成',
+  rollback: '回滚',
 };
 
 async function readBody(res: Response): Promise<ApiErrorBody> {
@@ -82,10 +87,12 @@ export function StagePanel({
   projectId,
   stageState,
   onChanged,
+  onLocked,
 }: {
   projectId: string;
   stageState: WorkflowStageState;
   onChanged: () => void;
+  onLocked?: (stage: WorkflowStage) => void;
 }) {
   const stage = stageState.stage;
   const [data, setData] = useState<StageContentResponse | null>(null);
@@ -96,16 +103,21 @@ export function StagePanel({
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const [affected, setAffected] = useState<string[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // M5：请求序号防竞态——慢响应不得覆盖更新一次请求的结果
+  const guardRef = useRef(createLatestOnlyGuard());
 
   const load = useCallback(async () => {
+    const seq = guardRef.current.next();
     try {
       const res = await fetch(`/api/projects/${projectId}/stage/${stage}`, {
         cache: 'no-store',
       });
+      if (!guardRef.current.isLatest(seq)) return; // 已有更新请求在途，丢弃 stale 响应
       if (!res.ok) throw new Error(await readError(res));
       setData((await res.json()) as StageContentResponse);
       setError(null);
     } catch (err) {
+      if (!guardRef.current.isLatest(seq)) return;
       setError(err instanceof Error ? err.message : '阶段内容加载失败');
     }
   }, [projectId, stage]);
@@ -176,12 +188,13 @@ export function StagePanel({
       });
       if (!res.ok) throw new Error(await readError(res));
       onChanged();
+      onLocked?.(stage);
     } catch (err) {
       setError(err instanceof Error ? err.message : '锁定失败');
     } finally {
       setBusy(null);
     }
-  }, [projectId, stage, onChanged]);
+  }, [projectId, stage, onChanged, onLocked]);
 
   const cancelJob = useCallback(
     async (jobId: string) => {
@@ -212,6 +225,8 @@ export function StagePanel({
   const outputKind = data?.outputKind ?? 'markdown';
   const isJson = outputKind === 'json';
   const hasContent = version !== null;
+  // M5：首次加载完成前显示 loading（不允许出现「新标题 + 旧内容/错误空态」）
+  const initialLoading = data === null && error === null;
   const canEdit =
     !activeJob && (status === 'generated' || status === 'edited' || status === 'stale');
   const canLock =
@@ -224,11 +239,11 @@ export function StagePanel({
         <div>
           <h2 className="stage-panel-title">
             {STAGE_NAMES[stage]}
-            {isJson ? <span className="json-type-badge" style={{marginLeft: 10}}>JSON</span> : null}
+            {isJson ? <span className="json-type-badge" style={{marginLeft: 10}}>结构化数据</span> : null}
           </h2>
-          <p className="stage-panel-sub mono">
-            {stage} · {STAGE_STATE_LABELS[status]}
-            {stageState.locked_version !== null ? ` · 锁定 v${stageState.locked_version}` : ''}
+          <p className="stage-panel-sub">
+            {STAGE_STATE_LABELS[status]}
+            {stageState.locked_version !== null ? ` · 已锁定第 ${stageState.locked_version} 版` : ''}
           </p>
         </div>
         <div className="stage-actions">
@@ -372,7 +387,7 @@ export function StagePanel({
         {version ? <span className="mono">v{version.version}</span> : null}
         {version?.prompt_version ? (
           <span>
-            Prompt <span className="mono">{version.prompt_version}</span>
+            提示词 <span className="mono">{version.prompt_version}</span>
           </span>
         ) : null}
         {version?.model ? (
@@ -402,7 +417,15 @@ export function StagePanel({
 
       {latestJob?.status === 'failed' && latestJob.error_message ? (
         <div className="error-banner" style={{margin: 0, borderRadius: 0}}>
-          最近生成失败（{latestJob.error_code ?? 'unknown'}）：{latestJob.error_message}
+          {friendlyStageError(latestJob.error_code, latestJob.error_message)}
+          {latestJob.error_code ? (
+            <details style={{marginTop: 6}}>
+              <summary style={{cursor: 'pointer', opacity: 0.75}}>技术详情</summary>
+              <div className="mono" style={{marginTop: 4, fontSize: 12}}>
+                {latestJob.error_code}
+              </div>
+            </details>
+          ) : null}
         </div>
       ) : null}
       {error ? (
@@ -426,6 +449,10 @@ export function StagePanel({
           aria-label="编辑阶段内容"
           spellCheck={false}
         />
+      ) : initialLoading ? (
+        <div className="stage-empty">
+          <p className="empty-title">正在加载「{STAGE_NAMES[stage]}」…</p>
+        </div>
       ) : hasContent ? (
         <div className={isJson ? 'stage-content mono' : 'stage-content'} style={isJson ? {fontFamily: 'var(--font-mono)', fontSize: 12.5, lineHeight: 1.7} : undefined}>
           {isJson ? prettyJson(version.content) : version.content}
@@ -576,8 +603,8 @@ function VersionHistoryDrawer({
                   <span className="badge" data-version-source={v.source}>
                     {VERSION_SOURCE_LABELS[v.source] ?? v.source}
                   </span>
-                  {v.isActive ? <span className="badge" data-stage-state="generated">Active</span> : null}
-                  {v.isLocked ? <span className="badge" data-stage-state="locked">Locked</span> : null}
+                  {v.isActive ? <span className="badge" data-stage-state="generated">当前版本</span> : null}
+                  {v.isLocked ? <span className="badge" data-stage-state="locked">已锁定</span> : null}
                 </div>
                 <div className="version-meta">
                   {v.promptVersion ? <span className="mono">{v.promptVersion}</span> : null}

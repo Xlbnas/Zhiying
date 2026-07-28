@@ -43,6 +43,13 @@ export interface StagePrompt {
    * LLM 输出与人工 JSON 编辑共用同一套规则——返回问题列表（空 = 通过）。
    */
   semanticValidate?: (data: unknown) => Array<{code: string; message: string}>;
+  /**
+   * Deterministic normalize（可选，zod 结构校验通过之后、语义校验之前执行；
+   * M5 Scenes 起）。能由程序确定的字段（enum alias / chapter 边界 / 绝对时间轴
+   * / 帧换算）在此归一，归一结果进入语义校验并作为 artifact 持久化。
+   * 必须幂等：对已合法输出再执行结果不变。
+   */
+  normalizeOutput?: (data: unknown) => unknown;
 }
 
 // ---------- 共享 system 片段（总控提示词全局原则的产品化） ----------

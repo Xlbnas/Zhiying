@@ -3,6 +3,7 @@
 import {useCallback, useEffect, useState} from 'react';
 import {FullCutPlayer} from '@/components/FullCutPlayer';
 import type {ZhiyingFullCutProps} from '@/lib/scene-schema';
+import {friendlyStageError} from './shared';
 
 /**
  * Final Render 区（M3-E）：四 source 全 current → Render Final Video →
@@ -63,7 +64,7 @@ export function FinalRenderPanel({
       setData((await res.json()) as FinalRenderReadiness);
       setError(null);
     } catch {
-      setError('Final Render 数据加载失败');
+      setError('最终视频数据加载失败');
     }
   }, [projectId]);
 
@@ -102,13 +103,13 @@ export function FinalRenderPanel({
   const job = data.latestJob;
 
   return (
-    <section className="stage-panel" style={{marginTop: 20}} aria-label="Final Render">
+    <section className="stage-panel" style={{marginTop: 20}} aria-label="最终视频">
       <div className="panel-head">
-        <span className="panel-title">FINAL RENDER（M3-E · 旁白 + 字幕成片）</span>
+        <span className="panel-title">最终视频</span>
         <div className="panel-head-actions">
           {job?.status === 'succeeded' && job.outputPath ? (
             <a className="btn btn-sm" href={`/api/jobs/${job.id}/download`} download>
-              Download MP4
+              下载视频
             </a>
           ) : null}
           <button
@@ -117,7 +118,7 @@ export function FinalRenderPanel({
             disabled={!data.ready || busy}
             onClick={() => void render()}
           >
-            {busy ? '创建中…' : 'Render Final Video'}
+            {busy ? '创建中…' : '生成最终视频'}
           </button>
         </div>
       </div>
@@ -132,27 +133,27 @@ export function FinalRenderPanel({
         </span>
         {data.sources ? (
           <span>
-            Scenes <span className="mono">v{data.sources.scenesVersion}</span> · Audio{' '}
-            <span className="mono">v{data.sources.audioArtifactVersion}</span> · Subtitle{' '}
-            <span className="mono">v{data.sources.subtitleArtifactVersion}</span> · Reconciliation{' '}
-            <span className="mono">v{data.sources.reconciliationArtifactVersion}</span>
+            场景 第{data.sources.scenesVersion}版 · 配音 第{data.sources.audioArtifactVersion}版 · 字幕 第{data.sources.subtitleArtifactVersion}版 · 校准 第{data.sources.reconciliationArtifactVersion}版
           </span>
         ) : null}
-        <span>
-          Final Source Compiler <span className="mono">v{data.compilerVersion}</span>
-        </span>
+        <details style={{alignSelf: 'center'}}>
+          <summary style={{cursor: 'pointer', opacity: 0.75, fontSize: 12}}>技术详情</summary>
+          <div className="mono" style={{marginTop: 4, fontSize: 12}}>
+            Final Source Compiler v{data.compilerVersion}
+          </div>
+        </details>
         {data.ready ? (
           <>
             <span>
-              Scenes <span className="mono">{data.sceneCount}</span> · Cues{' '}
-              <span className="mono">{data.subtitleCueCount}</span>
+              <span className="mono">{data.sceneCount}</span> 个场景 ·{' '}
+              <span className="mono">{data.subtitleCueCount}</span> 条字幕
             </span>
             <span>
-              Master <span className="mono">{((data.masterDurationMs ?? 0) / 1000).toFixed(1)}s</span> →{' '}
-              <span className="mono">{data.targetTotalFrames}f（{(data.durationSec ?? 0).toFixed(2)}s）</span>
+              母版 <span className="mono">{((data.masterDurationMs ?? 0) / 1000).toFixed(1)} 秒</span> →{' '}
+              <span className="mono">{data.targetTotalFrames} 帧（{(data.durationSec ?? 0).toFixed(2)} 秒）</span>
             </span>
             <span>
-              Residual <span className="mono">{(data.frameResidualMs ?? 0).toFixed(2)}ms</span>
+              误差 <span className="mono">{(data.frameResidualMs ?? 0).toFixed(2)} 毫秒</span>
             </span>
           </>
         ) : null}
@@ -164,7 +165,7 @@ export function FinalRenderPanel({
               {job.status === 'running' ? ` ${job.progress}%` : ''}
             </span>
             {job.sourceArtifactVersion !== null ? (
-              <span className="mono" style={{marginLeft: 6}}>source v{job.sourceArtifactVersion}</span>
+              <span className="mono" style={{marginLeft: 6}}>素材 第{job.sourceArtifactVersion}版</span>
             ) : null}
           </span>
         ) : null}
@@ -175,7 +176,13 @@ export function FinalRenderPanel({
           <ul style={{textAlign: 'left', margin: 0, paddingLeft: 20, lineHeight: 1.9}}>
             {data.blockers.map((blocker, index) => (
               <li key={index}>
-                <span className="mono" style={{fontSize: 12}}>[{blocker.code}]</span> {blocker.message}
+                {friendlyStageError(blocker.code, blocker.message)}
+                <details style={{marginTop: 6}}>
+                  <summary style={{cursor: 'pointer', opacity: 0.75}}>技术详情</summary>
+                  <div className="mono" style={{marginTop: 4, fontSize: 12}}>
+                    [{blocker.code}] {blocker.message}
+                  </div>
+                </details>
               </li>
             ))}
           </ul>

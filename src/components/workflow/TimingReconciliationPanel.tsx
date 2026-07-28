@@ -73,7 +73,7 @@ export function TimingReconciliationPanel({
       setData((await res.json()) as ReconciliationReadiness);
       setError(null);
     } catch {
-      setError('Timing Reconciliation 数据加载失败');
+      setError('音画时间校准数据加载失败');
     }
   }, [projectId]);
 
@@ -101,13 +101,13 @@ export function TimingReconciliationPanel({
   if (!data) return null;
 
   return (
-    <section className="stage-panel" style={{marginTop: 20}} aria-label="Timing Reconciliation">
+    <section className="stage-panel" style={{marginTop: 20}} aria-label="音画时间校准">
       <div className="panel-head">
-        <span className="panel-title">TIMING RECONCILIATION（M3-D · 帧级 · 比例重定时）</span>
+        <span className="panel-title">音画时间校准</span>
         <div className="panel-head-actions">
           {data.status === 'ready' && data.reconciliation ? (
             <button type="button" className="btn btn-sm" onClick={() => setShowScenes((v) => !v)}>
-              {showScenes ? '收起 Scene Timing' : '查看 Scene Timing'}
+              {showScenes ? '收起场景时间' : '查看场景时间'}
             </button>
           ) : null}
           <button
@@ -117,10 +117,10 @@ export function TimingReconciliationPanel({
             onClick={() => void build()}
           >
             {busy
-              ? '构建中…'
+              ? '校准中…'
               : data.status === 'ready'
-                ? '重新构建 Reconciliation'
-                : 'Build Timing Reconciliation'}
+                ? '重新校准'
+                : '校准音画时间'}
           </button>
         </div>
       </div>
@@ -135,46 +135,47 @@ export function TimingReconciliationPanel({
         </span>
         {data.sources ? (
           <span>
-            Scenes <span className="mono">v{data.sources.scenesVersion}</span> · Audio{' '}
-            <span className="mono">v{data.sources.audioArtifactVersion}</span> · Subtitle{' '}
-            <span className="mono">v{data.sources.subtitleArtifactVersion}</span>
+            场景 第{data.sources.scenesVersion}版 · 配音 第{data.sources.audioArtifactVersion}版 · 字幕 第{data.sources.subtitleArtifactVersion}版
           </span>
         ) : null}
-        <span>
-          Compiler <span className="mono">v{data.compilerVersion}</span>
-        </span>
+        <details style={{alignSelf: 'center'}}>
+          <summary style={{cursor: 'pointer', opacity: 0.75, fontSize: 12}}>技术详情</summary>
+          <div className="mono" style={{marginTop: 4, fontSize: 12}}>
+            Compiler v{data.compilerVersion}
+            {data.artifactVersion !== null ? ` · artifact v${data.artifactVersion}` : ''}
+          </div>
+        </details>
         {data.status === 'ready' && data.sourceVisual && data.target ? (
           <>
             <span>
-              Scenes <span className="mono">{data.sceneCount}</span>
+              <span className="mono">{data.sceneCount}</span> 个场景
             </span>
             <span>
-              Source <span className="mono">{data.sourceVisual.weightTotalFrames}f</span>
+              源时长 <span className="mono">{data.sourceVisual.weightTotalFrames} 帧</span>
               {data.sourceVisual.weightTotalFrames !== data.sourceVisual.authoredTotalFrames ||
               data.sourceVisual.rendererEndFrame !== data.sourceVisual.authoredTotalFrames ? (
                 <span className="mono" style={{color: 'var(--muted)'}}>
-                  （authored {data.sourceVisual.authoredTotalFrames}f / renderer-end {data.sourceVisual.rendererEndFrame}f）
+                  （创作 {data.sourceVisual.authoredTotalFrames} 帧 / 渲染结束 {data.sourceVisual.rendererEndFrame} 帧）
                 </span>
               ) : null}
             </span>
             <span>
-              Master <span className="mono">{((data.masterDurationMs ?? 0) / 1000).toFixed(1)}s</span> → Target{' '}
-              <span className="mono">{data.target.totalFrames}f</span>
+              母版 <span className="mono">{((data.masterDurationMs ?? 0) / 1000).toFixed(1)} 秒</span> → 目标时长{' '}
+              <span className="mono">{data.target.totalFrames} 帧</span>
             </span>
             <span>
-              Residual <span className="mono">{data.target.frameResidualMs.toFixed(2)}ms</span>
+              误差 <span className="mono">{data.target.frameResidualMs.toFixed(2)} 毫秒</span>
             </span>
             <span>
-              Unresolved <span className="mono">{data.unresolvedCount}</span>
+              待确认 <span className="mono">{data.unresolvedCount}</span>
             </span>
-            <span className="mono">artifact v{data.artifactVersion}</span>
           </>
         ) : null}
         {data.status === 'stale' ? (
-          <span>Reconciliation 已过期（source 或 compiler 已前进）——请重新构建</span>
+          <span>校准已过期（素材已更新），请重新校准</span>
         ) : null}
         {data.status === 'not_ready' ? (
-          <span>等待 Scenes 锁定 + Narration Audio + Subtitle Timing 全部就绪</span>
+          <span>需要先完成：锁定场景数据、生成配音、生成字幕</span>
         ) : null}
       </div>
 
@@ -184,11 +185,11 @@ export function TimingReconciliationPanel({
             <div key={scene.sceneId} className="scene-row" style={{cursor: 'default', gridTemplateColumns: '72px 1fr auto'}}>
               <span className="scene-id mono">{scene.sceneId}</span>
               <span className="scene-line mono">
-                source {scene.sourceWeightStartFrame}–{scene.sourceWeightEndFrame}f → effective{' '}
-                {scene.effectiveStartFrame}–{scene.effectiveEndFrame}f
+                {scene.sourceWeightStartFrame}–{scene.sourceWeightEndFrame} 帧 →{' '}
+                {scene.effectiveStartFrame}–{scene.effectiveEndFrame} 帧
               </span>
               <span className="scene-dur mono">
-                {scene.sourceWeightEndFrame - scene.sourceWeightStartFrame}f → {scene.effectiveDurationFrames}f · 第{scene.chapter}章
+                {scene.sourceWeightEndFrame - scene.sourceWeightStartFrame} 帧 → {scene.effectiveDurationFrames} 帧 · 第{scene.chapter}章
               </span>
             </div>
           ))}

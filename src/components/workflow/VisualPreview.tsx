@@ -4,6 +4,7 @@ import {useRouter} from 'next/navigation';
 import {useCallback, useEffect, useState} from 'react';
 import {FullCutPlayer} from '@/components/FullCutPlayer';
 import type {ZhiyingFullCutProps} from '@/lib/scene-schema';
+import {friendlyStageError} from './shared';
 
 /**
  * Visual Preview（M2-E-C §二十六/四十六）：
@@ -69,15 +70,20 @@ export function VisualPreview({
   }, [projectId, router, load]);
 
   return (
-    <section className="stage-panel" style={{marginTop: 20}} aria-label="Visual Preview">
+    <section className="stage-panel" style={{marginTop: 20}} aria-label="画面预览">
       <div className="stage-panel-head">
         <div>
-          <h2 className="stage-panel-title">Visual Preview</h2>
+          <h2 className="stage-panel-title">画面预览</h2>
           <p className="stage-panel-sub">
-            locked Scenes → M1 渲染链 · 无旁白无字幕（音频阶段未开始）
-            {data?.scenesVersion !== null && data?.scenesVersion !== undefined
-              ? ` · scenes v${data.scenesVersion}`
-              : ''}
+            根据已锁定的场景数据生成预览（暂无配音字幕）
+            {data?.scenesVersion !== null && data?.scenesVersion !== undefined ? (
+              <details style={{marginTop: 6}}>
+                <summary style={{cursor: 'pointer', opacity: 0.75}}>技术详情</summary>
+                <div className="mono" style={{marginTop: 4, fontSize: 12}}>
+                  scenes v{data.scenesVersion}
+                </div>
+              </details>
+            ) : null}
           </p>
         </div>
         <div className="stage-actions">
@@ -87,7 +93,7 @@ export function VisualPreview({
             disabled={!data?.ready || submitting}
             onClick={() => void startRender()}
           >
-            {submitting ? '创建中…' : 'Render Preview'}
+            {submitting ? '创建中…' : '生成预览'}
           </button>
         </div>
       </div>
@@ -108,10 +114,13 @@ export function VisualPreview({
           <ul style={{textAlign: 'left', margin: 0, paddingLeft: 20, lineHeight: 1.9}}>
             {data.blockers.map((blocker, index) => (
               <li key={index}>
-                <span className="mono" style={{fontSize: 12}}>
-                  [{blocker.code}]
-                </span>{' '}
-                {blocker.message}
+                {friendlyStageError(blocker.code, blocker.message)}
+                <details style={{marginTop: 6}}>
+                  <summary style={{cursor: 'pointer', opacity: 0.75}}>技术详情</summary>
+                  <div className="mono" style={{marginTop: 4, fontSize: 12}}>
+                    [{blocker.code}] {blocker.message}
+                  </div>
+                </details>
               </li>
             ))}
           </ul>

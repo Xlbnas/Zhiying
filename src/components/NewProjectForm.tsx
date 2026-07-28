@@ -2,11 +2,24 @@
 
 import {useRouter} from 'next/navigation';
 import {useState} from 'react';
+import {
+  clampDurationMinutes,
+  DURATION_DEFAULT,
+  DURATION_MAX,
+  DURATION_MIN,
+  DURATION_QUICK_VALUES,
+  formatDurationPayload,
+  LANGUAGE_OPTIONS,
+  PLATFORM_OPTIONS,
+  VIDEO_STYLE_OPTIONS,
+} from './form-utils';
 
 /**
- * 新建项目表单（M2-C §二十四）。
- * 必填：主题 / 核心问题；高级设置可展开（目标时长 / 语言 / 平台 / 受众 /
- * 视频风格 / 视觉风格 / 科学严谨度）。提交 → POST /api/projects → 项目页。
+ * 新建项目表单（M2-C §二十四；M5 控件化）。
+ * 必填：主题 / 核心问题；高级设置可展开。
+ * M5：目标时长 = 数字步进器（分钟，1–60）；平台 / 语言 / 视频风格 =
+ * 「可选择 + 可自定义」combobox（datalist）；枚举性强用选择器，表达性强留文本框。
+ * 提交契约不变：targetDuration 仍为「N 分钟」字符串。
  */
 
 interface ApiError {
@@ -19,7 +32,8 @@ export function NewProjectForm({onClose}: {onClose: () => void}) {
   const [topic, setTopic] = useState('');
   const [coreQuestion, setCoreQuestion] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [targetDuration, setTargetDuration] = useState('10 分钟');
+  const [durationMin, setDurationMin] = useState<number>(DURATION_DEFAULT);
+  const [durationText, setDurationText] = useState<string>(String(DURATION_DEFAULT));
   const [language, setLanguage] = useState('中文');
   const [platform, setPlatform] = useState('');
   const [audience, setAudience] = useState('');
@@ -31,6 +45,25 @@ export function NewProjectForm({onClose}: {onClose: () => void}) {
 
   const canSubmit = topic.trim().length > 0 && coreQuestion.trim().length > 0 && !busy;
 
+  const applyDuration = (next: number): void => {
+    const clamped = clampDurationMinutes(next);
+    setDurationMin(clamped);
+    setDurationText(String(clamped));
+  };
+
+  const onDurationInput = (raw: string): void => {
+    setDurationText(raw);
+    const parsed = Number(raw);
+    if (raw.trim() !== '' && Number.isFinite(parsed)) {
+      setDurationMin(clampDurationMinutes(parsed));
+    }
+  };
+
+  const onDurationBlur = (): void => {
+    // 失焦收敛：空 / NaN / 越界一律回到合法值
+    applyDuration(Number(durationText));
+  };
+
   const submit = async () => {
     setBusy(true);
     setError(null);
@@ -41,7 +74,7 @@ export function NewProjectForm({onClose}: {onClose: () => void}) {
         body: JSON.stringify({
           topic: topic.trim(),
           coreQuestion: coreQuestion.trim(),
-          targetDuration: targetDuration.trim() || undefined,
+          targetDuration: formatDurationPayload(durationMin),
           language: language.trim() || undefined,
           platform: platform.trim() || undefined,
           audience: audience.trim() || undefined,
@@ -99,12 +132,53 @@ export function NewProjectForm({onClose}: {onClose: () => void}) {
               <label className="form-label" htmlFor="np-duration">
                 目标时长
               </label>
-              <input
-                id="np-duration"
-                className="form-input"
-                value={targetDuration}
-                onChange={(e) => setTargetDuration(e.target.value)}
-              />
+              <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  aria-label="减少一分钟"
+                  disabled={durationMin <= DURATION_MIN}
+                  onClick={() => applyDuration(durationMin - 1)}
+                >
+                  −
+                </button>
+                <input
+                  id="np-duration"
+                  className="form-input"
+                  style={{width: 64, textAlign: 'center'}}
+                  type="number"
+                  inputMode="numeric"
+                  min={DURATION_MIN}
+                  max={DURATION_MAX}
+                  step={1}
+                  value={durationText}
+                  onChange={(e) => onDurationInput(e.target.value)}
+                  onBlur={onDurationBlur}
+                />
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  aria-label="增加一分钟"
+                  disabled={durationMin >= DURATION_MAX}
+                  onClick={() => applyDuration(durationMin + 1)}
+                >
+                  +
+                </button>
+                <span style={{color: 'var(--muted)', fontSize: 13}}>分钟</span>
+              </div>
+              <div style={{display: 'flex', gap: 6, marginTop: 6}}>
+                {DURATION_QUICK_VALUES.map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={durationMin === v ? {fontWeight: 600} : undefined}
+                    onClick={() => applyDuration(v)}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="form-field">
               <label className="form-label" htmlFor="np-language">
@@ -113,9 +187,15 @@ export function NewProjectForm({onClose}: {onClose: () => void}) {
               <input
                 id="np-language"
                 className="form-input"
+                list="np-language-options"
                 value={language}
                 onChange={(e) => setLanguage(e.target.value)}
               />
+              <datalist id="np-language-options">
+                {LANGUAGE_OPTIONS.map((l) => (
+                  <option key={l} value={l} />
+                ))}
+              </datalist>
             </div>
             <div className="form-field">
               <label className="form-label" htmlFor="np-platform">
@@ -124,10 +204,16 @@ export function NewProjectForm({onClose}: {onClose: () => void}) {
               <input
                 id="np-platform"
                 className="form-input"
-                placeholder="B站 / YouTube / 小红书"
+                list="np-platform-options"
+                placeholder="选择或直接输入"
                 value={platform}
                 onChange={(e) => setPlatform(e.target.value)}
               />
+              <datalist id="np-platform-options">
+                {PLATFORM_OPTIONS.map((p) => (
+                  <option key={p} value={p} />
+                ))}
+              </datalist>
             </div>
             <div className="form-field">
               <label className="form-label" htmlFor="np-audience">
@@ -148,9 +234,15 @@ export function NewProjectForm({onClose}: {onClose: () => void}) {
               <input
                 id="np-vstyle"
                 className="form-input"
+                list="np-vstyle-options"
                 value={videoStyle}
                 onChange={(e) => setVideoStyle(e.target.value)}
               />
+              <datalist id="np-vstyle-options">
+                {VIDEO_STYLE_OPTIONS.map((s) => (
+                  <option key={s} value={s} />
+                ))}
+              </datalist>
             </div>
             <div className="form-field">
               <label className="form-label" htmlFor="np-visual">

@@ -10,7 +10,7 @@ import {StagePanel} from './StagePanel';
 import {TimingReconciliationPanel} from './TimingReconciliationPanel';
 import {VisualPreview} from './VisualPreview';
 import {WorkflowStepper} from './WorkflowStepper';
-import {STAGE_NAMES, type StagesResponse} from './shared';
+import {nextStageAfter, STAGE_NAMES, type StagesResponse} from './shared';
 
 /**
  * Workflow Workspace Shell（M2-C §二十/二十一）。
@@ -22,6 +22,11 @@ import {STAGE_NAMES, type StagesResponse} from './shared';
  *   存在 locked scenes artifact 时（M2-E 起）再追加 M1 Scene Workbench。
  *
  * 轮询：存在 queued/running 的 llm_job 时每 2s 刷新 /stages，终态后停止。
+ *
+ * M5：
+ * - StagePanel 以 key=selected 强制重挂载：切换阶段零旧内容残留（标题与内容
+ *   永远一致），配合面板内 loading 态与请求序号防竞态。
+ * - 锁定成功 → 成功提示条 + 自动进入下一阶段；最后阶段引导至「旁白」区域。
  */
 
 const POLL_INTERVAL_MS = 2000;
@@ -31,7 +36,25 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [selected, setSelected] = useState<WorkflowStage>('project_definition');
+  const [advanceNotice, setAdvanceNotice] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const handleSelect = useCallback((stage: WorkflowStage) => {
+    setAdvanceNotice(null); // 用户手动切换时清除进阶提示
+    setSelected(stage);
+  }, []);
+
+  const handleLocked = useCallback((stage: WorkflowStage) => {
+    const next = nextStageAfter(stage);
+    if (next && isStageEnabled(next)) {
+      setAdvanceNotice(`「${STAGE_NAMES[stage]}」已锁定，正在进入下一步：${STAGE_NAMES[next]}`);
+      setSelected(next);
+    } else {
+      // 最后阶段（场景数据）：不跳到不存在的阶段，引导至旁白制作区
+      setAdvanceNotice(`「${STAGE_NAMES[stage]}」已锁定。十个阶段全部完成，下一步：生成旁白（见下方「旁白」区域）。`);
+      document.getElementById('narration-panel')?.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -117,20 +140,27 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
 
       {error ? <div className="error-banner">{error}</div> : null}
 
-      <WorkflowStepper stages={data.stages} selected={selected} onSelect={setSelected} />
+      <WorkflowStepper stages={data.stages} selected={selected} onSelect={handleSelect} />
+
+      {advanceNotice ? (
+        <div className="advance-notice" role="status">
+          ✓ {advanceNotice}
+        </div>
+      ) : null}
 
       {selectedState && isStageEnabled(selected) ? (
         <StagePanel
+          key={selected}
           projectId={projectId}
           stageState={selectedState}
           onChanged={() => void refresh()}
+          onLocked={handleLocked}
         />
       ) : selectedState ? (
         <section className="stage-panel">
           <div className="stage-panel-head">
             <div>
               <h2 className="stage-panel-title">{STAGE_NAMES[selected]}</h2>
-              <p className="stage-panel-sub mono">{selected}</p>
             </div>
           </div>
           <div className="stage-disabled-note">
