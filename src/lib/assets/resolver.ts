@@ -19,7 +19,7 @@ const HARD_BLOCKED_POLICIES = new Set(['generated', 'stock']);
 
 function statusForAsset(asset: AssetRow | null): ResolutionStatus {
   if (!asset) return 'pending';
-  if (asset.license_status === 'usable') return 'ready';
+  if (asset.license_status === 'usable' || asset.license_status === 'generated' || asset.license_status === 'user_provided') return 'ready';
   if (asset.license_status === 'review_required') return 'manual_required';
   return 'policy_blocked';
 }
