@@ -51,6 +51,8 @@ export async function GET(
     noAssetNeeded: visual.noAssetNeeded,
     needAssets: visual.needAssets,
     readyScenes: visual.readyScenes,
+    readyAssetScenes: visual.readyAssetScenes,
+    pendingAssets: visual.pendingAssets,
     missing: visual.missing,
     assets: assetRows,
   });
