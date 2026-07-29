@@ -36,25 +36,28 @@ x-zhiying-app: &zhiying-app
 
 services:
   zhiying-web:
-    <<: *zhiying-app
+    image: zhiying:${ZHIYING_RELEASE_TAG:?ZHIYING_RELEASE_TAG required}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    volumes:
+      - ${ZHIYING_HOST_DATA_DIR:?ZHIYING_HOST_DATA_DIR required}:/app/data
+      - ${ZHIYING_HOST_PUBLIC_DIR:?ZHIYING_HOST_PUBLIC_DIR required}:/app/public:ro
+      - ${ZHIYING_HOST_ASSETS_DIR:?ZHIYING_HOST_ASSETS_DIR required}:/app/public/assets:rw
     container_name: zhiying-web
+    # M6.2.1: host network for Wikimedia TLS (Docker bridge blocks TLS to Wikimedia CDN)
+    network_mode: host
     # 直接 exec Next server（不经 pnpm wrapper）
     command: ["node", "node_modules/next/dist/bin/next", "start"]
-    # 唯一 user-facing 入口：仅宿主 loopback，由 fnOS 反向代理转发；
-    # 不得改为 0.0.0.0 除非反代验证后另行决议（M4-A frozen）
-    ports:
-      - "127.0.0.1:3210:3000"
     environment:
-      # web 侧实证只需这些（narration API 会实例化 TTS Provider 拿 metadata，
-      # 不发起网络调用；web 从不实例化 LLM Provider）
       NODE_ENV: production
       ZHIYING_DATA_DIR: /app/data
       PORT: "3000"
       TTS_PROVIDER: indextts2
-      INDEXTTS2_BASE_URL: http://indextts2-adapter:9880
-      # 严禁注入：DEEPSEEK_API_KEY / LLM_PROVIDER / ADAPTER_* / voice registry
+      INDEXTTS2_BASE_URL: http://127.0.0.1:9880
     healthcheck:
-      # 只读、不改变状态的稳定 API（GET /api/projects）
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/projects').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
@@ -62,18 +65,21 @@ services:
       retries: 5
 
   zhiying-worker:
-    <<: *zhiying-app
+    image: zhiying:${ZHIYING_RELEASE_TAG:?ZHIYING_RELEASE_TAG required}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    volumes:
+      - ${ZHIYING_HOST_DATA_DIR:?ZHIYING_HOST_DATA_DIR required}:/app/data
+      - ${ZHIYING_HOST_PUBLIC_DIR:?ZHIYING_HOST_PUBLIC_DIR required}:/app/public:ro
+      - ${ZHIYING_HOST_ASSETS_DIR:?ZHIYING_HOST_ASSETS_DIR required}:/app/public/assets:rw
+    # M6.2.1: host network — worker also needs internet for Wikimedia
+    network_mode: host
     container_name: zhiying-worker
-    # 直接 exec worker 真实进程：node --import tsx（loader 在进程内注册，
-    # 无子进程 shim 链）——docker stop 的 SIGTERM 经 tini 直达 worker handler
     command: ["node", "--import", "tsx", "src/worker/index.ts"]
-    # SIGTERM 优雅退出窗口：当前任务 abort → requeue → bye.（frozen worker 语义）
     stop_grace_period: 60s
-    # 单 Scheduler/单 Worker 是 frozen 架构不变量（无代码级锁，且 stale job
-    # recovery 会让多 worker 互相回收）——本文件只定义一个 worker service，
-    # 严禁 docker compose up --scale zhiying-worker=N（N>1）
-    # M5-PERF：资源与并发默认值经生产 benchmark 确定，可经 env 覆盖；
-    # GPU 实验走 docker-compose.production.gpu.yml override（默认不透传）
     cpus: ${ZHIYING_WORKER_CPUS:-8}
     mem_limit: ${ZHIYING_WORKER_MEM:-8g}
     environment:
@@ -82,7 +88,7 @@ services:
       WORKER_ROLE: all
       LLM_PROVIDER: deepseek
       TTS_PROVIDER: indextts2
-      INDEXTTS2_BASE_URL: http://indextts2-adapter:9880
+      INDEXTTS2_BASE_URL: http://127.0.0.1:9880
       # M5-PERF：显式渲染并发（默认 6；非法值代码内 fail-safe 回退）
       REMOTION_CONCURRENCY: ${REMOTION_CONCURRENCY:-6}
       # M5-PERF：Chromium 硬件 GL 实验开关（默认关闭 = software path）；
@@ -130,6 +136,9 @@ services:
       - zhiying-app-net
       - zhiying-tts-net
     # 无 ports — 仅 stack 内部可达（worker 经 zhiying-app-net 访问 9880）
+    # M6.2.1: expose on localhost for host-network web/worker
+    ports:
+      - "127.0.0.1:9880:9880"
 
 networks:
   zhiying-app-net:
