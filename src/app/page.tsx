@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {useCallback, useEffect, useRef, useState} from 'react';
+import {createPortal} from 'react-dom';
 import {NewProjectForm} from '@/components/NewProjectForm';
 import {StatusBadge} from '@/components/StatusBadge';
 import {formatDateTime, formatDurationSec} from '@/components/format';
@@ -187,10 +188,10 @@ export default function ProjectsPage() {
 
       {error ? <div className="error-banner">{error}</div> : null}
 
-      {/* 删除确认弹窗 */}
-      {deleteConfirm ? (
+      {/* 删除确认弹窗 — Portal 到 body，避免被父容器 stacking context 裁剪 */}
+      {deleteConfirm ? createPortal(
         <div style={{
-          position: 'fixed', inset: 0, zIndex: 1000,
+          position: 'fixed', inset: 0, zIndex: 9999,
           background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center',
         }} onClick={() => setDeleteConfirm(null)}>
           <div style={{
@@ -209,7 +210,8 @@ export default function ProjectsPage() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
 
       {projects === null ? (

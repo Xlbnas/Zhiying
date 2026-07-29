@@ -34,16 +34,41 @@ export class NarrationCompileError extends Error {
 /** 每个 speech unit 聚合的自然句数（deterministic 常量，测试锁定）。 */
 export const SENTENCES_PER_SPEECH_UNIT = 2;
 
-/** 章标题识别。支持：
- *   - `## 第1章 标题`
- *   - `## 第 1 章 标题`
- *   - `## 第1章：标题`
- *   - `## 第1章（00:00–01:20）标题`
- *   - `## 第1章标题`（无空格）
- *   章号必须是正整数，空格（含全角空格 U+3000）和冒号（:：）在「章」后均视为分隔。
- *   时间范围后缀由 DECLARED_RANGE 在 title 提取阶段处理。
+// ── Chinese numeral → integer（支持「一」到「九十九」）──
+const CN_DIGITS: Record<string, number> = {一:1,二:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9};
+const CN_TENS: Record<string, number> = {十:10};
+function parseChineseNumeral(raw: string): number | null {
+  const s = raw.trim();
+  // 纯 Arabic digit: "12"
+  if (/^\d+$/.test(s)) return Number(s);
+  // 单个中文数字: "一" → 1, "十" → 10
+  if (s.length === 1) return CN_DIGITS[s] ?? CN_TENS[s] ?? null;
+  // "十二" → 12, "二十" → 20, "二十一" → 21
+  let tens = 0;
+  let ones = 0;
+  if (s.startsWith('十')) { tens = 10; ones = CN_DIGITS[s[1]!] ?? 0; }
+  else if (s.endsWith('十')) { tens = (CN_DIGITS[s[0]!] ?? 0) * 10; }
+  else if (s.includes('十')) {
+    const parts = s.split('十');
+    tens = (CN_DIGITS[parts[0]!] ?? 0) * 10;
+    ones = CN_DIGITS[parts[1]!] ?? 0;
+  } else {
+    return null;
+  }
+  return tens + ones;
+}
+
+/** 章标题识别。支持 Arabic + Chinese numeral：
+ *   - `## 第1章 标题` / `## 第 1 章 标题` / `## 第1章：标题` / `## 第1章标题`
+ *   - `## 第一章 标题` / `## 第一章：标题` / `## 第十二章 标题`
+ *   - `## 第一章　标题`（全角空格 U+3000）
+ *   - `## 第一章 明明有害，却无法停止（0:00—0:45）`
+ *   章号必须是正整数（Arabic 1–99 或 Chinese 一–九十九）。
  */
-const CHAPTER_HEADING = /^##[\u3000\s]+第[\u3000\s]*(\d+)[\u3000\s]*章[\u3000\s:：]*(.+?)[\u3000\s]*$/;
+const CHAPTER_HEADING = /^##[\u3000\s]+第[\u3000\s]*([\d一二三四五六七八九十]+)[\u3000\s]*章[\u3000\s:：]*(.+?)[\u3000\s]*$/;
+
+/** 系统内部 HTML 注释 marker（非用户内容，生成 pipeline 遗留）。 */
+const INTERNAL_COMMENT = /<!--\s*(?:none|E\d+(?:\s*,\s*E\d+)*)\s*-->/gi;
 /** 正式声明时间区间（（mm:ss–mm:ss），兼容 – — - 三种破折号）；其他括号标题文本一律保留。 */
 const DECLARED_RANGE = /（\s*\d{1,2}:\d{2}\s*[–—-]\s*\d{1,2}:\d{2}\s*）\s*$/;
 const HEADING = /^#{1,6}\s+/;
@@ -160,19 +185,23 @@ function parseScript(markdown: string): {chapters: NarrationChapter[]; paragraph
   };
 
   for (const line of normalized.split('\n')) {
-    const trimmed = line.trim();
+    // M6.2: 正文剥离系统内部 HTML 注释（<!-- none --> / <!-- E01, E03 -->）
+    const trimmed = line.replace(INTERNAL_COMMENT, '').trim();
+    if (trimmed.length === 0) { buffer.push(line); continue; }
     const chapterMatch = CHAPTER_HEADING.exec(trimmed);
     if (chapterMatch) {
       flush();
-      const chapter = Number(chapterMatch[1]);
+      const channelRaw = chapterMatch[1]!;
+      const channel = parseChineseNumeral(channelRaw);
+      if (channel === null || channel < 1) continue; // 非章号 → 跳过
       // 标题仅剥离正式声明时间区间（mm:ss–mm:ss）；
       // 「记忆（上）」「问题（第二部分）」等合法括号标题文本原样保留
       const title = chapterMatch[2]!.replace(DECLARED_RANGE, '').trim();
       if (title.length === 0) {
-        throw new NarrationCompileError('SCRIPT_V2_INVALID', `第 ${chapter} 章缺少标题`);
+        throw new NarrationCompileError('SCRIPT_V2_INVALID', `第 ${channel} 章缺少标题`);
       }
-      chapters.push({chapter, title, firstUnitId: null, lastUnitId: null});
-      currentChapter = chapter;
+      chapters.push({chapter: channel, title, firstUnitId: null, lastUnitId: null});
+      currentChapter = channel;
       continue;
     }
     if (HEADING.test(trimmed) || BLOCKQUOTE.test(trimmed)) {

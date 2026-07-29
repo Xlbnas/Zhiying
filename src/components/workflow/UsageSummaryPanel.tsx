@@ -35,13 +35,14 @@ const STAGE_LABELS: Record<string, string> = {
   argument_tree: '论证树',
   script_v1: '脚本 V1',
   script_v2: '脚本 V2',
-  narration_beat: '旁白节拍',
+  narration_beat_map: '旁白节拍',
   visual_breakdown: '视觉拆解',
   shot_list: '镜头清单',
   scenes: '场景',
   narration: '旁白',
   assets: '素材',
   render: '渲染',
+  tts: '配音',
   other: '其他',
 };
 
@@ -100,7 +101,7 @@ export function UsageSummaryPanel({projectId}: {projectId: string}) {
           )}
         </div>
       ) : (
-        <>
+        <div style={{padding: '0 24px 20px'}}>
           {/* 核心指标 */}
           <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, padding: '16px 0'}}>
             <MetricCard label="总费用" value={fmtCny(data.totalCostCny)} />
@@ -170,7 +171,7 @@ export function UsageSummaryPanel({projectId}: {projectId: string}) {
               部分历史用量不可追溯
             </div>
           </details>
-        </>
+        </div>
       )}
     </section>
   );

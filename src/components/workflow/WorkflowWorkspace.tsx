@@ -9,6 +9,7 @@ import {FinalRenderPanel} from './FinalRenderPanel';
 import {StagePanel} from './StagePanel';
 import {TimingReconciliationPanel} from './TimingReconciliationPanel';
 import {VisualPreview} from './VisualPreview';
+import {VisualAssetsPanel} from './VisualAssetsPanel';
 import {UsageSummaryPanel} from './UsageSummaryPanel';
 import {WorkflowStepper} from './WorkflowStepper';
 import {nextStageAfter, STAGE_NAMES, type StagesResponse} from './shared';
@@ -191,13 +192,12 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
         }
       />
 
-      <FinalRenderPanel
+      <VisualAssetsPanel
         projectId={projectId}
-        sourceStageKey={
+        scenesStageKey={
           (() => {
-            const sv2 = data.stages.find((s) => s.stage === 'script_v2');
             const sc = data.stages.find((s) => s.stage === 'scenes');
-            return `${sv2 ? `${sv2.status}:${sv2.updated_at}` : 'missing'}|${sc ? `${sc.status}:${sc.updated_at}` : 'missing'}`;
+            return sc ? `${sc.status}:${sc.updated_at}` : 'missing';
           })()
         }
       />
@@ -219,6 +219,17 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
           }
         />
       )}
+
+      <FinalRenderPanel
+        projectId={projectId}
+        sourceStageKey={
+          (() => {
+            const sv2 = data.stages.find((s) => s.stage === 'script_v2');
+            const sc = data.stages.find((s) => s.stage === 'scenes');
+            return `${sv2 ? `${sv2.status}:${sv2.updated_at}` : 'missing'}|${sc ? `${sc.status}:${sc.updated_at}` : 'missing'}`;
+          })()
+        }
+      />
 
       <UsageSummaryPanel projectId={projectId} />
     </main>
