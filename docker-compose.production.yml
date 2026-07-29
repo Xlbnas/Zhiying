@@ -57,6 +57,9 @@ services:
       PORT: "3210"
       TTS_PROVIDER: indextts2
       INDEXTTS2_BASE_URL: http://127.0.0.1:9880
+      APIYI_API_KEY: ${APIYI_API_KEY:-}
+      APIYI_IMAGE_MODEL: ${APIYI_IMAGE_MODEL:-gemini-3.1-flash-image}
+      APIYI_BASE_URL: ${APIYI_BASE_URL:-https://api.apiyi.com}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3210/api/projects').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -89,6 +92,9 @@ services:
       LLM_PROVIDER: deepseek
       TTS_PROVIDER: indextts2
       INDEXTTS2_BASE_URL: http://127.0.0.1:9880
+      APIYI_API_KEY: ${APIYI_API_KEY:-}
+      APIYI_IMAGE_MODEL: ${APIYI_IMAGE_MODEL:-gemini-3.1-flash-image}
+      APIYI_BASE_URL: ${APIYI_BASE_URL:-https://api.apiyi.com}
       # M5-PERF：显式渲染并发（默认 6；非法值代码内 fail-safe 回退）
       REMOTION_CONCURRENCY: ${REMOTION_CONCURRENCY:-6}
       # M5-PERF：Chromium 硬件 GL 实验开关（默认关闭 = software path）；
