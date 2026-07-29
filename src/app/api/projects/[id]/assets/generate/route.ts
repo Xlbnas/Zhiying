@@ -18,8 +18,13 @@ export async function GET(
   {params}: {params: Promise<{id: string}>},
 ): Promise<Response> {
   const prov = getGeneratedImageProvider();
+  // Trigger health check on demand (cached internally)
+  const health = await prov.checkHealth();
   return Response.json({
-    available: prov.available,
+    configured: prov.configured,
+    available: health.available,
+    healthy: health.healthy,
+    reason: health.reason,
     provider: prov.name,
   });
 }
@@ -44,7 +49,7 @@ export async function POST(
 
   try {
     const prov = getGeneratedImageProvider();
-    if (!prov.available) return jsonError(503, 'provider_unavailable', {message: '图像生成服务未配置'});
+    if (!prov.configured || !prov.health.available) return jsonError(503, 'provider_unavailable', {message: '图像生成服务未配置或不可用'});
 
     const candidates: GeneratedImageCandidate[] = await prov.generate({prompt: body.prompt});
     if (!candidates.length) return jsonError(500, 'generation_failed', {message: '未生成有效图片'});

@@ -27,6 +27,17 @@ export interface GeneratedImageCandidate {
 
 export interface GeneratedImageProvider {
   readonly name: string;
-  readonly available: boolean;
+  readonly configured: boolean;
+  /** 最近 health check 结果（缓存，避免每次检查都调用 API） */
+  health: ProviderHealth;
   generate(input: GenerateImageInput): Promise<GeneratedImageCandidate[]>;
+  /** 执行一次轻量 credential probe（不产生图片费用） */
+  checkHealth(): Promise<ProviderHealth>;
+}
+
+export interface ProviderHealth {
+  healthy: boolean;
+  available: boolean; // configured && healthy
+  reason: 'not_configured' | 'healthy' | 'authentication_failed' | 'provider_unreachable' | 'temporarily_unavailable';
+  checkedAt: number;
 }
