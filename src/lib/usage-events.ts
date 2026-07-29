@@ -7,7 +7,7 @@
  * 费用单位：元（cost_cny REAL，高精度存储；不依赖 provider 返回的 bill）。
  */
 import crypto from 'node:crypto';
-import {getDb} from '../db';
+import {getDb} from './db';
 
 export type UsageEventKind = 'llm' | 'cpu' | 'gpu' | 'render' | 'tts' | 'asset';
 
