@@ -33,23 +33,54 @@ export function VisualAssetsPanel({projectId, scenesStageKey}: {projectId: strin
   const [expandedScene, setExpandedScene] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploadingScene, setUploadingScene] = useState<string | null>(null);
+  const [generatingScene, setGeneratingScene] = useState<string | null>(null);
+  const [genAvailable, setGenAvailable] = useState(false);
+  const [genPrompt, setGenPrompt] = useState<string>('');
+  const [showGenPrompt, setShowGenPrompt] = useState<string | null>(null); // sceneId to show prompt for
 
   const load = useCallback(async () => {
     try {
-      const [r1, r2] = await Promise.all([
+      const [r1, r2, r3] = await Promise.all([
         fetch(`/api/projects/${projectId}/assets/resolve`, {cache: 'no-store'}),
         fetch(`/api/projects/${projectId}/assets`, {cache: 'no-store'}),
+        fetch(`/api/projects/${projectId}/assets/generate`, {cache: 'no-store'}),
       ]);
       if (r1.ok) setData((await r1.json()) as ResolverResponse);
       if (r2.ok) {
         const d = await r2.json() as Record<string, unknown>;
         setSummary({needAssets: d.needAssets as number, readyAssetScenes: d.readyAssetScenes as number, pendingAssets: d.pendingAssets as number});
       }
+      if (r3.ok) {
+        const g = await r3.json() as {available: boolean};
+        setGenAvailable(g.available);
+      }
       setError(null);
     } catch {
       setError('素材数据加载失败');
     }
   }, [projectId]);
+
+  const doGenerate = useCallback(async (sceneId: string) => {
+    if (!genPrompt.trim()) return;
+    setGeneratingScene(sceneId);
+    setShowGenPrompt(null);
+    setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/assets/generate`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({sceneId, prompt: genPrompt}),
+      });
+      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as {message?: string})?.message ?? '生成失败');
+      setResult('AI 生成完成，请在下方使用该图片');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '生成失败');
+    } finally {
+      setGeneratingScene(null);
+      setGenPrompt('');
+    }
+  }, [projectId, genPrompt, load]);
 
   useEffect(() => { void load(); }, [load, scenesStageKey]);
 
@@ -145,7 +176,28 @@ export function VisualAssetsPanel({projectId, scenesStageKey}: {projectId: strin
                             <button className="btn btn-sm" onClick={() => acquire()}>重新搜索</button>
                           )}
                           {req.availableActions.includes('generate') ? (
-                            <button className="btn btn-sm" disabled title="AI 图像生成暂不可用">AI 生成（暂不可用）</button>
+                            genAvailable ? (
+                              showGenPrompt === s.sceneId ? (
+                                <div style={{display: 'flex', gap: 6, flexDirection: 'column', width: '100%'}}>
+                                  <textarea value={genPrompt} onChange={e => setGenPrompt(e.target.value)}
+                                    placeholder="描述你想要的画面..." rows={2}
+                                    style={{fontSize: 12, padding: 6, borderRadius: 6, border: '1px solid var(--border)', resize: 'vertical'}} />
+                                  <div style={{display: 'flex', gap: 6}}>
+                                    <button className="btn btn-sm btn-primary" disabled={generatingScene === s.sceneId || !genPrompt.trim()}
+                                      onClick={() => doGenerate(s.sceneId)}>
+                                      {generatingScene === s.sceneId ? '生成中…' : '开始生成'}
+                                    </button>
+                                    <button className="btn btn-sm" onClick={() => setShowGenPrompt(null)}>取消</button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <button className="btn btn-sm" onClick={() => { setGenPrompt(req.requirement.subject); setShowGenPrompt(s.sceneId); }}>
+                                  AI 生成
+                                </button>
+                              )
+                            ) : (
+                              <button className="btn btn-sm" disabled title="AI 图像生成暂不可用">AI 生成（暂不可用）</button>
+                            )
                           ) : null}
                           {req.availableActions.includes('upload') && (
                             <button className="btn btn-sm" onClick={() => { setUploadingScene(s.sceneId); fileRef.current?.click(); }}>

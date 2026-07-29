@@ -20,7 +20,7 @@ export interface AssetRow {
   width: number | null;
   height: number | null;
   duration_ms: number | null;
-  license_status: 'usable' | 'review_required' | 'blocked' | 'user_provided';
+  license_status: 'usable' | 'review_required' | 'blocked' | 'user_provided' | 'generated';
   license_note: string | null;
   attribution: string | null;
   description: string | null;

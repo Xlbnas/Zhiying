@@ -92,7 +92,7 @@ export function evaluateVisualReadiness(projectId: string, scenes: Scene[]): Vis
   const all = listAssetsForProject(projectId);
   const usableByScene = new Map<string, AssetRow[]>();
   for (const asset of all) {
-    if (asset.license_status !== 'usable' && asset.license_status !== 'user_provided' || !asset.scene_id) continue;
+    if ((asset.license_status !== 'usable' && asset.license_status !== 'user_provided' && asset.license_status !== 'generated') || !asset.scene_id) continue;
     const list = usableByScene.get(asset.scene_id) ?? [];
     list.push(asset);
     usableByScene.set(asset.scene_id, list);
@@ -119,7 +119,7 @@ export function evaluateVisualReadiness(projectId: string, scenes: Scene[]): Vis
 export function buildAssetMap(projectId: string): Record<string, ResolvedAsset[]> {
   const map: Record<string, ResolvedAsset[]> = {};
   for (const asset of listAssetsForProject(projectId)) {
-    if (asset.license_status !== 'usable' && asset.license_status !== 'user_provided' || !asset.scene_id) continue;
+    if ((asset.license_status !== 'usable' && asset.license_status !== 'user_provided' && asset.license_status !== 'generated') || !asset.scene_id) continue;
     if (!fs.existsSync(path.join(process.cwd(), 'public', asset.local_path))) continue;
     const list = map[asset.scene_id] ?? [];
     list.push(assetToResolved(asset));
