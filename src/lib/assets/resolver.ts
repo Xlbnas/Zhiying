@@ -106,24 +106,20 @@ export function resolveSceneAssets(
   scene: Scene,
   assetRows: AssetRow[],
 ): SceneAssetResolution {
-  const all = assetRows.filter((a) => a.scene_id === scene.id && a.license_status === 'usable');
+  const usableStatuses = new Set(['usable', 'user_provided', 'generated']);
+  const all = assetRows.filter((a) => a.scene_id === scene.id && usableStatuses.has(a.license_status));
   const reqs: AssetRequirement[] = Array.isArray(scene.assetRequirements)
     ? scene.assetRequirements
     : [];
-  const boundMap = new Map<string, AssetRow>();
-  for (const a of all) {
-    try {
-      const reqJson = a.requirement_json ? (JSON.parse(a.requirement_json) as AssetRequirement) : null;
-      if (reqJson) {
-        const key = JSON.stringify(reqJson);
-        if (!boundMap.has(key)) boundMap.set(key, a);
-      }
-    } catch { /* skip */ }
+  // Sequential binding: first usable asset → first requirement, second → second, etc.
+  // User can also explicitly bind via generated bind API or upload API.
+  const boundMap = new Map<number, AssetRow>();
+  for (let i = 0; i < Math.min(all.length, reqs.length); i++) {
+    boundMap.set(i, all[i]!);
   }
 
   const requirements = reqs.map((req, i) => {
-    const key = JSON.stringify(req);
-    const bound = boundMap.get(key) ?? null;
+    const bound = boundMap.get(i) ?? null;
     return buildRequirementResolution(req, i, bound);
   });
 
