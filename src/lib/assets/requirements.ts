@@ -68,8 +68,9 @@ export function buildSceneAssetPlan(scene: Scene): SceneAssetPlan {
     };
   }
   if (ASSET_CATEGORIES.has(scene.category)) {
-    const requirements = scene.assetRequirements.length > 0
-      ? scene.assetRequirements
+    const assetReqs = Array.isArray(scene.assetRequirements) ? scene.assetRequirements : [];
+    const requirements = assetReqs.length > 0
+      ? assetReqs
       : [synthesizeRequirement(scene)];
     return {
       sceneId: scene.id,
