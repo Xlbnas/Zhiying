@@ -229,6 +229,47 @@ export function recordImageGenerationUsage(
   return {id, inserted, costCny, unitPriceCny, costSource};
 }
 
+/**
+ * 生成 route 在 candidate 落库后回补 assetId 链接（usage 先于 asset 记录，
+ * 费用先行不丢；链接用于 backfill 精确去重）。
+ */
+export function linkAssetToImageUsageEvent(attemptId: string, assetId: string): void {
+  getDb().prepare(
+    `UPDATE project_usage_events
+     SET metadata = json_set(metadata, '$.assetId', ?)
+     WHERE id = ? AND kind = 'image'`,
+  ).run(assetId, attemptId);
+}
+
+/** 判断某 generated asset 是否已有对应的 image usage event（backfill 去重依据）。 */
+export function hasImageUsageForAsset(asset: {
+  id: string;
+  projectId: string;
+  sceneId: string | null;
+  createdAt: string;
+}): boolean {
+  const db = getDb();
+  // 精确链接：metadata.assetId = asset.id（新生成 + 已回填 event）
+  const linked = db.prepare(
+    `SELECT 1 FROM project_usage_events
+     WHERE kind = 'image' AND project_id = ? AND metadata->>'assetId' = ?`,
+  ).get(asset.projectId, asset.id);
+  if (linked) return true;
+  // 宽松兜底：同 project+scene 的非回填成功 event 与 asset 同秒级时间窗内
+  // （M6.3.10 首版 route 未写 assetId 的 event；provider 调用秒级耗时 +
+  // in-flight lock，同窗两次成功生成实际不可能）
+  const fuzzy = db.prepare(
+    `SELECT 1 FROM project_usage_events
+     WHERE kind = 'image' AND project_id = ?
+       AND metadata->>'sceneId' = ?
+       AND metadata->>'status' = 'succeeded'
+       AND COALESCE(metadata->>'backfilled', 'false') != 'true'
+       AND ABS((julianday(created_at) - julianday(?)) * 86400000) < 10000
+     LIMIT 1`,
+  ).get(asset.projectId, asset.sceneId ?? 'unknown', asset.createdAt);
+  return fuzzy !== undefined;
+}
+
 // ---------- M6.3.10：render / tts wall time 幂等回填 ----------
 
 /**

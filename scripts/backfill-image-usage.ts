@@ -15,7 +15,7 @@
  */
 
 import {getDb} from '../src/lib/db';
-import {recordImageGenerationUsage} from '../src/lib/usage-events';
+import {hasImageUsageForAsset, recordImageGenerationUsage} from '../src/lib/usage-events';
 
 interface GeneratedAssetRow {
   id: string;
@@ -58,9 +58,18 @@ function main(): void {
   console.log(`发现 ${rows.length} 个 generated asset 行（= 已证成功的可计费调用）`);
   let backfilled = 0;
   let skipped = 0;
+  let alreadyAccounted = 0;
   const perProject = new Map<string, number>();
 
   for (const row of rows) {
+    // 已有对应 usage event（实时记账 assetId 链接 / 时间窗兜底）→ 不属于历史 gap，跳过
+    if (hasImageUsageForAsset({
+      id: row.id, projectId: row.project_id, sceneId: row.scene_id, createdAt: row.created_at,
+    })) {
+      alreadyAccounted++;
+      console.log(`  [skip-已记账] ${row.project_id.slice(0, 8)} ${row.scene_id} ${row.created_at}`);
+      continue;
+    }
     const model = modelFromRow(row);
     const requirementId = requirementIdFromRow(row);
     const input = {
@@ -97,6 +106,7 @@ function main(): void {
   console.log(
     `${APPLY ? '已回填' : 'dry-run 将回填'} ${backfilled} 条 image usage event` +
       (skipped > 0 ? `，跳过已存在 ${skipped} 条` : '') +
+      (alreadyAccounted > 0 ? `，${alreadyAccounted} 个 asset 已有实时记账（跳过）` : '') +
       `（单价按写入时价目表快照，costSource=configured_estimate）`,
   );
   for (const [projectId, count] of perProject) {

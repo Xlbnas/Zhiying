@@ -18,7 +18,11 @@ import {defaultGeneratePrompt} from '@/lib/assets/generate-prompt';
 import {getGeneratedImageProvider, ImageGenerationError} from '@/lib/assets/providers/generated';
 import type {GeneratedImageCandidate} from '@/lib/assets/providers/generated';
 import {findRequirementInPlans, loadLatestScenesPlans} from '@/lib/assets/requirements';
-import {imageGenerationErrorStatus, recordImageGenerationUsage} from '@/lib/usage-events';
+import {
+  imageGenerationErrorStatus,
+  linkAssetToImageUsageEvent,
+  recordImageGenerationUsage,
+} from '@/lib/usage-events';
 import {getProject, jsonError} from '../../../../_lib/shared';
 
 export const runtime = 'nodejs';
@@ -148,6 +152,14 @@ export async function POST(
 
     // M6.3.9：生成成功 → 清除该 requirement 的失败状态（candidate_waiting 由 resolver 推导）
     clearResolutionState(id, body.sceneId, body.requirementId);
+
+    // M6.3.10：usage event 先于 candidate 持久化（费用先行），此处回补 assetId 链接，
+    // 供 backfill 精确去重（metadata->>'assetId' = asset.id → 已记账，跳过）。
+    try {
+      linkAssetToImageUsageEvent(attemptId, row.id);
+    } catch (err) {
+      console.error(`[assets/generate] usage event assetId 回补失败 attempt=${attemptId}:`, err);
+    }
 
     return Response.json({
       candidate: {

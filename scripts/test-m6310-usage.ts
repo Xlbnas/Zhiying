@@ -46,7 +46,9 @@ import {
 } from '../src/lib/usage/image-pricing';
 import {
   getProjectUsageSummary,
+  hasImageUsageForAsset,
   imageGenerationErrorStatus,
+  linkAssetToImageUsageEvent,
   recordImageGenerationUsage,
   recordUsageEvent,
   syncComputeWallToEvents,
@@ -431,6 +433,33 @@ async function main(): Promise<void> {
     const empty = getProjectUsageSummary('test-m6310-empty');
     ok(empty.totalCostCny === 0 && empty.image.calls === 0 && empty.totalWallHours === 0,
       '[J03] 空项目 summary 全零');
+  }
+
+  // ---------- K. usage↔asset 链接与 backfill 去重 ----------
+  {
+    // 实时 event 未带 assetId（旧 route 行为）→ 时间窗兜底去重
+    recordImageGenerationUsage({
+      attemptId: 'attempt-link-1', projectId: P1, sceneId: 'S09', requirementId: 'S09-R01',
+      provider: 'apiyi', model: 'gemini-3.1-flash-image', requestedSize: '1K', aspectRatio: '16:9',
+      imageCount: 1, status: 'succeeded',
+    });
+    ok(hasImageUsageForAsset({
+      id: 'asset-x1', projectId: P1, sceneId: 'S09', createdAt: new Date().toISOString(),
+    }) === true, '[K01] 同 scene 时间窗内实时 event → backfill 跳过（防双记）');
+    ok(hasImageUsageForAsset({
+      id: 'asset-x2', projectId: P1, sceneId: 'S99', createdAt: new Date().toISOString(),
+    }) === false, '[K02] 不同 scene → 不去重');
+    ok(hasImageUsageForAsset({
+      id: 'asset-x3', projectId: P1, sceneId: 'S09', createdAt: '2020-01-01T00:00:00.000Z',
+    }) === false, '[K03] 时间窗外 → 不去重（历史 asset 各自独立）');
+    // 回补 assetId → 精确链接
+    linkAssetToImageUsageEvent('attempt-link-1', 'asset-x1');
+    const row = getDb().prepare(`SELECT metadata FROM project_usage_events WHERE id = 'attempt-link-1'`).get() as {metadata: string};
+    ok((JSON.parse(row.metadata) as {assetId?: string}).assetId === 'asset-x1',
+      '[K04] linkAssetToImageUsageEvent 回补 metadata.assetId');
+    ok(hasImageUsageForAsset({
+      id: 'asset-x1', projectId: P1, sceneId: 'S09', createdAt: '2020-01-01T00:00:00.000Z',
+    }) === true, '[K05] assetId 精确链接（跨时间窗也去重）');
   }
 
   // ---------- 汇总 ----------
