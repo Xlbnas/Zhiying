@@ -26,9 +26,16 @@ export interface SceneReadiness {
 export interface VisualReadinessSummary {
   ready: boolean;
   total: number;
+  /** 无需外部素材的场景数（Minimal / MG / Editorial Graphic）。 */
   noAssetNeeded: number;
+  /** 需要外部素材的场景数（Archive / B-roll）。 */
   needAssets: number;
+  /** 已通过 readiness 的总场景数。 */
   readyScenes: number;
+  /** 需要外部素材且已准备好（已绑定 usable asset + 文件存在）的场景数。 */
+  readyAssetScenes: number;
+  /** 需要外部素材但尚未准备的场景数（needAssets - readyAssetScenes）。 */
+  pendingAssets: number;
   missing: Array<{sceneId: string; reason: string}>;
   scenes: SceneReadiness[];
 }
@@ -93,6 +100,7 @@ export function evaluateVisualReadiness(projectId: string, scenes: Scene[]): Vis
   const scenes_ = scenes.map((s) => checkScene(projectId, s, usableByScene));
   const plans = scenes.map(buildSceneAssetPlan);
   const needAssets = plans.filter((p) => p.needsAssets).length;
+  const readyAssetScenes = scenes_.filter((s) => s.ready && s.strategy === 'asset').length;
   const missing = scenes_.filter((s) => !s.ready).map((s) => ({sceneId: s.sceneId, reason: s.reason ?? '未知原因'}));
   return {
     ready: missing.length === 0,
@@ -100,6 +108,8 @@ export function evaluateVisualReadiness(projectId: string, scenes: Scene[]): Vis
     noAssetNeeded: scenes.length - needAssets,
     needAssets,
     readyScenes: scenes_.filter((s) => s.ready).length,
+    readyAssetScenes,
+    pendingAssets: needAssets - readyAssetScenes,
     missing,
     scenes: scenes_,
   };

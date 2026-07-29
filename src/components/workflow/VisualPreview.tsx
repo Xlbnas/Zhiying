@@ -19,6 +19,8 @@ interface VisualReadinessInfo {
   noAssetNeeded: number;
   needAssets: number;
   readyScenes: number;
+  readyAssetScenes: number;
+  pendingAssets: number;
   missing: Array<{sceneId: string; reason: string}>;
 }
 
@@ -112,10 +114,10 @@ export function VisualPreview({
               <span style={{marginLeft: 12}}>
                 {' · '}视觉素材{' '}
                 <span style={{
-                  color: data.visualReadiness.ready ? 'var(--success)' : 'var(--accent)',
+                  color: data.visualReadiness.pendingAssets === 0 ? 'var(--success)' : 'var(--accent)',
                   fontWeight: 600,
                 }}>
-                  {data.visualReadiness.readyScenes}/{data.visualReadiness.total}
+                  {data.visualReadiness.readyAssetScenes}/{data.visualReadiness.needAssets}
                 </span>
                 {' 已准备'}
               </span>
@@ -156,13 +158,13 @@ export function VisualPreview({
         }}>
           <span style={{fontSize: 14, fontWeight: 600}}>
             视觉素材{' '}
-            <span style={{color: data.visualReadiness.ready ? 'var(--success)' : 'var(--accent)'}}>
-              {data.visualReadiness.readyScenes}/{data.visualReadiness.total}
+            <span style={{color: data.visualReadiness.readyAssetScenes === data.visualReadiness.needAssets ? 'var(--success)' : 'var(--accent)'}}>
+              {data.visualReadiness.readyAssetScenes}/{data.visualReadiness.needAssets}
             </span>
             {' '}已准备
-            {data.visualReadiness.missing.length > 0 ? (
+            {data.visualReadiness.pendingAssets > 0 ? (
               <span style={{color: 'var(--muted)', fontSize: 12, marginLeft: 6}}>
-                （{data.visualReadiness.missing.length} 个待准备）
+                （{data.visualReadiness.pendingAssets} 个待准备）
               </span>
             ) : null}
           </span>
