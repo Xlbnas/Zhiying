@@ -144,17 +144,17 @@ export function VisualAssetsPanel({projectId, scenesStageKey}: {projectId: strin
                           {req.availableActions.includes('search') && (
                             <button className="btn btn-sm" onClick={() => acquire()}>重新搜索</button>
                           )}
-                          {req.availableActions.includes('generate') && (
-                            <button className="btn btn-sm" onClick={() => {/* TODO: AI generate */}}>AI 生成</button>
-                          )}
+                          {req.availableActions.includes('generate') ? (
+                            <button className="btn btn-sm" disabled title="AI 图像生成暂不可用">AI 生成（暂不可用）</button>
+                          ) : null}
                           {req.availableActions.includes('upload') && (
                             <button className="btn btn-sm" onClick={() => { setUploadingScene(s.sceneId); fileRef.current?.click(); }}>
                               {uploadingScene === s.sceneId ? '上传中…' : '上传图片'}
                             </button>
                           )}
-                          {req.availableActions.includes('switch_to_mg') && (
-                            <button className="btn btn-sm">改用 MG</button>
-                          )}
+                          {req.availableActions.includes('switch_to_mg') ? (
+                            <button className="btn btn-sm" disabled title="改用 MG 功能即将支持">改用 MG（即将支持）</button>
+                          ) : null}
                         </div>
                         <details style={{marginTop: 6}}>
                           <summary style={{cursor: 'pointer', fontSize: 11, opacity: 0.6}}>技术详情</summary>
