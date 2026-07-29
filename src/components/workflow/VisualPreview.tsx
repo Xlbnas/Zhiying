@@ -203,7 +203,36 @@ export function VisualPreview({
         </div>
       ) : (
         <div className="stage-empty">
-          <p className="empty-title">暂不可渲染</p>
+          {/* M6.1: Legacy scene detection — if blocked by retired M1 templates, show migration UI */}
+          {data.blockers.some(b => b.code === 'MG_TEMPLATE_NOT_REGISTERED' || (b.code === 'RENDER_SOURCE_INVALID' && b.message.includes('MG_TEMPLATE_NOT_REGISTERED'))) ? (
+            <div style={{textAlign: 'center', marginBottom: 16}}>
+              <p className="empty-title" style={{fontSize: 16}}>这个项目使用了旧版画面格式，需要更新画面数据后才能继续生成视频。</p>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={submitting}
+                onClick={() => {
+                  setSubmitting(true);
+                  fetch('/api/workflow/run-stage', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({projectId, stage: 'scenes', confirmStale: true}),
+                  }).then(r => r.json()).then(d => {
+                    if (d.job) { alert('画面数据更新已开始，请稍等片刻后刷新页面查看结果。'); }
+                    else { alert('更新请求失败，请稍后重试。'); }
+                  }).catch(() => alert('更新请求失败，请稍后重试。'))
+                  .finally(() => { setSubmitting(false); load(); });
+                }}
+              >
+                {submitting ? '更新中…' : '更新画面数据'}
+              </button>
+              <p style={{fontSize: 12, color: 'var(--muted)', marginTop: 8}}>
+                基于现有镜头数据重新生成画面，旧版本会保留为历史记录。
+              </p>
+            </div>
+          ) : (
+            <p className="empty-title">暂不可渲染</p>
+          )}
           <ul style={{textAlign: 'left', margin: 0, paddingLeft: 20, lineHeight: 1.9}}>
             {data.blockers.map((blocker, index) => (
               <li key={index}>
