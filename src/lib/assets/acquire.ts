@@ -1,21 +1,34 @@
 /**
  * M6 Asset Acquisition Flow：Compile → Acquire → Validate → Bind。
  * 单项目、单 scene 归属由程序保证；provider 只负责搜索/下载。
+ *
+ * M6.3.8：per-requirement 获取 + exact binding。
+ * - 已存在 active binding 的 requirement 跳过；其余逐个搜索/下载/绑定。
+ * - 下载成功后 insertAsset + bindAssetToRequirement（exact requirementId）。
+ * - 不再有 scene 级 skip，不再"任一成功即停"。
  */
 
 import crypto from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import {getDb} from '../db';
-import type {AssetRequirement} from '../scene-schema';
-import {insertAsset, listUsableAssetsForScene, type AssetRow} from './model';
-import {compileAssetPlans, type SceneAssetPlan} from './requirements';
-import {AssetProviderError, type AssetProvider, type AssetSearchHit} from './providers/types';
+import type {IdentifiedRequirement} from '../scene-schema';
+import {
+  bindAssetToRequirement,
+  getActiveBinding,
+  insertAsset,
+} from './model';
+import {
+  findRequirementInPlans,
+  loadLatestScenesPlans,
+  type SceneAssetPlan,
+} from './requirements';
+import {type AssetProvider, type AssetSearchHit} from './providers/types';
 import {WikimediaCommonsProvider} from './providers/wikimedia';
 
 export interface AcquireResult {
   sceneId: string;
+  requirementId: string;
   status: 'bound' | 'acquired' | 'no_result' | 'policy_blocked' | 'failed';
   assetId?: string;
   reason?: string;
@@ -32,7 +45,7 @@ const PROVIDERS: Record<string, () => AssetProvider> = {
   public_domain: () => new WikimediaCommonsProvider(),
 };
 
-function providerFor(policy: AssetRequirement['policy']): AssetProvider | null {
+function providerFor(policy: IdentifiedRequirement['policy']): AssetProvider | null {
   // stock / generated：本轮无可用 provider（不静默降级到错误来源）
   return PROVIDERS[policy]?.() ?? null;
 }
@@ -70,12 +83,12 @@ function pickHit(hits: AssetSearchHit[]): {hit?: AssetSearchHit; blockedReason?:
 }
 
 /** 从一个 requirement 生成最多 MAX_QUERIES 个搜索查询（优先英文 + 实体）。 */
-function buildSearchQueries(req: AssetRequirement): string[] {
+function buildSearchQueries(req: IdentifiedRequirement): string[] {
   const queries: string[] = [req.query];
   const subject = req.subject.trim();
   // 如果原始 query 是中文，尝试提取英文实体/关键词
   // 简单策略：移除描述性词汇，生成短查询
-  if (/[\u4e00-\u9fff]/.test(req.query)) {
+  if (/[一-鿿]/.test(req.query)) {
     // 保留原始中文 query，同时尝试更短的变体
     const words = subject.replace(/[，,、；;。．\s]+/g, ' ').trim().split(/\s+/);
     if (words.length >= 3) queries.push(words.slice(0, 2).join(' '));
@@ -91,12 +104,13 @@ function buildSearchQueries(req: AssetRequirement): string[] {
 async function acquireWithRetry(
   projectId: string,
   plan: SceneAssetPlan,
-  requirement: AssetRequirement,
+  requirement: IdentifiedRequirement,
   maxRetries = 3,
 ): Promise<AcquireResult> {
+  const base = {sceneId: plan.sceneId, requirementId: requirement.requirementId};
   const provider = providerFor(requirement.policy);
   if (!provider) {
-    return {sceneId: plan.sceneId, status: 'policy_blocked', reason: `暂无可用的 ${requirement.policy} provider`};
+    return {...base, status: 'policy_blocked', reason: `暂无可用的 ${requirement.policy} provider`};
   }
 
   const queries = buildSearchQueries(requirement);
@@ -105,20 +119,20 @@ async function acquireWithRetry(
   for (const query of queries) {
     if (query !== requirement.query) {
       // 修改 requirement 的 query 进行 fallback 搜索
-      const altReq: AssetRequirement = {...requirement, query};
+      const altReq: IdentifiedRequirement = {...requirement, query};
       try {
         const hits = await provider.search(altReq, 3);
         const {hit, blockedReason} = pickHit(hits);
         if (!hit) {
-          if (blockedReason) lastResult = {sceneId: plan.sceneId, status: 'policy_blocked', reason: blockedReason};
-          else lastResult = {sceneId: plan.sceneId, status: 'no_result', reason: `未找到素材：${query}`};
+          if (blockedReason) lastResult = {...base, status: 'policy_blocked', reason: blockedReason};
+          else lastResult = {...base, status: 'no_result', reason: `未找到素材：${query}`};
           continue;
         }
         const result = await downloadAndInsert(projectId, plan.sceneId, requirement, hit, provider.name);
         if (result.status === 'acquired') return result;
         lastResult = result;
       } catch (err) {
-        lastResult = {sceneId: plan.sceneId, status: 'failed', reason: err instanceof Error ? err.message : String(err)};
+        lastResult = {...base, status: 'failed', reason: err instanceof Error ? err.message : String(err)};
       }
     } else {
       // 原始 query，支持下载重试
@@ -127,8 +141,8 @@ async function acquireWithRetry(
           const hits = await provider.search(requirement, 3);
           const {hit, blockedReason} = pickHit(hits);
           if (!hit) {
-            if (blockedReason) { lastResult = {sceneId: plan.sceneId, status: 'policy_blocked', reason: blockedReason}; break; }
-            lastResult = {sceneId: plan.sceneId, status: 'no_result', reason: `未找到素材：${requirement.query}`};
+            if (blockedReason) { lastResult = {...base, status: 'policy_blocked', reason: blockedReason}; break; }
+            lastResult = {...base, status: 'no_result', reason: `未找到素材：${requirement.query}`};
             break;
           }
           const result = await downloadAndInsert(projectId, plan.sceneId, requirement, hit, provider.name);
@@ -144,19 +158,19 @@ async function acquireWithRetry(
             await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
             continue;
           }
-          lastResult = {sceneId: plan.sceneId, status: 'failed', reason: err instanceof Error ? err.message : String(err)};
+          lastResult = {...base, status: 'failed', reason: err instanceof Error ? err.message : String(err)};
         }
       }
     }
   }
 
-  return lastResult ?? {sceneId: plan.sceneId, status: 'no_result', reason: `所有查询均无结果：${requirement.subject}`};
+  return lastResult ?? {...base, status: 'no_result', reason: `所有查询均无结果：${requirement.subject}`};
 }
 
 async function downloadAndInsert(
   projectId: string,
   sceneId: string,
-  requirement: AssetRequirement,
+  requirement: IdentifiedRequirement,
   hit: AssetSearchHit,
   providerName: string,
 ): Promise<AcquireResult> {
@@ -167,16 +181,16 @@ async function downloadAndInsert(
   try {
     // 先下载到临时文件
     const prov = providerFor(requirement.policy);
-    if (!prov) return {sceneId, status: 'failed', reason: 'provider unavailable'};
+    if (!prov) return {sceneId, requirementId: requirement.requirementId, status: 'failed', reason: 'provider unavailable'};
     const tmpPath = absPath + '.tmp';
     await prov.download(hit, tmpPath);
     const tmpStat = fs.statSync(tmpPath);
-    if (tmpStat.size < 1024) { fs.rmSync(tmpPath, {force: true}); return {sceneId, status: 'failed', reason: '下载文件过小，校验失败'}; }
+    if (tmpStat.size < 1024) { fs.rmSync(tmpPath, {force: true}); return {sceneId, requirementId: requirement.requirementId, status: 'failed', reason: '下载文件过小，校验失败'}; }
     // 原子重命名
     fs.renameSync(tmpPath, absPath);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    return {sceneId, status: 'failed', reason};
+    return {sceneId, requirementId: requirement.requirementId, status: 'failed', reason};
   }
   const dims = probeImage(absPath);
   const row = insertAsset({
@@ -196,40 +210,35 @@ async function downloadAndInsert(
     description: hit.description || requirement.subject,
     requirement,
   });
-  return {sceneId, status: 'acquired', assetId: row.id};
+  // M6.3.8：exact binding —— 下载成功即绑定到该 requirement（replace 语义）
+  bindAssetToRequirement({
+    projectId,
+    sceneId,
+    requirementId: requirement.requirementId,
+    assetId: row.id,
+  });
+  return {sceneId, requirementId: requirement.requirementId, status: 'acquired', assetId: row.id};
 }
 
 /**
- * 对项目 locked scenes 执行素材获取（已绑定 usable 素材的场景跳过）。
- * scenesJson = locked scenes artifact 内容。
+ * 对项目 locked scenes 执行素材获取。
+ * 逐 requirement：已有 active binding 的跳过（bound），其余搜索/下载/exact 绑定。
  */
 export async function acquireAssetsForProject(projectId: string): Promise<AcquireSummary> {
-  const row = getDb().prepare(
-    `SELECT content FROM project_versions
-     WHERE project_id = ? AND stage = 'scenes' ORDER BY version DESC LIMIT 1`,
-  ).get(projectId) as {content: string} | undefined;
-  if (!row) throw new Error('项目缺少 scenes artifact');
-  const plans = compileAssetPlans(row.content);
+  const plans = loadLatestScenesPlans(projectId);
+  if (!plans) throw new Error('项目缺少 scenes artifact');
   const results: AcquireResult[] = [];
   for (const plan of plans) {
     if (!plan.needsAssets) continue;
-    const existing = listUsableAssetsForScene(projectId, plan.sceneId);
-    if (existing.length > 0) {
-      results.push({sceneId: plan.sceneId, status: 'bound', assetId: existing[0]!.id});
-      continue;
-    }
-    // 逐 requirement 尝试，任一成功即绑定
-    let done: AcquireResult | null = null;
     for (const req of plan.requirements) {
+      if (getActiveBinding(projectId, plan.sceneId, req.requirementId)) {
+        results.push({sceneId: plan.sceneId, requirementId: req.requirementId, status: 'bound'});
+        continue;
+      }
       // eslint-disable-next-line no-await-in-loop
       const r = await acquireWithRetry(projectId, plan, req);
-      if (r.status === 'acquired') {
-        done = r;
-        break;
-      }
-      done = r;
+      results.push(r);
     }
-    results.push(done ?? {sceneId: plan.sceneId, status: 'failed', reason: '无可用 requirement'});
   }
   return {
     acquired: results.filter((r) => r.status === 'acquired').length,
@@ -237,4 +246,25 @@ export async function acquireAssetsForProject(projectId: string): Promise<Acquir
     failed: results.filter((r) => r.status !== 'acquired' && r.status !== 'bound').length,
     results,
   };
+}
+
+/**
+ * 单 requirement 定向获取（resolver UI「重新搜索」）。
+ * requirement 不存在 = failed（调用方据此返回 4xx；禁止回退猜测）。
+ */
+export async function acquireAssetsForRequirement(
+  projectId: string,
+  sceneId: string,
+  requirementId: string,
+): Promise<AcquireResult> {
+  const plans = loadLatestScenesPlans(projectId);
+  if (!plans) throw new Error('项目缺少 scenes artifact');
+  const found = findRequirementInPlans(plans, sceneId, requirementId);
+  if (!found) {
+    return {sceneId, requirementId, status: 'failed', reason: `需求 ${requirementId} 不存在于场景 ${sceneId}`};
+  }
+  if (getActiveBinding(projectId, sceneId, requirementId)) {
+    return {sceneId, requirementId, status: 'bound'};
+  }
+  return acquireWithRetry(projectId, found.plan, found.requirement);
 }

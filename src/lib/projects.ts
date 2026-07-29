@@ -161,6 +161,7 @@ export function deleteProject(projectId: string): void {
 
   const tx = db.transaction((): void => {
     // 按外键依赖逆序删除（子表先删，主表最后）
+    db.prepare('DELETE FROM asset_bindings WHERE project_id = ?').run(projectId);
     db.prepare('DELETE FROM assets WHERE project_id = ?').run(projectId);
     db.prepare('DELETE FROM tts_jobs WHERE project_id = ?').run(projectId);
     db.prepare('DELETE FROM llm_usage WHERE project_id = ?').run(projectId);

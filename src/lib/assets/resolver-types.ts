@@ -32,11 +32,13 @@ export interface SceneAssetResolution {
 }
 
 export interface RequirementResolution {
-  /** 该 requirement 在 scene.assetRequirements 中的 index */
+  /** M6.3.8：稳定需求身份（exact binding 的唯一匹配键）。 */
+  requirementId: string;
+  /** 该 requirement 在 scene.assetRequirements 中的 index（仅 UI 展示"需求 1/2"用，不作身份）。 */
   index: number;
   requirement: AssetRequirement;
   status: ResolutionStatus;
-  /** 已绑定的 asset（ready 时非 null） */
+  /** 已绑定的 asset（ready 时非 null；来自 active binding，非顺序猜测） */
   boundAssetId: string | null;
   boundAsset: AssetRow | null;
   /** 搜索尝试记录 */
@@ -45,10 +47,21 @@ export interface RequirementResolution {
   queryUsed: string | null;
   /** 搜索候选（搜索成功但未绑定的候选项） */
   candidates: AssetSearchCandidate[];
+  /** 未绑定的 AI 生成候选（candidate-first：需用户显式"使用这张"才绑定） */
+  generatedCandidates: GeneratedCandidateInfo[];
   /** 该 requirement 支持的操作 */
   availableActions: ResolverAction[];
   /** 用户可见的状态描述（中文） */
   friendlyStatus: string;
+}
+
+/** 未绑定 AI 生成候选的展示信息。 */
+export interface GeneratedCandidateInfo {
+  assetId: string;
+  publicPath: string;
+  provider: string;
+  prompt: string;
+  createdAt: string;
 }
 
 export interface AssetSearchCandidate {
@@ -77,19 +90,20 @@ export type ResolverAction =
 export interface ResolveRequest {
   projectId: string;
   sceneId: string;
-  requirementIndex?: number; // 可指定单 requirement；不指定 = 全部
+  /** M6.3.8：exact requirement 身份（不再使用位置 index）。 */
+  requirementId: string;
   action: ResolverAction;
   /** upload action 需要提供文件 body（multipart）*/
   uploadFile?: File;
   /** generate action 可选自定义 prompt */
   generatePrompt?: string;
-  /** select_candidate 需要指定 candidate index */
-  candidateIndex?: number;
+  /** select_candidate 需要指定 candidate asset id */
+  candidateAssetId?: string;
 }
 
 export interface ResolveResult {
   sceneId: string;
-  requirementIndex: number;
+  requirementId: string;
   status: ResolutionStatus;
   assetId: string | null;
   message: string;

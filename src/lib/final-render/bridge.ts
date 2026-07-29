@@ -199,7 +199,7 @@ export function buildFinalRenderProps(input: {
     reconciliation: rec,
   });
   // M6：注入 assetMap（已绑定的真实素材，含 provenance）
-  const assetMap = buildAssetMap(input.projectId);
+  const assetMap = buildAssetMap(input.projectId, src.scenes.data.scenes);
   return zhiyingFullCutPropsSchema.parse({
     data: {
       schemaVersion: SCHEMA_VERSION,
@@ -372,12 +372,12 @@ export function checkFinalRenderReadiness(projectId: string): FinalRenderReadine
   base.durationSec = rec.target.renderedDurationMs / 1000;
   base.frameResidualMs = rec.target.frameResidualMs;
 
-  // M6：Final Render 硬门禁 — 视觉素材未就绪则禁止渲染
+  // M6：Final Render 硬门禁 — 视觉素材未就绪则禁止渲染（M6.3.8：requirement 粒度）
   const visual = evaluateVisualReadiness(projectId, src.scenes.data.scenes);
   if (!visual.ready) {
     base.blockers.push({
       code: 'VISUAL_READINESS_FAILED',
-      message: `还有 ${visual.missing.length} 个镜头的视觉素材未准备完成`,
+      message: `还有 ${visual.missing.length} 个素材需求未准备完成（${visual.readyRequirements}/${visual.needAssets} 已就绪）`,
     });
     return base;
   }
@@ -422,12 +422,12 @@ export function enqueueFinalRender(projectId: string): EnqueueFinalRenderResult 
     const src = readFinalSources(projectId);
     if (src instanceof FinalRenderError) throw src;
 
-    // M6：Final Render 硬门禁 — 视觉素材未就绪禁止入队
+    // M6：Final Render 硬门禁 — 视觉素材未就绪禁止入队（M6.3.8：requirement 粒度）
     const visual = evaluateVisualReadiness(projectId, src.scenes.data.scenes);
     if (!visual.ready) {
       throw new FinalRenderError(
         'VISUAL_READINESS_FAILED',
-        `还有 ${visual.missing.length} 个镜头的视觉素材未准备完成`,
+        `还有 ${visual.missing.length} 个素材需求未准备完成（${visual.readyRequirements}/${visual.needAssets} 已就绪）`,
       );
     }
 

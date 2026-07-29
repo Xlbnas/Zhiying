@@ -310,7 +310,7 @@ export function buildWorkflowRenderProps(
   // width/height 由 M1 projectMetaSchema 默认值统一提供（1920×1080，不再硬编码第二份）
   const durationSec = source.parsed.scenes[source.parsed.scenes.length - 1]!.end;
   // M6：注入 assetMap（已绑定的真实素材，含 provenance）
-  const assetMap = buildAssetMap(projectId);
+  const assetMap = buildAssetMap(projectId, source.parsed.scenes);
   const props: ZhiyingFullCutProps = zhiyingFullCutPropsSchema.parse({
     data: {
       schemaVersion: SCHEMA_VERSION,

@@ -1,21 +1,24 @@
 /**
  * M6.3 Asset Resolver — 每个 scene 的素材解析状态与可用动作。
  *
- * 纯函数：输入 scenes + assets → 输出 SceneAssetResolution[]。
+ * 纯函数：输入 scenes + assets + active bindings → 输出 SceneAssetResolution[]。
  * 不修改 DB，不触发 provider。
+ *
+ * M6.3.8：READY 的唯一依据是 exact active binding
+ * （projectId + sceneId + requirementId → assetId）。
+ * 禁止 scene_id + 数组顺序猜测、禁止 asset 计数匹配、禁止依赖 DB 返回顺序。
  */
-import type {AssetRequirement, Scene} from '../scene-schema';
-import {listAssetsForProject, type AssetRow} from './model';
+import type {AssetRequirement, IdentifiedRequirement, Scene} from '../scene-schema';
+import {listActiveBindingsForProject, listAssetsForProject, type AssetBindingRow, type AssetRow} from './model';
+import {buildSceneAssetPlan} from './requirements';
 import type {
   AssetSearchCandidate,
+  GeneratedCandidateInfo,
   RequirementResolution,
   ResolverAction,
   ResolutionStatus,
   SceneAssetResolution,
 } from './resolver-types';
-
-/** 分类：不属于 acquire 责任的 policy */
-const HARD_BLOCKED_POLICIES = new Set(['generated', 'stock']);
 
 function statusForAsset(asset: AssetRow | null): ResolutionStatus {
   if (!asset) return 'pending';
@@ -80,14 +83,28 @@ function actionsFor(
   return actions;
 }
 
+/** 读取 asset 快照中记录的 intended requirementId（generated candidate 的目标需求）。 */
+function intendedRequirementId(asset: AssetRow): string | null {
+  if (!asset.requirement_json) return null;
+  try {
+    const parsed = JSON.parse(asset.requirement_json) as {requirementId?: unknown};
+    return typeof parsed.requirementId === 'string' && parsed.requirementId.length > 0
+      ? parsed.requirementId
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function buildRequirementResolution(
-  req: AssetRequirement,
+  req: IdentifiedRequirement,
   index: number,
   boundAsset: AssetRow | null,
+  generatedCandidates: GeneratedCandidateInfo[],
 ): RequirementResolution {
   const status = statusForAsset(boundAsset);
-  const hasCandidates = false; // M6.3: candidates computed by acquire flow
   return {
+    requirementId: req.requirementId,
     index,
     requirement: req,
     status,
@@ -96,7 +113,8 @@ function buildRequirementResolution(
     queriesTried: req.query ? [req.query] : [],
     queryUsed: boundAsset ? req.query : null,
     candidates: [],
-    availableActions: actionsFor(status, req.policy, boundAsset !== null, hasCandidates),
+    generatedCandidates,
+    availableActions: actionsFor(status, req.policy, boundAsset !== null, generatedCandidates.length > 0),
     friendlyStatus: friendlyStatus(status, req.policy),
   };
 }
@@ -105,26 +123,40 @@ export function resolveSceneAssets(
   projectId: string,
   scene: Scene,
   assetRows: AssetRow[],
+  activeBindings: AssetBindingRow[],
 ): SceneAssetResolution {
-  const usableStatuses = new Set(['usable', 'user_provided', 'generated']);
-  const all = assetRows.filter((a) => a.scene_id === scene.id && usableStatuses.has(a.license_status));
-  const reqs: AssetRequirement[] = Array.isArray(scene.assetRequirements)
-    ? scene.assetRequirements
-    : [];
-  // Sequential binding: first usable asset → first requirement, second → second, etc.
-  // User can also explicitly bind via generated bind API or upload API.
-  const boundMap = new Map<number, AssetRow>();
-  for (let i = 0; i < Math.min(all.length, reqs.length); i++) {
-    boundMap.set(i, all[i]!);
-  }
+  const plan = buildSceneAssetPlan(scene);
+  const bindingByReq = new Map(
+    activeBindings.filter((b) => b.scene_id === scene.id).map((b) => [b.requirement_id, b]),
+  );
+  const assetById = new Map(assetRows.map((a) => [a.id, a]));
+  const activelyBoundAssetIds = new Set(activeBindings.map((b) => b.asset_id));
 
-  const requirements = reqs.map((req, i) => {
-    const bound = boundMap.get(i) ?? null;
-    return buildRequirementResolution(req, i, bound);
+  const requirements = plan.requirements.map((req, i) => {
+    // exact binding：唯一 READY 依据
+    const binding = bindingByReq.get(req.requirementId);
+    const boundAsset = binding ? (assetById.get(binding.asset_id) ?? null) : null;
+    // 未绑定 generated 候选：目标为本 requirement 且当前无 active binding
+    const generatedCandidates: GeneratedCandidateInfo[] = assetRows
+      .filter(
+        (a) =>
+          a.source_type === 'generated' &&
+          !activelyBoundAssetIds.has(a.id) &&
+          a.scene_id === scene.id &&
+          intendedRequirementId(a) === req.requirementId,
+      )
+      .map((a) => ({
+        assetId: a.id,
+        publicPath: a.local_path,
+        provider: a.source_provider,
+        prompt: a.description ?? '',
+        createdAt: a.created_at,
+      }));
+    return buildRequirementResolution(req, i, boundAsset, generatedCandidates);
   });
 
   const ready = requirements.filter((r) => r.status === 'ready').length;
-  const overall: ResolutionStatus = ready === reqs.length ? 'ready'
+  const overall: ResolutionStatus = ready === requirements.length ? 'ready'
     : requirements.some((r) => r.status === 'download_failed') ? 'download_failed'
     : requirements.some((r) => r.status === 'policy_blocked') ? 'policy_blocked'
     : requirements.some((r) => r.status === 'no_result') ? 'no_result'
@@ -133,7 +165,7 @@ export function resolveSceneAssets(
   return {
     sceneId: scene.id,
     category: scene.category,
-    totalRequired: reqs.length,
+    totalRequired: requirements.length,
     ready,
     overallStatus: overall,
     requirements,
@@ -143,5 +175,6 @@ export function resolveSceneAssets(
 /** 为整个项目计算所有 scenes 的解析状态 */
 export function buildProjectResolution(projectId: string, scenes: Scene[]): SceneAssetResolution[] {
   const all = listAssetsForProject(projectId);
-  return scenes.map((s) => resolveSceneAssets(projectId, s, all));
+  const bindings = listActiveBindingsForProject(projectId);
+  return scenes.map((s) => resolveSceneAssets(projectId, s, all, bindings));
 }

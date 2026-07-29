@@ -20,8 +20,9 @@ interface VisualReadinessInfo {
   needAssets: number;
   readyScenes: number;
   readyAssetScenes: number;
+  readyRequirements: number;
   pendingAssets: number;
-  missing: Array<{sceneId: string; reason: string}>;
+  missing: Array<{sceneId: string; requirementId: string | null; reason: string}>;
 }
 
 interface PreviewResponse {
@@ -95,7 +96,7 @@ export function VisualPreview({
                   color: data.visualReadiness.pendingAssets === 0 ? 'var(--success)' : 'var(--accent)',
                   fontWeight: 600,
                 }}>
-                  {data.visualReadiness.readyAssetScenes}/{data.visualReadiness.needAssets}
+                  {data.visualReadiness.readyRequirements}/{data.visualReadiness.needAssets}
                 </span>
                 {' 已准备'}
               </span>

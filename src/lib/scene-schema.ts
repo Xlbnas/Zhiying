@@ -11,6 +11,13 @@ import {z} from 'zod';
 
 /** M6：素材需求（LLM 负责 query/subject 语义，scene 归属由程序保证）。 */
 export const assetRequirementSchema = z.object({
+  /**
+   * M6.3.8：稳定需求身份（如 "S012-R01"）。
+   * 可选以保证旧 artifact 零迁移兼容：缺失时由 requirementIdOf 按
+   * sceneId + 数组序号 deterministic 推导（同一 artifact 每次读取相同）；
+   * 新 artifact 由 scenes compiler 显式注入。禁止用 description/内容做身份。
+   */
+  requirementId: z.string().min(1).optional(),
   kind: z.enum(['image', 'video']).default('image'),
   /** 画面主体（如：弗洛伊德肖像 / 维也纳街道 / 《梦的解析》初版封面）。 */
   subject: z.string().min(1),
@@ -22,6 +29,19 @@ export const assetRequirementSchema = z.object({
 });
 
 export type AssetRequirement = z.infer<typeof assetRequirementSchema>;
+
+/** 携带稳定身份的 requirement（编译/解析层保证 requirementId 存在）。 */
+export type IdentifiedRequirement = AssetRequirement & {requirementId: string};
+
+/**
+ * M6.3.8：requirement 的稳定身份。显式 requirementId 优先；缺失时按
+ * `{sceneId}-R{序号两位}` deterministic 推导。同一 Stage 10 artifact 版本
+ * 内容不变 → 推导结果稳定。数组位置只在「推导缺失 id」这一时刻使用，
+ * 不作为 asset 绑定的匹配依据（绑定一律走显式 requirementId）。
+ */
+export function requirementIdOf(sceneId: string, req: AssetRequirement, index: number): string {
+  return req.requirementId ?? `${sceneId}-R${String(index + 1).padStart(2, '0')}`;
+}
 
 export const sceneSchema = z.object({
   id: z.string(),

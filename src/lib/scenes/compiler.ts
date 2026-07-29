@@ -34,6 +34,7 @@ import {
   SCENE_VISUAL_TYPES,
   SCENES_SYSTEM_FPS,
 } from '../workflow/scenes-semantic-validation';
+import {requirementIdOf, type AssetRequirement} from '../scene-schema';
 
 type ChapterTiming = {chapter: number; title: string; start: number; end: number};
 type Scene = {
@@ -255,6 +256,18 @@ export function compileScenesAiOutput(input: unknown): SceneCompileResult {
         fixes.push(`${scene.id} ${field} "${current}" → "${normalized}"`);
         scene[field] = normalized;
       }
+    }
+    // M6.3.8：为 assetRequirements 注入稳定 requirementId（fill-if-missing）。
+    // 幂等：已有显式 id 原样保留；缺失时按 sceneId + 数组序号 deterministic
+    // 推导（与 requirementIdOf 同一规则），再次编译结果不变。
+    if (Array.isArray(scene.assetRequirements)) {
+      scene.assetRequirements = (scene.assetRequirements as AssetRequirement[]).map(
+        (req, index) => {
+          if (!req || typeof req !== 'object') return req;
+          if (typeof req.requirementId === 'string' && req.requirementId.length > 0) return req;
+          return {...req, requirementId: requirementIdOf(scene.id, req, index)};
+        },
+      );
     }
   }
 

@@ -134,7 +134,26 @@ CREATE TABLE IF NOT EXISTS assets (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_assets_project_scene ON assets(project_id, scene_id);
-CREATE TABLE IF NOT EXISTS tts_jobs (   -- 一个 speech unit 一个 job（独立 retry/cancel）  id TEXT PRIMARY KEY,
+-- ============ M6.3.8：显式 asset→requirement 绑定（唯一 READY 依据） ============
+-- scene_id 仅为 denormalized 便利列；resolver/readiness 只认本表 active 行。
+-- candidate = 无 active binding 的 asset 行；replace = deactivate 旧 + insert 新（历史保留）。
+CREATE TABLE IF NOT EXISTS asset_bindings (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  scene_id TEXT NOT NULL,
+  requirement_id TEXT NOT NULL,       -- 稳定需求 ID（如 S012-R01；见 scene-schema.requirementIdOf）
+  asset_id TEXT NOT NULL REFERENCES assets(id),
+  active INTEGER NOT NULL DEFAULT 1,  -- 1 = 当前生效；0 = 历史（replace 后保留）
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_asset_bindings_project_scene
+  ON asset_bindings(project_id, scene_id);
+-- 每个 (project, scene, requirement) 至多一个 active binding（DB 级强制）
+CREATE UNIQUE INDEX IF NOT EXISTS uq_asset_bindings_active_requirement
+  ON asset_bindings(project_id, scene_id, requirement_id) WHERE active = 1;
+-- M3-B：TTS 任务队列（一个 speech unit 一个 job，独立 retry/cancel）
+CREATE TABLE IF NOT EXISTS tts_jobs (
+  id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id),
   narration_plan_artifact_id TEXT NOT NULL,
   narration_plan_version INTEGER NOT NULL,

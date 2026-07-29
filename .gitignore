@@ -15,6 +15,9 @@ next-env.d.ts
 public/full/
 public/pilot/
 
+# M6 运行时素材库（production 为独立挂载卷，用户上传/下载/生成的素材，不进入 git）
+/public/assets/
+
 # 帧对比工具的独立依赖（scripts/README.md 有使用说明）
 scripts/frame-compare/node_modules/
 

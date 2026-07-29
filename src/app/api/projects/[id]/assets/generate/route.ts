@@ -1,15 +1,17 @@
 /**
  * POST /api/projects/[id]/assets/generate — AI 图像生成（candidate，不自动绑定）。
  * GET  /api/projects/[id]/assets/generate — 检查 provider 可用性。
+ *
+ * M6.3.8：generate ≠ bind。candidate 记录 intended 目标（sceneId + 真实 requirement
+ * 快照含 requirementId），只有用户显式调用 bind API 才产生 active binding。
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import {getDb} from '@/lib/db';
 import {insertAsset} from '@/lib/assets/model';
 import {getGeneratedImageProvider} from '@/lib/assets/providers/generated';
 import type {GeneratedImageCandidate} from '@/lib/assets/providers/generated';
-import type {AssetRequirement} from '@/lib/scene-schema';
+import {findRequirementInPlans, loadLatestScenesPlans} from '@/lib/assets/requirements';
 import {getProject, jsonError} from '../../../../_lib/shared';
 
 export const runtime = 'nodejs';
@@ -30,7 +32,7 @@ export async function GET(
   });
 }
 
-const IN_FLIGHT = new Set<string>(); // projectId:sceneId → 防重复提交
+const IN_FLIGHT = new Set<string>(); // projectId:sceneId:requirementId → 防重复提交
 
 export async function POST(
   req: Request,
@@ -40,19 +42,31 @@ export async function POST(
   const project = getProject(id);
   if (!project) return jsonError(404, 'project_not_found');
 
-  let body: {sceneId: string; prompt: string; requirementIndex?: number};
+  let body: {sceneId: string; requirementId: string; prompt?: string};
   try { body = await req.json() as typeof body; } catch { return jsonError(400, 'invalid_json'); }
-  if (!body.sceneId || !body.prompt) return jsonError(400, 'missing_fields', {message: '需要 sceneId 和 prompt'});
+  if (!body.sceneId || !body.requirementId) {
+    return jsonError(400, 'missing_fields', {message: '需要 sceneId 和 requirementId'});
+  }
 
-  const lockKey = `${id}:${body.sceneId}`;
-  if (IN_FLIGHT.has(lockKey)) return jsonError(429, 'generation_in_progress', {message: '正在为这个镜头生成图片，请稍后'});
+  // 目标 requirement 必须真实存在于 active scenes artifact（exact 查找）
+  const plans = loadLatestScenesPlans(id);
+  if (!plans) return jsonError(404, 'scenes_not_found', {message: '项目缺少 scenes artifact'});
+  const found = findRequirementInPlans(plans, body.sceneId, body.requirementId);
+  if (!found) {
+    return jsonError(400, 'requirement_not_found', {message: `需求 ${body.requirementId} 不存在于场景 ${body.sceneId}`});
+  }
+  const requirement = found.requirement;
+  const prompt = body.prompt?.trim() || `${requirement.subject}（${requirement.query}）`;
+
+  const lockKey = `${id}:${body.sceneId}:${body.requirementId}`;
+  if (IN_FLIGHT.has(lockKey)) return jsonError(429, 'generation_in_progress', {message: '正在为该素材需求生成图片，请稍后'});
   IN_FLIGHT.add(lockKey);
 
   try {
     const prov = getGeneratedImageProvider();
     if (!prov.configured || !prov.health.available) return jsonError(503, 'provider_unavailable', {message: '图像生成服务未配置或不可用'});
 
-    const candidates: GeneratedImageCandidate[] = await prov.generate({prompt: body.prompt});
+    const candidates: GeneratedImageCandidate[] = await prov.generate({prompt});
     if (!candidates.length) return jsonError(500, 'generation_failed', {message: '未生成有效图片'});
 
     const first = candidates[0]!;
@@ -70,7 +84,9 @@ export async function POST(
 
     const row = insertAsset({
       projectId: id,
-      sceneId: null, // Candidate — not bound yet
+      // intended 目标 scene（denormalized 便利列）；是否 READY 只看 asset_bindings，
+      // candidate 无 binding 行 → 不影响 readiness（candidate-first 契约不变）。
+      sceneId: body.sceneId,
       mediaType: 'image',
       sourceType: 'generated',
       sourceProvider: 'apiyi',
@@ -79,27 +95,20 @@ export async function POST(
       mimeType: first.mimeType,
       width: first.width ?? null,
       height: first.height ?? null,
-      licenseStatus: 'usable' as const, // will be updated to 'generated'
+      licenseStatus: 'generated',
       licenseNote: `AI 生成 · ${first.model} (待确认)`,
       attribution: `API易 / ${first.model}`,
       description: first.prompt.slice(0, 200),
-      requirement: {
-        kind: 'image',
-        subject: first.prompt.slice(0, 60),
-        query: first.prompt.slice(0, 60),
-        usage: 'primary',
-        policy: 'generated',
-      } as AssetRequirement,
+      // 真实 requirement 快照（含 requirementId）—— bind 时据此校验 exact 目标
+      requirement,
     });
-
-    // Update license_status to generated (override the default 'usable')
-    getDb().prepare('UPDATE assets SET license_status = ? WHERE id = ?').run('generated', row.id);
 
     return Response.json({
       candidate: {
         assetId: row.id,
         publicPath: row.local_path,
         sceneId: body.sceneId,
+        requirementId: body.requirementId,
         provider: first.provider,
         model: first.model,
         prompt: first.prompt,

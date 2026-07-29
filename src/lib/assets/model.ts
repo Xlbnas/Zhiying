@@ -89,16 +89,86 @@ export function listAssetsForProject(projectId: string): AssetRow[] {
     .all(projectId) as AssetRow[];
 }
 
-export function listUsableAssetsForScene(projectId: string, sceneId: string): AssetRow[] {
-  return getDb()
-    .prepare(
-      `SELECT * FROM assets
-       WHERE project_id = ? AND scene_id = ? AND license_status = 'usable'
-       ORDER BY created_at ASC`,
-    )
-    .all(projectId, sceneId) as AssetRow[];
-}
-
 export function deleteAssetsForProject(projectId: string): void {
   getDb().prepare('DELETE FROM assets WHERE project_id = ?').run(projectId);
+}
+
+// ---------- M6.3.8：显式 asset→requirement binding ----------
+
+export interface AssetBindingRow {
+  id: string;
+  project_id: string;
+  scene_id: string;
+  requirement_id: string;
+  asset_id: string;
+  active: number;
+  created_at: string;
+}
+
+export interface NewBinding {
+  projectId: string;
+  sceneId: string;
+  requirementId: string;
+  assetId: string;
+}
+
+/**
+ * 绑定 asset 到 exact requirement（replace 语义）：
+ * 同一事务内 deactivate 该 requirement 全部现有 binding + 插入新 active binding。
+ * 旧 asset 行 / 文件 / provenance 一律保留（历史 binding active=0）。
+ */
+export function bindAssetToRequirement(input: NewBinding): AssetBindingRow {
+  const db = getDb();
+  const id = crypto.randomUUID();
+  const tx = db.transaction((): void => {
+    db.prepare(
+      `UPDATE asset_bindings SET active = 0
+       WHERE project_id = ? AND scene_id = ? AND requirement_id = ? AND active = 1`,
+    ).run(input.projectId, input.sceneId, input.requirementId);
+    db.prepare(
+      `INSERT INTO asset_bindings (id, project_id, scene_id, requirement_id, asset_id, active, created_at)
+       VALUES (?, ?, ?, ?, ?, 1, ?)`,
+    ).run(id, input.projectId, input.sceneId, input.requirementId, input.assetId, new Date().toISOString());
+  });
+  tx();
+  return getDb().prepare('SELECT * FROM asset_bindings WHERE id = ?').get(id) as AssetBindingRow;
+}
+
+/** 解除 exact requirement 的 active binding（保留历史行 active=0）。 */
+export function deactivateBindingForRequirement(
+  projectId: string,
+  sceneId: string,
+  requirementId: string,
+): void {
+  getDb()
+    .prepare(
+      `UPDATE asset_bindings SET active = 0
+       WHERE project_id = ? AND scene_id = ? AND requirement_id = ? AND active = 1`,
+    )
+    .run(projectId, sceneId, requirementId);
+}
+
+export function getActiveBinding(
+  projectId: string,
+  sceneId: string,
+  requirementId: string,
+): AssetBindingRow | undefined {
+  return getDb()
+    .prepare(
+      `SELECT * FROM asset_bindings
+       WHERE project_id = ? AND scene_id = ? AND requirement_id = ? AND active = 1`,
+    )
+    .get(projectId, sceneId, requirementId) as AssetBindingRow | undefined;
+}
+
+export function listActiveBindingsForProject(projectId: string): AssetBindingRow[] {
+  return getDb()
+    .prepare('SELECT * FROM asset_bindings WHERE project_id = ? AND active = 1 ORDER BY created_at ASC')
+    .all(projectId) as AssetBindingRow[];
+}
+
+export function listBindingsForProject(projectId: string): AssetBindingRow[] {
+  return getDb()
+    .prepare('SELECT * FROM asset_bindings WHERE project_id = ? ORDER BY created_at ASC')
+    .all(projectId) as AssetBindingRow[];
 }

@@ -1,14 +1,16 @@
 /**
  * GET /api/projects/[id]/assets/resolve — 计算每 scene 的素材解析状态和可用动作。
- * POST /api/projects/[id]/assets/resolve — 执行单个解析动作（search/generate/select）。
+ * POST /api/projects/[id]/assets/resolve — 触发素材获取。
  *
  * M6.3 Asset Resolver。
+ * M6.3.8：POST 支持可选 body {sceneId, requirementId} = 单 requirement 定向重新搜索；
+ * 无 body = 全项目获取（跳过已有 active binding 的 requirement）。
  */
 import {getProject, jsonError} from '../../../../_lib/shared';
 import {getDb} from '@/lib/db';
 import {buildProjectResolution} from '@/lib/assets/resolver';
 import type {Scene} from '@/lib/scene-schema';
-import {acquireAssetsForProject} from '@/lib/assets/acquire';
+import {acquireAssetsForProject, acquireAssetsForRequirement} from '@/lib/assets/acquire';
 
 export const runtime = 'nodejs';
 
@@ -40,15 +42,26 @@ export async function GET(
 }
 
 export async function POST(
-  _req: Request,
+  req: Request,
   {params}: {params: Promise<{id: string}>},
 ): Promise<Response> {
   const {id} = await params;
   const project = getProject(id);
   if (!project) return jsonError(404, 'project_not_found');
 
-  // POST 触发全量 acquire（复用现有逻辑：跳过已 ready，仅处理 pending/blocked）
+  let body: {sceneId?: string; requirementId?: string} | null = null;
+  try { body = await req.json() as {sceneId?: string; requirementId?: string}; } catch { /* 无 body = 全量 */ }
+
   try {
+    // 单 requirement 定向获取（exact sceneId + requirementId）
+    if (body?.sceneId && body?.requirementId) {
+      const result = await acquireAssetsForRequirement(id, body.sceneId, body.requirementId);
+      if (result.status === 'failed' && result.reason?.includes('不存在')) {
+        return jsonError(400, 'requirement_not_found', {message: result.reason});
+      }
+      return Response.json(result, {status: 202});
+    }
+    // 全量 acquire（跳过已有 active binding 的 requirement）
     const summary = await acquireAssetsForProject(id);
     return Response.json(summary, {status: 202});
   } catch (err) {
