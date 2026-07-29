@@ -1,6 +1,6 @@
 'use client';
 
-import {useCallback, useEffect, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {FullCutPlayer} from '@/components/FullCutPlayer';
 import {parseRenderProgressDetail} from '@/lib/render/progress-detail';
 import type {ZhiyingFullCutProps} from '@/lib/scene-schema';
@@ -10,6 +10,11 @@ import {friendlyStageError} from './shared';
  * Final Render 区（M3-E）：四 source 全 current → Render Final Video →
  * narrated + subtitled MP4。Player 预览用 playerPreviewProps（narration=null，
  * 仅视觉+字幕预览）；真实旁白由 Worker 渲染时注入。
+ *
+ * M6.3.10 轮询：
+ * - latestJob queued/running → 2s 轮询进度（frame/百分比实时变化，无需 F5）
+ * - latestJob === null → 10s 低频 discovery（渲染可能从面板外入队）
+ * - 终态跳变 → onRenderSettled（Usage Summary 自动刷新）；unmount 清理 timer
  */
 
 interface FinalRenderReadiness {
@@ -51,13 +56,19 @@ export function FinalRenderPanel({
   projectId,
   /** 上游阶段状态指纹，变化时重新拉取。 */
   sourceStageKey,
+  /** M6.3.10：渲染进入终态（succeeded/failed/cancelled）时回调一次。 */
+  onRenderSettled,
 }: {
   projectId: string;
   sourceStageKey: string;
+  onRenderSettled?: () => void;
 }) {
   const [data, setData] = useState<FinalRenderReadiness | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const prevStatusRef = useRef<string | null>(null);
+  const settledRef = useRef(onRenderSettled);
+  settledRef.current = onRenderSettled;
 
   const load = useCallback(async () => {
     try {
@@ -74,14 +85,28 @@ export function FinalRenderPanel({
     void load();
   }, [load, sourceStageKey]);
 
-  // job 进行中时轮询
+  // 终态跳变检测：active（queued/running）→ terminal 时触发一次 onRenderSettled
   useEffect(() => {
-    if (!data?.latestJob || (data.latestJob.status !== 'queued' && data.latestJob.status !== 'running')) {
-      return;
+    const status = data?.latestJob?.status ?? null;
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = status;
+    const wasActive = prev === 'queued' || prev === 'running';
+    const isTerminal = status === 'succeeded' || status === 'failed' || status === 'cancelled';
+    if (wasActive && isTerminal) settledRef.current?.();
+  }, [data?.latestJob?.status]);
+
+  // job 进行中 2s 轮询；无 job 时 10s discovery（面板外入队也能自动出现）
+  useEffect(() => {
+    const status = data?.latestJob?.status;
+    if (status === 'queued' || status === 'running') {
+      const timer = setInterval(() => void load(), 2000);
+      return () => clearInterval(timer);
     }
-    const timer = setInterval(() => void load(), 2000);
-    return () => clearInterval(timer);
-  }, [data?.latestJob, load]);
+    if (data && !data.latestJob) {
+      const timer = setInterval(() => void load(), 10000);
+      return () => clearInterval(timer);
+    }
+  }, [data?.latestJob, data, load]);
 
   const render = useCallback(async () => {
     setBusy(true);

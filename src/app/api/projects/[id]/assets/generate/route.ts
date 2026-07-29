@@ -4,15 +4,21 @@
  *
  * M6.3.8：generate ≠ bind。candidate 记录 intended 目标（sceneId + 真实 requirement
  * 快照含 requirementId），只有用户显式调用 bind API 才产生 active binding。
+ *
+ * M6.3.10：每次真实 provider 调用 = 一个 generation attempt = 一条 usage event
+ * （attemptId 幂等）。费用属于 attempt 而非最终 bind 的 asset：拒绝/未绑定/
+ * 重新生成各自独立计费；provider 成功 → 先记 usage 再持久化 candidate，
+ * candidate 后续失败不丢已发生费用。bind 链路零改动（不重复计费）。
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {clearResolutionState, insertAsset, upsertResolutionState} from '@/lib/assets/model';
 import {defaultGeneratePrompt} from '@/lib/assets/generate-prompt';
-import {getGeneratedImageProvider} from '@/lib/assets/providers/generated';
+import {getGeneratedImageProvider, ImageGenerationError} from '@/lib/assets/providers/generated';
 import type {GeneratedImageCandidate} from '@/lib/assets/providers/generated';
 import {findRequirementInPlans, loadLatestScenesPlans} from '@/lib/assets/requirements';
+import {imageGenerationErrorStatus, recordImageGenerationUsage} from '@/lib/usage-events';
 import {getProject, jsonError} from '../../../../_lib/shared';
 
 export const runtime = 'nodejs';
@@ -63,8 +69,21 @@ export async function POST(
   if (IN_FLIGHT.has(lockKey)) return jsonError(429, 'generation_in_progress', {message: '正在为该素材需求生成图片，请稍后'});
   IN_FLIGHT.add(lockKey);
 
+  // M6.3.10：attemptId 在调用 provider 之前生成（usage event 幂等键；
+  // 每次 POST = 新 attempt = 独立计费，重复处理由主键 INSERT OR IGNORE 挡住）
+  const attemptId = crypto.randomUUID();
+  const prov = getGeneratedImageProvider();
+
+  /** 记账失败不得阻断生成流程（费用已真实发生），但必须 loudly log。 */
+  const recordUsage = (input: Parameters<typeof recordImageGenerationUsage>[0]): void => {
+    try {
+      recordImageGenerationUsage(input);
+    } catch (err) {
+      console.error(`[assets/generate] usage event 记录失败 attempt=${attemptId}:`, err);
+    }
+  };
+
   try {
-    const prov = getGeneratedImageProvider();
     if (!prov.configured || !prov.health.available) return jsonError(503, 'provider_unavailable', {message: '图像生成服务未配置或不可用'});
 
     const candidates: GeneratedImageCandidate[] = await prov.generate({prompt});
@@ -74,6 +93,26 @@ export async function POST(
     }
 
     const first = candidates[0]!;
+    const firstMeta = (first.metadata ?? {}) as Record<string, unknown>;
+
+    // 费用已真实发生：先记 usage event，再持久化 candidate（Phase 9 ordering）。
+    // imageCount = provider 实际产出张数（含后续可能被拒绝/不绑定的 candidate）。
+    recordUsage({
+      attemptId,
+      projectId: id,
+      sceneId: body.sceneId,
+      requirementId: body.requirementId,
+      provider: first.provider,
+      model: first.model,
+      requestedSize: typeof firstMeta.size === 'string' ? firstMeta.size : '1K',
+      aspectRatio: typeof firstMeta.aspectRatio === 'string' ? firstMeta.aspectRatio : '16:9',
+      imageCount: candidates.length,
+      status: 'succeeded',
+      generationId: first.generationId,
+      providerRequestId: typeof firstMeta.providerRequestId === 'string' ? firstMeta.providerRequestId : undefined,
+      usageMetadata: firstMeta.usageMetadata,
+    });
+
     const assetId = crypto.randomUUID();
     const ext = first.mimeType === 'image/png' ? 'png' : first.mimeType === 'image/webp' ? 'webp' : 'jpg';
     const relPath = path.posix.join('assets', id, `${assetId}.${ext}`);
@@ -120,10 +159,30 @@ export async function POST(
         model: first.model,
         prompt: first.prompt,
         generationId: first.generationId,
+        attemptId,
       },
     }, {status: 201});
   } catch (err) {
     const msg = err instanceof Error ? err.message : '图像生成失败';
+    // M6.3.10 计费口径：auth_failed → cost 0；429/timeout/5xx/空结果/http 错误
+    // → unknown_billing（不计费，技术详情可见）；not_configured 未发请求 → 不记。
+    if (err instanceof ImageGenerationError) {
+      const usageStatus = imageGenerationErrorStatus(err.code);
+      if (usageStatus) {
+        recordUsage({
+          attemptId,
+          projectId: id,
+          sceneId: body.sceneId,
+          requirementId: body.requirementId,
+          provider: prov.name,
+          model: err.context?.model ?? 'unknown',
+          requestedSize: err.context?.size ?? 'unknown',
+          aspectRatio: err.context?.aspectRatio ?? 'unknown',
+          imageCount: 0,
+          status: usageStatus,
+        });
+      }
+    }
     upsertResolutionState({projectId: id, sceneId: body.sceneId, requirementId: body.requirementId, status: 'generation_failed', reason: msg, provider: 'apiyi'});
     return jsonError(500, 'generation_failed', {message: msg});
   } finally {

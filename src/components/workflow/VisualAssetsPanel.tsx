@@ -68,7 +68,12 @@ const SOURCE_LABELS: Record<string, string> = {
   local: '本地素材',
 };
 
-export function VisualAssetsPanel({projectId, scenesStageKey}: {projectId: string; scenesStageKey: string}) {
+export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: {
+  projectId: string;
+  scenesStageKey: string;
+  /** M6.3.10：AI 生成成功（产生费用）后通知外部刷新 Usage Summary。 */
+  onAssetsChanged?: () => void;
+}) {
   const [data, setData] = useState<ResolverResponse | null>(null);
   const [summary, setSummary] = useState<SummaryData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -170,10 +175,11 @@ export function VisualAssetsPanel({projectId, scenesStageKey}: {projectId: strin
       setGenTarget(null);
       setGenPrompt('');
       await load();
+      onAssetsChanged?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : '生成失败');
     } finally { setGeneratingKey(null); }
-  }, [projectId, genTarget, genPrompt, load]);
+  }, [projectId, genTarget, genPrompt, load, onAssetsChanged]);
 
   const bindCandidate = useCallback(async (sceneId: string, requirementId: string, assetId: string) => {
     const key = `${sceneId}:${requirementId}:bind:${assetId}`;

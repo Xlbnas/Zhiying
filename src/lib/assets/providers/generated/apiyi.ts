@@ -21,6 +21,26 @@ const HEALTH_CACHE_TTL_MS = 300_000; // 5min
 
 const ALLOWED_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
+/**
+ * M6.3.10：带计费语义的 provider 错误。code 驱动 usage event 状态映射：
+ * auth_failed → cost 0；rate_limited/unavailable/timeout/empty_result/http_error
+ * → unknown_billing（不计费）；not_configured → 未发请求，不记 event。
+ */
+export class ImageGenerationError extends Error {
+  constructor(
+    readonly code:
+      | 'not_configured' | 'auth_failed' | 'rate_limited'
+      | 'unavailable' | 'timeout' | 'empty_result' | 'http_error',
+    message: string,
+    readonly httpStatus?: number,
+    /** 抛出点的有效请求配置（供 error event 记录 model/size/aspectRatio） */
+    readonly context?: {model: string; size: string; aspectRatio: string},
+  ) {
+    super(message);
+    this.name = 'ImageGenerationError';
+  }
+}
+
 export class ApiYiImageProvider implements GeneratedImageProvider {
   readonly name = 'apiyi';
   readonly configured: boolean;
@@ -79,9 +99,14 @@ export class ApiYiImageProvider implements GeneratedImageProvider {
   }
 
   async generate(input: GenerateImageInput): Promise<GeneratedImageCandidate[]> {
-    if (!this.configured) throw new Error('APIYi image provider not configured (missing APIYI_API_KEY)');
+    if (!this.configured) {
+      throw new ImageGenerationError('not_configured', 'APIYi image provider not configured (missing APIYI_API_KEY)');
+    }
 
     const model = input.model || MODEL;
+    const size = input.size || SIZE;
+    const aspectRatio = input.aspectRatio || ASPECT_RATIO;
+    const ctx = {model, size, aspectRatio};
     const url = `${BASE_URL}/v1beta/models/${model}:generateContent`;
 
     const body = {
@@ -89,8 +114,8 @@ export class ApiYiImageProvider implements GeneratedImageProvider {
       generationConfig: {
         responseModalities: ['IMAGE'],
         imageConfig: {
-          aspectRatio: input.aspectRatio || ASPECT_RATIO,
-          imageSize: input.size || SIZE,
+          aspectRatio,
+          imageSize: size,
         },
       },
     };
@@ -109,17 +134,22 @@ export class ApiYiImageProvider implements GeneratedImageProvider {
         const status = res.status;
         if (status === 401 || status === 403) {
           this.health = {healthy: false, available: false, reason: 'authentication_failed', checkedAt: Date.now()};
-          throw new Error('图像服务配置错误');
+          throw new ImageGenerationError('auth_failed', '图像服务配置错误', status, ctx);
         }
-        if (status === 429) throw new Error('当前生成服务繁忙，请稍后重试');
-        if (status >= 500) throw new Error('图像生成服务暂时不可用');
-        throw new Error(`图像生成失败 (HTTP ${status})`);
+        if (status === 429) throw new ImageGenerationError('rate_limited', '当前生成服务繁忙，请稍后重试', status, ctx);
+        if (status >= 500) throw new ImageGenerationError('unavailable', '图像生成服务暂时不可用', status, ctx);
+        throw new ImageGenerationError('http_error', `图像生成失败 (HTTP ${status})`, status, ctx);
       }
       // Success: update health
       this.health = {healthy: true, available: true, reason: 'healthy', checkedAt: Date.now()};
+      // M6.3.10：透传 provider 返回的用量元数据与请求 id（如有），供 usage event 记录对账
+      const providerRequestId = res.headers.get('x-request-id') ?? undefined;
       const data = (await res.json()) as Record<string, unknown>;
+      const usageMetadata = data.usageMetadata;
       const candidates = (data.candidates ?? []) as Array<Record<string, unknown>>;
-      if (!candidates || candidates.length === 0) throw new Error('图像生成未返回有效结果');
+      if (!candidates || candidates.length === 0) {
+        throw new ImageGenerationError('empty_result', '图像生成未返回有效结果', undefined, ctx);
+      }
 
       const results: GeneratedImageCandidate[] = [];
       for (let i = 0; i < candidates.length; i++) {
@@ -141,7 +171,7 @@ export class ApiYiImageProvider implements GeneratedImageProvider {
                 model,
                 prompt: input.prompt,
                 generationId: (data as Record<string, unknown>).generationId as string | undefined,
-                metadata: {model, size: input.size || SIZE},
+                metadata: {model, size, aspectRatio, usageMetadata, providerRequestId},
               });
             } catch { /* skip corrupt base64 */ }
           }
@@ -151,11 +181,13 @@ export class ApiYiImageProvider implements GeneratedImageProvider {
           }
         }
       }
-      if (results.length === 0) throw new Error('当前生成描述无法生成，请调整描述后重试');
+      if (results.length === 0) {
+        throw new ImageGenerationError('empty_result', '当前生成描述无法生成，请调整描述后重试', undefined, ctx);
+      }
       return results;
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
-        throw new Error('图像生成超时，请重试');
+        throw new ImageGenerationError('timeout', '图像生成超时，请重试', undefined, ctx);
       }
       throw err;
     } finally {

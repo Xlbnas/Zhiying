@@ -17,8 +17,10 @@ import {
 import {recoverStaleLlmJobs} from '@/lib/llm-jobs';
 import {buildStageDetail, detailFromRemotionProgress} from '@/lib/render/progress-detail';
 import {describeRenderPerfConfig, loadRenderPerfConfig} from '@/lib/render/render-config';
+import {probeNvencSupport} from '@/lib/render/nvenc';
 import {claimNextAnyJob} from '@/lib/scheduler';
-import {recoverStaleTtsJobs} from '@/lib/tts-jobs';
+import {getTtsJob, recoverStaleTtsJobs} from '@/lib/tts-jobs';
+import {recordJobComputeUsage, snapshotComputeStart} from '@/lib/usage/compute';
 import {
   COMPOSITION_ID,
   COMPOSITION_ID_NO_SUBTITLES,
@@ -44,7 +46,10 @@ const PERF_CONFIG = loadRenderPerfConfig();
  * - bundle 缓存：data/bundle-cache/{templateVersion}/；
  *   M2-C 起改为 lazy ensureBundle——只有真正 claim 到 render job 才打包，
  *   LLM job 不依赖 Remotion bundle / Chrome / public 运行素材
- * - 渲染：selectComposition + renderMedia（h264 / crf 18）
+ * - 渲染：selectComposition + renderMedia（h264；REMOTION_NVENC=true 且探测
+ *   通过时 h264_nvenc + videoBitrate，否则 libx264 / crf 18，见 M6.3.10）
+ * - M6.3.10：render/tts job 的 CPU（cgroup delta）/GPU（NVENC attempt wall 秒）
+ *   写入 project_usage_events；wall time 由 summary 侧 jobs 表幂等回填
  * - onProgress 节流（≥2s）写 heartbeat + progress，并检查 isCancelRequested
  * - SIGTERM/SIGINT 优雅退出：当前任务回 queued
  * - WORKER_ROLE 预留（M1 只实现 'all'）
@@ -193,6 +198,31 @@ async function runJob(
 ): Promise<void> {
   // 每个 job 独立随机端口：失败后 retry / 下一个 job 不复用旧端口（见上文说明）
   const renderPort = randomRenderPort();
+  // M6.3.10：compute usage 采集（cgroup cpu delta 归属本 attempt；
+  // 仅渲染主路径记录——payload/staging 等前置失败的 CPU 可忽略，不记）。
+  const computeSnapshot = snapshotComputeStart();
+  let encoder: 'h264_nvenc' | 'libx264' = 'libx264';
+  let encoderFallbackReason: string | null = null;
+  const recordCompute = (status: 'succeeded' | 'failed' | 'cancelled'): void => {
+    try {
+      recordJobComputeUsage({
+        kind: 'render',
+        jobId: job.id,
+        projectId: job.project_id,
+        attempt: job.attempt,
+        snapshot: computeSnapshot,
+        status,
+        gpuAccelerated: encoder === 'h264_nvenc',
+        metadata: {
+          renderJobKind: job.kind,
+          encoder,
+          ...(encoderFallbackReason ? {fallbackReason: encoderFallbackReason} : {}),
+        },
+      });
+    } catch (err) {
+      log(`job ${job.id} compute usage 记录失败（不影响渲染结果）: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
   try {
     // 排队期间被请求取消：直接标记 cancelled，不进入渲染
     if (isCancelRequested(job.id)) {
@@ -271,12 +301,31 @@ async function runJob(
         `${composition.durationInFrames}f → ${outputRel}`,
     );
 
+    // M6.3.10：NVENC 优先（REMOTION_NVENC=true 且真实编码探测通过）；
+    // 探测失败 → libx264 crf 18 回退，fallbackReason 落 usage metadata + log。
+    if (PERF_CONFIG.nvencEnabled) {
+      const probe = await probeNvencSupport();
+      if (probe.ok) {
+        encoder = 'h264_nvenc';
+      } else {
+        encoderFallbackReason = probe.reason ?? 'nvenc_probe_failed';
+        log(`job ${job.id} NVENC 不可用，回退 libx264：${encoderFallbackReason}`);
+      }
+    }
+    log(
+      `job ${job.id} encoder: ${encoder}` +
+        (encoder === 'h264_nvenc' ? ` bitrate=${PERF_CONFIG.nvencBitrate}` : ' crf=18'),
+    );
+
     let lastBeat = 0;
     await renderMedia({
       composition,
       serveUrl: bundleLocation,
       codec: 'h264',
-      crf: 18,
+      // NVENC 与 crf 互斥（hw 路径以 bitrate 控质量）；输出分辨率/帧率/封装不变
+      ...(encoder === 'h264_nvenc'
+        ? {hardwareAcceleration: 'required' as const, videoBitrate: PERF_CONFIG.nvencBitrate}
+        : {crf: 18 as const}),
       outputLocation: outputAbs,
       inputProps,
       port: renderPort,
@@ -320,25 +369,30 @@ async function runJob(
 
     if (isCancelRequested(job.id)) {
       markCancelled(job.id);
+      recordCompute('cancelled');
       log(`job ${job.id} cancelled at finish line`);
       return;
     }
     completeJob(job.id, outputRel);
+    recordCompute('succeeded');
     log(`job ${job.id} succeeded → ${outputRel}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (shuttingDown) {
       // 优雅退出：当前任务回 queued，交给下一个 worker / 下次启动
+      // （不记 compute usage：attempt 保留，最终执行会完整记录）
       requeueJob(job.id);
       log(`job ${job.id} requeued due to shutdown`);
       return;
     }
     if (isCancelRequested(job.id)) {
       markCancelled(job.id);
+      recordCompute('cancelled');
       log(`job ${job.id} cancelled (render aborted)`);
       return;
     }
     failJob(job.id, 'RENDER_ERROR', message);
+    recordCompute('failed');
     log(`job ${job.id} failed (attempt ${job.attempt}/${job.max_attempts}): ${message}`);
   }
 }
@@ -402,11 +456,38 @@ async function main(): Promise<void> {
         continue;
       }
       if (claimed.type === 'tts') {
+        // M6.3.10：TTS compute usage（cpu only；IndexTTS2 是外部服务，
+        // 其 GPU 消耗不计入本地 GPU 口径）。终态从 DB 读回。
+        const ttsSnapshot = snapshotComputeStart();
         await runTtsJob(claimed.job, {
           isShuttingDown: () => shuttingDown,
           log,
           shutdownSignal: controller.signal,
         });
+        try {
+          const final = getTtsJob(claimed.job.id);
+          const status = final?.status === 'succeeded'
+            ? 'succeeded'
+            : final?.status === 'cancelled'
+              ? 'cancelled'
+              : final?.status === 'failed'
+                ? 'failed'
+                : null;
+          // queued（retry/shutdown requeue）→ 本 attempt 未定稿，不记
+          if (status) {
+            recordJobComputeUsage({
+              kind: 'tts',
+              jobId: claimed.job.id,
+              projectId: claimed.job.project_id,
+              attempt: claimed.job.attempt,
+              snapshot: ttsSnapshot,
+              status,
+              metadata: {provider: claimed.job.provider, unitId: claimed.job.unit_id},
+            });
+          }
+        } catch (err) {
+          log(`tts job ${claimed.job.id} compute usage 记录失败（不影响任务结果）: ${err instanceof Error ? err.message : String(err)}`);
+        }
         continue;
       }
       let bundleLocation: string;

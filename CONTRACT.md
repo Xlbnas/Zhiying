@@ -129,7 +129,9 @@ CREATE TABLE IF NOT EXISTS llm_jobs (   -- M2 用，M1 只建表不消费
 3. 渲染：`selectComposition({serveUrl: bundle, id, inputProps})` → `renderMedia({...})`
    - `onProgress` → `heartbeat(jobId, progress)`（也兼作 heartbeat，≤5s 一次）
    - 每轮检查 `isCancelRequested` → 取消则中止（renderMedia 支持 cancelSignal）
-   - 输出：`data/projects/{projectId}/renders/{jobId}.mp4`，codec h264，crf 18
+   - 输出：`data/projects/{projectId}/renders/{jobId}.mp4`，codec h264
+     （M6.3.10：REMOTION_NVENC=true 且真实编码探测通过 → h264_nvenc + videoBitrate；
+     否则 libx264 crf 18 回退并记录 fallbackReason；分辨率/帧率/封装不变）
 4. 环境变量：`WORKER_ROLE=all`（预留，M1 只实现 all）、`ZHIYING_DATA_DIR`
 5. 优雅退出：SIGTERM/SIGINT 时当前任务标记回 queued 后退出
 

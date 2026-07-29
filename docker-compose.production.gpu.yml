@@ -1,7 +1,10 @@
-# 知影 · M5-PERF GPU 实验 override（可控制、可回退）
+# 知影 · M5-PERF GPU override（M6.3.10 起用于 NVENC 编码，可控制、可回退）
 #
-# 作用：仅给 zhiying-worker 透传 NVIDIA GPU 并开启 Chromium 硬件 GL 后端
-# （angle-egl）。base compose 默认不透传、GPU_ENABLED=false（software path）。
+# 作用：仅给 zhiying-worker 透传 NVIDIA GPU 并开启
+#   - Chromium 硬件 GL 后端（angle-egl，REMOTION_GPU_ENABLED）
+#   - 视频编码 NVENC 优先（REMOTION_NVENC；worker 启动渲染前做真实 8 帧
+#     h264_nvenc 编码探测，失败自动回退 libx264 crf 18 并记录 fallbackReason）
+# base compose 默认不透传、GPU_ENABLED=false、NVENC 未开（software path）。
 #
 # 启用：
 #   docker compose \
@@ -16,7 +19,7 @@
 # 注意：
 # - 只透传 worker；zhiying-web 不需要 GPU，不加入本文件。
 # - 与 IndexTTS2 共享同一张 RTX 2080 Ti（TTS 常驻 ~14.2GB/22GB）：
-#   Chrome GL 占用小，但需监控 VRAM，防止 TTS OOM。
+#   Chrome GL 与 NVENC session 占用小，但需监控 VRAM，防止 TTS OOM。
 # - 需要宿主已安装 nvidia-container-toolkit（tts-stack 已在用，已验证）。
 
 services:
@@ -24,3 +27,6 @@ services:
     gpus: all
     environment:
       REMOTION_GPU_ENABLED: "true"
+      REMOTION_NVENC: "true"
+      # NVENC 视频码率（NVENC 与 crf 互斥，以 bitrate 控质量）；默认 8M
+      # REMOTION_NVENC_BITRATE: "8M"

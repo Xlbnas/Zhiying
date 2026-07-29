@@ -1,6 +1,7 @@
 'use client';
 
 import {useCallback, useEffect, useState} from 'react';
+import {fmtDuration} from '@/lib/usage/format';
 
 interface StageUsage {
   stage: string;
@@ -9,6 +10,17 @@ interface StageUsage {
   cpuHours: number;
   gpuHours: number;
   wallHours: number;
+}
+
+interface ImageUsageSummary {
+  calls: number;
+  images: number;
+  costCny: number;
+  unknownBilling: number;
+  authFailed: number;
+  providers: string[];
+  models: string[];
+  backfilled: number;
 }
 
 interface UsageSummary {
@@ -25,6 +37,7 @@ interface UsageSummary {
   llmEvents: number;
   cpuEvents: number;
   gpuEvents: number;
+  image: ImageUsageSummary;
   dataStartAt: string | null;
 }
 
@@ -41,6 +54,7 @@ const STAGE_LABELS: Record<string, string> = {
   scenes: '场景',
   narration: '旁白',
   assets: '素材',
+  image_generation: '图像生成',
   render: '渲染',
   tts: '配音',
   other: '其他',
@@ -56,12 +70,7 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
-function fmtHours(h: number): string {
-  if (h < 0.01) return '0.00 小时';
-  return `${h.toFixed(2)} 小时`;
-}
-
-export function UsageSummaryPanel({projectId}: {projectId: string}) {
+export function UsageSummaryPanel({projectId, refreshKey}: {projectId: string; refreshKey?: number}) {
   const [data, setData] = useState<UsageSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,12 +87,17 @@ export function UsageSummaryPanel({projectId}: {projectId: string}) {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshKey]);
 
   if (error) return <div className="error-banner">{error}</div>;
   if (!data) return <div className="loading">加载用量数据…</div>;
 
-  const hasAnyData = data.totalTokens > 0 || data.totalCpuHours > 0 || data.totalGpuHours > 0;
+  const hasAnyData =
+    data.totalTokens > 0 ||
+    data.totalCpuHours > 0 ||
+    data.totalGpuHours > 0 ||
+    data.totalWallHours > 0 ||
+    data.image.calls > 0;
 
   return (
     <section className="stage-panel" style={{marginTop: 20}} aria-label="用量总结">
@@ -103,26 +117,30 @@ export function UsageSummaryPanel({projectId}: {projectId: string}) {
       ) : (
         <div style={{padding: '0 24px 20px'}}>
           {/* 核心指标 */}
-          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, padding: '16px 0'}}>
+          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, padding: '16px 0'}}>
             <MetricCard label="总费用" value={fmtCny(data.totalCostCny)} />
             <MetricCard label="Token" value={fmtTokens(data.totalTokens)}
               sub={`输入 ${fmtTokens(data.totalInputTokens)} · 输出 ${fmtTokens(data.totalOutputTokens)}`}
             />
-            <MetricCard label="CPU" value={fmtHours(data.totalCpuHours)}
+            <MetricCard label="AI 图片" value={fmtCny(data.image.costCny)}
+              sub={data.image.calls > 0 ? `${data.image.calls} 次生成 · ${data.image.images} 张图片` : '—'}
+            />
+            <MetricCard label="CPU" value={fmtDuration(data.totalCpuHours)}
               sub={data.cpuEvents > 0 ? `${data.cpuEvents} 个任务` : '—'}
             />
-            <MetricCard label="GPU" value={fmtHours(data.totalGpuHours)}
+            <MetricCard label="GPU" value={fmtDuration(data.totalGpuHours)}
               sub={data.gpuEvents > 0 ? `${data.gpuEvents} 个任务` : '—'}
             />
-            <MetricCard label="总耗时" value={fmtHours(data.totalWallHours)} />
+            <MetricCard label="总耗时" value={fmtDuration(data.totalWallHours)} />
           </div>
 
           {data.dataStartAt ? (
             <div style={{fontSize: 12, color: 'var(--muted)', marginBottom: 16}}>
               从 {new Date(data.dataStartAt).toLocaleString('zh-CN')} 起开始统计
               {data.llmEvents > 0 ? ` · ${data.llmEvents} 次大模型调用` : ''}
+              {data.image.calls > 0 ? ` · ${data.image.calls} 次图像生成` : ''}
               {' · '}
-              费用根据当前配置单价估算，实际账单可能存在差异。
+              费用根据配置单价估算，实际账单可能存在差异。
             </div>
           ) : null}
 
@@ -148,9 +166,9 @@ export function UsageSummaryPanel({projectId}: {projectId: string}) {
                         <td style={{padding: '6px 12px'}}>{STAGE_LABELS[s.stage] ?? s.stage}</td>
                         <td style={{textAlign: 'right', padding: '6px 12px'}}>{s.costCny > 0 ? fmtCny(s.costCny) : '—'}</td>
                         <td style={{textAlign: 'right', padding: '6px 12px'}}>{s.tokens > 0 ? fmtTokens(s.tokens) : '—'}</td>
-                        <td style={{textAlign: 'right', padding: '6px 12px'}}>{s.cpuHours > 0 ? fmtHours(s.cpuHours) : '—'}</td>
-                        <td style={{textAlign: 'right', padding: '6px 12px'}}>{s.gpuHours > 0 ? fmtHours(s.gpuHours) : '—'}</td>
-                        <td style={{textAlign: 'right', padding: '6px 12px'}}>{s.wallHours > 0 ? fmtHours(s.wallHours) : '—'}</td>
+                        <td style={{textAlign: 'right', padding: '6px 12px'}}>{s.cpuHours > 0 ? fmtDuration(s.cpuHours) : '—'}</td>
+                        <td style={{textAlign: 'right', padding: '6px 12px'}}>{s.gpuHours > 0 ? fmtDuration(s.gpuHours) : '—'}</td>
+                        <td style={{textAlign: 'right', padding: '6px 12px'}}>{s.wallHours > 0 ? fmtDuration(s.wallHours) : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -166,8 +184,19 @@ export function UsageSummaryPanel({projectId}: {projectId: string}) {
               llm events: {data.llmEvents} · cpu events: {data.cpuEvents} · gpu events: {data.gpuEvents}<br />
               cache tokens: {fmtTokens(data.totalCacheTokens)}<br />
               data since: {data.dataStartAt ?? 'N/A'}<br />
-              CPU 小时 = CPU 微秒累计 ÷ 3,600,000,000（cgroup cpu.stat usage_usec）<br />
-              GPU 小时 = GPU 任务 wall duration 累计，不按 GPU 利用率加权<br />
+              CPU = 容器 cgroup cpu.stat usage_usec delta 累计（worker 串行归属单个任务）<br />
+              GPU = 真实走 NVENC 路径的渲染 attempt wall duration 累计，不按利用率加权<br />
+              总耗时 = render/tts 任务 started_at→finished_at（不含 LLM API 等待）<br />
+              {data.image.calls + data.image.unknownBilling + data.image.authFailed > 0 ? (
+                <>
+                  图像生成: {data.image.calls} 次成功计费 · {data.image.images} 张
+                  {data.image.unknownBilling > 0 ? ` · ${data.image.unknownBilling} 次费用未知（未计入）` : ''}
+                  {data.image.authFailed > 0 ? ` · ${data.image.authFailed} 次认证失败（¥0）` : ''}
+                  {data.image.backfilled > 0 ? ` · ${data.image.backfilled} 次历史回填` : ''}<br />
+                  provider: {data.image.providers.join(', ') || 'N/A'} · model: {data.image.models.join(', ') || 'N/A'}<br />
+                  图像费用 = 每次 generation attempt × 写入时单价快照（configured_estimate，含未采用 candidate）<br />
+                </>
+              ) : null}
               部分历史用量不可追溯
             </div>
           </details>

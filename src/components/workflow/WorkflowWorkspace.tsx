@@ -39,6 +39,9 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
   const [notFound, setNotFound] = useState(false);
   const [selected, setSelected] = useState<WorkflowStage>('project_definition');
   const [advanceNotice, setAdvanceNotice] = useState<string | null>(null);
+  // M6.3.10：AI 图像生成成功 / 渲染进入终态 → bump 触发 Usage Summary 刷新（无需 F5）
+  const [usageRefreshKey, setUsageRefreshKey] = useState(0);
+  const bumpUsageRefresh = useCallback(() => setUsageRefreshKey((k) => k + 1), []);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const handleSelect = useCallback((stage: WorkflowStage) => {
@@ -194,6 +197,7 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
 
       <VisualAssetsPanel
         projectId={projectId}
+        onAssetsChanged={bumpUsageRefresh}
         scenesStageKey={
           (() => {
             const sc = data.stages.find((s) => s.stage === 'scenes');
@@ -222,6 +226,7 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
 
       <FinalRenderPanel
         projectId={projectId}
+        onRenderSettled={bumpUsageRefresh}
         sourceStageKey={
           (() => {
             const sv2 = data.stages.find((s) => s.stage === 'script_v2');
@@ -231,7 +236,7 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
         }
       />
 
-      <UsageSummaryPanel projectId={projectId} />
+      <UsageSummaryPanel projectId={projectId} refreshKey={usageRefreshKey} />
     </main>
   );
 }
