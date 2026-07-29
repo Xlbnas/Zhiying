@@ -37,7 +37,7 @@ import {
 import {evaluateVisualReadiness} from '../src/lib/assets/readiness';
 import {authenticityOf} from '../src/lib/assets/requirements';
 import {buildProjectResolution, canGenerateFallback} from '../src/lib/assets/resolver';
-import {defaultGeneratePrompt} from '../src/lib/assets/generate-prompt';
+import {defaultGeneratePrompt, stripNarrationDirectives} from '../src/lib/assets/generate-prompt';
 import {assetRequirementSchema, type AssetRequirement, type Scene} from '../src/lib/scene-schema';
 
 let pass = 0;
@@ -158,9 +158,14 @@ async function main(): Promise<void> {
   // ============ J. 默认生成 prompt ============
   {
     const p = defaultGeneratePrompt(REQ_BROLL);
-    ok(p.includes('书桌台灯特写') && p.includes('时钟显示22:00'), '[J01] prompt 含完整 subject 内容', p);
+    ok(!p.includes('旁白') && !p.includes('明天早上九点'), '[J00] 旁白指令不进入生成 prompt（production E2E 修正）', p);
+    ok(p.includes('书桌台灯特写') && p.includes('时钟显示22:00'), '[J01] prompt 含完整画面内容', p);
     ok(p.includes('16:9'), '[J02] prompt 含画幅约束');
     ok(p.includes('无字幕') && p.includes('无水印'), '[J03] prompt 含洁净度约束');
+    ok(stripNarrationDirectives('手指在键盘上犹豫、拿起手机又放下') === '手指在键盘上犹豫、拿起手机又放下', '[J04] 无旁白时 subject 原样保留');
+    ok(stripNarrationDirectives('深夜书房，旁白" deadline "全程覆盖') === '深夜书房', '[J05] 双引号旁白同样剥离');
+    const fallback = defaultGeneratePrompt({subject: "旁白'xxx'全程覆盖", query: 'desk lamp night'});
+    ok(fallback.includes('desk lamp night'), '[J06] 全被剥离时 fallback 到 query', fallback);
   }
 
   // ============ A. 构造型 B-roll + no_result → generate AVAILABLE + RECOMMENDED ============
