@@ -29,12 +29,18 @@ export async function GET(
     )
     .get(id) as {content: string} | undefined;
 
-  if (!row) {
-    return Response.json({ready: false, reason: 'scenes 尚未生成'});
+  if (!row || !row.content) {
+    return Response.json({ready: false, reason: 'scenes 尚未生成', total: 0, noAssetNeeded: 0, needAssets: 0, readyScenes: 0, missing: [], assets: []});
   }
 
-  const scenesObj = JSON.parse(row.content);
-  const visual = evaluateVisualReadiness(id, scenesObj.scenes ?? []);
+  let scenesObj: Record<string, unknown>;
+  try {
+    scenesObj = JSON.parse(row.content) as Record<string, unknown>;
+  } catch {
+    return Response.json({ready: false, reason: 'scenes 数据无法解析', total: 0, noAssetNeeded: 0, needAssets: 0, readyScenes: 0, missing: [], assets: []});
+  }
+
+  const visual = evaluateVisualReadiness(id, (scenesObj.scenes ?? []) as Parameters<typeof evaluateVisualReadiness>[1]);
   const assetRows = getDb()
     .prepare('SELECT * FROM assets WHERE project_id = ? ORDER BY created_at DESC')
     .all(id);
