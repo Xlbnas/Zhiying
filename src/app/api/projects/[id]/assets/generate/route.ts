@@ -9,6 +9,7 @@ import {getDb} from '@/lib/db';
 import {insertAsset} from '@/lib/assets/model';
 import {getGeneratedImageProvider} from '@/lib/assets/providers/generated';
 import type {GeneratedImageCandidate} from '@/lib/assets/providers/generated';
+import type {AssetRequirement} from '@/lib/scene-schema';
 import {getProject, jsonError} from '../../../../_lib/shared';
 
 export const runtime = 'nodejs';
@@ -69,7 +70,7 @@ export async function POST(
 
     const row = insertAsset({
       projectId: id,
-      sceneId: body.sceneId,
+      sceneId: null, // Candidate — not bound yet
       mediaType: 'image',
       sourceType: 'generated',
       sourceProvider: 'apiyi',
@@ -79,12 +80,16 @@ export async function POST(
       width: first.width ?? null,
       height: first.height ?? null,
       licenseStatus: 'usable' as const, // will be updated to 'generated'
-      licenseNote: `AI 生成 · ${first.model}`,
+      licenseNote: `AI 生成 · ${first.model} (待确认)`,
       attribution: `API易 / ${first.model}`,
       description: first.prompt.slice(0, 200),
-      requirement: body.requirementIndex !== undefined
-        ? {kind: 'image', subject: first.prompt.slice(0, 60), query: first.prompt.slice(0, 60), usage: 'primary', policy: 'generated'}
-        : null,
+      requirement: {
+        kind: 'image',
+        subject: first.prompt.slice(0, 60),
+        query: first.prompt.slice(0, 60),
+        usage: 'primary',
+        policy: 'generated',
+      } as AssetRequirement,
     });
 
     // Update license_status to generated (override the default 'usable')
