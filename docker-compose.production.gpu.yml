@@ -21,11 +21,16 @@
 # - 与 IndexTTS2 共享同一张 RTX 2080 Ti（TTS 常驻 ~14.2GB/22GB）：
 #   Chrome GL 与 NVENC session 占用小，但需监控 VRAM，防止 TTS OOM。
 # - 需要宿主已安装 nvidia-container-toolkit（tts-stack 已在用，已验证）。
+# - NVIDIA_DRIVER_CAPABILITIES=all：toolkit 默认只注入 compute/utility 驱动库，
+#   NVENC 所需的 libnvidia-encode.so 属 "video" capability（angle-egl 的 EGL
+#   库属 "graphics"）——不设会导致容器内有 /dev/nvidia0 但 ffmpeg 报
+#   "Cannot load libnvidia-encode.so.1"（M6.3.10 实证）。
 
 services:
   zhiying-worker:
     gpus: all
     environment:
+      NVIDIA_DRIVER_CAPABILITIES: "all"
       REMOTION_GPU_ENABLED: "true"
       REMOTION_NVENC: "true"
       # NVENC 视频码率（NVENC 与 crf 互斥，以 bitrate 控质量）；默认 8M
