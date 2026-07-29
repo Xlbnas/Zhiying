@@ -63,6 +63,17 @@ export function VisualPreview({
     void load();
   }, [load, scenesStageKey]);
 
+  // M6.3.10：渲染进行中（RENDER_ALREADY_ACTIVE）时 3s 轮询，
+  // blocker 文案内的 frame 进度与 Final Render 面板同步刷新；
+  // blocker 消失（终态）后自动停止并展示最新状态。unmount 清理 timer。
+  const blockedByActiveRender =
+    data?.blockers.some((b) => b.code === 'RENDER_ALREADY_ACTIVE') ?? false;
+  useEffect(() => {
+    if (!blockedByActiveRender) return;
+    const timer = setInterval(() => void load(), 3000);
+    return () => clearInterval(timer);
+  }, [blockedByActiveRender, load]);
+
   const startRender = useCallback(async () => {
     setSubmitting(true);
     setError(null);
