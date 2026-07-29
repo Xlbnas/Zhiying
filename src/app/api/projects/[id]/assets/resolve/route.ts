@@ -9,6 +9,7 @@
 import {getProject, jsonError} from '../../../../_lib/shared';
 import {getDb} from '@/lib/db';
 import {buildProjectResolution} from '@/lib/assets/resolver';
+import {getGeneratedImageProvider} from '@/lib/assets/providers/generated';
 import type {Scene} from '@/lib/scene-schema';
 import {acquireAssetsForProject, acquireAssetsForRequirement} from '@/lib/assets/acquire';
 
@@ -36,7 +37,11 @@ export async function GET(
   }
 
   const scenes = (scenesObj.scenes ?? []) as Scene[];
-  const resolutions = buildProjectResolution(id, scenes);
+  // M6.3.9：能力闸门 —— generate action = 语义 eligible AND provider 可用（health 内部 5min 缓存）
+  const health = await getGeneratedImageProvider().checkHealth();
+  const resolutions = buildProjectResolution(id, scenes, {
+    generateProviderAvailable: health.available && health.healthy,
+  });
 
   return Response.json({resolutions});
 }

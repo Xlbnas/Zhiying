@@ -9,7 +9,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import {bindAssetToRequirement, getActiveBinding, insertAsset} from '@/lib/assets/model';
+import {bindAssetToRequirement, clearResolutionState, getActiveBinding, insertAsset} from '@/lib/assets/model';
 import {findRequirementInPlans, loadLatestScenesPlans} from '@/lib/assets/requirements';
 import {getProject, jsonError} from '../../../../_lib/shared';
 
@@ -102,6 +102,8 @@ export async function POST(
 
   // exact binding（replace 语义：旧 binding 转历史，旧 asset 记录/文件保留）
   bindAssetToRequirement({projectId: id, sceneId, requirementId, assetId: row.id});
+  // M6.3.9：上传成功 → 清除该 requirement 的失败状态
+  clearResolutionState(id, sceneId, requirementId);
 
   return Response.json({
     assetId: row.id,

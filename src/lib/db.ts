@@ -151,6 +151,20 @@ CREATE INDEX IF NOT EXISTS idx_asset_bindings_project_scene
 -- 每个 (project, scene, requirement) 至多一个 active binding（DB 级强制）
 CREATE UNIQUE INDEX IF NOT EXISTS uq_asset_bindings_active_requirement
   ON asset_bindings(project_id, scene_id, requirement_id) WHERE active = 1;
+-- ============ M6.3.9：per-requirement 解析尝试状态（仅展示层元数据） ============
+-- READY 唯一依据仍是 asset_bindings；本表只记录最近一次自动获取/生成的失败结果，
+-- 供 resolver 向用户解释「发生了什么 / 为什么 / 下一步」（不驱动 readiness）。
+CREATE TABLE IF NOT EXISTS asset_resolution_state (
+  project_id TEXT NOT NULL,
+  scene_id TEXT NOT NULL,
+  requirement_id TEXT NOT NULL,
+  status TEXT NOT NULL,          -- no_result | download_failed | generation_failed | policy_blocked
+  reason TEXT,
+  queries_tried TEXT,            -- JSON array
+  provider TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, scene_id, requirement_id)
+);
 -- M3-B：TTS 任务队列（一个 speech unit 一个 job，独立 retry/cancel）
 CREATE TABLE IF NOT EXISTS tts_jobs (
   id TEXT PRIMARY KEY,

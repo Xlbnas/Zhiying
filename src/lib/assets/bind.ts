@@ -10,6 +10,7 @@
 import {getDb} from '../db';
 import {
   bindAssetToRequirement,
+  clearResolutionState,
   getAssetById,
   type AssetBindingRow,
   type AssetRow,
@@ -104,6 +105,8 @@ export function bindGeneratedCandidate(input: {
   getDb()
     .prepare('UPDATE assets SET license_status = ?, license_note = ? WHERE id = ?')
     .run('generated', asset.license_note?.replace('(待确认)', '').trim() || 'AI 生成', input.candidateId);
+  // M6.3.9：绑定成功 → 清除该 requirement 的失败状态
+  clearResolutionState(input.projectId, input.sceneId, input.requirementId);
 
   return {binding, asset: getAssetById(input.candidateId)!};
 }

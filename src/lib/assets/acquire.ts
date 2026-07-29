@@ -15,8 +15,10 @@ import path from 'node:path';
 import type {IdentifiedRequirement} from '../scene-schema';
 import {
   bindAssetToRequirement,
+  clearResolutionState,
   getActiveBinding,
   insertAsset,
+  upsertResolutionState,
 } from './model';
 import {
   findRequirementInPlans,
@@ -29,7 +31,7 @@ import {WikimediaCommonsProvider} from './providers/wikimedia';
 export interface AcquireResult {
   sceneId: string;
   requirementId: string;
-  status: 'bound' | 'acquired' | 'no_result' | 'policy_blocked' | 'failed';
+  status: 'bound' | 'acquired' | 'no_result' | 'download_failed' | 'policy_blocked' | 'failed';
   assetId?: string;
   reason?: string;
 }
@@ -101,6 +103,35 @@ function buildSearchQueries(req: IdentifiedRequirement): string[] {
   return [...new Set(queries)].slice(0, 5);
 }
 
+/**
+ * M6.3.9：把一次 requirement 获取的最终结果持久化为解析状态（展示层元数据，非 readiness）。
+ * 成功 → 清除失败状态；可解释的失败 → 记录（no_result/download_failed/policy_blocked）；
+ * 'failed'（搜索异常等瞬态错误）不持久化 —— 瞬态错误已在 POST 响应中告知用户。
+ */
+function persistOutcome(
+  projectId: string,
+  requirement: IdentifiedRequirement,
+  queries: string[],
+  result: AcquireResult,
+): AcquireResult {
+  if (result.status === 'acquired' || result.status === 'bound') {
+    clearResolutionState(projectId, result.sceneId, result.requirementId);
+    return result;
+  }
+  if (result.status === 'no_result' || result.status === 'download_failed' || result.status === 'policy_blocked') {
+    upsertResolutionState({
+      projectId,
+      sceneId: result.sceneId,
+      requirementId: result.requirementId,
+      status: result.status,
+      reason: result.reason ?? null,
+      queriesTried: queries,
+      provider: providerFor(requirement.policy)?.name ?? requirement.policy,
+    });
+  }
+  return result;
+}
+
 async function acquireWithRetry(
   projectId: string,
   plan: SceneAssetPlan,
@@ -129,7 +160,7 @@ async function acquireWithRetry(
           continue;
         }
         const result = await downloadAndInsert(projectId, plan.sceneId, requirement, hit, provider.name);
-        if (result.status === 'acquired') return result;
+        if (result.status === 'acquired') return persistOutcome(projectId, requirement, queries, result);
         lastResult = result;
       } catch (err) {
         lastResult = {...base, status: 'failed', reason: err instanceof Error ? err.message : String(err)};
@@ -146,8 +177,8 @@ async function acquireWithRetry(
             break;
           }
           const result = await downloadAndInsert(projectId, plan.sceneId, requirement, hit, provider.name);
-          if (result.status === 'acquired') return result;
-          if (result.status === 'failed' && attempt < maxRetries) {
+          if (result.status === 'acquired') return persistOutcome(projectId, requirement, queries, result);
+          if (result.status === 'download_failed' && attempt < maxRetries) {
             await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1))); // exponential backoff
             continue;
           }
@@ -164,7 +195,12 @@ async function acquireWithRetry(
     }
   }
 
-  return lastResult ?? {...base, status: 'no_result', reason: `所有查询均无结果：${requirement.subject}`};
+  return persistOutcome(
+    projectId,
+    requirement,
+    queries,
+    lastResult ?? {...base, status: 'no_result', reason: `所有查询均无结果：${requirement.subject}`},
+  );
 }
 
 async function downloadAndInsert(
@@ -181,16 +217,16 @@ async function downloadAndInsert(
   try {
     // 先下载到临时文件
     const prov = providerFor(requirement.policy);
-    if (!prov) return {sceneId, requirementId: requirement.requirementId, status: 'failed', reason: 'provider unavailable'};
+    if (!prov) return {sceneId, requirementId: requirement.requirementId, status: 'download_failed', reason: 'provider unavailable'};
     const tmpPath = absPath + '.tmp';
     await prov.download(hit, tmpPath);
     const tmpStat = fs.statSync(tmpPath);
-    if (tmpStat.size < 1024) { fs.rmSync(tmpPath, {force: true}); return {sceneId, requirementId: requirement.requirementId, status: 'failed', reason: '下载文件过小，校验失败'}; }
+    if (tmpStat.size < 1024) { fs.rmSync(tmpPath, {force: true}); return {sceneId, requirementId: requirement.requirementId, status: 'download_failed', reason: '下载文件过小，校验失败'}; }
     // 原子重命名
     fs.renameSync(tmpPath, absPath);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    return {sceneId, requirementId: requirement.requirementId, status: 'failed', reason};
+    return {sceneId, requirementId: requirement.requirementId, status: 'download_failed', reason};
   }
   const dims = probeImage(absPath);
   const row = insertAsset({

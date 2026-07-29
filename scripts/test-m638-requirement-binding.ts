@@ -251,7 +251,9 @@ async function main(): Promise<void> {
     deactivateBindingForRequirement(P1, 'S01', p1ReqIds[0]!);
     const withCand = buildProjectResolution(P1, scenes).find((x) => x.sceneId === 'S01')!;
     const req01 = withCand.requirements.find((q) => q.requirementId === p1ReqIds[0])!;
-    ok(req01.status === 'pending', '[G03] 解绑后 R01 回 pending');
+    // M6.3.9：解绑后存在未绑定候选 → candidate_waiting（等待确认），不再显示裸 pending；
+    // candidate-first 不变量不变（READY 仍只认 active binding，见 G01/G02）
+    ok(req01.status === 'candidate_waiting', '[G03] 解绑后 R01 → candidate_waiting（M6.3.9）');
     ok(req01.generatedCandidates.some((c) => c.assetId === cand.id), '[G04] candidate 出现在该需求的候选列表');
     ok(req01.availableActions.includes('select_candidate'), '[G05] 候选提供 select_candidate 动作');
 

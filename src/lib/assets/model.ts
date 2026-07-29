@@ -172,3 +172,65 @@ export function listBindingsForProject(projectId: string): AssetBindingRow[] {
     .prepare('SELECT * FROM asset_bindings WHERE project_id = ? ORDER BY created_at ASC')
     .all(projectId) as AssetBindingRow[];
 }
+
+// ---------- M6.3.9：per-requirement 解析尝试状态（展示层元数据，非 readiness） ----------
+
+export interface AssetResolutionStateRow {
+  project_id: string;
+  scene_id: string;
+  requirement_id: string;
+  status: 'no_result' | 'download_failed' | 'generation_failed' | 'policy_blocked';
+  reason: string | null;
+  queries_tried: string | null;
+  provider: string | null;
+  updated_at: string;
+}
+
+export interface NewResolutionState {
+  projectId: string;
+  sceneId: string;
+  requirementId: string;
+  status: AssetResolutionStateRow['status'];
+  reason?: string | null;
+  queriesTried?: string[];
+  provider?: string | null;
+}
+
+/** 记录某 requirement 最近一次解析尝试的失败结果（成功时由调用方 clear）。 */
+export function upsertResolutionState(input: NewResolutionState): void {
+  getDb()
+    .prepare(
+      `INSERT INTO asset_resolution_state
+         (project_id, scene_id, requirement_id, status, reason, queries_tried, provider, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (project_id, scene_id, requirement_id)
+       DO UPDATE SET status = excluded.status, reason = excluded.reason,
+         queries_tried = excluded.queries_tried, provider = excluded.provider,
+         updated_at = excluded.updated_at`,
+    )
+    .run(
+      input.projectId,
+      input.sceneId,
+      input.requirementId,
+      input.status,
+      input.reason ?? null,
+      JSON.stringify(input.queriesTried ?? []),
+      input.provider ?? null,
+      new Date().toISOString(),
+    );
+}
+
+/** 解析成功（bind/upload/generate 成功）后清除失败状态。 */
+export function clearResolutionState(projectId: string, sceneId: string, requirementId: string): void {
+  getDb()
+    .prepare(
+      'DELETE FROM asset_resolution_state WHERE project_id = ? AND scene_id = ? AND requirement_id = ?',
+    )
+    .run(projectId, sceneId, requirementId);
+}
+
+export function listResolutionStatesForProject(projectId: string): AssetResolutionStateRow[] {
+  return getDb()
+    .prepare('SELECT * FROM asset_resolution_state WHERE project_id = ?')
+    .all(projectId) as AssetResolutionStateRow[];
+}

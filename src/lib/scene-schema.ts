@@ -24,9 +24,20 @@ export const assetRequirementSchema = z.object({
   /** provider 搜索关键词（允许英文，历史档案检索更准）。 */
   query: z.string().min(1),
   usage: z.enum(['primary', 'supporting']).default('primary'),
-  /** 来源策略：public_domain=开放档案；generated=AI 生成；stock=商业图库（预留）。 */
+  /** 来源策略（preferred source / license policy）：public_domain=开放档案；generated=AI 生成；stock=商业图库（预留）。 */
   policy: z.enum(['public_domain', 'generated', 'stock']).default('public_domain'),
+  /**
+   * M6.3.9：真实性要求（与 policy 正交）。缺失时由 authenticityOf 按
+   * category/policy deterministic 推导（Archive→authentic_required，其余→synthetic_allowed），
+   * 旧 artifact 零迁移兼容。
+   * authentic_required=必须真实史料（禁止 AI 替代）；authentic_preferred=真实优先，
+   * AI 仅作明确标注的次级 fallback；synthetic_allowed=构造型画面，AI 生成合法。
+   */
+  authenticity: z.enum(['authentic_required', 'authentic_preferred', 'synthetic_allowed']).optional(),
 });
+
+/** M6.3.9：真实性要求（导出供 resolver / UI 使用）。 */
+export type RequirementAuthenticity = NonNullable<AssetRequirement['authenticity']>;
 
 export type AssetRequirement = z.infer<typeof assetRequirementSchema>;
 

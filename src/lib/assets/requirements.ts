@@ -18,6 +18,7 @@ import {
   requirementIdOf,
   type AssetRequirement,
   type IdentifiedRequirement,
+  type RequirementAuthenticity,
   type Scene,
 } from '../scene-schema';
 
@@ -32,6 +33,21 @@ export interface SceneAssetPlan {
 }
 
 const ASSET_CATEGORIES = new Set(['Archive', 'B-roll']);
+
+/**
+ * M6.3.9：推导 requirement 的真实性要求（与 policy 正交）。
+ * 显式 authenticity 优先；缺失时 deterministic 推导（同一 artifact 每次相同）：
+ * - policy=generated → synthetic_allowed（generated-native 需求）
+ * - category=Archive → authentic_required（历史真实性 guardrail 默认：
+ *   档案类镜头默认禁止 AI 伪造真实史料）
+ * - 其余（B-roll 等构造型画面）→ synthetic_allowed
+ */
+export function authenticityOf(category: string, req: AssetRequirement): RequirementAuthenticity {
+  if (req.authenticity) return req.authenticity;
+  if (req.policy === 'generated') return 'synthetic_allowed';
+  if (category === 'Archive') return 'authentic_required';
+  return 'synthetic_allowed';
+}
 
 /** deterministic 保底 query：LLM 未给 assetRequirements 时用 description 合成。 */
 function synthesizeRequirement(scene: Scene): AssetRequirement {

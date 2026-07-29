@@ -70,9 +70,13 @@ ${describeMgTemplatesForPrompt()}
   · MG_ScheduleNodes（清单/步骤）：{"title":"…","items":[{"label":"…"}]}
   templateProps 的文字必须与 description 表达的画面一致。
 - Archive / B-roll Scene 必须给出 assetRequirements（真实素材需求，系统将据此
-  获取档案/授权素材）：[{"kind":"image","subject":"画面主体（中文）","query":"检索关键词（英文优先）","usage":"primary","policy":"public_domain"}]
+  获取档案/授权素材）：[{"kind":"image","subject":"画面主体（中文）","query":"检索关键词（英文优先）","usage":"primary","policy":"public_domain","authenticity":"authentic_required"}]
   policy：历史照片/手稿/古籍/建筑用 public_domain；明确需要 AI 生成的概念画面
   用 generated；禁止请求电影/电视剧/商业摄影片段（版权不可自动使用）。
+  authenticity（真实性要求，与 policy 正交）：真实历史人物/事件/文物/档案画面
+  用 authentic_required（禁止 AI 伪造史料）；真实优先但允许 AI 替代用
+  authentic_preferred；构造型/示意性 B-roll（场景布置、静物、氛围画面）
+  用 synthetic_allowed（搜索失败时系统将推荐 AI 生成）。
 - Minimal / Editorial Graphic 不需要 assetRequirements（Minimal 用排版；
   Editorial Graphic 按 MG 规则给 template + templateProps）。
 - narrationSummary 是该 Scene 对应旁白的语义摘要，不是旁白原文。

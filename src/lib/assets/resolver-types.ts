@@ -16,6 +16,7 @@ export type ResolutionStatus =
   | 'download_failed' // 下载可重试
   | 'policy_blocked'  // 无可用 provider（如 generated 未实现）
   | 'generation_failed' // AI 生成失败
+  | 'candidate_waiting' // M6.3.9：已有未绑定 AI 候选，等待用户确认（derived，不持久化）
   | 'manual_required'; // 需要用户上传或选择其他方案
 
 /** 每个 scene 的整体素材状态 + 每项 requirement 的解析进度 */
@@ -49,10 +50,24 @@ export interface RequirementResolution {
   candidates: AssetSearchCandidate[];
   /** 未绑定的 AI 生成候选（candidate-first：需用户显式"使用这张"才绑定） */
   generatedCandidates: GeneratedCandidateInfo[];
-  /** 该 requirement 支持的操作 */
+  /** 该 requirement 支持的操作（recommendedAction 排在首位） */
   availableActions: ResolverAction[];
   /** 用户可见的状态描述（中文） */
   friendlyStatus: string;
+  /** M6.3.9：真实性要求（authenticityOf 推导结果；AI fallback 的语义闸门） */
+  authenticity: 'authentic_required' | 'authentic_preferred' | 'synthetic_allowed';
+  /** M6.3.9：系统推荐下一步动作（null = 无需动作，如 ready） */
+  recommendedAction: ResolverAction | null;
+  /** M6.3.9：语义上允许 AI 生成（尚未叠加 provider health） */
+  generateEligible: boolean;
+  /** M6.3.9：authentic_preferred 时 true —— UI 应标注「AI生成替代」 */
+  generateSecondary: boolean;
+  /** M6.3.9：generate 不可用的原因（语义禁止或 provider 不可用；可用时为 null） */
+  generateDisabledReason: string | null;
+  /** M6.3.9：最近一次失败尝试的原因（来自 asset_resolution_state，无则 null） */
+  failureReason: string | null;
+  /** M6.3.9：用户态说明 —— 发生了什么 / 为什么 / 建议下一步（一句话） */
+  statusHint: string;
 }
 
 /** 未绑定 AI 生成候选的展示信息。 */

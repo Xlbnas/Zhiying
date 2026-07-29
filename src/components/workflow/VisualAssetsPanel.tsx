@@ -1,6 +1,7 @@
 'use client';
 
 import {useCallback, useEffect, useRef, useState} from 'react';
+import {defaultGeneratePrompt} from '@/lib/assets/generate-prompt';
 
 interface GeneratedCandidateData {
   assetId: string;
@@ -29,6 +30,15 @@ interface RequirementData {
   boundAsset: BoundAssetData | null;
   generatedCandidates: GeneratedCandidateData[];
   availableActions: string[];
+  // M6.3.9：动作路由与用户态展示
+  authenticity: string;
+  recommendedAction: string | null;
+  generateEligible: boolean;
+  generateSecondary: boolean;
+  generateDisabledReason: string | null;
+  failureReason: string | null;
+  statusHint: string;
+  queriesTried: string[];
 }
 
 interface ResolutionData {
@@ -73,15 +83,14 @@ export function VisualAssetsPanel({projectId, scenesStageKey}: {projectId: strin
   const [genTarget, setGenTarget] = useState<{sceneId: string; requirementId: string} | null>(null);
   const [genPrompt, setGenPrompt] = useState<string>('');
   const [generatingKey, setGeneratingKey] = useState<string | null>(null);
-  const [genAvailable, setGenAvailable] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null); // 搜索/绑定按钮 busy
 
   const load = useCallback(async () => {
     try {
-      const [r1, r2, r3] = await Promise.all([
+      // resolve 响应已含 per-requirement 能力闸门（generateEligible / generateDisabledReason）
+      const [r1, r2] = await Promise.all([
         fetch(`/api/projects/${projectId}/assets/resolve`, {cache: 'no-store'}),
         fetch(`/api/projects/${projectId}/assets`, {cache: 'no-store'}),
-        fetch(`/api/projects/${projectId}/assets/generate`, {cache: 'no-store'}),
       ]);
       if (r1.ok) setData((await r1.json()) as ResolverResponse);
       if (r2.ok) {
@@ -91,10 +100,6 @@ export function VisualAssetsPanel({projectId, scenesStageKey}: {projectId: strin
           readyRequirements: (d.readyRequirements as number) ?? 0,
           pendingAssets: d.pendingAssets as number,
         });
-      }
-      if (r3.ok) {
-        const g = await r3.json() as {available: boolean};
-        setGenAvailable(g.available);
       }
       setError(null);
     } catch {
@@ -112,8 +117,20 @@ export function VisualAssetsPanel({projectId, scenesStageKey}: {projectId: strin
     try {
       const res = await fetch(`/api/projects/${projectId}/assets/resolve`, {method: 'POST'});
       if (!res.ok) throw new Error(await errMsg(res, '获取失败'));
-      const r = await res.json() as {acquired: number; reused: number; failed: number};
-      setResult(`成功 ${r.acquired}，失败 ${r.failed}`);
+      const r = await res.json() as {acquired: number; reused: number; failed: number; results?: Array<{status: string}>};
+      // M6.3.9：全局 summary 区分结果构成（成功 / 未找到 / 下载失败 / 其他）
+      let noResult = 0; let downloadFailed = 0; let other = 0;
+      for (const x of r.results ?? []) {
+        if (x.status === 'no_result') noResult++;
+        else if (x.status === 'download_failed') downloadFailed++;
+        else if (x.status !== 'acquired' && x.status !== 'bound') other++;
+      }
+      setResult(
+        `自动准备完成：成功 ${r.acquired}` +
+        (noResult ? ` · 未找到 ${noResult}` : '') +
+        (downloadFailed ? ` · 下载失败 ${downloadFailed}` : '') +
+        (other ? ` · 其他失败 ${other}` : ''),
+      );
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : '获取失败');
@@ -222,7 +239,7 @@ export function VisualAssetsPanel({projectId, scenesStageKey}: {projectId: strin
         <div style={{display: 'flex', gap: 20, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap'}}>
           <span style={{fontSize: 14}}>素材需求：<strong>{summary.needAssets}</strong> 项</span>
           <span style={{fontSize: 14}}>已准备：<strong style={{color: summary.pendingAssets === 0 ? 'var(--success)' : 'var(--accent)'}}>{summary.readyRequirements}</strong> / {summary.needAssets}</span>
-          {summary.pendingAssets > 0 ? <span style={{fontSize: 12, color: 'var(--muted)'}}>待准备：{summary.pendingAssets} 项</span> : null}
+          {summary.pendingAssets > 0 ? <span style={{fontSize: 12, color: 'var(--muted)'}}>待处理：{summary.pendingAssets} 项</span> : null}
         </div>
 
         {result ? <div style={{fontSize: 12, color: 'var(--success)', marginBottom: 8}}>{result}</div> : null}
@@ -249,15 +266,80 @@ export function VisualAssetsPanel({projectId, scenesStageKey}: {projectId: strin
                     {s.requirements.map((req) => {
                       const reqKey = `${s.sceneId}:${req.requirementId}`;
                       const isReady = req.status === 'ready';
+                      const isFailure = req.status === 'download_failed' || req.status === 'generation_failed';
+                      const statusColor = isReady ? 'var(--success)' : isFailure ? 'var(--danger)' : 'var(--accent)';
+                      // M6.3.9：推荐动作主按钮单独一行；其余进「其他方式」行（select_candidate 由候选区块承担）
+                      const buttonActions = req.availableActions.filter((a) => a !== 'select_candidate');
+                      const primaryAction = req.recommendedAction && buttonActions.includes(req.recommendedAction)
+                        ? req.recommendedAction
+                        : null;
+                      const secondaryActions = primaryAction ? buttonActions.filter((a) => a !== primaryAction) : buttonActions;
+                      // 语义允许但 provider 不可用 → 展示真实 disabled 按钮（authentic_required 则不渲染 generate）
+                      const showDisabledGenerate = !req.availableActions.includes('generate')
+                        && req.generateEligible && !!req.generateDisabledReason;
+                      const labelFor = (action: string): string => {
+                        switch (action) {
+                          case 'search': return req.status === 'pending' ? '搜索素材' : '重新搜索';
+                          case 'retry_download': return '重新下载';
+                          case 'generate': return req.generateSecondary ? 'AI生成替代' : 'AI 生成';
+                          case 'upload': return '上传图片';
+                          case 'replace': return '替换素材';
+                          case 'switch_to_mg': return '改用 MG（即将支持）';
+                          default: return action;
+                        }
+                      };
+                      const renderBtn = (action: string, isPrimary: boolean) => {
+                        const cls = isPrimary ? 'btn btn-sm btn-primary' : 'btn btn-sm';
+                        if (action === 'switch_to_mg') {
+                          return <button key={action} className="btn btn-sm" disabled title="改用 MG 功能即将支持">改用 MG（即将支持）</button>;
+                        }
+                        if (action === 'search' || action === 'retry_download') {
+                          const busy = busyKey === `${reqKey}:search`;
+                          return (
+                            <button key={action} className={cls} disabled={busy}
+                              onClick={() => void searchOne(s.sceneId, req.requirementId)}>
+                              {busy ? '搜索中…' : labelFor(action)}
+                            </button>
+                          );
+                        }
+                        if (action === 'generate') {
+                          return (
+                            <button key={action} className={cls}
+                              onClick={() => {
+                                setGenTarget({sceneId: s.sceneId, requirementId: req.requirementId});
+                                setGenPrompt(defaultGeneratePrompt(req.requirement));
+                              }}>
+                              {labelFor(action)}
+                            </button>
+                          );
+                        }
+                        if (action === 'upload' || action === 'replace') {
+                          const busy = uploadingKey === `${reqKey}:upload`;
+                          return (
+                            <button key={action} className={cls} disabled={busy}
+                              onClick={() => { setUploadTarget({sceneId: s.sceneId, requirementId: req.requirementId}); fileRef.current?.click(); }}>
+                              {busy ? '上传中…' : labelFor(action)}
+                            </button>
+                          );
+                        }
+                        return null;
+                      };
                       return (
                         <div key={req.requirementId} style={{marginBottom: 14, paddingBottom: 12, borderBottom: '1px dashed var(--border)'}}>
                           <div style={{display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4, flexWrap: 'wrap'}}>
                             <span style={{fontSize: 12, fontWeight: 600}}>需求 {req.index + 1}</span>
                             <span style={{fontSize: 12, color: 'var(--muted)'}}>{req.requirement.subject}</span>
-                            <span style={{fontSize: 12, fontWeight: 600, color: isReady ? 'var(--success)' : 'var(--accent)'}}>
+                            <span style={{fontSize: 12, fontWeight: 600, color: statusColor}}>
                               {isReady ? '✓ ' : ''}{req.friendlyStatus}
                             </span>
                           </div>
+
+                          {/* 用户态说明：发生了什么 / 为什么 / 建议下一步（无需展开技术详情） */}
+                          {req.statusHint ? (
+                            <div style={{fontSize: 12, color: 'var(--muted)', marginBottom: 6, lineHeight: 1.5}}>
+                              {req.statusHint}
+                            </div>
+                          ) : null}
 
                           {/* 已绑定素材（exact binding） */}
                           {req.boundAsset ? (
@@ -275,43 +357,25 @@ export function VisualAssetsPanel({projectId, scenesStageKey}: {projectId: strin
                             </div>
                           ) : null}
 
-                          {/* 操作按钮：全部针对 exact requirement */}
-                          <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
-                            {req.availableActions.includes('search') && (
-                              <button className="btn btn-sm" disabled={busyKey === `${reqKey}:search`}
-                                onClick={() => void searchOne(s.sceneId, req.requirementId)}>
-                                {busyKey === `${reqKey}:search` ? '搜索中…' : '重新搜索'}
-                              </button>
-                            )}
-                            {req.availableActions.includes('generate') ? (
-                              genAvailable ? (
-                                <button className="btn btn-sm"
-                                  onClick={() => {
-                                    setGenTarget({sceneId: s.sceneId, requirementId: req.requirementId});
-                                    setGenPrompt(req.requirement.subject);
-                                  }}>
-                                  AI 生成
+                          {/* 推荐动作（主按钮单独一行，窄屏 flex-wrap 自然折行） */}
+                          {primaryAction ? (
+                            <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6}}>
+                              {renderBtn(primaryAction, true)}
+                            </div>
+                          ) : null}
+
+                          {/* 其他方式（全部针对 exact requirement） */}
+                          {secondaryActions.length > 0 || showDisabledGenerate ? (
+                            <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center'}}>
+                              {primaryAction ? <span style={{fontSize: 11, color: 'var(--muted)'}}>其他方式：</span> : null}
+                              {secondaryActions.map((a) => renderBtn(a, false))}
+                              {showDisabledGenerate ? (
+                                <button className="btn btn-sm" disabled title={req.generateDisabledReason ?? 'AI 生成暂不可用'}>
+                                  AI 生成（暂不可用）
                                 </button>
-                              ) : (
-                                <button className="btn btn-sm" disabled title="AI 图像生成暂不可用">AI 生成（暂不可用）</button>
-                              )
-                            ) : null}
-                            {req.availableActions.includes('upload') && (
-                              <button className="btn btn-sm" disabled={uploadingKey === `${reqKey}:upload`}
-                                onClick={() => { setUploadTarget({sceneId: s.sceneId, requirementId: req.requirementId}); fileRef.current?.click(); }}>
-                                {uploadingKey === `${reqKey}:upload` ? '上传中…' : '上传图片'}
-                              </button>
-                            )}
-                            {req.availableActions.includes('replace') && (
-                              <button className="btn btn-sm" disabled={uploadingKey === `${reqKey}:upload`}
-                                onClick={() => { setUploadTarget({sceneId: s.sceneId, requirementId: req.requirementId}); fileRef.current?.click(); }}>
-                                {uploadingKey === `${reqKey}:upload` ? '上传中…' : '替换素材'}
-                              </button>
-                            )}
-                            {req.availableActions.includes('switch_to_mg') ? (
-                              <button className="btn btn-sm" disabled title="改用 MG 功能即将支持">改用 MG（即将支持）</button>
-                            ) : null}
-                          </div>
+                              ) : null}
+                            </div>
+                          ) : null}
 
                           {/* AI 生成 prompt 编辑器（针对 exact requirement） */}
                           {genTarget?.requirementId === req.requirementId ? (
@@ -358,8 +422,11 @@ export function VisualAssetsPanel({projectId, scenesStageKey}: {projectId: strin
                           <details style={{marginTop: 6}}>
                             <summary style={{cursor: 'pointer', fontSize: 11, opacity: 0.6}}>技术详情</summary>
                             <div style={{fontSize: 10, opacity: 0.5, marginTop: 4}}>
-                              sceneId={s.sceneId} requirementId={req.requirementId} policy={req.requirement.policy}<br />
-                              query=&quot;{req.requirement.query}&quot; status={req.status}
+                              sceneId={s.sceneId} requirementId={req.requirementId} policy={req.requirement.policy} authenticity={req.authenticity}<br />
+                              query=&quot;{req.requirement.query}&quot; status={req.status} recommended={req.recommendedAction ?? '—'}<br />
+                              queriesTried=[{req.queriesTried.join(', ')}]
+                              {req.failureReason ? <> failureReason=&quot;{req.failureReason}&quot;</> : null}
+                              {req.generateDisabledReason ? <> generateDisabled=&quot;{req.generateDisabledReason}&quot;</> : null}
                             </div>
                           </details>
                         </div>

@@ -8,7 +8,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import {insertAsset} from '@/lib/assets/model';
+import {clearResolutionState, insertAsset, upsertResolutionState} from '@/lib/assets/model';
+import {defaultGeneratePrompt} from '@/lib/assets/generate-prompt';
 import {getGeneratedImageProvider} from '@/lib/assets/providers/generated';
 import type {GeneratedImageCandidate} from '@/lib/assets/providers/generated';
 import {findRequirementInPlans, loadLatestScenesPlans} from '@/lib/assets/requirements';
@@ -56,7 +57,7 @@ export async function POST(
     return jsonError(400, 'requirement_not_found', {message: `需求 ${body.requirementId} 不存在于场景 ${body.sceneId}`});
   }
   const requirement = found.requirement;
-  const prompt = body.prompt?.trim() || `${requirement.subject}（${requirement.query}）`;
+  const prompt = body.prompt?.trim() || defaultGeneratePrompt(requirement);
 
   const lockKey = `${id}:${body.sceneId}:${body.requirementId}`;
   if (IN_FLIGHT.has(lockKey)) return jsonError(429, 'generation_in_progress', {message: '正在为该素材需求生成图片，请稍后'});
@@ -67,7 +68,10 @@ export async function POST(
     if (!prov.configured || !prov.health.available) return jsonError(503, 'provider_unavailable', {message: '图像生成服务未配置或不可用'});
 
     const candidates: GeneratedImageCandidate[] = await prov.generate({prompt});
-    if (!candidates.length) return jsonError(500, 'generation_failed', {message: '未生成有效图片'});
+    if (!candidates.length) {
+      upsertResolutionState({projectId: id, sceneId: body.sceneId, requirementId: body.requirementId, status: 'generation_failed', reason: '未生成有效图片', provider: prov.name});
+      return jsonError(500, 'generation_failed', {message: '未生成有效图片'});
+    }
 
     const first = candidates[0]!;
     const assetId = crypto.randomUUID();
@@ -103,6 +107,9 @@ export async function POST(
       requirement,
     });
 
+    // M6.3.9：生成成功 → 清除该 requirement 的失败状态（candidate_waiting 由 resolver 推导）
+    clearResolutionState(id, body.sceneId, body.requirementId);
+
     return Response.json({
       candidate: {
         assetId: row.id,
@@ -117,6 +124,7 @@ export async function POST(
     }, {status: 201});
   } catch (err) {
     const msg = err instanceof Error ? err.message : '图像生成失败';
+    upsertResolutionState({projectId: id, sceneId: body.sceneId, requirementId: body.requirementId, status: 'generation_failed', reason: msg, provider: 'apiyi'});
     return jsonError(500, 'generation_failed', {message: msg});
   } finally {
     IN_FLIGHT.delete(lockKey);
