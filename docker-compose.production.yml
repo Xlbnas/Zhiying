@@ -30,6 +30,7 @@ x-zhiying-app: &zhiying-app
   volumes:
     - ${ZHIYING_HOST_DATA_DIR:?ZHIYING_HOST_DATA_DIR required}:/app/data
     - ${ZHIYING_HOST_PUBLIC_DIR:?ZHIYING_HOST_PUBLIC_DIR required}:/app/public:ro
+    - ${ZHIYING_HOST_ASSETS_DIR:?ZHIYING_HOST_ASSETS_DIR required}:/app/public/assets:rw
   networks:
     - zhiying-app-net
 
