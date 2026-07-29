@@ -375,6 +375,9 @@ export function checkFinalRenderReadiness(projectId: string): FinalRenderReadine
   // M6：Final Render 硬门禁 — 视觉素材未就绪则禁止渲染（M6.3.8：requirement 粒度）
   const visual = evaluateVisualReadiness(projectId, src.scenes.data.scenes);
   if (!visual.ready) {
+    // fail-closed：任何 requirement pending → ready=false（UI 禁用渲染按钮）；
+    // enqueueFinalRender 内部另有同一门禁兜底。
+    base.ready = false;
     base.blockers.push({
       code: 'VISUAL_READINESS_FAILED',
       message: `还有 ${visual.missing.length} 个素材需求未准备完成（${visual.readyRequirements}/${visual.needAssets} 已就绪）`,
