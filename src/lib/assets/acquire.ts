@@ -69,50 +69,122 @@ function pickHit(hits: AssetSearchHit[]): {hit?: AssetSearchHit; blockedReason?:
   return {};
 }
 
-async function acquireOne(
+/** 从一个 requirement 生成最多 MAX_QUERIES 个搜索查询（优先英文 + 实体）。 */
+function buildSearchQueries(req: AssetRequirement): string[] {
+  const queries: string[] = [req.query];
+  const subject = req.subject.trim();
+  // 如果原始 query 是中文，尝试提取英文实体/关键词
+  // 简单策略：移除描述性词汇，生成短查询
+  if (/[\u4e00-\u9fff]/.test(req.query)) {
+    // 保留原始中文 query，同时尝试更短的变体
+    const words = subject.replace(/[，,、；;。．\s]+/g, ' ').trim().split(/\s+/);
+    if (words.length >= 3) queries.push(words.slice(0, 2).join(' '));
+    if (words.length >= 4) queries.push(words.slice(0, 1).join(' '));
+    // 移除括号内容和描述词
+    const noParens = subject.replace(/（[^）]*）/g, '').replace(/\([^)]*\)/g, '').trim();
+    if (noParens !== subject) queries.push(noParens);
+  }
+  // 去重，限制数量
+  return [...new Set(queries)].slice(0, 5);
+}
+
+async function acquireWithRetry(
   projectId: string,
   plan: SceneAssetPlan,
   requirement: AssetRequirement,
+  maxRetries = 3,
 ): Promise<AcquireResult> {
   const provider = providerFor(requirement.policy);
   if (!provider) {
     return {sceneId: plan.sceneId, status: 'policy_blocked', reason: `暂无可用的 ${requirement.policy} provider`};
   }
-  let hits: AssetSearchHit[];
-  try {
-    hits = await provider.search(requirement, 3);
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    return {sceneId: plan.sceneId, status: 'failed', reason};
+
+  const queries = buildSearchQueries(requirement);
+  let lastResult: AcquireResult | null = null;
+
+  for (const query of queries) {
+    if (query !== requirement.query) {
+      // 修改 requirement 的 query 进行 fallback 搜索
+      const altReq: AssetRequirement = {...requirement, query};
+      try {
+        const hits = await provider.search(altReq, 3);
+        const {hit, blockedReason} = pickHit(hits);
+        if (!hit) {
+          if (blockedReason) lastResult = {sceneId: plan.sceneId, status: 'policy_blocked', reason: blockedReason};
+          else lastResult = {sceneId: plan.sceneId, status: 'no_result', reason: `未找到素材：${query}`};
+          continue;
+        }
+        const result = await downloadAndInsert(projectId, plan.sceneId, requirement, hit, provider.name);
+        if (result.status === 'acquired') return result;
+        lastResult = result;
+      } catch (err) {
+        lastResult = {sceneId: plan.sceneId, status: 'failed', reason: err instanceof Error ? err.message : String(err)};
+      }
+    } else {
+      // 原始 query，支持下载重试
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const hits = await provider.search(requirement, 3);
+          const {hit, blockedReason} = pickHit(hits);
+          if (!hit) {
+            if (blockedReason) { lastResult = {sceneId: plan.sceneId, status: 'policy_blocked', reason: blockedReason}; break; }
+            lastResult = {sceneId: plan.sceneId, status: 'no_result', reason: `未找到素材：${requirement.query}`};
+            break;
+          }
+          const result = await downloadAndInsert(projectId, plan.sceneId, requirement, hit, provider.name);
+          if (result.status === 'acquired') return result;
+          if (result.status === 'failed' && attempt < maxRetries) {
+            await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1))); // exponential backoff
+            continue;
+          }
+          lastResult = result;
+          break;
+        } catch (err) {
+          if (attempt < maxRetries) {
+            await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
+            continue;
+          }
+          lastResult = {sceneId: plan.sceneId, status: 'failed', reason: err instanceof Error ? err.message : String(err)};
+        }
+      }
+    }
   }
-  const {hit, blockedReason} = pickHit(hits);
-  if (!hit) {
-    return blockedReason
-      ? {sceneId: plan.sceneId, status: 'policy_blocked', reason: blockedReason}
-      : {sceneId: plan.sceneId, status: 'no_result', reason: `未找到素材：${requirement.query}`};
-  }
+
+  return lastResult ?? {sceneId: plan.sceneId, status: 'no_result', reason: `所有查询均无结果：${requirement.subject}`};
+}
+
+async function downloadAndInsert(
+  projectId: string,
+  sceneId: string,
+  requirement: AssetRequirement,
+  hit: AssetSearchHit,
+  providerName: string,
+): Promise<AcquireResult> {
   const assetId = crypto.randomUUID();
   const ext = extForMime(hit.mimeType);
   const relPath = path.posix.join('assets', projectId, `${assetId}.${ext}`);
   const absPath = path.join(publicRoot(), relPath);
   try {
-    await provider.download(hit, absPath);
+    // 先下载到临时文件
+    const prov = providerFor(requirement.policy);
+    if (!prov) return {sceneId, status: 'failed', reason: 'provider unavailable'};
+    const tmpPath = absPath + '.tmp';
+    await prov.download(hit, tmpPath);
+    const tmpStat = fs.statSync(tmpPath);
+    if (tmpStat.size < 1024) { fs.rmSync(tmpPath, {force: true}); return {sceneId, status: 'failed', reason: '下载文件过小，校验失败'}; }
+    // 原子重命名
+    fs.renameSync(tmpPath, absPath);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    return {sceneId: plan.sceneId, status: 'failed', reason};
-  }
-  const stat = fs.statSync(absPath);
-  if (stat.size < 1024) {
-    fs.rmSync(absPath, {force: true});
-    return {sceneId: plan.sceneId, status: 'failed', reason: '下载文件过小，校验失败'};
+    return {sceneId, status: 'failed', reason};
   }
   const dims = probeImage(absPath);
   const row = insertAsset({
     projectId,
-    sceneId: plan.sceneId,
+    sceneId,
     mediaType: 'image',
     sourceType: requirement.policy === 'public_domain' ? 'archive' : 'generated',
-    sourceProvider: provider.name,
+    sourceProvider: providerName,
     sourceUrl: hit.sourceUrl,
     localPath: relPath,
     mimeType: hit.mimeType,
@@ -124,7 +196,7 @@ async function acquireOne(
     description: hit.description || requirement.subject,
     requirement,
   });
-  return {sceneId: plan.sceneId, status: 'acquired', assetId: row.id};
+  return {sceneId, status: 'acquired', assetId: row.id};
 }
 
 /**
@@ -150,7 +222,7 @@ export async function acquireAssetsForProject(projectId: string): Promise<Acquir
     let done: AcquireResult | null = null;
     for (const req of plan.requirements) {
       // eslint-disable-next-line no-await-in-loop
-      const r = await acquireOne(projectId, plan, req);
+      const r = await acquireWithRetry(projectId, plan, req);
       if (r.status === 'acquired') {
         done = r;
         break;

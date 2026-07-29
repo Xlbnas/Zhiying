@@ -20,7 +20,7 @@ export interface AssetRow {
   width: number | null;
   height: number | null;
   duration_ms: number | null;
-  license_status: 'usable' | 'review_required' | 'blocked';
+  license_status: 'usable' | 'review_required' | 'blocked' | 'user_provided';
   license_note: string | null;
   attribution: string | null;
   description: string | null;
@@ -40,7 +40,7 @@ export interface NewAsset {
   width?: number | null;
   height?: number | null;
   durationMs?: number | null;
-  licenseStatus: AssetRow['license_status'];
+  licenseStatus: AssetRow['license_status'];  // usable | review_required | blocked | user_provided
   licenseNote?: string | null;
   attribution?: string | null;
   description?: string | null;
