@@ -609,3 +609,74 @@ Storyboard approved 后生成低成本 Animatic：
   }
 }
 ```
+
+---
+
+## REVIEW DECISIONS — 2026-07-30
+
+> M7.0 Review 冻结决策。本节内容优先级高于报告前文任何冲突表述。实施基线：`9bd1abc079f75c5ba4aa2c132bd17ecefaa7a1b7`，实施分支 `m7-typed-narration`。
+
+### 1.1 Narration unit 使用真正的 discriminated union
+
+废止前文的 `kind: "speech" | "pause" | "visual_beat"` + `spokenText: string | null` + `pauseBeforeMs/pauseAfterMs` 设计。冻结为：
+
+```ts
+type NarrationUnit = SpeechUnit | SilenceUnit;
+
+interface SpeechUnit {
+  id: string;
+  kind: "speech";
+  chapter: number;
+  spokenText: string;        // 必须非空
+  subtitleText: string | null;
+  delivery: Delivery;
+  evidenceIds: string[];
+  sourceText: string;
+}
+
+interface SilenceUnit {
+  id: string;
+  kind: "silence";
+  chapter: number;
+  durationMs: number;        // 有限正整数，有上限
+  reason: "pause" | "visual_breath";
+  sourceText: string;
+}
+```
+
+约束：speech.spokenText 必须非空；silence 不允许 spokenText/subtitleText/delivery；所有有时长停顿必须是显式 silence unit；禁止 pause unit 与 pauseBefore/pauseAfter 双重表示；「旁白无」无明确时长时必须 needsReview/hard stop；visual cue 只允许作为非权威 editorial hint，不得成为 Visual Intent 真相。
+
+### 1.2 Beat 不得引用下游 Sequence
+
+从 `narrative-beats@1.0` 删除 `sequenceId`。依赖方向固定：Narrative Beat → refs Narration Units；Visual Sequence → refs Beat IDs。禁止双向引用。
+
+### 1.3 TTS 复用使用完整输入 fingerprint
+
+禁止只按文本 hash 复用。冻结为：
+
+```
+ttsInputFingerprint = sha256(
+  normalizedSpokenText + voiceIdentity + referenceAudioHash
+  + ttsModelVersion + delivery + speed + synthesisParameters
+  + normalizationVersion
+)
+```
+
+只有 fingerprint 完全一致才允许复用旧 unit audio。
+
+### 1.4 Timing authority 分层
+
+固定为：`narrationAudioManifest` = authoritative temporal coordinate system；`timing-reconciliation@2.0` output = authoritative visual shot timeline。Beat/Intent/Sequence 只保存 intent/weight，不保存独立最终时间线。
+
+### 1.5 Visual Intent 单一所有者
+
+`visual_intent_plan` 是唯一 intent 权威。Sequence/Shot 只引用 `visualIntentId`，不得复制独立 intent 字段。
+
+### 1.6 Approval 是独立 append-only record
+
+Storyboard/Animatic artifact 内不得保存可变的 approved/pass 布尔状态。Final source 将来必须精确引用 approval record ID。
+
+### 1.7 修正阶段验收指标
+
+- 「增量 TTS ≤20%」降为 observation，不是 hard gate。
+- 「title card <15%」降为 candidate target，不是未校准的硬阈值。
