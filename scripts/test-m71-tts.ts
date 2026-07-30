@@ -337,12 +337,17 @@ function main(): void {
   {
     const projectId = newProject();
     try {
-      enqueueNarrationAudioJobsV2({projectId, provider: SNAPSHOT});
-      ok(false, '[E1] 无 eligible current plan → 入队必须拒绝');
+      // M7.1.1：必须显式传 narrationPlanV2ArtifactId；不存在的 ID → NOT_FOUND
+      enqueueNarrationAudioJobsV2({
+        projectId,
+        narrationPlanV2ArtifactId: crypto.randomUUID(),
+        provider: SNAPSHOT,
+      });
+      ok(false, '[E1] 不存在的 plan artifact → 入队必须拒绝');
     } catch (err) {
       ok(
-        err instanceof NarrationAudioV2Error && err.code === 'NARRATION_PLAN_V2_NOT_CURRENT',
-        '[E1] 无 eligible current plan → NARRATION_PLAN_V2_NOT_CURRENT',
+        err instanceof NarrationAudioV2Error && err.code === 'NARRATION_PLAN_V2_NOT_FOUND',
+        '[E1] 不存在的 plan artifact → NARRATION_PLAN_V2_NOT_FOUND',
         err instanceof Error ? err.message : err,
       );
     }
