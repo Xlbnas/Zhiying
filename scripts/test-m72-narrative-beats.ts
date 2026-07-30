@@ -4,6 +4,9 @@
  * 用法：npx tsx scripts/test-m72-narrative-beats.ts
  * 覆盖：schema、coverage validator、input isolation、LLM/repair、idempotency、
  * candidate 生命周期、M7.1.1 active getter frozen-ruleset regression、API routes。
+ * M7.2.1 适配：build 返回 union（succeeded/in_progress/terminal）——LLM/validation
+ * 失败不再 throw，而是 run 转 failed 终态；requestId 需 8–128 安全字符；
+ * durable single-flight（generation_runs/generation_attempts）。
  * 任一断言失败即非零退出。
  */
 
@@ -29,6 +32,8 @@ import {
   getNarrativeBeatsArtifact,
   listNarrativeBeatsCandidates,
   NarrativeBeatsError,
+  setNarrativeBeatsProviderForTest,
+  type BuildNarrativeBeatsResult,
 } from '../src/lib/narrative-beats/plan';
 import {
   NARRATIVE_BEATS_KIND,
@@ -79,6 +84,39 @@ async function expectBeatsError(code: string, fn: () => unknown, label: string):
       err instanceof Error ? `${err.name}: ${(err as {code?: string}).code ?? err.message}` : err,
     );
   }
+}
+
+type SucceededResult = Extract<BuildNarrativeBeatsResult, {kind: 'succeeded'}>;
+
+/** M7.2.1：build 返回 union——断言 kind=succeeded 后继续（失败会计数并级联）。 */
+function asSucceeded(result: BuildNarrativeBeatsResult, label: string): SucceededResult {
+  ok(result.kind === 'succeeded', label, result.kind === 'succeeded' ? undefined : result);
+  return result as SucceededResult;
+}
+
+interface RunRowProbe {
+  id: string;
+  status: string;
+  error_code: string | null;
+  result_artifact_id: string | null;
+}
+
+function runRow(projectId: string, requestId: string): RunRowProbe | undefined {
+  return getDb()
+    .prepare(
+      `SELECT id, status, error_code, result_artifact_id FROM generation_runs
+       WHERE project_id = ? AND stage = 'm7_narrative_beats' AND request_id = ?`,
+    )
+    .get(projectId, requestId) as RunRowProbe | undefined;
+}
+
+function runCount(projectId: string): number {
+  const row = getDb()
+    .prepare(
+      `SELECT COUNT(*) AS c FROM generation_runs WHERE project_id = ? AND stage = 'm7_narrative_beats'`,
+    )
+    .get(projectId) as {c: number};
+  return row.c;
 }
 
 // ── Scriptable Mock Provider（测试专用，确定性故障注入） ──
@@ -497,14 +535,14 @@ async function main(): Promise<void> {
   {
     await expectBeatsError(
       'NARRATION_PLAN_NOT_FOUND',
-      () => buildNarrativeBeats({projectId: projectA, narrationPlanV2ArtifactId: crypto.randomUUID(), requestId: 'i-1'}),
+      () => buildNarrativeBeats({projectId: projectA, narrationPlanV2ArtifactId: crypto.randomUUID(), requestId: 'req-i-0001'}),
       '[I1] 不存在的 plan artifact → NARRATION_PLAN_NOT_FOUND',
     );
     const projectX = newProjectWithScript(STRICT_MD, 'script-v2@2.0');
     const buildX = buildNarrationPlanV2(projectX);
     await expectBeatsError(
       'NARRATION_PLAN_NOT_FOUND',
-      () => buildNarrativeBeats({projectId: projectA, narrationPlanV2ArtifactId: buildX.artifact.id, requestId: 'i-2'}),
+      () => buildNarrativeBeats({projectId: projectA, narrationPlanV2ArtifactId: buildX.artifact.id, requestId: 'req-i-0002'}),
       '[I2] 跨项目 plan artifact → NARRATION_PLAN_NOT_FOUND',
     );
     const projectR = newProjectWithScript(REVIEW_MD, 'script-v2@1.0');
@@ -512,7 +550,7 @@ async function main(): Promise<void> {
     ok(buildR.plan.needsReview.length > 0, '[I3a] needsReview fixture 非空');
     await expectBeatsError(
       'NARRATION_PLAN_NOT_ELIGIBLE',
-      () => buildNarrativeBeats({projectId: projectR, narrationPlanV2ArtifactId: buildR.artifact.id, requestId: 'i-3'}),
+      () => buildNarrativeBeats({projectId: projectR, narrationPlanV2ArtifactId: buildR.artifact.id, requestId: 'req-i-0003'}),
       '[I3b] needs_review plan → NARRATION_PLAN_NOT_ELIGIBLE',
     );
     await expectBeatsError(
@@ -535,7 +573,7 @@ async function main(): Promise<void> {
     lockStage(projectX, 'script_v2');
     await expectBeatsError(
       'NARRATION_PLAN_NOT_ELIGIBLE',
-      () => buildNarrativeBeats({projectId: projectX, narrationPlanV2ArtifactId: buildX.artifact.id, requestId: 'i-5'}),
+      () => buildNarrativeBeats({projectId: projectX, narrationPlanV2ArtifactId: buildX.artifact.id, requestId: 'req-i-0005'}),
       '[I5] stale plan → NARRATION_PLAN_NOT_ELIGIBLE（不 fallback latest）',
     );
   }
@@ -545,16 +583,25 @@ async function main(): Promise<void> {
   let beatsArtifactId = '';
   {
     provider.push({text: proposalJson(validBeats)});
-    const result = await buildNarrativeBeats({
-      projectId: projectA,
-      narrationPlanV2ArtifactId: buildA.artifact.id,
-      requestId: 'L-1',
-      provider,
-    });
-    ok(!result.reused && result.beats.beats.length === 6, '[L1] 合法 proposal 一次通过');
-    ok(result.beats.generation.attemptCount === 1, '[L2] attemptCount=1');
+    const r1 = asSucceeded(
+      await buildNarrativeBeats({
+        projectId: projectA,
+        narrationPlanV2ArtifactId: buildA.artifact.id,
+        requestId: 'req-L-0001',
+        provider,
+      }),
+      '[L1a] build 返回 kind=succeeded',
+    );
+    ok(!r1.reused && r1.beats.beats.length === 6, '[L1] 合法 proposal 一次通过');
+    ok(r1.beats.generation.attemptCount === 1, '[L2] attemptCount=1');
     ok(usageCount(projectA) === 1, '[L3] usage 记录恰好 1 行');
-    beatsArtifactId = result.artifact.id;
+    const runL1 = runRow(projectA, 'req-L-0001');
+    ok(
+      runL1 !== undefined && runL1.status === 'succeeded' && runL1.id === r1.runId,
+      '[L3b] generation_runs 行转 succeeded 且 runId 回传',
+      runL1,
+    );
+    beatsArtifactId = r1.artifact.id;
 
     // prompt 内容隔离：不得含 sourceText / raw directive / 旧 beat_map / scenes
     const reqText = provider.requests.map((r) => `${r.system}\n${r.user}`).join('\n');
@@ -568,12 +615,15 @@ async function main(): Promise<void> {
     dupBeats[0] = {...dupBeats[0]!, unitIds: [n1, n2]};
     provider.push({text: proposalJson(dupBeats)});
     provider.push({text: proposalJson(validBeats)});
-    const repaired = await buildNarrativeBeats({
-      projectId: projectA,
-      narrationPlanV2ArtifactId: buildA.artifact.id,
-      requestId: 'L-2',
-      provider,
-    });
+    const repaired = asSucceeded(
+      await buildNarrativeBeats({
+        projectId: projectA,
+        narrationPlanV2ArtifactId: buildA.artifact.id,
+        requestId: 'req-L-0002',
+        provider,
+      }),
+      '[L5a] repair build 返回 kind=succeeded',
+    );
     ok(!repaired.reused && repaired.beats.generation.attemptCount === 2, '[L5] 重复 unit → repair 第 2 次成功');
     const repairReq = provider.requests[provider.requests.length - 1]!;
     ok(
@@ -581,85 +631,94 @@ async function main(): Promise<void> {
       '[L6] repair prompt 携带精确 validation errors',
     );
 
-    // 两次 repair 仍失败（遗漏 unit ×3）
+    // 两次 repair 仍失败（遗漏 unit ×3）→ M7.2.1：不再 throw，run 转 failed 终态
     for (let i = 0; i < 3; i++) {
       const missing = validBeats.slice(0, 5);
       provider.push({text: proposalJson(missing)});
     }
-    let failed: unknown = null;
-    try {
-      await buildNarrativeBeats({
-        projectId: projectA,
-        narrationPlanV2ArtifactId: buildA.artifact.id,
-        requestId: 'L-3',
-        provider,
-      });
-    } catch (err) {
-      failed = err;
-    }
-    ok(failed instanceof LLMError && failed.code === 'VALIDATION_FAILED', '[L7] 两次 repair 仍失败 → VALIDATION_FAILED');
-    ok(beatsRows(projectA).length === 2, '[L8] 失败 generation 不产生 artifact（仍仅 L-1/L-2 两个 candidate）');
+    const failedResult = await buildNarrativeBeats({
+      projectId: projectA,
+      narrationPlanV2ArtifactId: buildA.artifact.id,
+      requestId: 'req-L-0003',
+      provider,
+    });
+    ok(
+      failedResult.kind === 'terminal' &&
+        failedResult.status === 'failed' &&
+        failedResult.errorCode === 'VALIDATION_FAILED',
+      '[L7] 两次 repair 仍失败 → terminal VALIDATION_FAILED（不再 throw）',
+      failedResult,
+    );
+    const runL3 = runRow(projectA, 'req-L-0003');
+    ok(
+      runL3 !== undefined && runL3.status === 'failed' && runL3.error_code === 'VALIDATION_FAILED',
+      '[L7b] generation_runs 行转 failed 终态',
+      runL3,
+    );
+    ok(beatsRows(projectA).length === 2, '[L8] 失败 generation 不产生 artifact（仍仅 req-L-0001/req-L-0002 两个 candidate）');
     ok(usageCount(projectA) === 6, '[L9] 全部真实请求均记 usage（1+2+3）');
 
-    // provider transport error → 无 usage、无 artifact
+    // provider transport error → terminal（无 usage、无 artifact）
     provider.push({error: new LLMError('PROVIDER_HTTP_ERROR', 'boom', {status: 500})});
-    let perr: unknown = null;
     const usageBeforeErr = usageCount(projectA);
-    try {
-      await buildNarrativeBeats({
-        projectId: projectA,
-        narrationPlanV2ArtifactId: buildA.artifact.id,
-        requestId: 'L-4',
-        provider,
-      });
-    } catch (err) {
-      perr = err;
-    }
-    ok(perr instanceof LLMError && perr.code === 'PROVIDER_HTTP_ERROR', '[L10] provider error 原样上抛');
+    const perr = await buildNarrativeBeats({
+      projectId: projectA,
+      narrationPlanV2ArtifactId: buildA.artifact.id,
+      requestId: 'req-L-0004',
+      provider,
+    });
+    ok(
+      perr.kind === 'terminal' && perr.status === 'failed' && perr.errorCode === 'PROVIDER_HTTP_ERROR',
+      '[L10] provider error → terminal PROVIDER_HTTP_ERROR（不再上抛 LLMError）',
+      perr,
+    );
+    const runL4 = runRow(projectA, 'req-L-0004');
+    ok(runL4?.status === 'failed' && runL4.error_code === 'PROVIDER_HTTP_ERROR', '[L10b] transport 失败 run 转 failed');
     ok(usageCount(projectA) === usageBeforeErr, '[L11] transport 失败不记 usage（不伪造成本）');
     ok(beatsRows(projectA).length === 2, '[L12] provider error 不产生 artifact');
 
-    // 空响应 ×3 → EMPTY_RESPONSE（3 次 usage）
+    // 空响应 ×3 → terminal EMPTY_RESPONSE（3 次 usage）
     provider.push({text: ''});
     provider.push({text: ''});
     provider.push({text: ''});
-    let eerr: unknown = null;
-    try {
-      await buildNarrativeBeats({
-        projectId: projectA,
-        narrationPlanV2ArtifactId: buildA.artifact.id,
-        requestId: 'L-5',
-        provider,
-      });
-    } catch (err) {
-      eerr = err;
-    }
-    ok(eerr instanceof LLMError && eerr.code === 'EMPTY_RESPONSE', '[L13] 空响应 ×3 → EMPTY_RESPONSE');
+    const eerr = await buildNarrativeBeats({
+      projectId: projectA,
+      narrationPlanV2ArtifactId: buildA.artifact.id,
+      requestId: 'req-L-0005',
+      provider,
+    });
+    ok(
+      eerr.kind === 'terminal' && eerr.errorCode === 'EMPTY_RESPONSE',
+      '[L13] 空响应 ×3 → terminal EMPTY_RESPONSE',
+      eerr,
+    );
 
-    // 截断 → OUTPUT_TRUNCATED（不做普通 repair）
+    // 截断 → terminal OUTPUT_TRUNCATED（不做普通 repair）
     provider.push({text: '{"beats":[', finishReason: 'length'});
-    let terr: unknown = null;
-    try {
-      await buildNarrativeBeats({
-        projectId: projectA,
-        narrationPlanV2ArtifactId: buildA.artifact.id,
-        requestId: 'L-6',
-        provider,
-      });
-    } catch (err) {
-      terr = err;
-    }
-    ok(terr instanceof LLMError && terr.code === 'OUTPUT_TRUNCATED', '[L14] finishReason=length → OUTPUT_TRUNCATED');
+    const terr = await buildNarrativeBeats({
+      projectId: projectA,
+      narrationPlanV2ArtifactId: buildA.artifact.id,
+      requestId: 'req-L-0006',
+      provider,
+    });
+    ok(
+      terr.kind === 'terminal' && terr.errorCode === 'OUTPUT_TRUNCATED',
+      '[L14] finishReason=length → terminal OUTPUT_TRUNCATED',
+      terr,
+    );
 
     // 非法 JSON → repair 成功
     provider.push({text: 'not json at all'});
     provider.push({text: proposalJson(validBeats)});
-    const repaired2 = await buildNarrativeBeats({
-      projectId: projectA,
-      narrationPlanV2ArtifactId: buildA.artifact.id,
-      requestId: 'L-7',
-      provider,
-    });
+    const repaired2 = asSucceeded(
+      await buildNarrativeBeats({
+        projectId: projectA,
+        narrationPlanV2ArtifactId: buildA.artifact.id,
+        requestId: 'req-L-0007',
+        provider,
+      }),
+      '[L15a] invalid JSON repair build 返回 kind=succeeded',
+    );
     ok(repaired2.beats.generation.attemptCount === 2, '[L15] invalid JSON → repair 成功');
 
     // 非法 role → repair 成功
@@ -667,12 +726,15 @@ async function main(): Promise<void> {
     badRole[0] = {...badRole[0]!, role: 'filler' as never};
     provider.push({text: JSON.stringify({beats: badRole})});
     provider.push({text: proposalJson(validBeats)});
-    const repaired3 = await buildNarrativeBeats({
-      projectId: projectA,
-      narrationPlanV2ArtifactId: buildA.artifact.id,
-      requestId: 'L-8',
-      provider,
-    });
+    const repaired3 = asSucceeded(
+      await buildNarrativeBeats({
+        projectId: projectA,
+        narrationPlanV2ArtifactId: buildA.artifact.id,
+        requestId: 'req-L-0008',
+        provider,
+      }),
+      '[L16a] 非法 role repair build 返回 kind=succeeded',
+    );
     ok(repaired3.beats.generation.attemptCount === 2, '[L16] 非法 role → zod 失败 → repair 成功');
 
     // usage 行审计字段
@@ -683,7 +745,7 @@ async function main(): Promise<void> {
       )
       .get(projectA) as {stage: string; job_id: string; prompt_version: string; provider: string};
     ok(
-      usageRow.job_id === 'L-1' && usageRow.prompt_version === 'narrative-beats@1.0' && usageRow.provider === 'scriptable-mock',
+      usageRow.job_id === 'req-L-0001' && usageRow.prompt_version === 'narrative-beats@1.0' && usageRow.provider === 'scriptable-mock',
       '[L17] usage 行含 requestId(job_id)/promptVersion/provider（可审计）',
       usageRow,
     );
@@ -693,23 +755,30 @@ async function main(): Promise<void> {
   {
     const rowsBefore = beatsRows(projectA).length;
     const usageBefore = usageCount(projectA);
-    const again = await buildNarrativeBeats({
-      projectId: projectA,
-      narrationPlanV2ArtifactId: buildA.artifact.id,
-      requestId: 'L-1',
-      provider,
-    });
+    const again = asSucceeded(
+      await buildNarrativeBeats({
+        projectId: projectA,
+        narrationPlanV2ArtifactId: buildA.artifact.id,
+        requestId: 'req-L-0001',
+        provider,
+      }),
+      '[ID1a] 同 requestId build 返回 kind=succeeded',
+    );
     ok(again.reused && again.artifact.id === beatsArtifactId, '[ID1] 同 requestId → 复用同 artifact');
+    ok(again.legacy === false && again.runId !== null, '[ID1b] M7.2.1 复用带 run 追溯（legacy=false）');
     ok(beatsRows(projectA).length === rowsBefore, '[ID2] 同 requestId 不产生新行');
     ok(usageCount(projectA) === usageBefore, '[ID3] 同 requestId 零新增 usage（不重复收费）');
 
     provider.push({text: proposalJson(validBeats)});
-    const regen = await buildNarrativeBeats({
-      projectId: projectA,
-      narrationPlanV2ArtifactId: buildA.artifact.id,
-      requestId: 'ID-new',
-      provider,
-    });
+    const regen = asSucceeded(
+      await buildNarrativeBeats({
+        projectId: projectA,
+        narrationPlanV2ArtifactId: buildA.artifact.id,
+        requestId: 'req-ID-new1',
+        provider,
+      }),
+      '[ID4a] regenerate build 返回 kind=succeeded',
+    );
     ok(!regen.reused && regen.artifact.id !== beatsArtifactId, '[ID4] 新 requestId → 新 candidate（regenerate 可用）');
     const versions = beatsRows(projectA).map((r) => r.version);
     ok(versions.length === new Set(versions).size, '[ID5] candidate append-only（旧 version 保留）');
@@ -721,7 +790,7 @@ async function main(): Promise<void> {
     await buildNarrativeBeats({
       projectId: projectY,
       narrationPlanV2ArtifactId: buildY.artifact.id,
-      requestId: 'Y-1',
+      requestId: 'req-Y-0001',
       provider,
     });
     editVersion(
@@ -744,35 +813,88 @@ async function main(): Promise<void> {
         buildNarrativeBeats({
           projectId: projectY,
           narrationPlanV2ArtifactId: buildY2.artifact.id,
-          requestId: 'Y-1',
+          requestId: 'req-Y-0001',
           provider,
         }),
       '[ID6b] 同 requestId 不同 source → REQUEST_ID_CONFLICT',
     );
 
-    // 失败 request 不 poison：L-3 失败后可成功
-    provider.push({text: proposalJson(validBeats)});
-    const retry = await buildNarrativeBeats({
+    // M7.2.1 终态语义：失败 requestId 再调 → 同一 terminal（零 provider 调用、零新增
+    // usage，不自动重试）；显式 regenerate 必须用新 requestId。
+    const callsBeforeRetry = provider.requests.length;
+    const usageBeforeRetry = usageCount(projectA);
+    const retrySame = await buildNarrativeBeats({
       projectId: projectA,
       narrationPlanV2ArtifactId: buildA.artifact.id,
-      requestId: 'L-3',
+      requestId: 'req-L-0003',
       provider,
     });
-    ok(!retry.reused && retry.beats.generation.attemptCount === 1, '[ID7] 失败 requestId 可重试成功');
+    ok(
+      retrySame.kind === 'terminal' && retrySame.errorCode === 'VALIDATION_FAILED',
+      '[ID7a] 失败 requestId 再调 → 同一 terminal（不自动重试）',
+      retrySame,
+    );
+    ok(provider.requests.length === callsBeforeRetry, '[ID7b] 终态复用零 provider 调用');
+    ok(usageCount(projectA) === usageBeforeRetry, '[ID7c] 终态复用零新增 usage（不重复收费）');
+    provider.push({text: proposalJson(validBeats)});
+    const retry = asSucceeded(
+      await buildNarrativeBeats({
+        projectId: projectA,
+        narrationPlanV2ArtifactId: buildA.artifact.id,
+        requestId: 'req-L-0003b',
+        provider,
+      }),
+      '[ID7d] 新 requestId regenerate build 返回 kind=succeeded',
+    );
+    ok(!retry.reused && retry.beats.generation.attemptCount === 1, '[ID7] 新 requestId regenerate → 成功');
 
-    // 并发同 requestId → 只有一个 artifact
+    // 并发同 requestId：durable claim 在 DB 层串行——先到者独占 run 并调用 provider，
+    // 后到者得 in_progress（绝不二次调用 provider）。
     provider.push({text: proposalJson(validBeats)});
-    provider.push({text: proposalJson(validBeats)});
+    const callsBeforeConc = provider.requests.length;
+    const usageBeforeConc = usageCount(projectA);
     const [c1, c2] = await Promise.all([
-      buildNarrativeBeats({projectId: projectA, narrationPlanV2ArtifactId: buildA.artifact.id, requestId: 'ID-conc', provider}),
-      buildNarrativeBeats({projectId: projectA, narrationPlanV2ArtifactId: buildA.artifact.id, requestId: 'ID-conc', provider}),
+      buildNarrativeBeats({projectId: projectA, narrationPlanV2ArtifactId: buildA.artifact.id, requestId: 'req-ID-conc', provider}),
+      buildNarrativeBeats({projectId: projectA, narrationPlanV2ArtifactId: buildA.artifact.id, requestId: 'req-ID-conc', provider}),
     ]);
-    ok(c1.artifact.id === c2.artifact.id, '[ID8] 并发同 requestId → 同一 artifact');
+    ok(
+      c1.kind === 'succeeded' && c2.kind === 'in_progress',
+      '[ID8] 并发同 requestId → 先到者 succeeded + 后到者 in_progress',
+      {c1: c1.kind, c2: c2.kind},
+    );
+    ok(
+      provider.requests.length === callsBeforeConc + 1,
+      '[ID8b] 并发全程 provider 恰好 1 次调用（single-flight）',
+    );
+    ok(
+      usageCount(projectA) === usageBeforeConc + 1,
+      '[ID8c] 并发恰好 1 行新 usage（无双计费）',
+    );
     const concByRequest = beatsRows(projectA).filter((r) => {
       const content = getDb().prepare('SELECT content_json FROM artifacts WHERE id = ?').get(r.id) as {content_json: string};
-      return (JSON.parse(content.content_json) as {generation: {requestId: string}}).generation.requestId === 'ID-conc';
+      return (JSON.parse(content.content_json) as {generation: {requestId: string}}).generation.requestId === 'req-ID-conc';
     });
     ok(concByRequest.length === 1, '[ID9] 并发不生成重复 artifact');
+    const concRun = runRow(projectA, 'req-ID-conc');
+    ok(
+      concRun !== undefined && concRun.status === 'succeeded',
+      '[ID9b] 并发恰好一条 generation_runs 行且终态 succeeded',
+      concRun,
+    );
+    // 租约释放后同 requestId 再调 → 复用同一 artifact（reused）
+    const concAgain = asSucceeded(
+      await buildNarrativeBeats({
+        projectId: projectA,
+        narrationPlanV2ArtifactId: buildA.artifact.id,
+        requestId: 'req-ID-conc',
+        provider,
+      }),
+      '[ID9c] 完成后同 requestId build 返回 kind=succeeded',
+    );
+    ok(
+      concAgain.reused && c1.kind === 'succeeded' && concAgain.artifact.id === c1.artifact.id,
+      '[ID9d] 完成后同 requestId → 复用同一 artifact',
+    );
   }
 
   // ============ CL：candidate 生命周期 ============
@@ -829,12 +951,15 @@ async function main(): Promise<void> {
     const projectZ = newProjectWithScript(STRICT_MD, 'script-v2@2.0');
     const buildZ = buildNarrationPlanV2(projectZ);
     provider.push({text: proposalJson(makeValidBeats(buildZ.plan))});
-    const beatsZ = await buildNarrativeBeats({
-      projectId: projectZ,
-      narrationPlanV2ArtifactId: buildZ.artifact.id,
-      requestId: 'CL-z',
-      provider,
-    });
+    const beatsZ = asSucceeded(
+      await buildNarrativeBeats({
+        projectId: projectZ,
+        narrationPlanV2ArtifactId: buildZ.artifact.id,
+        requestId: 'req-CL-z01',
+        provider,
+      }),
+      '[CL8a] projectZ beats build 返回 kind=succeeded',
+    );
     editVersion(
       {
         projectId: projectZ,
@@ -939,9 +1064,10 @@ async function main(): Promise<void> {
     const listJson = (await listRes.json()) as {
       candidateOnly: boolean;
       pipelineVersion: string;
-      candidates: Array<{artifactId: string}>;
+      candidates: Array<{artifactId: string; legacyRunMetadataUnavailable: boolean}>;
       narrationCandidates: Array<{artifactId: string}>;
       latestEligibleSuggestionArtifactId: string | null;
+      runs: Array<{runId: string; requestId: string; status: string}>;
     };
     ok(
       listJson.candidateOnly === true && listJson.pipelineVersion === 'm6',
@@ -955,19 +1081,68 @@ async function main(): Promise<void> {
       listJson.latestEligibleSuggestionArtifactId === buildA.artifact.id,
       '[API4] latestEligible 建议仅为建议字段',
     );
+    ok(
+      Array.isArray(listJson.runs) &&
+        listJson.runs.some((r) => r.requestId === 'req-L-0001' && r.status === 'succeeded') &&
+        listJson.runs.some((r) => r.requestId === 'req-L-0003' && r.status === 'failed'),
+      '[API4b] list 响应含 generation runs（succeeded + failed 均可见）',
+    );
+    const candidateL1 = listJson.candidates.find((c) => c.artifactId === beatsArtifactId);
+    ok(
+      candidateL1 !== undefined && candidateL1.legacyRunMetadataUnavailable === false,
+      '[API4c] 有 run 的 candidate legacyRunMetadataUnavailable=false',
+    );
 
     const badBuild = await beatsPOST(
-      new Request('http://test', {method: 'POST', body: JSON.stringify({requestId: 'x'})}),
+      new Request('http://test', {method: 'POST', body: JSON.stringify({requestId: 'req-x-0001'})}),
       {params: Promise.resolve({id: projectA})},
     );
     ok(badBuild.status === 422 || badBuild.status === 400, '[API5] 缺 artifact ID → 4xx（不允许空 artifact ID）');
 
-    // 注：route 使用进程级 provider 单例（测试环境=MockLLMProvider，无 beats fixture），
-    // 201 真实生成路径已在 library 层全覆盖；此处验证 route plumbing + 幂等（reused 不触达 LLM）。
+    // M7.2.1：route 真实新建路径——经 setNarrativeBeatsProviderForTest 注入 Mock
+    // （route 不传 provider；用例后恢复 null）。
+    const routeProvider = new ScriptableProvider();
+    routeProvider.push({text: proposalJson(validBeats)});
+    setNarrativeBeatsProviderForTest(routeProvider);
+    try {
+      const createRes = await beatsPOST(
+        new Request('http://test', {
+          method: 'POST',
+          body: JSON.stringify({narrationPlanV2ArtifactId: buildA.artifact.id, requestId: 'req-API-new1'}),
+        }),
+        {params: Promise.resolve({id: projectA})},
+      );
+      ok(createRes.status === 201, '[API5b] 新 requestId POST → 201 新建');
+      const createJson = (await createRes.json()) as {
+        reused: boolean;
+        legacy: boolean;
+        runId: string | null;
+        artifactId: string;
+      };
+      ok(
+        createJson.reused === false && createJson.legacy === false && createJson.runId !== null,
+        '[API5c] 201 响应含非空 runId（durable run 追溯）',
+        createJson,
+      );
+      ok(routeProvider.requests.length === 1, '[API5d] route 新建路径真实调用注入的 provider');
+    } finally {
+      setNarrativeBeatsProviderForTest(null);
+    }
+
+    const shortId = await beatsPOST(
+      new Request('http://test', {
+        method: 'POST',
+        body: JSON.stringify({narrationPlanV2ArtifactId: buildA.artifact.id, requestId: 'abc'}),
+      }),
+      {params: Promise.resolve({id: projectA})},
+    );
+    ok(shortId.status === 422, '[API5e] 过短 requestId → 422 REQUEST_ID_INVALID');
+
+    // 同 requestId POST → reused（不触达 LLM，无需注入 provider）。
     const rebuildRes = await beatsPOST(
       new Request('http://test', {
         method: 'POST',
-        body: JSON.stringify({narrationPlanV2ArtifactId: buildA.artifact.id, requestId: 'L-1'}),
+        body: JSON.stringify({narrationPlanV2ArtifactId: buildA.artifact.id, requestId: 'req-L-0001'}),
       }),
       {params: Promise.resolve({id: projectA})},
     );
@@ -977,6 +1152,8 @@ async function main(): Promise<void> {
       candidateOnly: boolean;
       pipelineVersion: string;
       artifactId: string;
+      legacy: boolean;
+      runId: string | null;
     };
     ok(
       rebuildJson.reused === true &&
@@ -984,6 +1161,30 @@ async function main(): Promise<void> {
         rebuildJson.pipelineVersion === 'm6' &&
         rebuildJson.artifactId === beatsArtifactId,
       '[API7] reused 响应：candidateOnly + m6 + 同 artifact',
+    );
+    ok(
+      rebuildJson.legacy === false && rebuildJson.runId !== null,
+      '[API7b] reused 响应带 run 追溯（legacy=false、runId 非空）',
+    );
+
+    // terminal run 同 requestId → 409（永远稳定返回同一终态）
+    const terminalRes = await beatsPOST(
+      new Request('http://test', {
+        method: 'POST',
+        body: JSON.stringify({narrationPlanV2ArtifactId: buildA.artifact.id, requestId: 'req-L-0003'}),
+      }),
+      {params: Promise.resolve({id: projectA})},
+    );
+    ok(terminalRes.status === 409, '[API7c] 失败 run 同 requestId POST → 409');
+    const terminalJson = (await terminalRes.json()) as {
+      status: string;
+      errorCode: string;
+      runId: string;
+    };
+    ok(
+      terminalJson.status === 'failed' && terminalJson.errorCode === 'VALIDATION_FAILED' && terminalJson.runId.length > 0,
+      '[API7d] 409 响应含 status/errorCode/runId',
+      terminalJson,
     );
 
     const detailRes = await beatsDetailGET(new Request('http://test'), {
