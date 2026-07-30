@@ -47,7 +47,8 @@ const VISUAL_PREFIX = /(?:^|[。！？!?；;\s])画面[:：]/g;
 const VISUAL_BREATH = /\[画面留白]/g;
 const HTML_COMMENT = /<!--[\s\S]*?-->/g;
 const SCRIPT_END = /【脚本结束】/g;
-const AT_DIRECTIVE = /(?:^|\s)@[A-Za-z][A-Za-z_-]*/gm;
+/** @directive DSL 语法位：@ 位于文本开头、空白后或中英文句读之后（句中 name@domain 不误伤）。 */
+const AT_DIRECTIVE = /(?:^|[\s。！？!?；;，,、：:])@[A-Za-z][A-Za-z_-]*/gm;
 const HORIZONTAL_RULE_LINE = /^\s*(?:[-*_]\s*){3,}$/;
 
 /** 括号内容是否属于指令（grammar 匹配）或疑似指令（含指令词但不合 grammar）。 */

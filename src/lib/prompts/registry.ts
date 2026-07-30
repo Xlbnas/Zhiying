@@ -18,6 +18,10 @@ import type {StagePrompt} from './shared';
 import {shotListPrompt} from './shot-list';
 import {visualBreakdownPrompt} from './visual-breakdown';
 
+// script_v2 固定注册 M6 稳定版（script-v2@1.0）。
+// script-v2@2.0（行级 directive DSL）刻意不注册：仅供显式 M7 typed narration
+// candidate 路径直接引用（prompts/script-v2.ts 的 scriptV2M7Prompt），
+// 标准 stage generation 无法经 Registry 拿到它（M7.2.1 P0 hotfix 冻结分流）。
 export const PROMPT_REGISTRY: Readonly<Record<WorkflowStage, StagePrompt>> = {
   project_definition: projectDefinitionPrompt,
   research: researchPrompt,

@@ -16,6 +16,7 @@ import {
 } from '../tts-jobs';
 import {getCurrentNarrationPlan} from './plan';
 import type {NarrationPlan, NarrationUnit} from './schema';
+import {describeLeakage, findDirectiveLeakage} from './leakage';
 import {isSpeakableText} from './speech-text';
 
 /**
@@ -114,6 +115,7 @@ export type NarrationAudioErrorCode =
   | 'PROJECT_NOT_FOUND'
   | 'LEGACY_PROJECT'
   | 'NARRATION_PLAN_NOT_CURRENT'
+  | 'NARRATION_PLAN_CONTAMINATED'
   | 'PROVIDER_SNAPSHOT_MISMATCH'
   | 'MASTER_PATH_CONFLICT';
 
@@ -166,6 +168,28 @@ export function enqueueNarrationAudioJobs(
       );
     }
     const {plan, artifact} = current;
+
+    // Gate B（M7.2.1 P0 hotfix）：任何 TTS job 创建前重跑统一 leakage validator。
+    // 旧污染 plan（如 script-v2@2.0 DSL 被 M6 compiler 误编产生的 artifact）：
+    // 整批拒绝——零 job、零 provider 调用，绝不只跳过污染单元继续生成。
+    // 错误列出全部污染 unit 与 raw token。
+    const contaminated: string[] = [];
+    for (const unit of plan.units) {
+      if (unit.kind !== 'speech' || !unit.text) continue;
+      const leaks = findDirectiveLeakage(unit.text);
+      if (leaks.length > 0) {
+        contaminated.push(`${unit.id} ${describeLeakage(leaks)}`);
+      }
+    }
+    if (contaminated.length > 0) {
+      throw new NarrationAudioError(
+        'NARRATION_PLAN_CONTAMINATED',
+        `当前 Narration Plan 的 speech unit 含导演指令/DSL 语法位（${contaminated.length} 个 unit），` +
+          `整批拒绝入队（零 TTS job）：${contaminated.slice(0, 10).join('；')}` +
+          `${contaminated.length > 10 ? '；…' : ''}。请修正 script_v2 并重新构建 Narration Plan。`,
+      );
+    }
+
     let enqueued = 0;
     let reused = 0;
     let active = 0;

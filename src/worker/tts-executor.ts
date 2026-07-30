@@ -17,6 +17,7 @@ import {
   ttsJobResultSchema,
   type TtsJobRow,
 } from '@/lib/tts-jobs';
+import {describeLeakage, findDirectiveLeakage} from '@/lib/narration/leakage';
 
 /**
  * TTS 任务执行器（M3-B §三十六–四十三，M3-B Hardening §五–十三）。
@@ -36,6 +37,7 @@ const NON_RETRYABLE_CODES = new Set([
   'CONFIG_ERROR',
   'INVALID_AUDIO',
   'PAYLOAD_INVALID',
+  'PAYLOAD_CONTAMINATED',
   'PROVIDER_INVALID_RESPONSE',
 ]);
 
@@ -123,6 +125,23 @@ export async function runTtsJob(
         `payload_json 校验失败：${err instanceof Error ? err.message.slice(0, 300) : String(err)}`,
         {retryable: false},
       );
+      return;
+    }
+
+    // Gate C（M7.2.1 P0 hotfix）：provider 调用前的最后一道防线。
+    // payload 朗读文本含导演指令/DSL 语法位（@delivery/@pause/@silence/括号指令/…）
+    // → terminal failure（non-retryable，绝不重试消耗），零 provider 调用。
+    // 历史污染 job 即使已入队也在此被拦截，永远到不了 IndexTTS2。
+    const spokenLeaks = findDirectiveLeakage(payloadSpokenText(payload));
+    if (spokenLeaks.length > 0) {
+      failTtsJob(
+        job.id,
+        'PAYLOAD_CONTAMINATED',
+        `payload 朗读文本含导演指令/DSL 语法位，拒绝调用 Provider：` +
+          `${describeLeakage(spokenLeaks)}`.slice(0, 500),
+        {retryable: false},
+      );
+      log(`tts job ${job.id} failed: PAYLOAD_CONTAMINATED（gate C，provider calls=0）`);
       return;
     }
 

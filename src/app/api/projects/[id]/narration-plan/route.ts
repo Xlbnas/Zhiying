@@ -16,7 +16,9 @@ function narrationErrorResponse(err: unknown): Response {
     const status =
       err.code === 'PROJECT_NOT_FOUND' || err.code === 'SCRIPT_V2_VERSION_NOT_FOUND'
         ? 404
-        : err.code === 'SCRIPT_V2_INVALID' || err.code === 'NARRATION_PLAN_INVALID'
+        : err.code === 'SCRIPT_V2_INVALID' ||
+            err.code === 'SCRIPT_V2_DSL_UNSUPPORTED_IN_M6' ||
+            err.code === 'NARRATION_PLAN_INVALID'
           ? 422
           : 409;
     return jsonError(status, err.code, { message: err.message });

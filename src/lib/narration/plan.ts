@@ -30,6 +30,7 @@ export type NarrationPlanErrorCode =
   | 'SCRIPT_V2_NOT_LOCKED'
   | 'SCRIPT_V2_VERSION_NOT_FOUND'
   | 'SCRIPT_V2_INVALID'
+  | 'SCRIPT_V2_DSL_UNSUPPORTED_IN_M6'
   | 'NARRATION_PLAN_INVALID';
 
 export class NarrationPlanError extends Error {

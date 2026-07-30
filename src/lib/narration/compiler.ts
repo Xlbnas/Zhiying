@@ -6,6 +6,7 @@ import {
   type NarrationPlan,
   type NarrationUnit,
 } from './schema';
+import {describeLeakage, findDirectiveLeakage} from './leakage';
 import {isSpeakableText, sanitizeSpeechText} from './speech-text';
 
 /**
@@ -20,17 +21,32 @@ import {isSpeakableText, sanitizeSpeechText} from './speech-text';
  * - `[画面留白]` → visual_breath unit
  * - `<!-- E01 E03 -->` → evidenceIds（剥离，不朗读）
  * - 其余段落文本 → speech unit（每 2 个自然句一单元，规则固定）
+ *
+ * M7.2.1 P0 hotfix（Gate A，双层 fail-closed）：
+ * 1. 输入预检：script_v2 含独占行 directive DSL（@delivery/@pause/@silence/…，
+ *    即 script-v2@2.0 输出）→ SCRIPT_V2_DSL_UNSUPPORTED_IN_M6。
+ *    该 DSL 只能由显式 M7 typed narration candidate 路径（compiler-v2）消费；
+ *    本 compiler 不识别，会继续就是把控制指令编进 spoken text 送进 TTS。
+ * 2. 编译后安全网：任何 speech unit 的 text 仍含导演指令语法位
+ *    （DSL token / 括号指令 / 旁白·画面前缀 / 元标记）→ NARRATION_PLAN_INVALID，
+ *    错误列出 unit/raw token。绝不保存、绝不成为 current。
  */
 
 export class NarrationCompileError extends Error {
   constructor(
-    public readonly code: 'SCRIPT_V2_INVALID' | 'NARRATION_PLAN_INVALID',
+    public readonly code:
+      | 'SCRIPT_V2_INVALID'
+      | 'SCRIPT_V2_DSL_UNSUPPORTED_IN_M6'
+      | 'NARRATION_PLAN_INVALID',
     message: string,
   ) {
     super(message);
     this.name = 'NarrationCompileError';
   }
 }
+
+/** 独占行 directive DSL（script-v2@2.0 语法位）：行首 @word（后接空白或行尾）。 */
+const DSL_DIRECTIVE_LINE = /^[ \t]*(@[A-Za-z][A-Za-z_-]*)(?=\s|$)/;
 
 /** 每个 speech unit 聚合的自然句数（deterministic 常量，测试锁定）。 */
 export const SENTENCES_PER_SPEECH_UNIT = 2;
@@ -234,6 +250,25 @@ export function compileNarrationPlan(input: {
   scriptV2Version: number;
   promptVersion: string | null;
 }): NarrationPlan {
+  // Gate A-1：script-v2@2.0 行级 DSL 预检（M6 编译器不识别该 grammar）。
+  // 列出全部指令行（line/raw token），fail-closed，不猜测、不剥离后继续。
+  const dslLines: string[] = [];
+  input.scriptV2Markdown.split('\n').forEach((line, index) => {
+    const m = DSL_DIRECTIVE_LINE.exec(line);
+    if (m) {
+      dslLines.push(`L${index + 1} ${m[1]!}`);
+    }
+  });
+  if (dslLines.length > 0) {
+    throw new NarrationCompileError(
+      'SCRIPT_V2_DSL_UNSUPPORTED_IN_M6',
+      `script_v2 含 script-v2@2.0 directive DSL（${dslLines.length} 行），M6 narration compiler 不支持：` +
+        `${dslLines.slice(0, 10).join('；')}${dslLines.length > 10 ? '；…' : ''}。` +
+        `该 DSL 只能由显式 M7 typed narration candidate 路径消费；` +
+        `m6 项目请使用 script-v2@1.0 prompt 重新生成 script_v2。`,
+    );
+  }
+
   const {chapters, paragraphs} = parseScript(input.scriptV2Markdown);
   if (chapters.length === 0) {
     throw new NarrationCompileError(
@@ -344,6 +379,25 @@ export function compileNarrationPlan(input: {
     const ids = units.filter((u) => u.chapter === chapter.chapter).map((u) => u.id);
     chapter.firstUnitId = ids[0] ?? null;
     chapter.lastUnitId = ids[ids.length - 1] ?? null;
+  }
+
+  // Gate A-2：编译后安全网——任何 speech unit 的 text 不得含导演指令语法位
+  // （行内混入的 @directive、未知括号指令、旁白/画面前缀、元标记等）。
+  // 列出全部污染 unit 与 raw token；fail-closed，绝不保存。
+  const contaminated: string[] = [];
+  for (const unit of units) {
+    if (unit.kind !== 'speech' || !unit.text) continue;
+    const leaks = findDirectiveLeakage(unit.text);
+    if (leaks.length > 0) {
+      contaminated.push(`${unit.id} ${describeLeakage(leaks)}`);
+    }
+  }
+  if (contaminated.length > 0) {
+    throw new NarrationCompileError(
+      'NARRATION_PLAN_INVALID',
+      `speech unit 含导演指令/DSL 语法位（${contaminated.length} 个 unit），拒绝保存：` +
+        `${contaminated.slice(0, 10).join('；')}${contaminated.length > 10 ? '；…' : ''}`,
+    );
   }
 
   const candidate = {
