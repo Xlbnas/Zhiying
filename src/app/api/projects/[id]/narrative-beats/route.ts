@@ -14,12 +14,14 @@ import {
   listNarrativeBeatsCandidates,
   NarrativeBeatsError,
 } from '@/lib/narrative-beats/plan';
+import {BEATS_USAGE_STAGE} from '@/lib/narrative-beats/generate';
+import {listGenerationRunSummaries} from '@/lib/narrative-beats/runs';
+import {getDb} from '@/lib/db';
 import {
   getLatestEligibleNarrationPlanV2Candidate,
   listNarrationPlanV2Candidates,
 } from '@/lib/narration/plan-v2';
 import {getM7PipelineSnapshotId, getPipelineVersion} from '@/lib/pipeline-version';
-import {LLMError} from '@/lib/llm/types';
 import {getProject, jsonError} from '../../../_lib/shared';
 
 export const runtime = 'nodejs';
@@ -41,11 +43,10 @@ function beatsErrorResponse(err: unknown): Response {
         ? 404
         : err.code === 'REQUEST_ID_REQUIRED'
           ? 400
-          : 409;
+          : err.code === 'REQUEST_ID_INVALID'
+            ? 422
+            : 409;
     return jsonError(status, err.code, {message: err.message});
-  }
-  if (err instanceof LLMError) {
-    return jsonError(502, err.code, {message: err.message});
   }
   throw err;
 }
@@ -87,13 +88,23 @@ export async function GET(
   }));
   // 仅供 UI 人工选择建议——不是 current/selected/active。
   const suggestion = getLatestEligibleNarrationPlanV2Candidate(id);
+  const candidates = listNarrativeBeatsCandidates(id);
+  const runs = listGenerationRunSummaries(getDb(), id, BEATS_USAGE_STAGE);
+  const runRequestIds = new Set(runs.map((r) => r.requestId));
   return Response.json({
     pipelineVersion: getPipelineVersion(id),
     m7PipelineSnapshotId: getM7PipelineSnapshotId(id),
     candidateOnly: true,
     narrationCandidates,
     latestEligibleSuggestionArtifactId: suggestion?.artifact.id ?? null,
-    candidates: listNarrativeBeatsCandidates(id).map(candidateSummary),
+    candidates: candidates.map((c) => ({
+      ...candidateSummary(c),
+      // M7.2.1 之前的 candidate 没有 generation run/journal——按 artifact 内
+      // requestId 幂等复用，绝不伪造 journal。
+      legacyRunMetadataUnavailable:
+        c.beats != null && !runRequestIds.has(c.beats.generation.requestId),
+    })),
+    runs,
   });
 }
 
@@ -119,12 +130,34 @@ export async function POST(
       narrationPlanV2ArtifactId: input.narrationPlanV2ArtifactId,
       requestId: input.requestId,
     });
+    if (result.kind === 'in_progress') {
+      // 同 requestId 的 run 正在运行——本请求未调用 provider，零成本。
+      return Response.json(
+        {runId: result.runId, status: 'running', retryAfterMs: result.retryAfterMs, candidateOnly: true},
+        {status: 202},
+      );
+    }
+    if (result.kind === 'terminal') {
+      // 同 requestId 的终态永远稳定返回；显式 regenerate 必须使用新 requestId。
+      return Response.json(
+        {
+          runId: result.runId,
+          status: result.status,
+          errorCode: result.errorCode,
+          message: result.errorMessage,
+          candidateOnly: true,
+        },
+        {status: 409},
+      );
+    }
     const ref = getNarrativeBeatsArtifact(id, result.artifact.id);
     return Response.json(
       {
         artifactId: result.artifact.id,
         artifactVersion: result.artifact.version,
         reused: result.reused,
+        legacy: result.legacy,
+        runId: result.runId,
         candidateOnly: true,
         pipelineVersion: getPipelineVersion(id),
         beatCount: result.beats.beats.length,

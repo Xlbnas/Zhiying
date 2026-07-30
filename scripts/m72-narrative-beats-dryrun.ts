@@ -127,6 +127,18 @@ async function main(): Promise<void> {
     requestId: args.requestId!,
   });
 
+  // M7.2.1：build 返回 union——in_progress/terminal 不是成功路径，打印并非零退出。
+  if (result.kind === 'in_progress') {
+    console.error(`FAIL: 同 requestId 的 generation 正在运行 runId=${result.runId} retryAfterMs=${result.retryAfterMs}`);
+    process.exit(2);
+  }
+  if (result.kind === 'terminal') {
+    console.error(
+      `FAIL: requestId 已终态 runId=${result.runId} status=${result.status} error=${result.errorCode}: ${result.errorMessage}`,
+    );
+    process.exit(3);
+  }
+
   const usageAfter = getDb()
     .prepare(`SELECT COUNT(*) AS c FROM llm_usage WHERE project_id = ? AND stage = 'm7_narrative_beats'`)
     .get(project) as {c: number};
@@ -143,7 +155,7 @@ async function main(): Promise<void> {
     cost_cny: number;
   }>;
 
-  console.log(`reused=${result.reused}`);
+  console.log(`reused=${result.reused} legacy=${result.legacy} runId=${result.runId ?? '(none)'}`);
   console.log(`beats artifactId=${result.artifact.id} version=${result.artifact.version}`);
   console.log(`generation provider=${result.beats.generation.provider} model=${result.beats.generation.model} attemptCount=${result.beats.generation.attemptCount}`);
   console.log(`beats=${result.beats.beats.length}`);

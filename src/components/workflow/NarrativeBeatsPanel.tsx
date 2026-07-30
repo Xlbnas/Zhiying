@@ -35,6 +35,22 @@ interface BeatsCandidateSummary {
   compilerVersion: string | null;
   attemptCount: number | null;
   requestId: string | null;
+  legacyRunMetadataUnavailable?: boolean;
+}
+
+interface GenerationRunSummary {
+  runId: string;
+  requestId: string;
+  status: 'running' | 'succeeded' | 'failed' | 'indeterminate';
+  sourceArtifactId: string;
+  resultArtifactId: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  attemptCount: number;
+  usageCount: number;
+  costCny: number;
+  createdAt: string;
+  finishedAt: string | null;
 }
 
 interface ListResponse {
@@ -43,6 +59,7 @@ interface ListResponse {
   narrationCandidates: NarrationCandidate[];
   latestEligibleSuggestionArtifactId: string | null;
   candidates: BeatsCandidateSummary[];
+  runs: GenerationRunSummary[];
 }
 
 interface BeatDetail {
@@ -118,9 +135,22 @@ export function NarrativeBeatsPanel({projectId}: {projectId: string}) {
           requestId: crypto.randomUUID(),
         }),
       });
-      const json = (await res.json()) as {error?: string; message?: string};
-      if (!res.ok) {
-        setBuildError(`${json.error ?? `HTTP ${res.status}`}: ${json.message ?? ''}`);
+      const json = (await res.json()) as {
+        error?: string;
+        message?: string;
+        status?: string;
+        errorCode?: string;
+        retryAfterMs?: number;
+      };
+      if (res.status === 202) {
+        // durable single-flight：同 requestId 的 generation 正在运行，本请求零成本。
+        setBuildError(`生成中（run ${json.status ?? 'running'}）——请稍后刷新`);
+        window.setTimeout(() => void load(), (json.retryAfterMs ?? 5000) + 1000);
+      } else if (!res.ok) {
+        // 409 = 同 requestId 终态（failed/indeterminate）；显式 regenerate 需新 requestId。
+        setBuildError(
+          `${json.error ?? json.errorCode ?? `HTTP ${res.status}`}: ${json.message ?? ''}`,
+        );
       } else {
         await load();
       }
@@ -208,6 +238,9 @@ export function NarrativeBeatsPanel({projectId}: {projectId: string}) {
                     {STATUS_LABELS[c.status] ?? c.status}
                   </span>
                   <span>{c.beatCount ?? '?'} beats</span>
+                  {c.legacyRunMetadataUnavailable ? (
+                    <span style={{color: 'var(--muted)', fontSize: 12}}>legacy run metadata unavailable</span>
+                  ) : null}
                   <span style={{color: 'var(--muted)', fontSize: 12}}>
                     {c.provider}/{c.model} · {c.promptVersion} · attempts={c.attemptCount ?? '?'} ·{' '}
                     {c.artifactId.slice(0, 8)}
@@ -243,6 +276,36 @@ export function NarrativeBeatsPanel({projectId}: {projectId: string}) {
             ))}
           </div>
         )}
+
+        {/* generation runs（M7.2.1 durable single-flight 状态面） */}
+        {data.runs.length > 0 ? (
+          <div style={{paddingTop: 12}}>
+            <div style={{fontSize: 13, marginBottom: 6}}>Generation Runs：</div>
+            {data.runs.map((r) => (
+              <div
+                key={r.runId}
+                style={{padding: '6px 0', borderTop: '1px dashed var(--border, #2a2a2a)', fontSize: 12, color: 'var(--muted)'}}
+              >
+                <span
+                  style={{
+                    color:
+                      r.status === 'succeeded'
+                        ? 'var(--ok, #4ade80)'
+                        : r.status === 'running'
+                          ? 'var(--accent, #7dd3fc)'
+                          : 'var(--warn, #facc15)',
+                  }}
+                >
+                  {r.status}
+                </span>{' '}
+                run={r.runId.slice(0, 8)} · attempts={r.attemptCount} · usage={r.usageCount} · ¥
+                {r.costCny.toFixed(4)}
+                {r.errorCode ? ` · ${r.errorCode}` : ''}
+                {r.resultArtifactId ? ` · artifact=${r.resultArtifactId.slice(0, 8)}` : ''}
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     </section>
   );

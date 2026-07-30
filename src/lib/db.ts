@@ -243,6 +243,60 @@ CREATE TABLE IF NOT EXISTS scene_visual_overrides (
   created_at TEXT NOT NULL,
   PRIMARY KEY (project_id, scene_id)
 );
+-- ============ M7.2.1：durable single-flight generation runs + attempt journal ============
+-- UNIQUE(project_id, stage, request_id) 行在任何 provider 调用之前以
+-- BEGIN IMMEDIATE 原子 claim，保证同一逻辑 run 最多一个调用方到达 provider
+-- （并发双计费在 DB 层被阻断，而非仅靠进程内检查）。
+CREATE TABLE IF NOT EXISTS generation_runs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  stage TEXT NOT NULL,                -- 如 'm7_narrative_beats'
+  request_id TEXT NOT NULL,           -- canonicalized 调用方幂等键
+  source_artifact_id TEXT NOT NULL,   -- exact 输入 artifact（禁止 latest 解析）
+  status TEXT NOT NULL
+    CHECK (status IN ('running', 'succeeded', 'failed', 'indeterminate')),
+  owner_token TEXT,                   -- claim 持有者；完成/失败转移时校验
+  lease_expires_at TEXT,              -- running 租约；过期 = indeterminate（不自动重调 provider）
+  result_artifact_id TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, stage, request_id)
+);
+-- append-only attempt journal：每次 provider 请求（proposal + 每次 repair）独立一行，
+-- 保存安全 request 投影、response 原文/hash、validation issues 与 usage 关联，
+-- 使成本与失败原因完全可审计。禁止保存 Authorization/header/secret。
+CREATE TABLE IF NOT EXISTS generation_attempts (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES generation_runs(id),
+  attempt_number INTEGER NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  request_hash TEXT NOT NULL,         -- sha256 请求投影（对账/去重证据）
+  request_json TEXT NOT NULL,         -- 安全字段投影（model/system/user/outputMode/…）
+  provider_request_id TEXT,
+  response_hash TEXT,
+  response_text TEXT,
+  finish_reason TEXT,
+  parse_result TEXT CHECK (parse_result IN ('pass', 'fail')),
+  schema_issues_json TEXT,
+  semantic_issues_json TEXT,
+  usage_record_id TEXT,               -- 精确关联 llm_usage.id
+  status TEXT NOT NULL CHECK (status IN (
+    'in_flight',
+    'response_received',
+    'validation_failed',
+    'succeeded',
+    'transport_failed',
+    'indeterminate'
+  )),
+  created_at TEXT NOT NULL,
+  finished_at TEXT,
+  UNIQUE(run_id, attempt_number)
+);
 `;
 
 // M2-A Hardening：版本号数据库级唯一约束（幂等）。
