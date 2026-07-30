@@ -54,6 +54,45 @@ export const ttsJobPayloadSchema = z.object({
 export type TtsJobPayload = z.infer<typeof ttsJobPayloadSchema>;
 
 /**
+ * M7.1：v2 payload（typed narration）。delivery + 完整 ttsInputFingerprint
+ * （REVIEW DECISIONS 1.3）。旧 v1.0 payload 保持可读（union 解析）。
+ */
+export const ttsJobPayloadV11Schema = z.object({
+  schemaVersion: z.literal('tts-payload@1.1'),
+  narrationPlanArtifactId: z.string().min(1),
+  narrationPlanArtifactVersion: z.number().int().positive(),
+  scriptV2Version: z.number().int().positive(),
+  compilerVersion: z.string().min(1),
+  unitId: z.string().regex(/^N\d{3}$/),
+  spokenText: z.string().min(1),
+  delivery: z.enum(['normal', 'slow', 'fast', 'soft', 'firm', 'emphasis']),
+  ttsInputFingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+});
+
+export type TtsJobPayloadV11 = z.infer<typeof ttsJobPayloadV11Schema>;
+
+/** 读取任意历史 payload：v1.0（unitText）或 v1.1（spokenText + fingerprint）。 */
+export const anyTtsJobPayloadSchema = z.union([ttsJobPayloadSchema, ttsJobPayloadV11Schema]);
+export type AnyTtsJobPayload = z.infer<typeof anyTtsJobPayloadSchema>;
+
+/** 解析持久化 payload_json；非法返回 null（不 crash、不猜）。 */
+export function parseTtsJobPayload(payloadJson: string): AnyTtsJobPayload | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(payloadJson);
+  } catch {
+    return null;
+  }
+  const parsed = anyTtsJobPayloadSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** 任意 payload → 朗读文本（v1.0=unitText，v1.1=spokenText）。 */
+export function payloadSpokenText(payload: AnyTtsJobPayload): string {
+  return payload.schemaVersion === '1.0' ? payload.unitText : payload.spokenText;
+}
+
+/**
  * 成功时持久化的 Provider 返回快照 + ffprobe 元数据（M3-B Hardening §三/五）。
  * 记录的是「实际生成这一个 WAV 时 Provider 返回的 snapshot」，
  * 不从 provider name / 环境变量推断；manifest 的唯一 metadata 来源。
@@ -147,7 +186,7 @@ export function enqueueTtsJobTx(
   provider: string,
   voiceProfileId: string,
   voiceProfileRevision: string,
-  payload: TtsJobPayload,
+  payload: AnyTtsJobPayload,
 ): TtsJobRow {
   const db = getDb();
   const active = getActiveTtsJob(

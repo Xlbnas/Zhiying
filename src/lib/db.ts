@@ -315,6 +315,13 @@ export function getDb(): Db {
   if (!artifactCols.some((c) => c.name === 'loudness_json')) {
     db.exec('ALTER TABLE render_artifacts ADD COLUMN loudness_json TEXT');
   }
+  // M7.1 迁移（幂等，同模式）：projects 增加 pipeline 分流列。
+  // 全部存量项目默认 'm6'（DDL DEFAULT 保证），绝不自动切 'm7'；
+  // 切换唯一入口是 pipeline-version.ts 的原子 guard（required chain 校验）。
+  const projectCols = db.prepare('PRAGMA table_info(projects)').all() as Array<{name: string}>;
+  if (!projectCols.some((c) => c.name === 'pipeline_version')) {
+    db.exec(`ALTER TABLE projects ADD COLUMN pipeline_version TEXT NOT NULL DEFAULT 'm6'`);
+  }
   instance = db;
   return db;
 }

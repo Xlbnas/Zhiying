@@ -6,13 +6,14 @@ import {getDataDir} from '@/lib/db';
 import {getTtsProviderByName} from '@/lib/tts';
 import {TtsError, type TtsProvider} from '@/lib/tts/types';
 import {
+  anyTtsJobPayloadSchema,
   failTtsJob,
   finalizeTtsJobSuccess,
   heartbeatTtsJob,
   isTtsCancelRequested,
   markTtsCancelled,
+  payloadSpokenText,
   requeueTtsJob,
-  ttsJobPayloadSchema,
   ttsJobResultSchema,
   type TtsJobRow,
 } from '@/lib/tts-jobs';
@@ -111,10 +112,10 @@ export async function runTtsJob(
       return;
     }
 
-    // payload 快照校验
-    let payload: ReturnType<typeof ttsJobPayloadSchema.parse>;
+    // payload 快照校验（M7.1：union 兼容 v1.0 unitText 与 v1.1 spokenText+delivery）
+    let payload: ReturnType<typeof anyTtsJobPayloadSchema.parse>;
     try {
-      payload = ttsJobPayloadSchema.parse(JSON.parse(job.payload_json));
+      payload = anyTtsJobPayloadSchema.parse(JSON.parse(job.payload_json));
     } catch (err) {
       failTtsJob(
         job.id,
@@ -144,9 +145,13 @@ export async function runTtsJob(
       );
       const result = await provider.synthesize(
         {
-          text: payload.unitText,
+          text: payloadSpokenText(payload),
           voiceProfile: {id: job.voice_profile_id, revision: job.voice_profile_revision},
           unitId: payload.unitId,
+          // M7.1：v1.1 payload 的 delivery 接通 TtsRequest.style（normal 不传，保持现状声学）
+          ...(payload.schemaVersion === 'tts-payload@1.1' && payload.delivery !== 'normal'
+            ? {style: {directive: payload.delivery}}
+            : {}),
           emotion: {mode: 'none'},
         },
         controller.signal,
