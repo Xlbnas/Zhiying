@@ -68,9 +68,10 @@ async function main(): Promise<void> {
   const frameRange: [number, number] = [0, Math.min(frames, totalFrames)];
   console.log(`[bench] composition=${compositionId} total=${totalFrames}f range=[${frameRange[0]}, ${frameRange[1]})`);
 
+  const nvenc = process.argv.includes('--nvenc');
   const outDir = path.join(getDataDir(), 'bench');
   fs.mkdirSync(outDir, {recursive: true});
-  const outAbs = path.join(outDir, `${jobId.slice(0, 8)}-f${frameRange[1]}${config.gpuEnabled ? '-gpu' : ''}.mp4`);
+  const outAbs = path.join(outDir, `${jobId.slice(0, 8)}-f${frameRange[1]}${nvenc ? '-nvenc' : ''}${config.gpuEnabled ? '-gpu' : ''}.mp4`);
 
   const start = Date.now();
   let lastLog = 0;
@@ -78,7 +79,10 @@ async function main(): Promise<void> {
     composition,
     serveUrl: bundleLocation,
     codec: 'h264',
-    crf: 18,
+    // 与 worker 同源（src/worker/index.ts）：NVENC 与 crf 互斥
+    ...(nvenc
+      ? {hardwareAcceleration: 'required' as const, videoBitrate: config.nvencBitrate}
+      : {crf: 18 as const}),
     frameRange,
     outputLocation: outAbs,
     inputProps,
