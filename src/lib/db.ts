@@ -59,6 +59,23 @@ CREATE TABLE IF NOT EXISTS render_jobs (
   attempt INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2,
   cancel_requested INTEGER NOT NULL DEFAULT 0
 );
+-- M6.3.11：每个成功 Final Render 的不可变产物 manifest（job_id 一一对应）。
+-- job 只有在输出校验 + SHA256 + manifest 落库后才能 succeeded（succeeded gate）；
+-- 下载按 exact job 读 manifest 校验文件，fail-closed，绝不 fallback 旧视频。
+CREATE TABLE IF NOT EXISTS render_artifacts (
+  job_id TEXT PRIMARY KEY REFERENCES render_jobs(id),
+  project_id TEXT NOT NULL,
+  output_path TEXT NOT NULL,
+  output_sha256 TEXT NOT NULL,
+  output_size INTEGER NOT NULL,
+  duration_sec REAL,
+  frame_count INTEGER,
+  encoder TEXT,
+  payload_sha256 TEXT,
+  bundle_key TEXT,
+  backfilled INTEGER NOT NULL DEFAULT 0,  -- 1 = M6.3.11 前历史产物惰性回填
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS llm_jobs (   -- M2 用，M1 只建表不消费
   id TEXT PRIMARY KEY, project_id TEXT, stage TEXT,
   status TEXT NOT NULL DEFAULT 'queued', payload_json TEXT,

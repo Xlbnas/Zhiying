@@ -40,6 +40,7 @@ interface FinalRenderReadiness {
     progress: number;
     progressDetail: string | null;
     outputPath: string | null;
+    outputSha256: string | null;
     sourceArtifactVersion: number | null;
   } | null;
 }
@@ -223,7 +224,35 @@ export function FinalRenderPanel({
 
       {data.ready && data.playerPreviewProps ? (
         <div className="player-frame">
-          <FullCutPlayer inputProps={data.playerPreviewProps} />
+          {/* M6.3.11：渲染成功后播放器直接播放实际产物（与「下载视频」同一
+              artifact identity，所见即所下）；尚无成功产物时才是实时预览。 */}
+          {job?.status === 'succeeded' && job.outputPath ? (
+            <video
+              controls
+              preload="metadata"
+              style={{width: '100%', display: 'block', background: '#000'}}
+              src={`/api/jobs/${job.id}/download?inline=1`}
+            />
+          ) : (
+            <FullCutPlayer inputProps={data.playerPreviewProps} />
+          )}
+        </div>
+      ) : null}
+
+      {job?.status === 'succeeded' && job.outputPath ? (
+        <div className="stage-meta">
+          <details style={{alignSelf: 'center'}}>
+            <summary style={{cursor: 'pointer', opacity: 0.75, fontSize: 12}}>产物信息</summary>
+            <div className="mono" style={{marginTop: 4, fontSize: 12}}>
+              job {job.id}
+              {job.outputSha256 ? (
+                <>
+                  {' · '}sha256 {job.outputSha256.slice(0, 16)}…
+                </>
+              ) : null}
+              {' · '}下载文件名 zhiying-{job.id}.mp4
+            </div>
+          </details>
         </div>
       ) : null}
     </section>

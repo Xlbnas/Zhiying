@@ -10,6 +10,7 @@ import {applyTimingReconciliation} from '../reconciliation/adapter';
 import type {TimingReconciliation} from '../reconciliation/schema';
 import {getCurrentTimingReconciliation} from '../reconciliation/timing';
 import {summarizeRenderProgress} from '../render/progress-detail';
+import {getRenderArtifact} from '../render/artifact';
 import {
   COMPOSITION_ID,
   SCHEMA_VERSION,
@@ -279,6 +280,8 @@ export interface FinalRenderReadiness {
     progress: number;
     progressDetail: string | null;
     outputPath: string | null;
+    /** M6.3.11：manifest 中的产物 SHA256（新渲染必有；历史 job 首次下载回填后出现）。 */
+    outputSha256: string | null;
     sourceArtifactVersion: number | null;
   } | null;
 }
@@ -303,6 +306,8 @@ function latestFinalJob(projectId: string): FinalRenderReadiness['latestJob'] {
         progress: job.progress,
         progressDetail: (job as {progress_detail?: string | null}).progress_detail ?? null,
         outputPath: job.output_path,
+        outputSha256:
+          job.status === 'succeeded' ? getRenderArtifact(job.id)?.output_sha256 ?? null : null,
         sourceArtifactVersion: parsed.data.finalRenderSourceArtifactVersion,
       };
     } catch {

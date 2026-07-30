@@ -31,6 +31,13 @@ import {
 import {runLlmJob} from './llm-executor';
 import {RuntimeAudioError, stageRuntimeNarrationAudio} from './runtime-audio';
 import {runTtsJob} from './tts-executor';
+import {bundleCacheKey} from './bundle-key';
+import {
+  persistRenderArtifact,
+  sha256File,
+  sha256Text,
+  validateRenderOutput,
+} from '@/lib/render/artifact';
 
 /**
  * Final Render 性能配置（M5-PERF）：见 src/lib/render/render-config.ts。
@@ -43,7 +50,8 @@ const PERF_CONFIG = loadRenderPerfConfig();
  * 知影渲染 Worker（CONTRACT §4，M2-C 扩展双队列）
  * - 单调度器：claimNextAnyJob 对 render_jobs + llm_jobs 全局 FIFO，
  *   任何时刻只跑一个任务（不引入并发、不拆双 scheduler）
- * - bundle 缓存：data/bundle-cache/{templateVersion}/；
+ * - bundle 缓存：data/bundle-cache/{templateVersion}-{rendererSourceHash}/（M6.3.11
+ *   起键含源码内容 hash，renderer 变化必触发重建，杜绝陈旧 bundle 复用）；
  *   M2-C 起改为 lazy ensureBundle——只有真正 claim 到 render job 才打包，
  *   LLM job 不依赖 Remotion bundle / Chrome / public 运行素材
  * - 渲染：selectComposition + renderMedia（h264；REMOTION_NVENC=true 且探测
@@ -95,11 +103,15 @@ function requestShutdown(signal: string): void {
 
 /**
  * 确保 Remotion bundle 存在。
- * 缓存目录：data/bundle-cache/{templateVersion}/，以 index.html 作为完整标记；
- * 缺失/不完整时清空后用 @remotion/bundler 重新打包（打包结果自带 public/ 静态资源拷贝）。
+ * 缓存目录：data/bundle-cache/{bundleCacheKey}/，键 = TEMPLATE_VERSION + renderer
+ * 源码内容 hash（M6.3.11 P0：旧键仅 TEMPLATE_VERSION，源码演进不触发重建，
+ * M1 陈旧 bundle 被复用导致 Final Render 产出旧 Demo 视觉）；
+ * 以 index.html 作为完整标记，缺失/不完整时清空后用 @remotion/bundler 重新打包
+ * （打包结果自带 public/ 静态资源拷贝）。
  */
 async function ensureBundle(): Promise<string> {
-  const cacheDir = path.join(getDataDir(), 'bundle-cache', TEMPLATE_VERSION);
+  const cacheKey = bundleCacheKey(TEMPLATE_VERSION, process.cwd());
+  const cacheDir = path.join(getDataDir(), 'bundle-cache', cacheKey);
   const marker = path.join(cacheDir, 'index.html');
   if (fs.existsSync(marker)) {
     log(`bundle cache hit: ${cacheDir}`);
@@ -249,6 +261,18 @@ async function runJob(
       );
       return;
     }
+    // M6.3.11 P0 绊线：workflow 渲染不得携带 M1 demo 残留标记。
+    // zhiyingFullCutDefaultProps 内置 showPilotIntro=true + 静态 demo 场景；
+    // 若该标记出现在 payload 中，说明 props 链路串入 demo defaultProps，
+    // fail-closed 拒绝渲染，绝不产出旧 Demo 视觉。
+    if (parsed.data.data.project.showPilotIntro === true) {
+      failJob(
+        job.id,
+        'PAYLOAD_DEMO_PROPS',
+        'payload 携带 showPilotIntro=true（M1 demo defaultProps 标记），拒绝渲染',
+      );
+      return;
+    }
     const inputProps: ZhiyingFullCutProps = {
       ...parsed.data,
       // kind 决定字幕开关与 composition，强制对齐，不信任 payload 里的 showSubtitles
@@ -286,6 +310,8 @@ async function runJob(
 
     // 输出：data/projects/{projectId}/renders/{jobId}.mp4
     // output_path 存数据目录相对路径（API 侧用 getDataDir() 拼接还原）
+    // M6.3.11：先渲染到 {jobId}.tmp.mp4，校验通过 + manifest 落库后原子改名
+    // 正式发布路径——succeeded 状态的 output 绝不指向未验证文件。
     const outputRel = path.posix.join(
       'projects',
       job.project_id,
@@ -293,6 +319,7 @@ async function runJob(
       `${job.id}.mp4`,
     );
     const outputAbs = path.join(getDataDir(), outputRel);
+    const outputAbsTmp = outputAbs.replace(/\.mp4$/, '.tmp.mp4');
     fs.mkdirSync(path.dirname(outputAbs), {recursive: true});
 
     log(
@@ -326,7 +353,7 @@ async function runJob(
       ...(encoder === 'h264_nvenc'
         ? {hardwareAcceleration: 'required' as const, videoBitrate: PERF_CONFIG.nvencBitrate}
         : {crf: 18 as const}),
-      outputLocation: outputAbs,
+      outputLocation: outputAbsTmp,
       inputProps,
       port: renderPort,
       // M5-PERF：显式并发（env 可配；null = Remotion 默认）
@@ -373,9 +400,33 @@ async function runJob(
       log(`job ${job.id} cancelled at finish line`);
       return;
     }
+    // M6.3.11 succeeded gate：ffprobe 校验 + SHA256 + manifest 落库 + 原子改名，
+    // 全部通过才允许 status=succeeded；任何一步失败 → failed，不展示「下载视频」。
+    const validation = await validateRenderOutput(outputAbsTmp);
+    if (!validation.ok) {
+      failJob(job.id, 'OUTPUT_INVALID', `产物校验失败：${validation.reason}`);
+      recordCompute('failed');
+      log(`job ${job.id} output validation failed: ${validation.reason}`);
+      return;
+    }
+    const outputSha256 = await sha256File(outputAbsTmp);
+    const outputSize = fs.statSync(outputAbsTmp).size;
+    fs.renameSync(outputAbsTmp, outputAbs);
+    persistRenderArtifact({
+      job_id: job.id,
+      project_id: job.project_id,
+      output_path: outputRel,
+      output_sha256: outputSha256,
+      output_size: outputSize,
+      duration_sec: validation.info.durationSec,
+      frame_count: composition.durationInFrames,
+      encoder,
+      payload_sha256: sha256Text(job.payload_json),
+      bundle_key: path.basename(bundleLocation),
+    });
     completeJob(job.id, outputRel);
     recordCompute('succeeded');
-    log(`job ${job.id} succeeded → ${outputRel}`);
+    log(`job ${job.id} succeeded → ${outputRel} (sha256 ${outputSha256.slice(0, 12)}…)`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (shuttingDown) {
