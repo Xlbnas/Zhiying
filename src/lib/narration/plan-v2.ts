@@ -16,7 +16,7 @@ import {
   narrationPlanV2Schema,
   type NarrationPlanV2,
 } from './schema-v2';
-import {getM7PipelineSnapshotArtifact} from '../m7-pipeline-snapshot';
+import {getM7PipelineSnapshotArtifact, getSnapshotValidator} from '../m7-pipeline-snapshot';
 
 /**
  * Narration Plan V2 artifact 层（M7.1 创建 / M7.1.1 candidate 语义冻结）。
@@ -229,6 +229,10 @@ export function getNarrationPlanV2Artifact(
  * 的 narration plan v2；其余情况（m6 / 无 snapshot / snapshot 非法）恒 null。
  * 绝不扫描 latest eligible artifact。新代码必须改用 getNarrationPlanV2Artifact
  * 显式传入 artifact ID。
+ *
+ * M7.2 补强（fail-closed）：读取前必须执行 snapshot 自身声明的 frozen
+ * ruleset validator——schema 可解析但链损坏 / 未知 ruleset / 任何
+ * consistency violation 一律返回 null，不 fallback candidate/latest。
  */
 export function getCurrentNarrationPlanV2(projectId: string): {
   plan: NarrationPlanV2;
@@ -242,6 +246,11 @@ export function getCurrentNarrationPlanV2(projectId: string): {
   }
   const snapshotRef = getM7PipelineSnapshotArtifact(projectId, project.m7_pipeline_snapshot_id);
   if (!snapshotRef) return null;
+  // 冻结 ruleset 完整验证：任何 violation（引用丢失/损坏/跨项目/approval
+  // 不一致/gate 非 pass/final source 不一致/未知 ruleset）→ null。
+  const validator = getSnapshotValidator(snapshotRef.snapshot.rulesetVersion);
+  if (!validator) return null;
+  if (validator(projectId, snapshotRef.snapshot).length > 0) return null;
   return getNarrationPlanV2Artifact(projectId, snapshotRef.snapshot.artifacts.narrationPlanV2ArtifactId);
 }
 
