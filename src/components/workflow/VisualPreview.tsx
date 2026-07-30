@@ -36,10 +36,13 @@ interface PreviewResponse {
 export function VisualPreview({
   projectId,
   scenesStageKey,
+  assetsRefreshKey,
 }: {
   projectId: string;
   /** scenes 阶段状态指纹（status+updated_at）：变化时重新拉取 readiness。 */
   scenesStageKey: string;
+  /** M6.3.13：素材绑定变化计数器（asset mutation 不改 project_stages，靠它失效重拉）。 */
+  assetsRefreshKey?: number;
 }) {
   const router = useRouter();
   const [data, setData] = useState<PreviewResponse | null>(null);
@@ -61,7 +64,7 @@ export function VisualPreview({
 
   useEffect(() => {
     void load();
-  }, [load, scenesStageKey]);
+  }, [load, scenesStageKey, assetsRefreshKey]);
 
   // M6.3.10：渲染进行中（RENDER_ALREADY_ACTIVE）时 3s 轮询，
   // blocker 文案内的 frame 进度与 Final Render 面板同步刷新；

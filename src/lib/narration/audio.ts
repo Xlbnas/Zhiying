@@ -16,6 +16,7 @@ import {
 } from '../tts-jobs';
 import {getCurrentNarrationPlan} from './plan';
 import type {NarrationPlan, NarrationUnit} from './schema';
+import {isSpeakableText} from './speech-text';
 
 /**
  * Narration Audio 管线（M3-B §三十–三十二/四十四–五十四）。
@@ -169,7 +170,9 @@ export function enqueueNarrationAudioJobs(
     let reused = 0;
     let active = 0;
     for (const unit of plan.units) {
-      if (unit.kind !== 'speech' || !unit.text) continue;
+      // M6.3.1.3 纵深防御：旧脏 plan（compilerVersion bump 前已存在）中的
+      // 不可朗读 speech unit（如 text='---'）跳过入队，不再送进 TTS。
+      if (unit.kind !== 'speech' || !unit.text || !isSpeakableText(unit.text)) continue;
       const existingActive = getActiveTtsJob(
         projectId, artifact.id, unit.id, provider.name, voice.id, voice.revision,
       );

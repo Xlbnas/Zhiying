@@ -9,6 +9,10 @@
  *   禁止"scene 内有任意素材即 READY"或计数/顺序匹配。
  *
  * 同时构建 bridge 注入用的 assetMap（sceneId → ResolvedAsset[]，按 requirement 顺序）。
+ *
+ * M6.3.13：scene 级「改用 MG」override（scene_visual_overrides）在本模块入口
+ * 统一应用——命中且未失效（scenes_version_id 匹配）的 scene 按 MG 判定，
+ * 其 requirements 退出 readiness 分母。
  */
 
 import fs from 'node:fs';
@@ -21,6 +25,11 @@ import {
   type AssetRow,
 } from './model';
 import {buildSceneAssetPlan, type SceneAssetPlan} from './requirements';
+import {
+  applyVisualOverrides,
+  currentScenesVersionId,
+  listVisualOverrides,
+} from '../scenes/visual-overrides';
 
 export interface SceneReadiness {
   sceneId: string;
@@ -127,7 +136,27 @@ function checkScene(
   };
 }
 
-export function evaluateVisualReadiness(projectId: string, scenes: Scene[]): VisualReadinessSummary {
+export interface VisualReadinessOptions {
+  /**
+   * M6.3.13：scenes 版本行 id（override 失效判定基准）。
+   * 缺省时按 locked 优先/最新 fallback 推导（见 currentScenesVersionId）。
+   */
+  scenesVersionId?: string;
+}
+
+/** M6.3.13：scene 输入处应用生效中的「改用 MG」override（两个 gate 无需改）。 */
+function withVisualOverrides(projectId: string, scenes: Scene[], opts?: VisualReadinessOptions): Scene[] {
+  const overrides = listVisualOverrides(projectId);
+  if (overrides.length === 0) return scenes;
+  return applyVisualOverrides(scenes, overrides, opts?.scenesVersionId ?? currentScenesVersionId(projectId));
+}
+
+export function evaluateVisualReadiness(
+  projectId: string,
+  scenes: Scene[],
+  opts?: VisualReadinessOptions,
+): VisualReadinessSummary {
+  scenes = withVisualOverrides(projectId, scenes, opts);
   const assetsById = new Map(listAssetsForProject(projectId).map((a) => [a.id, a]));
   // exact active binding 索引：`${sceneId}:${requirementId}` → asset（license 必须可用）
   const boundByReqKey = new Map<string, AssetRow>();
@@ -163,7 +192,12 @@ export function evaluateVisualReadiness(projectId: string, scenes: Scene[]): Vis
  * 仅含 exact active binding + license 可用 + 文件存在的素材，
  * 按 requirement 在 scene 中的顺序排列（renderer 取 assets[0] = 首个需求）。
  */
-export function buildAssetMap(projectId: string, scenes: Scene[]): Record<string, ResolvedAsset[]> {
+export function buildAssetMap(
+  projectId: string,
+  scenes: Scene[],
+  opts?: VisualReadinessOptions,
+): Record<string, ResolvedAsset[]> {
+  scenes = withVisualOverrides(projectId, scenes, opts);
   const assetsById = new Map(listAssetsForProject(projectId).map((a) => [a.id, a]));
   const orderByReqKey = new Map<string, number>();
   for (const scene of scenes) {

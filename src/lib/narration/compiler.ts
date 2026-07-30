@@ -6,6 +6,7 @@ import {
   type NarrationPlan,
   type NarrationUnit,
 } from './schema';
+import {isSpeakableText, sanitizeSpeechText} from './speech-text';
 
 /**
  * Narration Compiler（M3-A）：Script V2 Markdown → Narration Plan。
@@ -187,7 +188,12 @@ function parseScript(markdown: string): {chapters: NarrationChapter[]; paragraph
   for (const line of normalized.split('\n')) {
     // M6.2: 正文剥离系统内部 HTML 注释（<!-- none --> / <!-- E01, E03 -->）
     const trimmed = line.replace(INTERNAL_COMMENT, '').trim();
-    if (trimmed.length === 0) { buffer.push(line); continue; }
+    if (trimmed.length === 0) {
+      // 真空行 → 段落边界（flush）；注释独占行 → 保留原文进 buffer（不断段）
+      if (line.trim().length === 0) { flush(); continue; }
+      buffer.push(line);
+      continue;
+    }
     const chapterMatch = CHAPTER_HEADING.exec(trimmed);
     if (chapterMatch) {
       flush();
@@ -249,7 +255,12 @@ export function compileNarrationPlan(input: {
     let pendingLeading: string[] = [];
 
     const emitSpeechRun = (runText: string): void => {
-      const sentences = splitSentences(runText);
+      // M6.3.1.3：先剔除不可朗读句（Markdown horizontal rule / 纯标点段），
+      // 再 sanitize 保留句（剥离混入句首的分隔符 run）——段内 `---` 只剔除
+      // 分隔符本身，不误伤同段合法句子。
+      const sentences = splitSentences(runText)
+        .filter(isSpeakableText)
+        .map(sanitizeSpeechText);
       if (sentences.length === 0) return;
       const groups = groupSentences(sentences, SENTENCES_PER_SPEECH_UNIT);
       groups.forEach((text, index) => {

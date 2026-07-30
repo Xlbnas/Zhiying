@@ -72,6 +72,22 @@ function main(): void {
     '[P08] summarize 带步骤明细',
   );
   ok(summarizeRenderProgress(12.3, null) === '12.3%', '[P09] summarize 无明细回退百分比');
+  // M6.3.13：percent 单一数据源 —— detail.percent 与 label 帧数同一快照推导，
+  // 不再使用 render_jobs.progress（Remotion 加权值 6% vs 帧口径 4.75% 的双源 bug）
+  ok(
+    summarizeRenderProgress(
+      6,
+      JSON.stringify({stage: 'encode', label: '编码视频 856/18013 帧', percent: 4.8, updatedAt: 'x'}),
+    ) === '编码视频 856/18013 帧（4.8%）',
+    '[P09a] summarize 优先 detail.percent（与帧数同源）',
+  );
+  {
+    const d = detailFromRemotionProgress(
+      {renderedFrames: 900, encodedFrames: 856, stitchStage: 'encoding', renderEstimatedTime: 60000, progress: 0.06},
+      18013,
+    );
+    ok(d.percent === 4.8, '[P09b] encoding percent = encodedFrames/total 一位小数', d.percent);
+  }
 
   // ---------- 3. heartbeat 带明细落库 ----------
   {

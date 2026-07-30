@@ -229,6 +229,20 @@ CREATE TABLE IF NOT EXISTS project_usage_events (
 );
 CREATE INDEX IF NOT EXISTS idx_usage_events_project
   ON project_usage_events (project_id, kind);
+-- ============ M6.3.13：scene 级「改用 MG」视觉策略覆盖（authoritative override） ============
+-- 不编辑 scenes artifact（whole-generation invariant 禁止跨代组合）：
+-- override 在 props/readiness/resolver 构建时按 scene 输入应用；
+-- scenes_version_id 漂移（重新生成/锁定新 scenes 版本）→ override 自动失效。
+CREATE TABLE IF NOT EXISTS scene_visual_overrides (
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  scene_id TEXT NOT NULL,
+  scenes_version_id TEXT NOT NULL,      -- 创建时的 locked scenes 版本行 id（失效判定依据）
+  strategy TEXT NOT NULL,               -- 'mg'
+  template TEXT NOT NULL,               -- 已注册 MG 模板 id
+  template_props TEXT NOT NULL,         -- 模板 schema 校验通过的 templateProps JSON
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, scene_id)
+);
 `;
 
 // M2-A Hardening：版本号数据库级唯一约束（幂等）。

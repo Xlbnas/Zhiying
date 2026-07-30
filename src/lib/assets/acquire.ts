@@ -25,6 +25,7 @@ import {
   loadLatestScenesPlans,
   type SceneAssetPlan,
 } from './requirements';
+import {activeOverrideSceneIds, isSceneVisuallyOverridden} from '../scenes/visual-overrides';
 import {type AssetProvider, type AssetSearchHit} from './providers/types';
 import {WikimediaCommonsProvider} from './providers/wikimedia';
 
@@ -263,9 +264,12 @@ async function downloadAndInsert(
 export async function acquireAssetsForProject(projectId: string): Promise<AcquireSummary> {
   const plans = loadLatestScenesPlans(projectId);
   if (!plans) throw new Error('项目缺少 scenes artifact');
+  // M6.3.13：已「改用 MG」的 scene 不再获取素材（override 失效后自动恢复获取）
+  const overridden = activeOverrideSceneIds(projectId);
   const results: AcquireResult[] = [];
   for (const plan of plans) {
     if (!plan.needsAssets) continue;
+    if (overridden.has(plan.sceneId)) continue;
     for (const req of plan.requirements) {
       if (getActiveBinding(projectId, plan.sceneId, req.requirementId)) {
         results.push({sceneId: plan.sceneId, requirementId: req.requirementId, status: 'bound'});
@@ -298,6 +302,10 @@ export async function acquireAssetsForRequirement(
   const found = findRequirementInPlans(plans, sceneId, requirementId);
   if (!found) {
     return {sceneId, requirementId, status: 'failed', reason: `需求 ${requirementId} 不存在于场景 ${sceneId}`};
+  }
+  // M6.3.13：已「改用 MG」的 scene 拒绝 acquire（防半截状态）
+  if (isSceneVisuallyOverridden(projectId, sceneId)) {
+    return {sceneId, requirementId, status: 'failed', reason: `场景 ${sceneId} 已改用 MG 模板，无需准备素材`};
   }
   if (getActiveBinding(projectId, sceneId, requirementId)) {
     return {sceneId, requirementId, status: 'bound'};

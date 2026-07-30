@@ -15,7 +15,7 @@ import {
   type RenderJobRow,
 } from '@/lib/jobs';
 import {recoverStaleLlmJobs} from '@/lib/llm-jobs';
-import {buildStageDetail, detailFromRemotionProgress} from '@/lib/render/progress-detail';
+import {buildStageDetail, detailFromRemotionProgress, round1} from '@/lib/render/progress-detail';
 import {describeRenderPerfConfig, loadRenderPerfConfig} from '@/lib/render/render-config';
 import {probeNvencSupport} from '@/lib/render/nvenc';
 import {claimNextAnyJob} from '@/lib/scheduler';
@@ -394,6 +394,9 @@ async function runJob(
     );
 
     let lastBeat = 0;
+    let lastBeatFrames = 0;
+    let lastStitchStage: string | null = null;
+    let phaseStartedAt: string | null = null;
     await renderMedia({
       composition,
       serveUrl: bundleLocation,
@@ -428,13 +431,24 @@ async function runJob(
         if (nowMs - lastBeat < HEARTBEAT_INTERVAL_MS) {
           return;
         }
+        // M6.3.13：fps = 相邻两次心跳 renderedFrames 增量 ÷ 实际间隔秒；
+        // 首次心跳（lastBeat=0）fps=null。stitchStage 切换时记录一次 phaseStartedAt。
+        const fps =
+          lastBeat > 0
+            ? round1((mediaProgress.renderedFrames - lastBeatFrames) / ((nowMs - lastBeat) / 1000))
+            : null;
         lastBeat = nowMs;
+        lastBeatFrames = mediaProgress.renderedFrames;
+        if (mediaProgress.stitchStage !== lastStitchStage) {
+          lastStitchStage = mediaProgress.stitchStage;
+          phaseStartedAt = new Date().toISOString();
+        }
         // M5：帧级步骤明细随心跳落库（渲染画面/编码/封装 + 预计剩余）
         const detail = detailFromRemotionProgress(mediaProgress, composition.durationInFrames);
         heartbeat(
           job.id,
           Math.round(mediaProgress.progress * 1000) / 10,
-          JSON.stringify({...detail, updatedAt: new Date().toISOString()}),
+          JSON.stringify({...detail, fps, phaseStartedAt, updatedAt: new Date().toISOString()}),
         );
         // 每轮检查取消请求 → 中止 renderMedia
         if (isCancelRequested(job.id)) {
@@ -454,6 +468,9 @@ async function runJob(
     let finalTmp = outputAbsTmp;
     let loudnessJson: string | null = null;
     if (isFinalRender) {
+      // M6.3.13：loudnorm 阶段无 Remotion onProgress，进入前补一次心跳——
+      // UI 显示「响度归一化」而非停在 ~100% 的假完成窗口
+      heartbeat(job.id, 100, JSON.stringify(buildStageDetail('finalize', {percent: 100})));
       const loudTmp = outputAbsTmp.replace(/\.tmp\.mp4$/, '.loud.tmp.mp4');
       try {
         const {measured} = await runTwoPassLoudnorm(outputAbsTmp, loudTmp);

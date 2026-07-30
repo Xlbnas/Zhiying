@@ -442,7 +442,7 @@ async function main(): Promise<void> {
       payload.narrationPlanArtifactId === artifact.id &&
         payload.narrationPlanArtifactVersion === 1 &&
         payload.scriptV2Version === 2 &&
-        payload.compilerVersion === '1.1' &&
+        payload.compilerVersion === '1.2' &&
         payload.unitId === 'N001',
       '[E15] job payload source artifact 快照正确',
       payload,
@@ -692,7 +692,7 @@ async function main(): Promise<void> {
       m.source.narrationPlanArtifactId === artifact.id &&
         m.source.narrationPlanArtifactVersion === artifact.version &&
         m.source.scriptV2Version === plan.source.version &&
-        m.source.compilerVersion === '1.1',
+        m.source.compilerVersion === '1.2',
       '[M36] manifest source trace 正确',
     );
     ok(

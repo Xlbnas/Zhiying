@@ -17,6 +17,7 @@ export type RenderStage =
   | 'render'    // 渲染画面（帧级）
   | 'encode'    // 编码视频（帧级）
   | 'mux'       // 封装视频文件
+  | 'finalize'  // 响度归一化（loudnorm 两通）
   | 'done';     // 完成
 
 export interface RenderProgressDetail {
@@ -29,6 +30,15 @@ export interface RenderProgressDetail {
   stitchStage?: string;
   /** 预计剩余毫秒（Remotion renderEstimatedTime；可能为 null）。 */
   etaMs?: number | null;
+  /**
+   * 百分比单一数据源（M6.3.13）：由同一快照的帧数推导（一位小数），
+   * 与 label 帧数口径同源——不用 render_jobs.progress（Remotion 加权值）。
+   */
+  percent?: number;
+  /** 相邻两次心跳的瞬时速度（帧/秒，一位小数）；首次心跳为 null。 */
+  fps?: number | null;
+  /** 当前阶段开始的 ISO 时间（stitchStage 切换时记录一次）。 */
+  phaseStartedAt?: string;
   updatedAt: string;
 }
 
@@ -40,8 +50,14 @@ export const RENDER_STAGE_LABELS: Record<RenderStage, string> = {
   render: '渲染画面',
   encode: '编码视频',
   mux: '封装视频文件',
+  finalize: '响度归一化',
   done: '完成',
 };
+
+/** 保留一位小数。 */
+export function round1(value: number): number {
+  return Math.round(value * 10) / 10;
+}
 
 export function buildStageDetail(
   stage: RenderStage,
@@ -73,6 +89,7 @@ export function detailFromRemotionProgress(progress: {
       totalFrames,
       stitchStage: progress.stitchStage,
       etaMs: progress.renderEstimatedTime,
+      percent: totalFrames > 0 ? round1((progress.encodedFrames / totalFrames) * 100) : 0,
     };
   }
   if (progress.stitchStage === 'muxing') {
@@ -84,6 +101,7 @@ export function detailFromRemotionProgress(progress: {
       totalFrames,
       stitchStage: progress.stitchStage,
       etaMs: progress.renderEstimatedTime,
+      percent: 100,
     };
   }
   return {
@@ -92,6 +110,7 @@ export function detailFromRemotionProgress(progress: {
     renderedFrames: progress.renderedFrames,
     totalFrames,
     etaMs: progress.renderEstimatedTime,
+    percent: totalFrames > 0 ? round1((progress.renderedFrames / totalFrames) * 100) : 0,
   };
 }
 
@@ -113,6 +132,9 @@ export function summarizeRenderProgress(
   detailJson: string | null | undefined,
 ): string {
   const detail = parseRenderProgressDetail(detailJson);
-  const pct = `${Math.round(progress * 10) / 10}%`;
+  // percent 同源（M6.3.13）：有 detail.percent 时与 label 帧数同一快照推导，
+  // 否则回退 render_jobs.progress（旧数据 / 无帧计数阶段）
+  const pctValue = detail?.percent ?? round1(progress);
+  const pct = `${pctValue}%`;
   return detail ? `${detail.label}（${pct}）` : pct;
 }

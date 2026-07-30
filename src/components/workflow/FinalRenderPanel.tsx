@@ -1,8 +1,9 @@
 'use client';
 
-import {useCallback, useEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {FullCutPlayer} from '@/components/FullCutPlayer';
-import {parseRenderProgressDetail} from '@/lib/render/progress-detail';
+import {createEtaEstimator} from '@/lib/render/eta';
+import {parseRenderProgressDetail, round1} from '@/lib/render/progress-detail';
 import type {ZhiyingFullCutProps} from '@/lib/scene-schema';
 import {friendlyStageError} from './shared';
 
@@ -13,8 +14,10 @@ import {friendlyStageError} from './shared';
  *
  * M6.3.10 轮询：
  * - latestJob queued/running → 2s 轮询进度（frame/百分比实时变化，无需 F5）
- * - latestJob === null → 10s 低频 discovery（渲染可能从面板外入队）
+ * - 无 active job（从未渲染或仅终态 job）→ 10s 低频 discovery（渲染可能从面板外入队）
  * - 终态跳变 → onRenderSettled（Usage Summary 自动刷新）；unmount 清理 timer
+ * M6.3.13：assetsRefreshKey（素材绑定变化）追加为 load 依赖，asset mutation
+ * 后 readiness 自动刷新（asset mutation 不改 project_stages 指纹）。
  */
 
 interface FinalRenderReadiness {
@@ -92,15 +95,30 @@ const JOB_STATUS_LABELS: Record<string, string> = {
   cancelled: '已取消',
 };
 
+/** M6.3.13：预计剩余 —— ≥90s 显示约 X 分钟，否则约 X 秒。 */
+function formatRemaining(remainingSec: number): string {
+  if (remainingSec >= 90) return `约 ${Math.ceil(remainingSec / 60)} 分钟`;
+  return `约 ${Math.max(1, Math.ceil(remainingSec))} 秒`;
+}
+
+/** M6.3.13：预计完成时刻 HH:mm。 */
+function formatClock(atMs: number): string {
+  const d = new Date(atMs);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 export function FinalRenderPanel({
   projectId,
   /** 上游阶段状态指纹，变化时重新拉取。 */
   sourceStageKey,
+  /** M6.3.13：素材绑定变化计数器（asset mutation 不改 project_stages，靠它失效重拉）。 */
+  assetsRefreshKey,
   /** M6.3.10：渲染进入终态（succeeded/failed/cancelled）时回调一次。 */
   onRenderSettled,
 }: {
   projectId: string;
   sourceStageKey: string;
+  assetsRefreshKey?: number;
   onRenderSettled?: () => void;
 }) {
   const [data, setData] = useState<FinalRenderReadiness | null>(null);
@@ -109,6 +127,9 @@ export function FinalRenderPanel({
   const prevStatusRef = useRef<string | null>(null);
   const settledRef = useRef(onRenderSettled);
   settledRef.current = onRenderSettled;
+  // M6.3.13：ETA 估算器跨 2s 轮询保持 EMA 状态；job 切换时以服务端 fps 先验重启
+  const etaRef = useRef(createEtaEstimator());
+  const etaJobRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -123,7 +144,7 @@ export function FinalRenderPanel({
 
   useEffect(() => {
     void load();
-  }, [load, sourceStageKey]);
+  }, [load, sourceStageKey, assetsRefreshKey]);
 
   // 终态跳变检测：active（queued/running）→ terminal 时触发一次 onRenderSettled
   useEffect(() => {
@@ -135,14 +156,15 @@ export function FinalRenderPanel({
     if (wasActive && isTerminal) settledRef.current?.();
   }, [data?.latestJob?.status]);
 
-  // job 进行中 2s 轮询；无 job 时 10s discovery（面板外入队也能自动出现）
+  // job 进行中 2s 轮询；无 active job 时 10s discovery（面板外入队 / 素材变化
+  // 后 readiness 翻转都能自动出现；M6.3.13 补洞：有过终态 job 也继续 discovery）
   useEffect(() => {
     const status = data?.latestJob?.status;
     if (status === 'queued' || status === 'running') {
       const timer = setInterval(() => void load(), 2000);
       return () => clearInterval(timer);
     }
-    if (data && !data.latestJob) {
+    if (data) {
       const timer = setInterval(() => void load(), 10000);
       return () => clearInterval(timer);
     }
@@ -164,6 +186,27 @@ export function FinalRenderPanel({
       setBusy(false);
     }
   }, [projectId, load]);
+
+  // M6.3.13：进度单一数据源 —— percent/fps/ETA 均来自 progress_detail 同一快照，
+  // 仅在 detail 缺失时回退 render_jobs.progress（Remotion 加权值，与帧数口径不同）
+  const runningJob = data?.latestJob?.status === 'running' ? data.latestJob : null;
+  const jobDetail = runningJob ? parseRenderProgressDetail(runningJob.progressDetail) : null;
+  const etaEstimate = useMemo(() => {
+    if (!runningJob || !jobDetail) return null;
+    if (etaJobRef.current !== runningJob.id) {
+      etaJobRef.current = runningJob.id;
+      etaRef.current.reset({fps: jobDetail.fps});
+    }
+    const frames = jobDetail.encodedFrames ?? jobDetail.renderedFrames;
+    if (frames == null || jobDetail.totalFrames == null) return null;
+    const atMs = Date.parse(jobDetail.updatedAt);
+    return etaRef.current.add({
+      frames,
+      totalFrames: jobDetail.totalFrames,
+      atMs: Number.isFinite(atMs) ? atMs : Date.now(),
+      stage: jobDetail.stage,
+    });
+  }, [runningJob, jobDetail]);
 
   if (!data) return null;
 
@@ -229,16 +272,25 @@ export function FinalRenderPanel({
             最近渲染{' '}
             <span className="badge" data-status={job.status}>
               {JOB_STATUS_LABELS[job.status] ?? job.status}
-              {job.status === 'running' ? ` ${job.progress}%` : ''}
+              {job.status === 'running' && !jobDetail ? ` ${job.progress}%` : ''}
             </span>
-            {job.status === 'running' && parseRenderProgressDetail(job.progressDetail) ? (
+            {job.status === 'running' && jobDetail ? (
               <span style={{marginLeft: 6, color: 'var(--muted)', fontSize: 12}}>
-                {parseRenderProgressDetail(job.progressDetail)!.label}
+                {jobDetail.label}（{jobDetail.percent ?? job.progress}%）
               </span>
             ) : null}
             {job.sourceArtifactVersion !== null ? (
               <span className="mono" style={{marginLeft: 6}}>素材 第{job.sourceArtifactVersion}版</span>
             ) : null}
+          </span>
+        ) : null}
+        {job?.status === 'running' &&
+        jobDetail &&
+        (jobDetail.stage === 'encode' || jobDetail.stage === 'render') ? (
+          <span style={{color: 'var(--muted)', fontSize: 12}}>
+            {etaEstimate
+              ? `速度 ${round1(etaEstimate.fps)} fps · 预计剩余 ${formatRemaining(etaEstimate.remainingSec)} · 预计完成 ${formatClock(etaEstimate.finishAt)}`
+              : '正在估算…'}
           </span>
         ) : null}
       </div>

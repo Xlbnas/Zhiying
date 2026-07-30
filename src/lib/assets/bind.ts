@@ -16,6 +16,7 @@ import {
   type AssetRow,
 } from './model';
 import {findRequirementInPlans, loadLatestScenesPlans} from './requirements';
+import {isSceneVisuallyOverridden} from '../scenes/visual-overrides';
 
 export class BindError extends Error {
   constructor(
@@ -80,6 +81,14 @@ export function bindGeneratedCandidate(input: {
     throw new BindError(
       'requirement_not_found',
       `需求 ${input.requirementId} 不存在于场景 ${input.sceneId}`,
+    );
+  }
+  // M6.3.13：已「改用 MG」的 scene 拒绝绑定（防半截状态）
+  if (isSceneVisuallyOverridden(input.projectId, input.sceneId)) {
+    throw new BindError(
+      'scene_overridden',
+      `场景 ${input.sceneId} 已改用 MG 模板，如需绑定素材请先「改回素材」`,
+      409,
     );
   }
 

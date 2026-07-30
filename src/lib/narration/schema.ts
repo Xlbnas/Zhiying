@@ -16,8 +16,12 @@ export const NARRATION_PLAN_SCHEMA_VERSION = 'narration-plan@1.0';
  * 解析行为修正，compilerVersion 1.0 → 1.1（数据结构不变）。
  * 旧 compiler@1.0 的 plan 不再视为 current（幂等键含 compilerVersion），
  * 重新 Build 产生 1.1 artifact，旧版保留为历史。
+ *
+ * M6.3.1.3：speech text sanitation——Markdown horizontal rule（`---` 等）与
+ * 纯标点段不再产生 speech unit，compilerVersion 1.1 → 1.2（数据结构不变）。
+ * 旧 compiler@1.1 的 plan 因 version 不匹配自动失效，重新 Build 产生 1.2 artifact。
  */
-export const NARRATION_COMPILER_VERSION = '1.1';
+export const NARRATION_COMPILER_VERSION = '1.2';
 
 export const narrationUnitKindSchema = z.enum([
   'speech',

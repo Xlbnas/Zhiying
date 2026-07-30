@@ -193,10 +193,12 @@ function TtsJobRow({job}: {job: TtsJobItem}) {
 }
 
 function RenderJobRow({job}: {job: RenderJobItem}) {
-  const pct = Math.max(0, Math.min(100, job.progress));
   const duration = jobDuration(job);
   const detail = parseRenderProgressDetail(job.progressDetail);
   const eta = formatEta(detail?.etaMs);
+  // M6.3.13：percent 单一数据源 —— 有 detail.percent 时与 label 帧数同源，
+  // 否则回退 render_jobs.progress（Remotion 加权值）
+  const pct = Math.max(0, Math.min(100, detail?.percent ?? job.progress));
   return (
     <div className="job-row">
       <div>

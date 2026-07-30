@@ -5,24 +5,26 @@
  * M6.3.8：requirementId 必填；目标 requirement 必须真实存在于 active scenes artifact。
  * 同一 requirement 已有 active binding 时 = Manual Replace（replace 语义）：
  * 旧 asset 行 / 物理文件 / provenance 全部保留，仅切换 active binding。
+ *
+ * 验证契约（M6.3.13）：
+ * - 文件内容（magic bytes）是类型判定的唯一权威，不信任客户端自报 MIME / 扩展名。
+ *   浏览器可能对合法 PNG/JPEG/WebP 自报 application/octet-stream 或错误 MIME，
+ *   此类情况按内容纠正后接受（canonical 类型决定落盘扩展名与 DB mimeType）。
+ * - magic bytes 不可识别 → 400 invalid_content（无论 declared MIME / 扩展名如何）。
+ * - 20MB 大小上限沿用 file.size 早判，不变。
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import {sniffImageType} from '@/lib/assets/image-sniff';
 import {bindAssetToRequirement, clearResolutionState, getActiveBinding, insertAsset} from '@/lib/assets/model';
 import {findRequirementInPlans, loadLatestScenesPlans} from '@/lib/assets/requirements';
+import {isSceneVisuallyOverridden} from '@/lib/scenes/visual-overrides';
 import {getProject, jsonError} from '../../../../_lib/shared';
 
 export const runtime = 'nodejs';
 
-const ALLOWED_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
-
-function extForMime(mime: string): string {
-  if (mime === 'image/png') return 'png';
-  if (mime === 'image/webp') return 'webp';
-  return 'jpg';
-}
 
 export async function POST(
   req: Request,
@@ -46,9 +48,6 @@ export async function POST(
   if (!file || !sceneId || !requirementId) {
     return jsonError(400, 'missing_fields', {message: '需要 file、sceneId 和 requirementId'});
   }
-  if (!ALLOWED_MIMES.has(file.type)) {
-    return jsonError(400, 'invalid_mime', {message: `仅支持 ${[...ALLOWED_MIMES].join(', ')}，收到 ${file.type}`});
-  }
   if (file.size > MAX_FILE_SIZE) {
     return jsonError(400, 'file_too_large', {message: `文件大小 ${(file.size / 1024 / 1024).toFixed(1)}MB 超过上限 20MB`});
   }
@@ -60,13 +59,24 @@ export async function POST(
   if (!found) {
     return jsonError(400, 'requirement_not_found', {message: `需求 ${requirementId} 不存在于场景 ${sceneId}`});
   }
+  // M6.3.13：已「改用 MG」的 scene 拒绝上传/替换（防半截状态）
+  if (isSceneVisuallyOverridden(id, sceneId)) {
+    return jsonError(409, 'scene_overridden', {message: `场景 ${sceneId} 已改用 MG 模板，如需上传素材请先「改回素材」`});
+  }
   const requirement = found.requirement;
   // Manual Replace 判定：该 requirement 已有 active binding → 本次上传替换它
   const previousBinding = getActiveBinding(id, sceneId, requirementId);
 
+  // 内容权威判定：magic bytes 决定 canonical 类型（纠正浏览器误报 MIME）；
+  // 不可识别内容一律拒绝（不信 declared MIME / 扩展名纸面信息）
+  const buf = Buffer.from(await file.arrayBuffer());
+  const sniffed = sniffImageType(buf);
+  if (!sniffed) {
+    return jsonError(400, 'invalid_content', {message: '文件内容不是合法的 PNG/JPEG/WebP 图片'});
+  }
+
   const assetId = crypto.randomUUID();
-  const ext = extForMime(file.type);
-  const relPath = path.posix.join('assets', id, `${assetId}.${ext}`);
+  const relPath = path.posix.join('assets', id, `${assetId}.${sniffed.ext}`);
   const publicDir = path.join(process.cwd(), 'public');
   const absPath = path.join(publicDir, relPath);
 
@@ -78,7 +88,6 @@ export async function POST(
   }
 
   fs.mkdirSync(path.dirname(absPath), {recursive: true});
-  const buf = Buffer.from(await file.arrayBuffer());
   fs.writeFileSync(absPath, buf);
 
   const row = insertAsset({
@@ -89,7 +98,7 @@ export async function POST(
     sourceProvider: 'user_upload',
     sourceUrl: null,
     localPath: relPath,
-    mimeType: file.type,
+    mimeType: sniffed.mime,
     width: null,
     height: null,
     licenseStatus: 'user_provided',

@@ -30,6 +30,8 @@ export interface SceneAssetResolution {
   /** 整体状态 */
   overallStatus: ResolutionStatus;
   requirements: RequirementResolution[];
+  /** M6.3.13：该 scene 已「改用 MG」时的生效 override（null = 未切换） */
+  mgOverride?: {template: string} | null;
 }
 
 export interface RequirementResolution {
@@ -68,6 +70,10 @@ export interface RequirementResolution {
   failureReason: string | null;
   /** M6.3.9：用户态说明 —— 发生了什么 / 为什么 / 建议下一步（一句话） */
   statusHint: string;
+  /** M6.3.13：语义上允许「改用 MG」（authenticity 闸门，与 AI fallback 同源） */
+  switchToMgEligible: boolean;
+  /** M6.3.13：不可改用 MG 的原因（eligible 时为 null，供 UI disabled 文案） */
+  switchToMgDisabledReason: string | null;
 }
 
 /** 未绑定 AI 生成候选的展示信息。 */

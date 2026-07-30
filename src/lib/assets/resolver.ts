@@ -22,6 +22,13 @@ import {
   type AssetRow,
 } from './model';
 import {authenticityOf, buildSceneAssetPlan} from './requirements';
+import {
+  applyVisualOverrides,
+  canSwitchToMg,
+  currentScenesVersionId,
+  listVisualOverrides,
+  type MgSwitchEligibility,
+} from '../scenes/visual-overrides';
 import type {
   AssetSearchCandidate,
   GeneratedCandidateInfo,
@@ -141,6 +148,7 @@ function decideActions(
   eligibility: GenerateEligibility,
   generateProviderAvailable: boolean,
   hasCandidates: boolean,
+  mgSwitch: MgSwitchEligibility,
 ): ActionDecision {
   const generateAllowed = eligibility.eligible && generateProviderAvailable;
   // generate 不可用的原因：语义禁止优先，其次 provider 不可用（仅未就绪状态需要展示）
@@ -205,6 +213,11 @@ function decideActions(
   if (hasCandidates && !actions.includes('select_candidate')) {
     actions.unshift('select_candidate');
   }
+  // M6.3.13：authentic_required（需要真实历史素材）→ 不暴露 switch_to_mg
+  // （沿用 canGenerateFallback 模式：语义禁止的动作不出现在 availableActions）
+  if (!mgSwitch.ok) {
+    actions = actions.filter((a) => a !== 'switch_to_mg');
+  }
   if (recommended && actions.includes(recommended)) {
     actions = [recommended, ...actions.filter((a) => a !== recommended)];
   }
@@ -232,6 +245,7 @@ function buildRequirementResolution(
   generatedCandidates: GeneratedCandidateInfo[],
   persisted: AssetResolutionStateRow | null,
   generateProviderAvailable: boolean,
+  mgSwitch: MgSwitchEligibility,
 ): RequirementResolution {
   // 状态合并优先级：exact binding → 未绑定 AI 候选 → 持久化失败状态 → pending
   const boundStatus = statusForAsset(boundAsset);
@@ -241,7 +255,7 @@ function buildRequirementResolution(
     ?? 'pending';
   const authenticity = authenticityOf(category, req);
   const eligibility = canGenerateFallback(authenticity);
-  const decision = decideActions(status, req.policy, eligibility, generateProviderAvailable, generatedCandidates.length > 0);
+  const decision = decideActions(status, req.policy, eligibility, generateProviderAvailable, generatedCandidates.length > 0, mgSwitch);
   let queriesTried: string[] = [];
   if (!boundStatus && persisted) {
     try { queriesTried = JSON.parse(persisted.queries_tried ?? '[]') as string[]; } catch { queriesTried = []; }
@@ -268,6 +282,8 @@ function buildRequirementResolution(
     generateDisabledReason: status === 'ready' ? null : decision.generateDisabledReason,
     failureReason: !boundStatus && persisted ? persisted.reason : null,
     statusHint: statusHintFor(status, req.policy, authenticity, generateAvailable),
+    switchToMgEligible: mgSwitch.ok,
+    switchToMgDisabledReason: mgSwitch.ok ? null : mgSwitch.reason,
   };
 }
 
@@ -276,6 +292,8 @@ export interface ResolveSceneOptions {
   resolutionStates?: AssetResolutionStateRow[];
   /** M6.3.9：AI 图像 provider 当前可用性（能力闸门；缺省 true 便于纯函数测试）。 */
   generateProviderAvailable?: boolean;
+  /** M6.3.13：该 scene 生效中的「改用 MG」override（UI 徽标/改回入口用）。 */
+  mgOverride?: {template: string} | null;
 }
 
 export function resolveSceneAssets(
@@ -286,6 +304,9 @@ export function resolveSceneAssets(
   opts?: ResolveSceneOptions,
 ): SceneAssetResolution {
   const plan = buildSceneAssetPlan(scene);
+  // M6.3.13：改用 MG 的语义闸门（authenticity）；MG override 后的 scene
+  // requirements 为空，闸门对 requirement 行无影响
+  const mgSwitch = canSwitchToMg(plan);
   const bindingByReq = new Map(
     activeBindings.filter((b) => b.scene_id === scene.id).map((b) => [b.requirement_id, b]),
   );
@@ -324,6 +345,7 @@ export function resolveSceneAssets(
       generatedCandidates,
       stateByReq.get(req.requirementId) ?? null,
       generateProviderAvailable,
+      mgSwitch,
     );
   });
 
@@ -343,6 +365,7 @@ export function resolveSceneAssets(
     ready,
     overallStatus: overall,
     requirements,
+    mgOverride: opts?.mgOverride ?? null,
   };
 }
 
@@ -350,15 +373,26 @@ export function resolveSceneAssets(
 export function buildProjectResolution(
   projectId: string,
   scenes: Scene[],
-  opts?: {generateProviderAvailable?: boolean},
+  opts?: {generateProviderAvailable?: boolean; scenesVersionId?: string},
 ): SceneAssetResolution[] {
   const all = listAssetsForProject(projectId);
   const bindings = listActiveBindingsForProject(projectId);
   const states = listResolutionStatesForProject(projectId);
-  return scenes.map((s) =>
+  // M6.3.13：scene 级「改用 MG」override 在 scene 输入处生效；
+  // version 漂移（重新生成/锁定新 scenes 版本）→ override 失效跳过
+  const overrides = listVisualOverrides(projectId);
+  const versionId = opts?.scenesVersionId ?? currentScenesVersionId(projectId);
+  const effectiveScenes = applyVisualOverrides(scenes, overrides, versionId);
+  const mgOverrideByScene = new Map(
+    overrides
+      .filter((o) => o.scenesVersionId === versionId)
+      .map((o) => [o.sceneId, {template: o.template}]),
+  );
+  return effectiveScenes.map((s) =>
     resolveSceneAssets(projectId, s, all, bindings, {
       resolutionStates: states,
       generateProviderAvailable: opts?.generateProviderAvailable,
+      mgOverride: mgOverrideByScene.get(s.id) ?? null,
     }),
   );
 }

@@ -335,7 +335,8 @@ async function main(): Promise<void> {
     const oldAssetId = oldBinding.asset_id;
 
     const form = new FormData();
-    form.append('file', new File([Buffer.from('new-image-bytes')], 'new.jpg', {type: 'image/jpeg'}));
+    // M6.3.13：服务端改为 magic bytes 权威判定，fixture 必须是真实 JPEG 文件头
+    form.append('file', new File([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01])], 'new.jpg', {type: 'image/jpeg'}));
     form.append('sceneId', 'S02');
     form.append('requirementId', s02ReqId);
     const res = await uploadPOST(

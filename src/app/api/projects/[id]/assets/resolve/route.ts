@@ -12,6 +12,7 @@ import {buildProjectResolution} from '@/lib/assets/resolver';
 import {getGeneratedImageProvider} from '@/lib/assets/providers/generated';
 import type {Scene} from '@/lib/scene-schema';
 import {acquireAssetsForProject, acquireAssetsForRequirement} from '@/lib/assets/acquire';
+import {isSceneVisuallyOverridden} from '@/lib/scenes/visual-overrides';
 
 export const runtime = 'nodejs';
 
@@ -60,6 +61,10 @@ export async function POST(
   try {
     // 单 requirement 定向获取（exact sceneId + requirementId）
     if (body?.sceneId && body?.requirementId) {
+      // M6.3.13：已「改用 MG」的 scene 拒绝 acquire（防半截状态）
+      if (isSceneVisuallyOverridden(id, body.sceneId)) {
+        return jsonError(409, 'scene_overridden', {message: `场景 ${body.sceneId} 已改用 MG 模板，无需准备素材`});
+      }
       const result = await acquireAssetsForRequirement(id, body.sceneId, body.requirementId);
       if (result.status === 'failed' && result.reason?.includes('不存在')) {
         return jsonError(400, 'requirement_not_found', {message: result.reason});

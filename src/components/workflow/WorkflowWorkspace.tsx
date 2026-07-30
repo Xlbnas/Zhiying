@@ -42,6 +42,14 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
   // M6.3.10：AI 图像生成成功 / 渲染进入终态 → bump 触发 Usage Summary 刷新（无需 F5）
   const [usageRefreshKey, setUsageRefreshKey] = useState(0);
   const bumpUsageRefresh = useCallback(() => setUsageRefreshKey((k) => k + 1), []);
+  // M6.3.13：任何素材绑定变化（搜索/上传/AI 候选绑定/改用 MG）→ bump 触发
+  // FinalRenderPanel / VisualPreview 重新拉取 readiness（asset mutation 不改
+  // project_stages，指纹 key 不变，必须靠显式计数器失效）
+  const [assetsRefreshKey, setAssetsRefreshKey] = useState(0);
+  const handleAssetsChanged = useCallback(() => {
+    setUsageRefreshKey((k) => k + 1); // 保留 M6.3.10 语义：AI 生成后 Usage Summary 刷新
+    setAssetsRefreshKey((k) => k + 1);
+  }, []);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const handleSelect = useCallback((stage: WorkflowStage) => {
@@ -197,7 +205,7 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
 
       <VisualAssetsPanel
         projectId={projectId}
-        onAssetsChanged={bumpUsageRefresh}
+        onAssetsChanged={handleAssetsChanged}
         scenesStageKey={
           (() => {
             const sc = data.stages.find((s) => s.stage === 'scenes');
@@ -213,6 +221,7 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
       ) : (
         <VisualPreview
           projectId={projectId}
+          assetsRefreshKey={assetsRefreshKey}
           scenesStageKey={
             (() => {
               const scenesStage = data.stages.find((s) => s.stage === 'scenes');
@@ -227,6 +236,7 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
       <FinalRenderPanel
         projectId={projectId}
         onRenderSettled={bumpUsageRefresh}
+        assetsRefreshKey={assetsRefreshKey}
         sourceStageKey={
           (() => {
             const sv2 = data.stages.find((s) => s.stage === 'script_v2');

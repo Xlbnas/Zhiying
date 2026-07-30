@@ -20,6 +20,7 @@ import {
   validateScenesSemantics,
 } from './scenes-semantic-validation';
 import {buildAssetMap, evaluateVisualReadiness, type VisualReadinessSummary} from '../assets/readiness';
+import {applyVisualOverrides, listVisualOverrides} from '../scenes/visual-overrides';
 
 /**
  * Workflow → M1 Render Bridge（M2-E-C）。
@@ -138,7 +139,17 @@ function loadLockedScenesSource(projectId: string): LockedScenesSource {
       {issueCount: semantic.issues.length},
     );
   }
-  return {scenesVersion: stage.locked_version, parsed: structural.data};
+  // M6.3.13：scene 级「改用 MG」override 在 scene 输入处生效（不改 scenes
+  // artifact；以 locked 版本行 id 为失效判定基准，version 漂移自动跳过）
+  const overriddenScenes = applyVisualOverrides(
+    structural.data.scenes,
+    listVisualOverrides(projectId),
+    version.id,
+  );
+  return {
+    scenesVersion: stage.locked_version,
+    parsed: {...structural.data, scenes: overriddenScenes},
+  };
 }
 
 // ---------- 内部：资产 preflight ----------

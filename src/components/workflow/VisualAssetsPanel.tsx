@@ -39,6 +39,9 @@ interface RequirementData {
   failureReason: string | null;
   statusHint: string;
   queriesTried: string[];
+  // M6.3.13：「改用 MG」语义闸门（authentic_required → 不渲染该动作）
+  switchToMgEligible?: boolean;
+  switchToMgDisabledReason?: string | null;
 }
 
 interface ResolutionData {
@@ -48,6 +51,8 @@ interface ResolutionData {
   ready: number;
   overallStatus: string;
   requirements: RequirementData[];
+  // M6.3.13：已「改用 MG」的 scene 的生效 override（徽标 + 改回入口）
+  mgOverride?: {template: string} | null;
 }
 
 interface ResolverResponse {
@@ -71,7 +76,8 @@ const SOURCE_LABELS: Record<string, string> = {
 export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: {
   projectId: string;
   scenesStageKey: string;
-  /** M6.3.10：AI 生成成功（产生费用）后通知外部刷新 Usage Summary。 */
+  /** M6.3.10/M6.3.13：任何素材绑定变化（自动获取/搜索/AI 生成/候选绑定/上传替换/改用 MG）
+      成功后通知外部刷新 Usage Summary 与 readiness 面板（无需 F5）。 */
   onAssetsChanged?: () => void;
 }) {
   const [data, setData] = useState<ResolverResponse | null>(null);
@@ -89,6 +95,8 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
   const [genPrompt, setGenPrompt] = useState<string>('');
   const [generatingKey, setGeneratingKey] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null); // 搜索/绑定按钮 busy
+  // M6.3.13：「改用 MG」预览确认区（preview 不落库，确认才 switch）
+  const [mgPreview, setMgPreview] = useState<{sceneId: string; template: string; templateProps: Record<string, unknown>} | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -137,10 +145,11 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
         (other ? ` · 其他失败 ${other}` : ''),
       );
       await load();
+      onAssetsChanged?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : '获取失败');
     } finally { setAcquiring(false); }
-  }, [projectId, load]);
+  }, [projectId, load, onAssetsChanged]);
 
   const searchOne = useCallback(async (sceneId: string, requirementId: string) => {
     const key = `${sceneId}:${requirementId}:search`;
@@ -155,10 +164,11 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
       const r = await res.json() as {status: string; reason?: string};
       setResult(r.status === 'acquired' ? '已找到并绑定素材' : (r.reason ?? '未找到合适素材'));
       await load();
+      onAssetsChanged?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : '搜索失败');
     } finally { setBusyKey(null); }
-  }, [projectId, load]);
+  }, [projectId, load, onAssetsChanged]);
 
   const doGenerate = useCallback(async () => {
     if (!genTarget || !genPrompt.trim()) return;
@@ -193,10 +203,11 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
       if (!res.ok) throw new Error(await errMsg(res, '绑定失败'));
       setResult('已绑定该素材');
       await load();
+      onAssetsChanged?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : '绑定失败');
     } finally { setBusyKey(null); }
-  }, [projectId, load]);
+  }, [projectId, load, onAssetsChanged]);
 
   const uploadForTarget = useCallback(async (file: File) => {
     if (!uploadTarget) return;
@@ -212,6 +223,7 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
       const r = await res.json() as {replaced?: boolean};
       setResult(r.replaced ? '已替换该需求的素材（旧素材保留在素材库）' : '已上传并绑定素材');
       await load();
+      onAssetsChanged?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : '上传失败');
     } finally {
@@ -219,18 +231,74 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
       setUploadTarget(null);
       if (fileRef.current) fileRef.current.value = '';
     }
-  }, [projectId, uploadTarget, load]);
+  }, [projectId, uploadTarget, load, onAssetsChanged]);
 
-  if (!summary || summary.needAssets === 0) return null;
+  // M6.3.13：改用 MG —— preview → inline 确认 → switch；成功走统一 invalidation
+  const startMgSwitch = useCallback(async (sceneId: string) => {
+    const key = `${sceneId}:mg-preview`;
+    setBusyKey(key); setError(null); setResult(null); setMgPreview(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/assets/mg-preview`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({sceneId}),
+      });
+      if (!res.ok) throw new Error(await errMsg(res, '无法构建 MG 预览'));
+      setMgPreview((await res.json()) as {sceneId: string; template: string; templateProps: Record<string, unknown>});
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '无法构建 MG 预览');
+    } finally { setBusyKey(null); }
+  }, [projectId]);
 
+  const confirmMgSwitch = useCallback(async () => {
+    if (!mgPreview) return;
+    const key = `${mgPreview.sceneId}:mg-switch`;
+    setBusyKey(key); setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/assets/switch-to-mg`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(mgPreview),
+      });
+      if (!res.ok) throw new Error(await errMsg(res, '切换失败'));
+      setResult(`场景 ${mgPreview.sceneId} 已改用 MG 模板（原素材绑定已停用并保留历史）`);
+      setMgPreview(null);
+      await load();
+      onAssetsChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '切换失败');
+    } finally { setBusyKey(null); }
+  }, [projectId, mgPreview, load, onAssetsChanged]);
+
+  const revertMg = useCallback(async (sceneId: string) => {
+    const key = `${sceneId}:mg-revert`;
+    setBusyKey(key); setError(null); setResult(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/assets/revert-mg`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({sceneId}),
+      });
+      if (!res.ok) throw new Error(await errMsg(res, '改回失败'));
+      setResult(`场景 ${sceneId} 已改回素材画面。原素材绑定不会自动恢复，请重新准备素材。`);
+      await load();
+      onAssetsChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '改回失败');
+    } finally { setBusyKey(null); }
+  }, [projectId, load, onAssetsChanged]);
+
+  if (!summary) return null;
   const needScenes = data?.resolutions.filter((s) => s.totalRequired > 0) ?? [];
+  const mgScenes = data?.resolutions.filter((s) => s.mgOverride) ?? [];
+  if (summary.needAssets === 0 && mgScenes.length === 0) return null;
 
   return (
     <section className="stage-panel" style={{marginTop: 20}} aria-label="视觉素材">
       <div className="panel-head">
         <span className="panel-title">视觉素材</span>
         <div className="panel-head-actions">
-          <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" hidden
+          <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" hidden
             onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadForTarget(f); }} />
           <button type="button" className="btn btn-primary btn-sm" disabled={acquiring}
             onClick={() => void acquireAll()}>
@@ -249,6 +317,49 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
         </div>
 
         {result ? <div style={{fontSize: 12, color: 'var(--success)', marginBottom: 8}}>{result}</div> : null}
+
+        {/* M6.3.13：改用 MG 确认区（模板名 + props 摘要预览，确认才落库） */}
+        {mgPreview ? (
+          <div style={{border: '1px solid var(--accent)', borderRadius: 10, padding: 12, marginBottom: 12, background: 'var(--surface-raised)'}}>
+            <div style={{fontSize: 13, marginBottom: 6}}>
+              将场景 <strong>{mgPreview.sceneId}</strong> 改用 MG 模板：<strong>{mgPreview.template}</strong>
+            </div>
+            <pre className="mono" style={{fontSize: 11, margin: '0 0 8px', padding: 8, borderRadius: 6, background: 'var(--surface)', overflow: 'auto', maxHeight: 160}}>
+              {JSON.stringify(mgPreview.templateProps, null, 2)}
+            </pre>
+            <div style={{fontSize: 12, color: 'var(--muted)', marginBottom: 8}}>
+              切换后该场景不再使用外部素材；原素材绑定会停用（保留历史），改回后需重新准备。
+            </div>
+            <div style={{display: 'flex', gap: 6}}>
+              <button type="button" className="btn btn-sm btn-primary"
+                disabled={busyKey === `${mgPreview.sceneId}:mg-switch`}
+                onClick={() => void confirmMgSwitch()}>
+                {busyKey === `${mgPreview.sceneId}:mg-switch` ? '切换中…' : '确认切换'}
+              </button>
+              <button type="button" className="btn btn-sm" onClick={() => setMgPreview(null)}>取消</button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* M6.3.13：已改用 MG 的 scene（徽标 + 改回素材入口） */}
+        {mgScenes.length > 0 ? (
+          <div style={{display: 'flex', flexDirection: 'column', gap: 8, marginBottom: needScenes.length > 0 ? 12 : 0}}>
+            {mgScenes.map((s) => (
+              <div key={s.sceneId} style={{display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', background: 'var(--surface-raised)'}}>
+                <span className="badge" data-stage-state="locked">MG</span>
+                <span style={{flex: 1, fontSize: 13}}>
+                  <strong>{s.sceneId}</strong> · 已改用 MG 模板（{s.mgOverride?.template}），无需外部素材
+                </span>
+                <button type="button" className="btn btn-sm"
+                  disabled={busyKey === `${s.sceneId}:mg-revert`}
+                  title="改回后原素材绑定不会自动恢复，需要重新准备素材"
+                  onClick={() => void revertMg(s.sceneId)}>
+                  {busyKey === `${s.sceneId}:mg-revert` ? '改回中…' : '改回素材'}
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         {needScenes.length > 0 ? (
           <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
@@ -290,14 +401,24 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
                           case 'generate': return req.generateSecondary ? 'AI生成替代' : 'AI 生成';
                           case 'upload': return '上传图片';
                           case 'replace': return '替换素材';
-                          case 'switch_to_mg': return '改用 MG（即将支持）';
+                          case 'switch_to_mg': return '改用 MG';
                           default: return action;
                         }
                       };
                       const renderBtn = (action: string, isPrimary: boolean) => {
                         const cls = isPrimary ? 'btn btn-sm btn-primary' : 'btn btn-sm';
                         if (action === 'switch_to_mg') {
-                          return <button key={action} className="btn btn-sm" disabled title="改用 MG 功能即将支持">改用 MG（即将支持）</button>;
+                          // M6.3.13：resolver 不暴露该动作 = 语义禁止（authentic_required）；
+                          // 暴露但被标记 ineligible 时展示真实 disabled 按钮 + 原因
+                          const eligible = req.switchToMgEligible !== false;
+                          const busy = busyKey === `${s.sceneId}:mg-preview`;
+                          return (
+                            <button key={action} className={cls} disabled={!eligible || busy}
+                              title={eligible ? '改用 MG 模板画面（不再使用外部素材）' : (req.switchToMgDisabledReason ?? '该镜头不能改用 MG')}
+                              onClick={() => void startMgSwitch(s.sceneId)}>
+                              {busy ? '构建中…' : labelFor(action)}
+                            </button>
+                          );
                         }
                         if (action === 'search' || action === 'retry_download') {
                           const busy = busyKey === `${reqKey}:search`;

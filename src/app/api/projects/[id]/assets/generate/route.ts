@@ -18,6 +18,7 @@ import {defaultGeneratePrompt} from '@/lib/assets/generate-prompt';
 import {getGeneratedImageProvider, ImageGenerationError} from '@/lib/assets/providers/generated';
 import type {GeneratedImageCandidate} from '@/lib/assets/providers/generated';
 import {findRequirementInPlans, loadLatestScenesPlans} from '@/lib/assets/requirements';
+import {isSceneVisuallyOverridden} from '@/lib/scenes/visual-overrides';
 import {
   imageGenerationErrorStatus,
   linkAssetToImageUsageEvent,
@@ -65,6 +66,10 @@ export async function POST(
   const found = findRequirementInPlans(plans, body.sceneId, body.requirementId);
   if (!found) {
     return jsonError(400, 'requirement_not_found', {message: `需求 ${body.requirementId} 不存在于场景 ${body.sceneId}`});
+  }
+  // M6.3.13：已「改用 MG」的 scene 拒绝生成（防半截状态；守卫在计费/IN_FLIGHT 之前）
+  if (isSceneVisuallyOverridden(id, body.sceneId)) {
+    return jsonError(409, 'scene_overridden', {message: `场景 ${body.sceneId} 已改用 MG 模板，无需生成素材`});
   }
   const requirement = found.requirement;
   const prompt = body.prompt?.trim() || defaultGeneratePrompt(requirement);

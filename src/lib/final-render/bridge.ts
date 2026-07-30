@@ -27,6 +27,7 @@ import {validateScenesSemantics} from '../workflow/scenes-semantic-validation';
 import {getStage} from '../workflow/stages';
 import {getVersion} from '../workflow/versions';
 import {buildAssetMap, evaluateVisualReadiness} from '../assets/readiness';
+import {applyVisualOverrides, listVisualOverrides} from '../scenes/visual-overrides';
 import {
   buildRuntimeNarrationLogicalPath,
   computePropsSha256,
@@ -198,13 +199,20 @@ export function buildFinalRenderProps(input: {
   const {src} = input;
   const rec = src.reconciliation.reconciliation;
   const fps = rec.fps;
+  // M6.3.13：scene 级「改用 MG」override 在 scene 输入处生效（不改 scenes artifact，
+  // 不破坏 whole-generation invariant；version 漂移的 override 自动失效跳过）
+  const effectiveScenes = applyVisualOverrides(
+    src.scenes.data.scenes,
+    listVisualOverrides(input.projectId),
+    src.scenes.versionId,
+  );
   const reconciled = applyTimingReconciliation({
-    scenes: src.scenes.data.scenes,
+    scenes: effectiveScenes,
     chapterTiming: src.scenes.data.chapterTiming,
     reconciliation: rec,
   });
   // M6：注入 assetMap（已绑定的真实素材，含 provenance）
-  const assetMap = buildAssetMap(input.projectId, src.scenes.data.scenes);
+  const assetMap = buildAssetMap(input.projectId, effectiveScenes, {scenesVersionId: src.scenes.versionId});
   return zhiyingFullCutPropsSchema.parse({
     data: {
       schemaVersion: SCHEMA_VERSION,
@@ -413,7 +421,7 @@ export function checkFinalRenderReadiness(projectId: string): FinalRenderReadine
   base.frameResidualMs = rec.target.frameResidualMs;
 
   // M6：Final Render 硬门禁 — 视觉素材未就绪则禁止渲染（M6.3.8：requirement 粒度）
-  const visual = evaluateVisualReadiness(projectId, src.scenes.data.scenes);
+  const visual = evaluateVisualReadiness(projectId, src.scenes.data.scenes, {scenesVersionId: src.scenes.versionId});
   if (!visual.ready) {
     // fail-closed：任何 requirement pending → ready=false（UI 禁用渲染按钮）；
     // enqueueFinalRender 内部另有同一门禁兜底。
@@ -478,7 +486,7 @@ export function enqueueFinalRender(projectId: string): EnqueueFinalRenderResult 
     if (src instanceof FinalRenderError) throw src;
 
     // M6：Final Render 硬门禁 — 视觉素材未就绪禁止入队（M6.3.8：requirement 粒度）
-    const visual = evaluateVisualReadiness(projectId, src.scenes.data.scenes);
+    const visual = evaluateVisualReadiness(projectId, src.scenes.data.scenes, {scenesVersionId: src.scenes.versionId});
     if (!visual.ready) {
       throw new FinalRenderError(
         'VISUAL_READINESS_FAILED',

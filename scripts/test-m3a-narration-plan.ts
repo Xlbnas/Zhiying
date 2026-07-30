@@ -324,7 +324,7 @@ async function main(): Promise<void> {
     insertArtifact(JSON.stringify(badSchema));
     r = checkNarrationReadiness(pid);
     ok(r.status === 'missing', '[H-C] schemaVersion 错误 → 不当 current');
-    // D：合法 plan 但 compilerVersion 为旧版 1.0（≠ 当前 1.1）→ stale（历史保留、不是 current）
+    // D：合法 plan 但 compilerVersion 为旧版 1.0（≠ 当前 1.2）→ stale（历史保留、不是 current）
     const oldPlan = JSON.parse(JSON.stringify(compile(FIXTURE_V2))) as Record<string, unknown>;
     oldPlan.compilerVersion = '1.0';
     insertArtifact(JSON.stringify(oldPlan));
@@ -334,15 +334,15 @@ async function main(): Promise<void> {
       '[H-D] compiler 1.0 artifact → stale（不 current，保留历史）',
       {status: r.status, latest: r.latestPlanSourceVersion},
     );
-    // Build：产生新的 1.1 artifact（不复用旧版），再次 build 幂等
+    // Build：产生新的 1.2 artifact（不复用旧版），再次 build 幂等
     const rebuilt = buildNarrationPlan(pid);
     ok(
-      !rebuilt.reused && rebuilt.plan.compilerVersion === '1.1',
-      '[H-V] compiler 1.0 → Build 产生 1.1 新 artifact',
+      !rebuilt.reused && rebuilt.plan.compilerVersion === '1.2',
+      '[H-V] compiler 1.0 → Build 产生 1.2 新 artifact',
     );
     ok(checkNarrationReadiness(pid).status === 'ready', '[H-V] rebuild 后 ready');
     const again = buildNarrationPlan(pid);
-    ok(again.reused && again.plan.compilerVersion === '1.1', '[H-V] 再次 build 幂等复用 1.1');
+    ok(again.reused && again.plan.compilerVersion === '1.2', '[H-V] 再次 build 幂等复用 1.2');
   }
   {
     // H-P：chapter 标题只剥离正式时间区间，合法括号标题保留
