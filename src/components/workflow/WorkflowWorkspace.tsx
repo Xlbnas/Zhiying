@@ -11,6 +11,7 @@ import {TimingReconciliationPanel} from './TimingReconciliationPanel';
 import {VisualPreview} from './VisualPreview';
 import {VisualAssetsPanel} from './VisualAssetsPanel';
 import {UsageSummaryPanel} from './UsageSummaryPanel';
+import {NarrativeBeatsPanel} from './NarrativeBeatsPanel';
 import {WorkflowStepper} from './WorkflowStepper';
 import {nextStageAfter, STAGE_NAMES, type StagesResponse} from './shared';
 
@@ -247,6 +248,8 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
       />
 
       <UsageSummaryPanel projectId={projectId} refreshKey={usageRefreshKey} />
+
+      <NarrativeBeatsPanel projectId={projectId} />
     </main>
   );
 }
