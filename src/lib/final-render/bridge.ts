@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import {isDeepStrictEqual} from 'node:util';
 import {getDb} from '../db';
 import {enqueueRenderJob, type RenderJobRow} from '../jobs';
@@ -11,6 +13,7 @@ import type {TimingReconciliation} from '../reconciliation/schema';
 import {getCurrentTimingReconciliation} from '../reconciliation/timing';
 import {summarizeRenderProgress} from '../render/progress-detail';
 import {getRenderArtifact} from '../render/artifact';
+import {auditFinalVisuals, validateFinalVisualProps, type FinalVisualAudit} from '../render/visual-gate';
 import {
   COMPOSITION_ID,
   SCHEMA_VERSION,
@@ -60,6 +63,7 @@ export type FinalRenderErrorCode =
   | 'SUBTITLE_TIMING_NOT_READY'
   | 'TIMING_RECONCILIATION_NOT_READY'
   | 'VISUAL_READINESS_FAILED'
+  | 'FINAL_VISUAL_INCOMPLETE'
   | 'RENDER_ALREADY_ACTIVE'
   | 'FINAL_RENDER_SOURCE_INVALID';
 
@@ -229,6 +233,29 @@ export function buildFinalRenderProps(input: {
 
 // ---------- artifact 读取 ----------
 
+/** M6.3.12 render-input gate 用的物理文件检查（与 readiness.ts 同一 public 根约定）。 */
+function publicAssetFileExists(publicPath: string): boolean {
+  try {
+    const abs = path.join(process.cwd(), 'public', publicPath);
+    return fs.statSync(abs).isFile() && fs.statSync(abs).size > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** M6.3.12：对最终 props 跑 render-input gate；不过 → FinalRenderError。 */
+function assertFinalVisualProps(props: ZhiyingFullCutProps): void {
+  const gate = validateFinalVisualProps(props, {assetFileExists: publicAssetFileExists});
+  if (!gate.ok) {
+    const first = gate.issues[0]!;
+    throw new FinalRenderError(
+      'FINAL_VISUAL_INCOMPLETE',
+      `Final renderer 视觉输入未解析（${gate.issues.length} 处）：` +
+        `${first.sceneId} ${first.reason}${gate.issues.length > 1 ? ' 等' : ''}`,
+    );
+  }
+}
+
 interface ArtifactRow {
   id: string;
   version: number;
@@ -274,6 +301,8 @@ export interface FinalRenderReadiness {
   durationSec: number | null;
   frameResidualMs: number | null;
   playerPreviewProps: ZhiyingFullCutProps | null;
+  /** M6.3.12：当前 props 的视觉审计（分布/静态时长/复用；ready 时存在）。 */
+  visualAudit: FinalVisualAudit | null;
   latestJob: {
     id: string;
     status: string;
@@ -282,6 +311,9 @@ export interface FinalRenderReadiness {
     outputPath: string | null;
     /** M6.3.11：manifest 中的产物 SHA256（新渲染必有；历史 job 首次下载回填后出现）。 */
     outputSha256: string | null;
+    /** M6.3.12：manifest 中的视觉审计 / 响度测量 JSON（历史 job 为 null）。 */
+    auditJson: string | null;
+    loudnessJson: string | null;
     sourceArtifactVersion: number | null;
   } | null;
 }
@@ -300,14 +332,16 @@ function latestFinalJob(projectId: string): FinalRenderReadiness['latestJob'] {
         .prepare('SELECT * FROM render_jobs WHERE id = ?')
         .get(parsed.data.jobId) as RenderJobRow | undefined;
       if (!job) continue;
+      const artifact = job.status === 'succeeded' ? getRenderArtifact(job.id) : undefined;
       return {
         id: job.id,
         status: job.status,
         progress: job.progress,
         progressDetail: (job as {progress_detail?: string | null}).progress_detail ?? null,
         outputPath: job.output_path,
-        outputSha256:
-          job.status === 'succeeded' ? getRenderArtifact(job.id)?.output_sha256 ?? null : null,
+        outputSha256: artifact?.output_sha256 ?? null,
+        auditJson: artifact?.audit_json ?? null,
+        loudnessJson: artifact?.loudness_json ?? null,
         sourceArtifactVersion: parsed.data.finalRenderSourceArtifactVersion,
       };
     } catch {
@@ -331,6 +365,7 @@ export function checkFinalRenderReadiness(projectId: string): FinalRenderReadine
     durationSec: null,
     frameResidualMs: null,
     playerPreviewProps: null,
+    visualAudit: null,
     latestJob: latestFinalJob(projectId),
   };
   const project = getDb()
@@ -397,6 +432,18 @@ export function checkFinalRenderReadiness(projectId: string): FinalRenderReadine
     templateVersion: project.template_version,
     src,
   });
+  // M6.3.12：render-input gate 与 enqueue/worker 同口径，UI 提前禁用渲染按钮
+  const renderInputGate = validateFinalVisualProps(full, {assetFileExists: publicAssetFileExists});
+  if (!renderInputGate.ok) {
+    const first = renderInputGate.issues[0]!;
+    base.ready = false;
+    base.blockers.push({
+      code: 'FINAL_VISUAL_INCOMPLETE',
+      message: `Final renderer 视觉输入未解析（${renderInputGate.issues.length} 处）：${first.sceneId} ${first.reason}${renderInputGate.issues.length > 1 ? ' 等' : ''}`,
+    });
+    return base;
+  }
+  base.visualAudit = auditFinalVisuals(full);
   base.playerPreviewProps = {...full, audio: {...full.audio, narration: null}};
   return base;
 }
@@ -445,6 +492,10 @@ export function enqueueFinalRender(projectId: string): EnqueueFinalRenderResult 
       templateVersion: project.template_version,
       src,
     });
+    // M6.3.12：render-input 硬门禁 — 以最终 props 为准（assetMap 注入 /
+    // MG templateProps 到达 renderer / 素材物理文件可读），杜绝 domain gate
+    // 全绿但 renderer 拿到占位的分歧（历史 P0：templateProps 穿线丢失）。
+    assertFinalVisualProps(props);
     const propsSha256 = computePropsSha256(props);
     const rec = src.reconciliation.reconciliation;
     const source: FinalRenderSource['source'] = {

@@ -164,6 +164,12 @@ export const zhiyingFullCutPropsSchema = z.object({
     sfx: z.string().nullable().default(DEFAULT_SFX_PATH),
   }),
   showSubtitles: z.boolean().default(true),
+  /**
+   * M6.3.12：渲染模式。'final'（worker Final Render 显式设置）时
+   * ProductionPlaceholder 直接 throw（placeholder 绝不进入最终视频）；
+   * 缺省/'preview'（Studio、Visual Preview、playerPreviewProps）允许占位。
+   */
+  renderMode: z.enum(['preview', 'final']).optional(),
 });
 
 export type Scene = z.infer<typeof sceneSchema>;

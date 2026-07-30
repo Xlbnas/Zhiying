@@ -196,8 +196,9 @@ function loadFinalSource(job: RenderJobRow, attempt: FinalRenderAttempt): FinalR
  * 逐层确保 staging 父目录链安全（Hardening：防 parent-chain symlink escape）：
  * 不存在 → mkdir；存在 → 必须是目录或指向 root 内部目录的 symlink；
  * 最终 realpath 必须 containment 在 realPublicRoot 内（不只依赖 path.resolve 字符串）。
+ * M6.3.12 起同时供 runtime-assets staging 复用。
  */
-function ensureSafeDirectoryInsideRoot(realPublicRoot: string, segments: string[]): string {
+export function ensureSafeDirectoryInsideRoot(realPublicRoot: string, segments: string[]): string {
   let current = realPublicRoot;
   for (const segment of segments) {
     current = path.join(current, segment);

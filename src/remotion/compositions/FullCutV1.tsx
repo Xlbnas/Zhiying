@@ -21,6 +21,7 @@ import {
 } from '@/lib/scene-schema';
 import {Typography} from '../design/typography';
 import {borderRadius, colors, fontFamily} from '../design/tokens';
+import {RenderModeContext, type RenderMode} from '../render-mode';
 import {
   FULL_CUT_DURATION_FRAMES,
   fullCutChapterTiming,
@@ -99,10 +100,13 @@ const ChapterLabel = ({scene, chapterTiming}: {scene: FullCutScene; chapterTimin
   );
 };
 
-const SceneContent = ({scene, chapterTiming, assetMap}: {
+const SceneContent = ({scene, chapterTiming, assetMap, templateProps}: {
   scene: FullCutScene;
   chapterTiming: ChapterTiming[];
   assetMap?: Record<string, unknown>;
+  /** M6.3.12：templateProps 从 SchemaScene 显式穿线（此前经 TimedScene
+      字段裁剪被丢弃，导致全部 MG scene 渲染成 placeholder —— P0 根因）。 */
+  templateProps?: SchemaScene['templateProps'];
 }) => {
   // 重建 SchemaScene（包含 templateProps / assetRequirements）
   const schemaScene: SchemaScene = {
@@ -118,7 +122,7 @@ const SceneContent = ({scene, chapterTiming, assetMap}: {
     visualType: scene.visualType as SchemaScene['visualType'],
     template: scene.template as SchemaScene['template'],
     sourceTemplate: scene.sourceTemplate,
-    templateProps: (scene as unknown as Record<string, unknown>).templateProps as SchemaScene['templateProps'],
+    templateProps,
     assetRequirements: (scene as unknown as Record<string, unknown>).assetRequirements as SchemaScene['assetRequirements'] ?? [],
     narrationSummary: scene.narrationSummary,
     description: scene.description,
@@ -172,7 +176,7 @@ const TimedScene = ({scene, lead, tail, chapterTiming, assetMap}: {
   };
   return (
     <AbsoluteFill style={{opacity: Math.min(fadeIn, fadeOut)}}>
-      <SceneContent scene={fcs} chapterTiming={chapterTiming} assetMap={assetMap} />
+      <SceneContent scene={fcs} chapterTiming={chapterTiming} assetMap={assetMap} templateProps={scene.templateProps} />
     </AbsoluteFill>
   );
 };
@@ -216,7 +220,7 @@ const FullSubtitles = ({cues, scenes}: {cues: SubtitleCue[]; scenes: FullCutScen
   const alpha = interpolate(time, [cue.start, cue.start + .1], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
   return (
     <div style={{position: 'absolute', left: 300, top: position, width: 1320, display: 'flex', justifyContent: 'center', opacity: alpha, pointerEvents: 'none'}}>
-      <div style={{fontFamily, fontSize: 34, fontWeight: 540, lineHeight: 1.34, color: '#f5f5f5', padding: '8px 18px 10px', borderRadius: borderRadius.sm, background: 'rgba(5,5,7,.54)', boxShadow: '0 8px 28px rgba(0,0,0,.2)', textShadow: '0 2px 10px rgba(0,0,0,.7)', textAlign: 'center'}}>{cue.text}</div>
+      <div style={{fontFamily, fontSize: 42, fontWeight: 540, lineHeight: 1.36, color: '#f5f5f5', padding: '10px 22px 12px', borderRadius: borderRadius.sm, background: 'rgba(5,5,7,.58)', boxShadow: '0 8px 28px rgba(0,0,0,.2)', textShadow: '0 2px 10px rgba(0,0,0,.7)', textAlign: 'center'}}>{cue.text}</div>
     </div>
   );
 };
@@ -236,7 +240,7 @@ const bgmVolume = (frame: number) => {
  * props.audio.bgm / props.audio.sfx（M2-E-D）：Freud 示例配乐，
  * 默认沿用原路径（Legacy 行为不变）；显式 null → 不挂载（Workflow Visual Preview）。
  */
-export const ZhiyingFullCut = ({data, subtitles, audio, showSubtitles}: ZhiyingFullCutProps) => {
+export const ZhiyingFullCut = ({data, subtitles, audio, showSubtitles, renderMode}: ZhiyingFullCutProps) => {
   const scenes = useMemo(() => data.scenes.map((s): FullCutScene => ({
     id: s.id, chapter: s.chapter, chapterTitle: s.chapterTitle,
     start: s.start, end: s.end, duration: s.duration,
@@ -251,13 +255,15 @@ export const ZhiyingFullCut = ({data, subtitles, audio, showSubtitles}: ZhiyingF
     transitionIn: s.transitionIn, transitionOut: s.transitionOut,
   })), [data.scenes]);
   return (
-    <AbsoluteFill style={{backgroundColor: colors.background}}>
-      <FullVisualTrack scenes={data.scenes} chapterTiming={data.chapterTiming} assetMap={data.assetMap as Record<string, unknown>} showPilotIntro={data.project.showPilotIntro === true} />
-      {audio.bgm ? <Audio src={staticFile(audio.bgm)} volume={bgmVolume} /> : null}
-      {audio.sfx ? <Audio src={staticFile(audio.sfx)} volume={0.9} /> : null}
-      {audio.narration ? <Audio src={staticFile(audio.narration)} volume={1} /> : null}
-      {showSubtitles ? <FullSubtitles cues={subtitles} scenes={scenes} /> : null}
-    </AbsoluteFill>
+    <RenderModeContext.Provider value={renderMode ?? 'preview'}>
+      <AbsoluteFill style={{backgroundColor: colors.background}}>
+        <FullVisualTrack scenes={data.scenes} chapterTiming={data.chapterTiming} assetMap={data.assetMap as Record<string, unknown>} showPilotIntro={data.project.showPilotIntro === true} />
+        {audio.bgm ? <Audio src={staticFile(audio.bgm)} volume={bgmVolume} /> : null}
+        {audio.sfx ? <Audio src={staticFile(audio.sfx)} volume={0.9} /> : null}
+        {audio.narration ? <Audio src={staticFile(audio.narration)} volume={1} /> : null}
+        {showSubtitles ? <FullSubtitles cues={subtitles} scenes={scenes} /> : null}
+      </AbsoluteFill>
+    </RenderModeContext.Provider>
   );
 };
 

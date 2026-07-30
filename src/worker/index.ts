@@ -30,6 +30,7 @@ import {
 } from '@/lib/scene-schema';
 import {runLlmJob} from './llm-executor';
 import {RuntimeAudioError, stageRuntimeNarrationAudio} from './runtime-audio';
+import {RuntimeAssetError, stageRuntimeAssets} from './runtime-assets';
 import {runTtsJob} from './tts-executor';
 import {bundleCacheKey} from './bundle-key';
 import {
@@ -38,6 +39,9 @@ import {
   sha256Text,
   validateRenderOutput,
 } from '@/lib/render/artifact';
+import {measureLoudness, runTwoPassLoudnorm, LOUDNESS_TARGET} from '@/lib/render/loudness';
+import {auditFinalVisuals, validateFinalVisualProps} from '@/lib/render/visual-gate';
+import {RUNTIME_NARRATION_PATTERN} from '@/lib/final-render/schema';
 
 /**
  * Final Render 性能配置（M5-PERF）：见 src/lib/render/render-config.ts。
@@ -273,10 +277,16 @@ async function runJob(
       );
       return;
     }
+    const isFinalRender =
+      typeof parsed.data.audio.narration === 'string' &&
+      RUNTIME_NARRATION_PATTERN.test(parsed.data.audio.narration);
     const inputProps: ZhiyingFullCutProps = {
       ...parsed.data,
       // kind 决定字幕开关与 composition，强制对齐，不信任 payload 里的 showSubtitles
       showSubtitles: job.kind !== 'no-subtitles',
+      // M6.3.12：Final Render 显式 final 模式——ProductionPlaceholder 直接 throw，
+      // 占位画面绝不进入最终视频；preview/no-subtitles 链路保持 preview 行为。
+      renderMode: isFinalRender ? 'final' : 'preview',
     };
     const compositionId =
       job.kind === 'no-subtitles'
@@ -297,6 +307,45 @@ async function runJob(
         return;
       }
       throw err;
+    }
+
+    // M6.3.12：Final Render 双保险（与 bridge enqueue 同口径）——
+    // render-input gate 以最终 props 为准；素材 staging 把 assetMap 文件复制进
+    // bundle public（bundle 打包后新增素材不在缓存里，缺失即 fail-closed）。
+    let visualAuditJson: string | null = null;
+    if (isFinalRender) {
+      const gate = validateFinalVisualProps(parsed.data, {
+        assetFileExists: (publicPath) => {
+          try {
+            const abs = path.join(process.cwd(), 'public', publicPath);
+            return fs.statSync(abs).isFile() && fs.statSync(abs).size > 0;
+          } catch {
+            return false;
+          }
+        },
+      });
+      if (!gate.ok) {
+        const first = gate.issues[0]!;
+        failJob(
+          job.id,
+          'FINAL_VISUAL_INCOMPLETE',
+          `Final renderer 视觉输入未解析（${gate.issues.length} 处）：${first.sceneId} ${first.reason}`,
+        );
+        log(`job ${job.id} final visual gate failed: ${JSON.stringify(gate.issues)}`);
+        return;
+      }
+      try {
+        const staged = stageRuntimeAssets(parsed.data, bundleLocation);
+        if (staged.staged > 0) log(`job ${job.id} staged ${staged.staged} visual asset(s) into bundle public`);
+      } catch (err) {
+        if (err instanceof RuntimeAssetError) {
+          failJob(job.id, err.code, err.message);
+          log(`job ${job.id} runtime asset staging failed: [${err.code}] ${err.message}`);
+          return;
+        }
+        throw err;
+      }
+      visualAuditJson = JSON.stringify(auditFinalVisuals(parsed.data));
     }
 
     heartbeat(job.id, 0, JSON.stringify(buildStageDetail('compose')));
@@ -400,18 +449,51 @@ async function runJob(
       log(`job ${job.id} cancelled at finish line`);
       return;
     }
+    // M6.3.12：Final Master 响度归一化（两通 loudnorm；视频流 copy 不重编码），
+    // 归一化产物才进入质量门——最终视频 integrated ≈ -16 LUFS / TP ≤ -1.5 dBTP。
+    let finalTmp = outputAbsTmp;
+    let loudnessJson: string | null = null;
+    if (isFinalRender) {
+      const loudTmp = outputAbsTmp.replace(/\.tmp\.mp4$/, '.loud.tmp.mp4');
+      try {
+        const {measured} = await runTwoPassLoudnorm(outputAbsTmp, loudTmp);
+        let post: Awaited<ReturnType<typeof measureLoudness>> | null = null;
+        try {
+          post = await measureLoudness(loudTmp);
+        } catch (err) {
+          log(`job ${job.id} 归一化后响度测量失败（不阻断，记 null）: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        loudnessJson = JSON.stringify({target: LOUDNESS_TARGET, input: measured, output: post});
+      } catch (err) {
+        fs.rmSync(loudTmp, {force: true});
+        failJob(job.id, 'LOUDNESS_ERROR', `响度归一化失败：${err instanceof Error ? err.message : String(err)}`);
+        recordCompute('failed');
+        log(`job ${job.id} loudness normalization failed`);
+        return;
+      }
+      fs.rmSync(outputAbsTmp, {force: true});
+      finalTmp = loudTmp;
+    }
     // M6.3.11 succeeded gate：ffprobe 校验 + SHA256 + manifest 落库 + 原子改名，
     // 全部通过才允许 status=succeeded；任何一步失败 → failed，不展示「下载视频」。
-    const validation = await validateRenderOutput(outputAbsTmp);
+    // M6.3.12 质量门扩展：Final 必须含音轨且时长与 composition 偏差 ≤1s。
+    const validation = await validateRenderOutput(
+      finalTmp,
+      undefined,
+      isFinalRender
+        ? {requireAudio: true, expectDurationSec: composition.durationInFrames / composition.fps}
+        : undefined,
+    );
     if (!validation.ok) {
       failJob(job.id, 'OUTPUT_INVALID', `产物校验失败：${validation.reason}`);
       recordCompute('failed');
+      if (finalTmp !== outputAbsTmp) fs.rmSync(finalTmp, {force: true});
       log(`job ${job.id} output validation failed: ${validation.reason}`);
       return;
     }
-    const outputSha256 = await sha256File(outputAbsTmp);
-    const outputSize = fs.statSync(outputAbsTmp).size;
-    fs.renameSync(outputAbsTmp, outputAbs);
+    const outputSha256 = await sha256File(finalTmp);
+    const outputSize = fs.statSync(finalTmp).size;
+    fs.renameSync(finalTmp, outputAbs);
     persistRenderArtifact({
       job_id: job.id,
       project_id: job.project_id,
@@ -423,6 +505,8 @@ async function runJob(
       encoder,
       payload_sha256: sha256Text(job.payload_json),
       bundle_key: path.basename(bundleLocation),
+      audit_json: visualAuditJson,
+      loudness_json: loudnessJson,
     });
     completeJob(job.id, outputRel);
     recordCompute('succeeded');

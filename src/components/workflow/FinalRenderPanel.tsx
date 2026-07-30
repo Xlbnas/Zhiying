@@ -41,8 +41,47 @@ interface FinalRenderReadiness {
     progressDetail: string | null;
     outputPath: string | null;
     outputSha256: string | null;
+    /** M6.3.12：manifest 中的视觉审计 / 响度测量 JSON（历史 job 为 null）。 */
+    auditJson: string | null;
+    loudnessJson: string | null;
     sourceArtifactVersion: number | null;
   } | null;
+}
+
+/** M6.3.12：产物信息里的响度摘要（loudnorm 归一化后实测）。 */
+function summarizeLoudness(loudnessJson: string | null): string | null {
+  if (!loudnessJson) return null;
+  try {
+    const parsed = JSON.parse(loudnessJson) as {
+      output?: {inputI?: number; inputTp?: number} | null;
+    };
+    const out = parsed.output;
+    if (!out || typeof out.inputI !== 'number') return null;
+    return `响度 ${out.inputI.toFixed(1)} LUFS · 峰值 ${typeof out.inputTp === 'number' ? out.inputTp.toFixed(1) : '?'} dBTP`;
+  } catch {
+    return null;
+  }
+}
+
+/** M6.3.12：产物信息里的视觉审计摘要（title/MG 占比 + 复用标记数）。 */
+function summarizeVisualAudit(auditJson: string | null): string | null {
+  if (!auditJson) return null;
+  try {
+    const parsed = JSON.parse(auditJson) as {
+      titleMgOnly?: {ratio?: number};
+      assetReuse?: Array<{suspicious?: boolean}>;
+      placeholder?: {scenes?: number};
+    };
+    const ratio = typeof parsed.titleMgOnly?.ratio === 'number' ? Math.round(parsed.titleMgOnly.ratio * 100) : null;
+    const suspicious = (parsed.assetReuse ?? []).filter((r) => r.suspicious).length;
+    const parts: string[] = [];
+    parts.push(`placeholder ${parsed.placeholder?.scenes ?? 0}`);
+    if (ratio !== null) parts.push(`字卡/MG ${ratio}%`);
+    if (suspicious > 0) parts.push(`复用素材 ${suspicious}`);
+    return `视觉审计 ${parts.join(' · ')}`;
+  } catch {
+    return null;
+  }
 }
 
 const JOB_STATUS_LABELS: Record<string, string> = {
@@ -251,6 +290,16 @@ export function FinalRenderPanel({
                 </>
               ) : null}
               {' · '}下载文件名 zhiying-{job.id}.mp4
+              {summarizeLoudness(job.loudnessJson) ? (
+                <>
+                  {' · '}{summarizeLoudness(job.loudnessJson)}
+                </>
+              ) : null}
+              {summarizeVisualAudit(job.auditJson) ? (
+                <>
+                  {' · '}{summarizeVisualAudit(job.auditJson)}
+                </>
+              ) : null}
             </div>
           </details>
         </div>

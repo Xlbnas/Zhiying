@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS render_artifacts (
   payload_sha256 TEXT,
   bundle_key TEXT,
   backfilled INTEGER NOT NULL DEFAULT 0,  -- 1 = M6.3.11 前历史产物惰性回填
+  audit_json TEXT,    -- M6.3.12：视觉审计（visual-gate auditFinalVisuals）
+  loudness_json TEXT, -- M6.3.12：loudnorm 归一化后实测响度
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS llm_jobs (   -- M2 用，M1 只建表不消费
@@ -290,6 +292,14 @@ export function getDb(): Db {
   const renderCols = db.prepare('PRAGMA table_info(render_jobs)').all() as Array<{name: string}>;
   if (!renderCols.some((c) => c.name === 'progress_detail')) {
     db.exec('ALTER TABLE render_jobs ADD COLUMN progress_detail TEXT');
+  }
+  // M6.3.12 迁移（幂等，同模式）：render_artifacts 增加视觉审计/响度列。
+  const artifactCols = db.prepare('PRAGMA table_info(render_artifacts)').all() as Array<{name: string}>;
+  if (!artifactCols.some((c) => c.name === 'audit_json')) {
+    db.exec('ALTER TABLE render_artifacts ADD COLUMN audit_json TEXT');
+  }
+  if (!artifactCols.some((c) => c.name === 'loudness_json')) {
+    db.exec('ALTER TABLE render_artifacts ADD COLUMN loudness_json TEXT');
   }
   instance = db;
   return db;

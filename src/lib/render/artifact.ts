@@ -34,6 +34,10 @@ export interface RenderArtifactRow {
   payload_sha256: string | null;
   bundle_key: string | null;
   backfilled: number;
+  /** M6.3.12：视觉审计 JSON（auditFinalVisuals；历史行 null）。 */
+  audit_json: string | null;
+  /** M6.3.12：loudnorm 归一化后实测响度 JSON（历史行 null）。 */
+  loudness_json: string | null;
   created_at: string;
 }
 
@@ -42,6 +46,8 @@ export interface ProbedOutput {
   width: number;
   height: number;
   codec: string;
+  /** M6.3.12：音频流 codec（无音轨为 null；质量门可要求必须存在）。 */
+  audioCodec: string | null;
 }
 
 /** 流式计算文件 SHA256（不一次性读入内存）。 */
@@ -78,6 +84,7 @@ export async function probeRenderOutput(
     format?: {duration?: string};
   };
   const video = (parsed.streams ?? []).find((s) => s.codec_type === 'video');
+  const audio = (parsed.streams ?? []).find((s) => s.codec_type === 'audio');
   const durationSec = Number(parsed.format?.duration ?? 0);
   if (!video || !video.width || !video.height || !(durationSec > 0)) {
     throw new Error(
@@ -90,11 +97,14 @@ export async function probeRenderOutput(
     width: video.width,
     height: video.height,
     codec: video.codec_name ?? 'unknown',
+    audioCodec: audio?.codec_name ?? null,
   };
 }
 
 /**
  * succeeded gate 用的输出校验：文件存在、非零、ffprobe 通过。
+ * M6.3.12 质量门扩展（opts）：requireAudio → 必须含音轨；
+ * expectDurationSec → 实际时长与预期偏差 >1s 即失败。
  * 通过时带回视频流信息（供 manifest 记录 duration）；
  * 失败返回原因（worker 据此 failJob，绝不上 succeeded）。
  */
@@ -102,15 +112,33 @@ export type OutputValidation =
   | {ok: true; info: ProbedOutput}
   | {ok: false; reason: string};
 
+export interface OutputValidationOptions {
+  requireAudio?: boolean;
+  expectDurationSec?: number;
+}
+
 export async function validateRenderOutput(
   absPath: string,
   probeFn?: (p: string) => Promise<ProbedOutput>,
+  opts?: OutputValidationOptions,
 ): Promise<OutputValidation> {
   if (!fs.existsSync(absPath)) return {ok: false, reason: `输出文件不存在: ${absPath}`};
   const size = fs.statSync(absPath).size;
   if (size <= 0) return {ok: false, reason: `输出文件为空: ${absPath}`};
   try {
     const info = await (probeFn ?? probeRenderOutput)(absPath);
+    if (opts?.requireAudio && !info.audioCodec) {
+      return {ok: false, reason: '质量门失败：输出无音轨（requireAudio）'};
+    }
+    if (
+      opts?.expectDurationSec !== undefined &&
+      Math.abs(info.durationSec - opts.expectDurationSec) > 1
+    ) {
+      return {
+        ok: false,
+        reason: `质量门失败：时长偏差超限（实际 ${info.durationSec.toFixed(3)}s vs 预期 ${opts.expectDurationSec.toFixed(3)}s）`,
+      };
+    }
     return {ok: true, info};
   } catch (err) {
     return {ok: false, reason: err instanceof Error ? err.message : String(err)};
@@ -128,18 +156,26 @@ export function getRenderArtifact(jobId: string): RenderArtifactRow | undefined 
     .get(jobId) as RenderArtifactRow | undefined;
 }
 
-export function persistRenderArtifact(row: Omit<RenderArtifactRow, 'created_at' | 'backfilled'> & {backfilled?: number}): void {
+export function persistRenderArtifact(
+  row: Omit<RenderArtifactRow, 'created_at' | 'backfilled' | 'audit_json' | 'loudness_json'> & {
+    backfilled?: number;
+    audit_json?: string | null;
+    loudness_json?: string | null;
+  },
+): void {
   getDb()
     .prepare(
       `INSERT OR REPLACE INTO render_artifacts
        (job_id, project_id, output_path, output_sha256, output_size, duration_sec,
-        frame_count, encoder, payload_sha256, bundle_key, backfilled, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        frame_count, encoder, payload_sha256, bundle_key, backfilled, audit_json,
+        loudness_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       row.job_id, row.project_id, row.output_path, row.output_sha256, row.output_size,
       row.duration_sec, row.frame_count, row.encoder, row.payload_sha256, row.bundle_key,
-      row.backfilled ?? 0, new Date().toISOString(),
+      row.backfilled ?? 0, row.audit_json ?? null, row.loudness_json ?? null,
+      new Date().toISOString(),
     );
 }
 

@@ -6,6 +6,7 @@ import {AbsoluteFill} from 'remotion';
 import {Typography} from '../design/typography';
 import {colors} from '../design/tokens';
 import type {Scene} from '@/lib/scene-schema';
+import {MissingVisualAssetError, useRenderMode} from '../render-mode';
 
 export interface ProductionPlaceholderProps {
   scene: Scene;
@@ -13,6 +14,11 @@ export interface ProductionPlaceholderProps {
 }
 
 export const ProductionPlaceholder = ({scene, reason}: ProductionPlaceholderProps) => {
+  // M6.3.12 kill switch：Final 模式 placeholder 即渲染失败（Phase 4/17）
+  const renderMode = useRenderMode();
+  if (renderMode === 'final') {
+    throw new MissingVisualAssetError(scene.id, reason);
+  }
   return (
     <AbsoluteFill style={{
       backgroundColor: colors.background,

@@ -83,7 +83,7 @@ function writeFixture(relPath: string, content: string): string {
   return abs;
 }
 
-const GOOD_PROBE: ProbedOutput = {durationSec: 5, width: 1920, height: 1080, codec: 'h264'};
+const GOOD_PROBE: ProbedOutput = {durationSec: 5, width: 1920, height: 1080, codec: 'h264', audioCodec: 'aac'};
 const goodProbe = async (): Promise<ProbedOutput> => GOOD_PROBE;
 const badProbe = async (): Promise<ProbedOutput> => {
   throw new Error('ffprobe 校验失败：无有效视频流');

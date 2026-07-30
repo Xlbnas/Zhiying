@@ -8,7 +8,7 @@
  * - 缺失素材/模板：显示明确占位，行为 fail-closed
  * - 绝不 fallback 到 M1 demo 内容
  */
-import {AbsoluteFill, Img, staticFile} from 'remotion';
+import {AbsoluteFill, Img, interpolate, staticFile, useCurrentFrame} from 'remotion';
 import type {Scene as SchemaScene, ResolvedAsset} from '@/lib/scene-schema';
 import {Typography} from '../design/typography';
 import {colors} from '../design/tokens';
@@ -74,6 +74,8 @@ export const ProductionSceneRenderer = ({scene, assetMap}: ProductionSceneRender
           description={asset.description}
           attribution={asset.attribution}
           narrationSummary={scene.narrationSummary}
+          sceneId={scene.id}
+          durationInFrames={scene.durationInFrames}
         />
       );
     }
@@ -108,19 +110,48 @@ function ProductionMinimal({narrationSummary}: {narrationSummary: string; chapte
   );
 }
 
+/**
+ * 确定性 Ken Burns：按 sceneId 哈希在 zoom-in / zoom-out / pan-left / pan-right
+ * 中选一种，整段 scene 内缓动。同一 scene 每次 render 结果完全一致。
+ */
+export function kenBurnsTransform(sceneId: string, frame: number, durationInFrames: number): string {
+  let hash = 0;
+  for (let i = 0; i < sceneId.length; i++) hash = (hash * 31 + sceneId.charCodeAt(i)) >>> 0;
+  const mode = hash % 4;
+  const t = Math.max(0, durationInFrames - 1);
+  const progress = t > 0 ? Math.min(1, Math.max(0, frame / t)) : 0;
+  if (mode === 0) {
+    const scale = interpolate(progress, [0, 1], [1.0, 1.04]);
+    return `scale(${scale.toFixed(5)})`;
+  }
+  if (mode === 1) {
+    const scale = interpolate(progress, [0, 1], [1.04, 1.0]);
+    return `scale(${scale.toFixed(5)})`;
+  }
+  // pan 需要保持基础放大，避免边缘露底
+  const x = mode === 2
+    ? interpolate(progress, [0, 1], [0, -1.5])
+    : interpolate(progress, [0, 1], [-1.5, 0]);
+  return `scale(1.05) translateX(${x.toFixed(4)}%)`;
+}
+
 function ProductionAssetImage({
-  publicPath, description, attribution, narrationSummary,
+  publicPath, description, attribution, narrationSummary, sceneId, durationInFrames,
 }: {
   publicPath: string;
   description: string;
   attribution: string;
   narrationSummary: string;
+  sceneId: string;
+  durationInFrames: number;
 }) {
+  const frame = useCurrentFrame();
+  const transform = kenBurnsTransform(sceneId, frame, durationInFrames);
   return (
     <AbsoluteFill style={{backgroundColor: '#111'}}>
       <Img
         src={staticFile(publicPath)}
-        style={{position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.75}}
+        style={{position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.75, transform}}
       />
       {/* 左侧旁白摘要 */}
       <div style={{
