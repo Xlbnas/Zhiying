@@ -16,7 +16,7 @@ import {
 } from '../tts-jobs';
 import {DEFAULT_VOICE_PROFILE, getTtsProvider} from '../tts';
 import {describeLeakage, findDirectiveLeakage} from './leakage';
-import {getCurrentNarrationPlanV2} from './plan-v2';
+import {classifyNarrationPlanV2Candidate, getNarrationPlanV2Artifact} from './plan-v2';
 import type {NarrationPlanV2, SpeechUnitV2} from './schema-v2';
 
 /**
@@ -271,8 +271,8 @@ export class NarrationAudioV2Error extends Error {
   constructor(
     public readonly code:
       | 'PROJECT_NOT_FOUND'
-      | 'NARRATION_PLAN_V2_NOT_CURRENT'
-      | 'NARRATION_PLAN_V2_NEEDS_REVIEW'
+      | 'NARRATION_PLAN_V2_NOT_FOUND'
+      | 'NARRATION_PLAN_V2_NOT_ELIGIBLE'
       | 'DIRECTIVE_LEAKAGE',
     message: string,
   ) {
@@ -282,12 +282,16 @@ export class NarrationAudioV2Error extends Error {
 }
 
 /**
- * v2 enqueue（单 BEGIN IMMEDIATE）：plan v2 必须 eligible current；
- * 每个 speech unit 过 leakage hard gate 后才允许入队（纵深防御第三道）。
+ * v2 enqueue（单 BEGIN IMMEDIATE）。M7.1.1 起必须显式传入
+ * narrationPlanV2ArtifactId（禁止 current/latest 解析）：
+ * artifact 必须存在、属于本项目、契约合法、且当前为 eligible_candidate
+ * （stale/needs_review/invalid 一律拒绝）；每个 speech unit 再过
+ * leakage hard gate 后才允许入队（纵深防御第三道）。
  * 本轮不接入 API/UI，仅供机制测试与后续里程碑使用。
  */
 export function enqueueNarrationAudioJobsV2(input: {
   projectId: string;
+  narrationPlanV2ArtifactId: string;
   provider: TtsProviderSnapshot;
   voiceProfile?: {id: string; revision: string};
   referenceAudioHash?: string;
@@ -301,14 +305,21 @@ export function enqueueNarrationAudioJobsV2(input: {
     if (!project) {
       throw new NarrationAudioV2Error('PROJECT_NOT_FOUND', `项目不存在: ${input.projectId}`);
     }
-    const current = getCurrentNarrationPlanV2(input.projectId);
-    if (!current) {
+    const ref = getNarrationPlanV2Artifact(input.projectId, input.narrationPlanV2ArtifactId);
+    if (!ref) {
       throw new NarrationAudioV2Error(
-        'NARRATION_PLAN_V2_NOT_CURRENT',
-        'Narration Plan V2 不是 eligible current（missing/stale/needsReview）——禁止入队',
+        'NARRATION_PLAN_V2_NOT_FOUND',
+        `narration plan v2 artifact ${input.narrationPlanV2ArtifactId} 不存在/跨项目/契约非法——禁止入队`,
       );
     }
-    const {plan, artifact} = current;
+    const status = classifyNarrationPlanV2Candidate(input.projectId, ref.artifact);
+    if (status.status !== 'eligible_candidate') {
+      throw new NarrationAudioV2Error(
+        'NARRATION_PLAN_V2_NOT_ELIGIBLE',
+        `narration plan v2 状态=${status.status}（${status.statusReason ?? ''}）——只有 eligible_candidate 才允许入队`,
+      );
+    }
+    const {plan, artifact} = ref;
     const reusePlan = planTtsReuseDecisions({
       projectId: input.projectId,
       plan,

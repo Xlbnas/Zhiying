@@ -316,11 +316,17 @@ export function getDb(): Db {
     db.exec('ALTER TABLE render_artifacts ADD COLUMN loudness_json TEXT');
   }
   // M7.1 迁移（幂等，同模式）：projects 增加 pipeline 分流列。
-  // 全部存量项目默认 'm6'（DDL DEFAULT 保证），绝不自动切 'm7'；
-  // 切换唯一入口是 pipeline-version.ts 的原子 guard（required chain 校验）。
+  // 全部存量项目默认 'm6'（DDL DEFAULT 保证），绝不自动切 'm7'。
   const projectCols = db.prepare('PRAGMA table_info(projects)').all() as Array<{name: string}>;
   if (!projectCols.some((c) => c.name === 'pipeline_version')) {
     db.exec(`ALTER TABLE projects ADD COLUMN pipeline_version TEXT NOT NULL DEFAULT 'm6'`);
+  }
+  // M7.1.1 迁移（additive，幂等）：M7 激活唯一指针。
+  // 冻结约束（由 pipeline-version.ts 事务写入 + 读取侧 validator 双重 fail-closed 保证，
+  // SQLite 无法安全附加复杂 CHECK/FK）：m6 → 必须 NULL；m7 → 必须指向同项目完整
+  // immutable m7_pipeline_snapshot。绝不依赖 latest 解析。
+  if (!projectCols.some((c) => c.name === 'm7_pipeline_snapshot_id')) {
+    db.exec('ALTER TABLE projects ADD COLUMN m7_pipeline_snapshot_id TEXT');
   }
   instance = db;
   return db;
