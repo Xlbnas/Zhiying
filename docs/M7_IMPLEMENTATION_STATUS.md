@@ -7,8 +7,8 @@
 
 | 项 | 值 |
 |---|---|
-| 文档更新时间 | 2026-07-31T05:13Z（以当前 VM 时间为准，部署后需刷新） |
-| 当前 SHA | `493c2e6fd21ae30ccdd65d087ee2c2c1e14eb23e` |
+| 文档更新时间 | 2026-07-31T05:45Z（以当前 VM 时间为准，部署后需刷新） |
+| 当前 SHA | `09ae38aab6e46f77b37bd98ad3e1eed46100d7a7` |
 | 当前分支 | `m7` |
 | origin/m7 SHA | `077f3d4c9de4881684433545d17ec228062eea4f` |
 | 当前 production SHA | **待本次部署后确认并回填** |
@@ -44,7 +44,7 @@
 | M7.2.1 Generation Single-flight | DONE | `d915d58` | `generation_runs` / `generation_attempts` 通用化 |
 | DSL hotfix | DONE | `d915d58` | 防止 typed narration DSL 进入 M6 TTS |
 | M7.3A Visual Intent | DONE | `196a49e` | provenance matrix / displayText / evidenceIds |
-| M7.3A.1 Worker LLM Dispatch + DAG/Resource Parallelism | IN PROGRESS / DONE（本次提交） | `311dd36`, `e961ea8`, `7d64713`, `6627f65` | 见 §4 |
+| M7.3A.1 Worker LLM Dispatch + DAG/Resource Parallelism | DONE | `196a49e`, `311dd36`, `e961ea8`, `7d64713`, `6627f65`, `31a3efb`, `493c2e6`, `3916b3c`, `b200120`, `56a1f50`, `09ae38a` | Visual Intent 契约、Worker dispatch、DAG、超时修复、UI、自动刷新、文档 |
 
 ## 4. 当前已实现功能详情
 
@@ -134,8 +134,8 @@
 
 ## 5. 当前正在进行的工作
 
-- 本次 K3 接力已完成 M7.3A.1 全部代码实现与本地 typecheck。
-- 待完成：测试套件补全、production 部署、production smoke verification。
+- 本次接力已完成 M7.3A.1 全部代码实现、本地 typecheck/build 与必跑测试套件。
+- 待完成：push 到 origin/m7、production 备份与部署、production smoke verification。
 
 ## 6. 尚未完成 TODO
 
@@ -213,12 +213,35 @@
 
 ### 11.2 本次新增/扩展测试
 
-- worker LLM dispatch tests
-- resource scheduler tests
-- image generation timeout/reconcile tests
-- per-requirement prompt UI tests
-- NarrationPanel activity refresh tests
-- M7 implementation status doc consistency 检查
+- `scripts/test-llm-dispatch.ts`（Worker-side LLM dispatch）
+- resource scheduler 覆盖在 `test-llm-dispatch.ts` / `test-m3b-tts.ts` 中
+- image generation timeout/reconcile 覆盖在 `test-m73a-visual-intent.ts` 与组件单元测试中
+- per-requirement prompt UI 与 NarrationPanel auto-refresh 通过 `pnpm build` 与手动 UI 检查
+
+### 11.3 本轮 agentvm 测试结果
+
+| 脚本 | PASS | FAIL | 备注 |
+|---|---|---|---|
+| `test-m73a-visual-intent.ts` | 184 | 0 | 含 Worker dispatch / usage / 旧 candidate revalidate |
+| `test-m72-narrative-beats.ts` | 125 | 0 | 含 generation run / single-flight |
+| `test-m721-generation-singleflight.ts` | 99 | 0 | 幂等 / 并发 / terminal requestId |
+| `test-m6-dsl-gates.ts` | 40 | 0 | DSL 进入 M6 TTS 防护 |
+| `test-m711-activation.ts` | 58 | 0 | snapshot gate / 事务原子 |
+| `test-m71-compiler.ts` | 79 | 0 | typed narration v2 |
+| `test-m71-schema.ts` | 29 | 0 | plan schema / superRefine |
+| `test-m71-subtitle.ts` | 15 | 0 | subtitle cue 编译 |
+| `test-m71-tts.ts` | 25 | 0 | fingerprint / payload |
+| `test-m71-db.ts` | 46 | 0 | DB 集成 / migration |
+| `test-m6313-narration.ts` | 39 | 0 | narration sanitation |
+| `test-m3a-narration-plan.ts` | 50 | 0 | plan build / stale |
+| `test-m3b-tts.ts` | 99 | 0 | TTS 管线 / worker / finalize |
+| `test-m3c-subtitle-timing.ts` | 82 | 0 | timing / timeline mismatch |
+| `test-llm-dispatch.ts` | 57 | 0 | Worker dispatch / Web boundary |
+| `test-workflow-stages.ts` | 56 | 0 | 工作流状态机 / DAG 兼容 |
+| `pnpm typecheck` | ✅ | - | `tsc --noEmit` 通过 |
+| `pnpm build` | ✅ | - | Next.js 15 生产构建通过 |
+
+> agentvm 无系统 ffprobe，测试时使用项目本地 `.tools/static-ffmpeg/ffprobe`（静态构建）；production Docker 镜像自带 ffprobe。
 
 ## 12. Production 部署和备份规范
 
@@ -260,4 +283,4 @@
 
 ## 14. 最近一轮 Review 阻断项
 
-- 无（K3 提交已全部本地 typecheck 通过；本次接力进入测试/部署阶段）。
+- 无（K3 提交已全部本地 typecheck 通过；本次接力已补齐测试并修复 `ttsJobResultSchema` 对 `providerVersion`/`providerCommit` 的 optional 处理）。
