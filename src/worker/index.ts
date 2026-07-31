@@ -19,8 +19,7 @@ import {recoverStaleDispatchJobs} from '@/lib/llm-generation/dispatch';
 import {buildStageDetail, detailFromRemotionProgress, round1} from '@/lib/render/progress-detail';
 import {describeRenderPerfConfig, loadRenderPerfConfig} from '@/lib/render/render-config';
 import {probeNvencSupport} from '@/lib/render/nvenc';
-import {claimNextAnyJob} from '@/lib/scheduler';
-import {getTtsJob, recoverStaleTtsJobs} from '@/lib/tts-jobs';
+import {recoverStaleTtsJobs} from '@/lib/tts-jobs';
 import {recordJobComputeUsage, snapshotComputeStart} from '@/lib/usage/compute';
 import {
   COMPOSITION_ID,
@@ -29,11 +28,14 @@ import {
   zhiyingFullCutPropsSchema,
   type ZhiyingFullCutProps,
 } from '@/lib/scene-schema';
-import {runLlmJob} from './llm-executor';
-import {runDispatchJob} from './dispatch-executor';
+import {
+  createParallelLoop,
+  executeClaimedJob,
+  type JobRunnerContext,
+  type ParallelLoop,
+} from './job-runner';
 import {RuntimeAudioError, stageRuntimeNarrationAudio} from './runtime-audio';
 import {RuntimeAssetError, stageRuntimeAssets} from './runtime-assets';
-import {runTtsJob} from './tts-executor';
 import {bundleCacheKey} from './bundle-key';
 import {
   persistRenderArtifact,
@@ -53,9 +55,11 @@ import {RUNTIME_NARRATION_PATTERN} from '@/lib/final-render/schema';
 const PERF_CONFIG = loadRenderPerfConfig();
 
 /**
- * 知影渲染 Worker（CONTRACT §4，M2-C 扩展双队列）
- * - 单调度器：claimNextAnyJob 对 render_jobs + llm_jobs 全局 FIFO，
- *   任何时刻只跑一个任务（不引入并发、不拆双 scheduler）
+ * 知影渲染 Worker（CONTRACT §4，M2-C 扩展双队列，M7 资源感知并行化）
+ * - 单调度器：claimNextAnyJob 对 render/llm/tts/dispatch 全局 FIFO；
+ *   M7 起主循环为资源感知并行（src/worker/job-runner.ts）——
+ *   资源兼容的任务并发执行（如 TTS 跑 GPU 时 LLM API 任务不被堵死），
+ *   GPU 互斥组（tts/render/local_image）同时只跑一个
  * - bundle 缓存：data/bundle-cache/{templateVersion}-{rendererSourceHash}/（M6.3.11
  *   起键含源码内容 hash，renderer 变化必触发重建，杜绝陈旧 bundle 复用）；
  *   M2-C 起改为 lazy ensureBundle——只有真正 claim 到 render job 才打包，
@@ -65,11 +69,13 @@ const PERF_CONFIG = loadRenderPerfConfig();
  * - M6.3.10：render/tts job 的 CPU（cgroup delta）/GPU（NVENC attempt wall 秒）
  *   写入 project_usage_events；wall time 由 summary 侧 jobs 表幂等回填
  * - onProgress 节流（≥2s）写 heartbeat + progress，并检查 isCancelRequested
- * - SIGTERM/SIGINT 优雅退出：当前任务回 queued
+ * - SIGTERM/SIGINT 优雅退出：abort 全部 running 任务并等 settle，任务回 queued
  * - WORKER_ROLE 预留（M1 只实现 'all'）
  */
 
 const POLL_INTERVAL_MS = 2000;
+/** 有任务在跑时的 tick 间隔（reap/补位更及时；空闲仍按 POLL_INTERVAL_MS 轮询）。 */
+const ACTIVE_TICK_MS = 250;
 const HEARTBEAT_INTERVAL_MS = 2000;
 const STALE_TIMEOUT_MS = 2 * 60 * 1000; // recoverStaleJobs(2min)
 
@@ -88,7 +94,8 @@ function randomRenderPort(): number {
 
 /** 优雅退出状态（模块级，信号处理器与主循环共享）。 */
 let shuttingDown = false;
-let currentController: AbortController | null = null;
+/** 并行调度循环句柄（main 内创建；信号处理器经它 abort 全部 running 任务）。 */
+let activeLoop: ParallelLoop | null = null;
 
 function log(...args: unknown[]): void {
   console.log(`[${new Date().toISOString()}] [${WORKER_ID}]`, ...args);
@@ -100,11 +107,11 @@ function requestShutdown(signal: string): void {
   }
   shuttingDown = true;
   log(`received ${signal}, shutting down gracefully…`);
-  // 统一当前任务取消句柄（M2-C Hardening §一）：render 与 llm 共用同一
-  // AbortController——renderMedia 立即中止；LLM 请求经 signal 得到
-  // CANCELLED，runLlmJob 的 catch 检测 shuttingDown 后 requeue（不回 queued 失败、
+  // 统一取消句柄（M2-C Hardening §一 → M7 并行）：abort 全部 running 任务的
+  // 独立 AbortController——renderMedia 立即中止；LLM/TTS 请求经 signal 得到
+  // CANCELLED，各 executor 检测 shuttingDown 后 requeue（不回 queued 失败、
   // 不标 cancelled、不产生 project_version）。
-  currentController?.abort();
+  activeLoop?.abortAll();
 }
 
 /**
@@ -551,6 +558,26 @@ async function runJob(
   }
 }
 
+/**
+ * render 分支（M7 抽到 job-runner 调用的 hook，语义与原主循环内联一致）：
+ * bundle 阶段心跳 → lazy ensureBundle（失败 → BUNDLE_ERROR 终态）→ runJob。
+ * controller 为调度循环为本任务创建的独立 AbortController。
+ */
+async function runRenderJob(job: RenderJobRow, controller: AbortController): Promise<void> {
+  let bundleLocation: string;
+  try {
+    // M5：bundle 阶段写入步骤明细（首次打包可能数分钟，用户可见而非黑窗）
+    heartbeat(job.id, 0, JSON.stringify(buildStageDetail('bundle')));
+    bundleLocation = await ensureBundleLazy();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    failJob(job.id, 'BUNDLE_ERROR', message);
+    log(`render job ${job.id} bundle init failed: ${message}`);
+    return;
+  }
+  await runJob(job, bundleLocation, controller);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -597,88 +624,34 @@ async function main(): Promise<void> {
     log(`finalized ${recoveredDispatch.failed} stale dispatch job(s) → failed(WORKER_CRASH)`);
   }
 
-  // 2. 单调度循环：render + llm + tts + dispatch 全局 FIFO，任何时刻只跑一个；
+  // 2. 并行调度循环（M7）：render + llm + tts + dispatch 全局 FIFO claim，
+  //    资源兼容的任务并发执行（GPU 互斥组同时只跑一个）；
   //    Remotion bundle 延后到首个 render job 才初始化（LLM/TTS/dispatch 零依赖）。
-  //    每个被 claim 的任务由主循环创建统一 AbortController（currentController），
-  //    SIGTERM/SIGINT 经 requestShutdown 同时覆盖三类任务。
+  //    每个被 claim 的任务获得独立 AbortController，SIGTERM/SIGINT 经
+  //    requestShutdown → abortAll 覆盖全部 running 任务。
+  const loop = createParallelLoop({
+    workerId: WORKER_ID,
+    log,
+    isShuttingDown: () => shuttingDown,
+    execute: (claimed, controller) => {
+      const ctx: JobRunnerContext = {
+        isShuttingDown: () => shuttingDown,
+        log,
+        shutdownSignal: controller.signal,
+      };
+      return executeClaimedJob(claimed, ctx, {
+        runRenderJob: (job) => runRenderJob(job, controller),
+      });
+    },
+  });
+  activeLoop = loop;
   while (!shuttingDown) {
-    const claimed = claimNextAnyJob(WORKER_ID);
-    if (!claimed) {
-      await sleep(POLL_INTERVAL_MS);
-      continue;
-    }
-    const controller = new AbortController();
-    currentController = controller;
-    try {
-      if (claimed.type === 'dispatch') {
-        // generation dispatch 信封：Worker 持有 LLM 凭据执行 build
-        // （durable single-flight 由 generation_runs 兜底，重复执行零重复计费）
-        await runDispatchJob(claimed.job, {
-          isShuttingDown: () => shuttingDown,
-          log,
-          shutdownSignal: controller.signal,
-        });
-        continue;
-      }
-      if (claimed.type === 'llm') {
-        await runLlmJob(claimed.job, {
-          isShuttingDown: () => shuttingDown,
-          log,
-          shutdownSignal: controller.signal,
-        });
-        continue;
-      }
-      if (claimed.type === 'tts') {
-        // M6.3.10：TTS compute usage（cpu only；IndexTTS2 是外部服务，
-        // 其 GPU 消耗不计入本地 GPU 口径）。终态从 DB 读回。
-        const ttsSnapshot = snapshotComputeStart();
-        await runTtsJob(claimed.job, {
-          isShuttingDown: () => shuttingDown,
-          log,
-          shutdownSignal: controller.signal,
-        });
-        try {
-          const final = getTtsJob(claimed.job.id);
-          const status = final?.status === 'succeeded'
-            ? 'succeeded'
-            : final?.status === 'cancelled'
-              ? 'cancelled'
-              : final?.status === 'failed'
-                ? 'failed'
-                : null;
-          // queued（retry/shutdown requeue）→ 本 attempt 未定稿，不记
-          if (status) {
-            recordJobComputeUsage({
-              kind: 'tts',
-              jobId: claimed.job.id,
-              projectId: claimed.job.project_id,
-              attempt: claimed.job.attempt,
-              snapshot: ttsSnapshot,
-              status,
-              metadata: {provider: claimed.job.provider, unitId: claimed.job.unit_id},
-            });
-          }
-        } catch (err) {
-          log(`tts job ${claimed.job.id} compute usage 记录失败（不影响任务结果）: ${err instanceof Error ? err.message : String(err)}`);
-        }
-        continue;
-      }
-      let bundleLocation: string;
-      try {
-        // M5：bundle 阶段写入步骤明细（首次打包可能数分钟，用户可见而非黑窗）
-        heartbeat(claimed.job.id, 0, JSON.stringify(buildStageDetail('bundle')));
-        bundleLocation = await ensureBundleLazy();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        failJob(claimed.job.id, 'BUNDLE_ERROR', message);
-        log(`render job ${claimed.job.id} bundle init failed: ${message}`);
-        continue;
-      }
-      await runJob(claimed.job, bundleLocation, controller);
-    } finally {
-      currentController = null;
-    }
+    loop.tick();
+    await sleep(loop.size() > 0 ? ACTIVE_TICK_MS : POLL_INTERVAL_MS);
   }
+  activeLoop = null;
+  // 优雅退出：abort 已在 requestShutdown 发出，等全部 running 任务 settle
+  await loop.settle();
 
   log('bye.');
 }

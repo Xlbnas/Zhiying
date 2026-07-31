@@ -5,6 +5,8 @@
 
 import type {StageStatus, WorkflowStage} from '@/lib/workflow/types';
 import {WORKFLOW_STAGES} from '@/lib/workflow/types';
+import type {ResourceClass} from '@/lib/workflow/resource-classes';
+import type {WorkflowNodeState} from '@/lib/workflow/dag-shared';
 
 export interface StageJobSummary {
   id: string;
@@ -33,6 +35,23 @@ export interface StagesResponse {
   inputs: {topic: string; coreQuestion: string} | null;
   legacy: boolean;
   hasScenesArtifact: boolean;
+}
+
+/** /api/projects/[id]/activity 的 runningJobs 行（M7）。 */
+export interface ActivityRunningJob {
+  type: 'render' | 'llm' | 'tts' | 'dispatch';
+  id: string;
+  stage: string | null;
+  resourceClass: ResourceClass;
+  startedAt: string | null;
+}
+
+/** /api/projects/[id]/activity 响应（M7 顶层轮询；只取 UI 消费字段）。 */
+export interface ActivityResponse {
+  nodes: WorkflowNodeState[];
+  readyNodes: string[];
+  runningJobs: ActivityRunningJob[];
+  resourceUsage: {busyClasses: ResourceClass[]; gpuOccupied: boolean};
 }
 
 export const STAGE_NAMES: Record<WorkflowStage, string> = {
