@@ -5,10 +5,16 @@
  * M6.3.8：generate ≠ bind。candidate 记录 intended 目标（sceneId + 真实 requirement
  * 快照含 requirementId），只有用户显式调用 bind API 才产生 active binding。
  *
- * M6.3.10：每次真实 provider 调用 = 一个 generation attempt = 一条 usage event
+ * M6.3.10 / M7：每次真实 provider 调用 = 一个 generation attempt = 一条 usage event
  * （attemptId 幂等）。费用属于 attempt 而非最终 bind 的 asset：拒绝/未绑定/
  * 重新生成各自独立计费；provider 成功 → 先记 usage 再持久化 candidate，
  * candidate 后续失败不丢已发生费用。bind 链路零改动（不重复计费）。
+ *
+ * M7 超时修复：
+ * - provider 调用前写入 in_flight usage event（DB 级幂等，跨进程防双击重计费）。
+ * - 错误码细分 connect/response/download/decode/terminal 阶段。
+ * - provider request id / attemptId / failure phase 持久化并返回给 UI。
+ * - 本地超时后不自动重试；显式 retry 需新 attemptId。
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -20,9 +26,11 @@ import type {GeneratedImageCandidate} from '@/lib/assets/providers/generated';
 import {findRequirementInPlans, loadLatestScenesPlans} from '@/lib/assets/requirements';
 import {isSceneVisuallyOverridden} from '@/lib/scenes/visual-overrides';
 import {
+  finalizeImageGenerationUsage,
+  getImageGenerationUsageById,
   imageGenerationErrorStatus,
   linkAssetToImageUsageEvent,
-  recordImageGenerationUsage,
+  recordImageGenerationUsageInFlight,
 } from '@/lib/usage-events';
 import {getProject, jsonError} from '../../../../_lib/shared';
 
@@ -44,7 +52,8 @@ export async function GET(
   });
 }
 
-const IN_FLIGHT = new Set<string>(); // projectId:sceneId:requirementId → 防重复提交
+/** 进程内短期锁：同一进程内防用户双击；DB 级 in_flight event 提供跨进程幂等。 */
+const IN_FLIGHT = new Set<string>();
 
 export async function POST(
   req: Request,
@@ -54,7 +63,7 @@ export async function POST(
   const project = getProject(id);
   if (!project) return jsonError(404, 'project_not_found');
 
-  let body: {sceneId: string; requirementId: string; prompt?: string};
+  let body: {sceneId: string; requirementId: string; prompt?: string; attemptId?: string};
   try { body = await req.json() as typeof body; } catch { return jsonError(400, 'invalid_json'); }
   if (!body.sceneId || !body.requirementId) {
     return jsonError(400, 'missing_fields', {message: '需要 sceneId 和 requirementId'});
@@ -75,38 +84,114 @@ export async function POST(
   const prompt = body.prompt?.trim() || defaultGeneratePrompt(requirement);
 
   const lockKey = `${id}:${body.sceneId}:${body.requirementId}`;
-  if (IN_FLIGHT.has(lockKey)) return jsonError(429, 'generation_in_progress', {message: '正在为该素材需求生成图片，请稍后'});
+  if (IN_FLIGHT.has(lockKey)) {
+    return jsonError(429, 'generation_in_progress', {message: '正在为该素材需求生成图片，请稍后'});
+  }
+
+  // M7：若客户端传入 attemptId，先查询已有 attempt 状态（reconcile / 幂等重试）
+  if (body.attemptId) {
+    const existing = getImageGenerationUsageById(body.attemptId);
+    if (existing) {
+      const meta = existing.metadata;
+      if (existing.status === 'succeeded' && meta.assetId) {
+        return Response.json({
+          candidate: {
+            assetId: meta.assetId,
+            sceneId: body.sceneId,
+            requirementId: body.requirementId,
+            provider: existing.provider,
+            model: existing.model,
+            prompt: meta.prompt,
+            attemptId: existing.id,
+            reused: true,
+          },
+        }, {status: 200});
+      }
+      if (existing.status === 'in_flight') {
+        return jsonError(202, 'generation_in_progress', {
+          message: '生成任务仍在进行中',
+          attemptId: existing.id,
+          providerRequestId: meta.providerRequestId ?? null,
+        });
+      }
+      // failed / unknown_billing / auth_failed：返回明确终态，不自动重调 provider
+      return jsonError(409, 'generation_failed', {
+        message: `attempt ${existing.id} 已结束（${existing.status}）`,
+        attemptId: existing.id,
+        failurePhase: meta.failurePhase ?? null,
+        providerRequestId: meta.providerRequestId ?? null,
+      });
+    }
+    // attemptId 不存在：客户端不应凭空构造 attemptId
+    return jsonError(404, 'attempt_not_found', {message: `attempt ${body.attemptId} 不存在`});
+  }
+
   IN_FLIGHT.add(lockKey);
 
-  // M6.3.10：attemptId 在调用 provider 之前生成（usage event 幂等键；
-  // 每次 POST = 新 attempt = 独立计费，重复处理由主键 INSERT OR IGNORE 挡住）
+  // M7：attemptId 在调用 provider 之前生成（usage event 幂等键）
   const attemptId = crypto.randomUUID();
   const prov = getGeneratedImageProvider();
-
-  /** 记账失败不得阻断生成流程（费用已真实发生），但必须 loudly log。 */
-  const recordUsage = (input: Parameters<typeof recordImageGenerationUsage>[0]): void => {
-    try {
-      recordImageGenerationUsage(input);
-    } catch (err) {
-      console.error(`[assets/generate] usage event 记录失败 attempt=${attemptId}:`, err);
-    }
-  };
+  const startAt = Date.now();
 
   try {
-    if (!prov.configured || !prov.health.available) return jsonError(503, 'provider_unavailable', {message: '图像生成服务未配置或不可用'});
+    if (!prov.configured || !prov.health.available) {
+      return jsonError(503, 'provider_unavailable', {message: '图像生成服务未配置或不可用'});
+    }
+
+    // DB 级 in_flight 写入：同一 attemptId 重复请求会被拒绝；幂等起点。
+    const inFlight = recordImageGenerationUsageInFlight({
+      attemptId,
+      projectId: id,
+      sceneId: body.sceneId,
+      requirementId: body.requirementId,
+      provider: prov.name,
+      model: process.env.APIYI_IMAGE_MODEL || 'gemini-3.1-flash-image',
+      requestedSize: process.env.APIYI_IMAGE_SIZE || '1K',
+      aspectRatio: process.env.APIYI_IMAGE_ASPECT_RATIO || '16:9',
+      prompt,
+    });
+    if (!inFlight.inserted) {
+      // 理论上仅在 attemptId 冲突时发生（UUID 几乎不可能）
+      return jsonError(409, 'generation_in_progress', {message: '该 attempt 已存在'});
+    }
 
     const candidates: GeneratedImageCandidate[] = await prov.generate({prompt});
     if (!candidates.length) {
-      upsertResolutionState({projectId: id, sceneId: body.sceneId, requirementId: body.requirementId, status: 'generation_failed', reason: '未生成有效图片', provider: prov.name});
-      return jsonError(500, 'generation_failed', {message: '未生成有效图片'});
+      const reason = '未生成有效图片';
+      finalizeImageGenerationUsage({
+        attemptId,
+        projectId: id,
+        sceneId: body.sceneId,
+        requirementId: body.requirementId,
+        provider: prov.name,
+        model: process.env.APIYI_IMAGE_MODEL || 'gemini-3.1-flash-image',
+        requestedSize: process.env.APIYI_IMAGE_SIZE || '1K',
+        aspectRatio: process.env.APIYI_IMAGE_ASPECT_RATIO || '16:9',
+        imageCount: 0,
+        status: 'unknown_billing',
+        failurePhase: 'IMAGE_DECODE_FAILED',
+        prompt,
+        elapsedMs: Date.now() - startAt,
+      });
+      upsertResolutionState({
+        projectId: id,
+        sceneId: body.sceneId,
+        requirementId: body.requirementId,
+        status: 'generation_failed',
+        reason,
+        provider: prov.name,
+        metadata: {attemptId, failurePhase: 'IMAGE_DECODE_FAILED', prompt, elapsedMs: Date.now() - startAt},
+      });
+      return jsonError(500, 'generation_failed', {message: reason, attemptId, failurePhase: 'IMAGE_DECODE_FAILED'});
     }
 
     const first = candidates[0]!;
     const firstMeta = (first.metadata ?? {}) as Record<string, unknown>;
+    const providerRequestId = typeof firstMeta.providerRequestId === 'string' ? firstMeta.providerRequestId : undefined;
+    const elapsedMs = Date.now() - startAt;
 
-    // 费用已真实发生：先记 usage event，再持久化 candidate（Phase 9 ordering）。
-    // imageCount = provider 实际产出张数（含后续可能被拒绝/不绑定的 candidate）。
-    recordUsage({
+    // 费用已真实发生：先 finalize usage event，再持久化 candidate（Phase 9 ordering）。
+    finalizeImageGenerationUsage({
       attemptId,
       projectId: id,
       sceneId: body.sceneId,
@@ -118,8 +203,10 @@ export async function POST(
       imageCount: candidates.length,
       status: 'succeeded',
       generationId: first.generationId,
-      providerRequestId: typeof firstMeta.providerRequestId === 'string' ? firstMeta.providerRequestId : undefined,
+      providerRequestId,
       usageMetadata: firstMeta.usageMetadata,
+      prompt,
+      elapsedMs,
     });
 
     const assetId = crypto.randomUUID();
@@ -177,31 +264,56 @@ export async function POST(
         prompt: first.prompt,
         generationId: first.generationId,
         attemptId,
+        providerRequestId,
       },
     }, {status: 201});
   } catch (err) {
+    const elapsedMs = Date.now() - startAt;
     const msg = err instanceof Error ? err.message : '图像生成失败';
-    // M6.3.10 计费口径：auth_failed → cost 0；429/timeout/5xx/空结果/http 错误
-    // → unknown_billing（不计费，技术详情可见）；not_configured 未发请求 → 不记。
+    let failurePhase = 'PROVIDER_TERMINAL_FAILURE';
+    let providerRequestId: string | undefined;
+    let model = process.env.APIYI_IMAGE_MODEL || 'gemini-3.1-flash-image';
+
     if (err instanceof ImageGenerationError) {
+      failurePhase = err.code;
+      providerRequestId = err.context?.providerRequestId;
+      model = err.context?.model ?? model;
       const usageStatus = imageGenerationErrorStatus(err.code);
       if (usageStatus) {
-        recordUsage({
+        finalizeImageGenerationUsage({
           attemptId,
           projectId: id,
           sceneId: body.sceneId,
           requirementId: body.requirementId,
           provider: prov.name,
-          model: err.context?.model ?? 'unknown',
-          requestedSize: err.context?.size ?? 'unknown',
-          aspectRatio: err.context?.aspectRatio ?? 'unknown',
+          model,
+          requestedSize: process.env.APIYI_IMAGE_SIZE || '1K',
+          aspectRatio: process.env.APIYI_IMAGE_ASPECT_RATIO || '16:9',
           imageCount: 0,
           status: usageStatus,
+          providerRequestId,
+          failurePhase,
+          prompt,
+          elapsedMs,
         });
       }
     }
-    upsertResolutionState({projectId: id, sceneId: body.sceneId, requirementId: body.requirementId, status: 'generation_failed', reason: msg, provider: 'apiyi'});
-    return jsonError(500, 'generation_failed', {message: msg});
+
+    upsertResolutionState({
+      projectId: id,
+      sceneId: body.sceneId,
+      requirementId: body.requirementId,
+      status: 'generation_failed',
+      reason: msg,
+      provider: prov.name,
+      metadata: {attemptId, providerRequestId, failurePhase, model, prompt, elapsedMs},
+    });
+    return jsonError(500, 'generation_failed', {
+      message: msg,
+      attemptId,
+      failurePhase,
+      providerRequestId: providerRequestId ?? null,
+    });
   } finally {
     IN_FLIGHT.delete(lockKey);
   }

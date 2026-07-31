@@ -68,6 +68,19 @@ export interface RequirementResolution {
   generateDisabledReason: string | null;
   /** M6.3.9：最近一次失败尝试的原因（来自 asset_resolution_state，无则 null） */
   failureReason: string | null;
+  /** M7：失败阶段码（PROVIDER_CONNECT_TIMEOUT / PROVIDER_RESPONSE_TIMEOUT / IMAGE_DECODE_FAILED / PROVIDER_TERMINAL_FAILURE 等） */
+  failurePhase: string | null;
+  /** M7：最近一次尝试 id（幂等键） */
+  attemptId: string | null;
+  /** M7：provider request id（用于对账 / reconcile） */
+  providerRequestId: string | null;
+  /** M7：实际使用的生成提示词（AI 生成失败时供用户查看/重试） */
+  promptUsed: string | null;
+  /** M7：provider/model（失败时对账用） */
+  provider: string | null;
+  model: string | null;
+  /** M7：最近一次尝试耗时（毫秒） */
+  elapsedMs: number | null;
   /** M6.3.9：用户态说明 —— 发生了什么 / 为什么 / 建议下一步（一句话） */
   statusHint: string;
   /** M6.3.13：语义上允许「改用 MG」（authenticity 闸门，与 AI fallback 同源） */

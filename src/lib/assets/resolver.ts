@@ -21,6 +21,7 @@ import {
   type AssetResolutionStateRow,
   type AssetRow,
 } from './model';
+import {getLatestImageUsageForRequirement} from '@/lib/usage-events';
 import {authenticityOf, buildSceneAssetPlan} from './requirements';
 import {
   applyVisualOverrides,
@@ -238,6 +239,8 @@ function intendedRequirementId(asset: AssetRow): string | null {
 }
 
 function buildRequirementResolution(
+  projectId: string,
+  sceneId: string,
   category: string,
   req: IdentifiedRequirement,
   index: number,
@@ -262,6 +265,41 @@ function buildRequirementResolution(
   }
   if (queriesTried.length === 0 && req.query) queriesTried = [req.query];
   const generateAvailable = eligibility.eligible && generateProviderAvailable;
+
+  // M7：解析持久化失败元数据；缺失时从 usage event 兜底回填
+  let failurePhase: string | null = null;
+  let attemptId: string | null = null;
+  let providerRequestId: string | null = null;
+  let promptUsed: string | null = null;
+  let providerName: string | null = null;
+  let modelName: string | null = null;
+  let elapsedMs: number | null = null;
+  if (!boundStatus && persisted) {
+    try {
+      const meta = JSON.parse(persisted.metadata ?? '{}') as Record<string, unknown>;
+      failurePhase = typeof meta.failurePhase === 'string' ? meta.failurePhase : null;
+      attemptId = typeof meta.attemptId === 'string' ? meta.attemptId : null;
+      providerRequestId = typeof meta.providerRequestId === 'string' ? meta.providerRequestId : null;
+      promptUsed = typeof meta.prompt === 'string' ? meta.prompt : null;
+      providerName = typeof meta.provider === 'string' ? meta.provider : null;
+      modelName = typeof meta.model === 'string' ? meta.model : null;
+      elapsedMs = typeof meta.elapsedMs === 'number' ? meta.elapsedMs : null;
+    } catch {
+      // 元数据损坏则忽略
+    }
+  }
+  if (status === 'generation_failed' && (!attemptId || !failurePhase)) {
+    const usage = getLatestImageUsageForRequirement(projectId, sceneId, req.requirementId);
+    if (usage) {
+      attemptId = attemptId ?? usage.id;
+      providerName = providerName ?? usage.provider;
+      modelName = modelName ?? usage.model;
+      providerRequestId = providerRequestId ?? (typeof usage.metadata.providerRequestId === 'string' ? usage.metadata.providerRequestId : null);
+      promptUsed = promptUsed ?? (typeof usage.metadata.prompt === 'string' ? usage.metadata.prompt : null);
+      failurePhase = failurePhase ?? (typeof usage.metadata.failurePhase === 'string' ? usage.metadata.failurePhase : null);
+    }
+  }
+
   return {
     requirementId: req.requirementId,
     index,
@@ -281,6 +319,13 @@ function buildRequirementResolution(
     generateSecondary: eligibility.secondary,
     generateDisabledReason: status === 'ready' ? null : decision.generateDisabledReason,
     failureReason: !boundStatus && persisted ? persisted.reason : null,
+    failurePhase,
+    attemptId,
+    providerRequestId,
+    promptUsed,
+    provider: providerName,
+    model: modelName,
+    elapsedMs,
     statusHint: statusHintFor(status, req.policy, authenticity, generateAvailable),
     switchToMgEligible: mgSwitch.ok,
     switchToMgDisabledReason: mgSwitch.ok ? null : mgSwitch.reason,
@@ -338,6 +383,8 @@ export function resolveSceneAssets(
         createdAt: a.created_at,
       }));
     return buildRequirementResolution(
+      projectId,
+      scene.id,
       plan.category,
       req,
       i,

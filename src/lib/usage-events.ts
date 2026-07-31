@@ -111,13 +111,19 @@ export type ImageGenerationStatus =
   /** 认证失败（401/403）：请求未进入生成 → cost 0 */
   | 'auth_failed'
   /** 429/超时/5xx/空结果/网络错误：是否产生费用无法确认 → cost 不计入 */
-  | 'unknown_billing';
+  | 'unknown_billing'
+  /** M7：调用 provider 前写入的 in_flight 状态，用于幂等防重与 reconcile。 */
+  | 'in_flight';
 
 /**
  * provider 错误 code → usage event 状态映射（Phase 4 计费口径）。
  * 返回 null = 未发出计费相关请求（not_configured），不记 event。
+ * M7：细分 timeout/failure 阶段，统一归 unknown_billing（是否真实计费不可确认，
+ * 技术详情写入 metadata）。
  */
-export function imageGenerationErrorStatus(code: string): ImageGenerationStatus | null {
+export function imageGenerationErrorStatus(
+  code: string,
+): Exclude<ImageGenerationStatus, 'in_flight'> | null {
   if (code === 'auth_failed') return 'auth_failed';
   if (code === 'not_configured') return null;
   return 'unknown_billing';
@@ -229,6 +235,195 @@ export function recordImageGenerationUsage(
   return {id, inserted, costCny, unitPriceCny, costSource};
 }
 
+export interface ImageGenerationInFlightInput {
+  attemptId: string;
+  projectId: string;
+  sceneId: string;
+  requirementId: string;
+  provider: string;
+  model: string;
+  requestedSize: string;
+  aspectRatio: string;
+  prompt: string;
+}
+
+/**
+ * M7：provider 调用前写入 in_flight usage event（INSERT OR IGNORE）。
+ * 同一 attemptId 重复调用返回 inserted=false，调用方应据此拒绝重复 provider 调用。
+ */
+export function recordImageGenerationUsageInFlight(
+  input: ImageGenerationInFlightInput,
+): {id: string; inserted: boolean} {
+  return recordUsageEvent({
+    id: input.attemptId,
+    projectId: input.projectId,
+    kind: 'image',
+    stage: 'image_generation',
+    provider: input.provider,
+    model: input.model,
+    metadata: {
+      attemptId: input.attemptId,
+      sceneId: input.sceneId,
+      requirementId: input.requirementId,
+      requestedSize: input.requestedSize,
+      aspectRatio: input.aspectRatio,
+      status: 'in_flight',
+      prompt: input.prompt,
+    },
+  });
+}
+
+export interface ImageGenerationFinalizeInput {
+  attemptId: string;
+  projectId: string;
+  sceneId: string;
+  requirementId: string;
+  provider: string;
+  model: string;
+  requestedSize: string;
+  aspectRatio: string;
+  imageCount: number;
+  status: Exclude<ImageGenerationStatus, 'in_flight'>;
+  generationId?: string;
+  providerRequestId?: string;
+  usageMetadata?: unknown;
+  failurePhase?: string;
+  prompt?: string;
+  elapsedMs?: number;
+  assetId?: string;
+}
+
+/**
+ * M7：将 in_flight usage event 更新为终态（succeeded/auth_failed/unknown_billing）。
+ * 只更新 status/cost/metadata，不改动 id；若行不存在（异常）则创建新行兜底。
+ */
+export function finalizeImageGenerationUsage(
+  input: ImageGenerationFinalizeInput,
+): ImageGenerationUsageResult {
+  const db = getDb();
+  const existing = db.prepare('SELECT metadata FROM project_usage_events WHERE id = ?').get(input.attemptId) as
+    | {metadata: string | null}
+    | undefined;
+
+  let costCny: number | null = null;
+  let unitPriceCny: number | null = null;
+  let costSource: ImageGenerationUsageResult['costSource'] = 'none';
+  let pricingError: string | null = null;
+
+  if (input.status === 'succeeded') {
+    try {
+      const priced = computeImageCostCny({
+        provider: input.provider,
+        model: input.model,
+        size: input.requestedSize,
+        imageCount: input.imageCount,
+      });
+      costCny = priced.costCny;
+      unitPriceCny = priced.unitPriceCny;
+      costSource = 'configured_estimate';
+    } catch (err) {
+      if (err instanceof ImagePricingError) {
+        pricingError = err.message;
+      } else {
+        throw err;
+      }
+    }
+  } else if (input.status === 'auth_failed') {
+    costCny = 0;
+  }
+
+  let priorMeta: Record<string, unknown> = {};
+  try {
+    priorMeta = existing?.metadata ? (JSON.parse(existing.metadata) as Record<string, unknown>) : {};
+  } catch {
+    priorMeta = {};
+  }
+
+  const metadata = {
+    ...priorMeta,
+    attemptId: input.attemptId,
+    sceneId: input.sceneId,
+    requirementId: input.requirementId,
+    imageCount: input.imageCount,
+    requestedSize: input.requestedSize,
+    aspectRatio: input.aspectRatio,
+    status: input.status,
+    costSource,
+    unitPriceCny,
+    pricingVersion: costSource === 'configured_estimate' ? IMAGE_PRICE_TABLE_VERSION : null,
+    pricingError,
+    generationId: input.generationId ?? null,
+    providerRequestId: input.providerRequestId ?? null,
+    usageMetadata: input.usageMetadata ?? null,
+    failurePhase: input.failurePhase ?? priorMeta.failurePhase ?? null,
+    prompt: input.prompt ?? priorMeta.prompt ?? null,
+    elapsedMs: input.elapsedMs ?? priorMeta.elapsedMs ?? null,
+    assetId: input.assetId ?? null,
+  };
+
+  if (existing) {
+    db.prepare(
+      `UPDATE project_usage_events
+       SET provider = ?, model = ?, cost_cny = ?, metadata = ?
+       WHERE id = ?`,
+    ).run(input.provider, input.model, costCny, JSON.stringify(metadata), input.attemptId);
+    return {id: input.attemptId, inserted: false, costCny, unitPriceCny, costSource};
+  }
+
+  const {id, inserted} = recordUsageEvent({
+    id: input.attemptId,
+    projectId: input.projectId,
+    kind: 'image',
+    stage: 'image_generation',
+    provider: input.provider,
+    model: input.model,
+    costCny,
+    metadata,
+  });
+  return {id, inserted, costCny, unitPriceCny, costSource};
+}
+
+/**
+ * M7：按 attemptId 读取 image usage event（reconcile / 幂等重试状态查询）。
+ */
+export function getImageGenerationUsageById(attemptId: string): {
+  id: string;
+  status: ImageGenerationStatus;
+  provider: string | null;
+  model: string | null;
+  costCny: number | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+} | null {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM project_usage_events WHERE id = ? AND kind = ?').get(attemptId, 'image') as
+    | {
+        id: string;
+        provider: string | null;
+        model: string | null;
+        cost_cny: number | null;
+        metadata: string | null;
+        created_at: string;
+      }
+    | undefined;
+  if (!row) return null;
+  let metadata: Record<string, unknown> = {};
+  try {
+    if (row.metadata) metadata = JSON.parse(row.metadata) as Record<string, unknown>;
+  } catch {
+    metadata = {};
+  }
+  return {
+    id: row.id,
+    status: (metadata.status as ImageGenerationStatus) ?? 'unknown_billing',
+    provider: row.provider,
+    model: row.model,
+    costCny: row.cost_cny,
+    metadata,
+    createdAt: row.created_at,
+  };
+}
+
 /**
  * 生成 route 在 candidate 落库后回补 assetId 链接（usage 先于 asset 记录，
  * 费用先行不丢；链接用于 backfill 精确去重）。
@@ -239,6 +434,58 @@ export function linkAssetToImageUsageEvent(attemptId: string, assetId: string): 
      SET metadata = json_set(metadata, '$.assetId', ?)
      WHERE id = ? AND kind = 'image'`,
   ).run(assetId, attemptId);
+}
+
+/** 查询某 requirement 最近一次图像生成 usage event（按 created_at 降序）。 */
+export function getLatestImageUsageForRequirement(
+  projectId: string,
+  sceneId: string,
+  requirementId: string,
+): {
+  id: string;
+  status: string;
+  provider: string | null;
+  model: string | null;
+  costCny: number | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+} | null {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT id, provider, model, cost_cny, metadata, created_at
+       FROM project_usage_events
+       WHERE project_id = ? AND kind = 'image'
+         AND metadata->>'sceneId' = ?
+         AND metadata->>'requirementId' = ?
+       ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(projectId, sceneId, requirementId) as
+    | {
+        id: string;
+        provider: string | null;
+        model: string | null;
+        cost_cny: number | null;
+        metadata: string | null;
+        created_at: string;
+      }
+    | undefined;
+  if (!row) return null;
+  let metadata: Record<string, unknown> = {};
+  try {
+    if (row.metadata) metadata = JSON.parse(row.metadata) as Record<string, unknown>;
+  } catch {
+    metadata = {};
+  }
+  return {
+    id: row.id,
+    status: typeof metadata.status === 'string' ? metadata.status : 'unknown',
+    provider: row.provider,
+    model: row.model,
+    costCny: row.cost_cny,
+    metadata,
+    createdAt: row.created_at,
+  };
 }
 
 /** 判断某 generated asset 是否已有对应的 image usage event（backfill 去重依据）。 */

@@ -181,9 +181,12 @@ CREATE TABLE IF NOT EXISTS asset_resolution_state (
   reason TEXT,
   queries_tried TEXT,            -- JSON array
   provider TEXT,
+  metadata TEXT,                 -- M7：JSON {attemptId, providerRequestId, failurePhase, model, prompt}
   updated_at TEXT NOT NULL,
   PRIMARY KEY (project_id, scene_id, requirement_id)
 );
+-- M7：为已存在表补齐 metadata 列（幂等）
+ALTER TABLE asset_resolution_state ADD COLUMN metadata TEXT;
 -- M3-B：TTS 任务队列（一个 speech unit 一个 job，独立 retry/cancel）
 CREATE TABLE IF NOT EXISTS tts_jobs (
   id TEXT PRIMARY KEY,

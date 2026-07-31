@@ -183,7 +183,18 @@ export interface AssetResolutionStateRow {
   reason: string | null;
   queries_tried: string | null;
   provider: string | null;
+  /** M7：JSON 元数据（attemptId, providerRequestId, failurePhase, model, prompt）。 */
+  metadata: string | null;
   updated_at: string;
+}
+
+export interface ResolutionStateMetadata {
+  attemptId?: string;
+  providerRequestId?: string;
+  failurePhase?: string;
+  model?: string;
+  prompt?: string;
+  elapsedMs?: number;
 }
 
 export interface NewResolutionState {
@@ -194,6 +205,7 @@ export interface NewResolutionState {
   reason?: string | null;
   queriesTried?: string[];
   provider?: string | null;
+  metadata?: ResolutionStateMetadata | null;
 }
 
 /** 记录某 requirement 最近一次解析尝试的失败结果（成功时由调用方 clear）。 */
@@ -201,12 +213,12 @@ export function upsertResolutionState(input: NewResolutionState): void {
   getDb()
     .prepare(
       `INSERT INTO asset_resolution_state
-         (project_id, scene_id, requirement_id, status, reason, queries_tried, provider, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         (project_id, scene_id, requirement_id, status, reason, queries_tried, provider, metadata, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (project_id, scene_id, requirement_id)
        DO UPDATE SET status = excluded.status, reason = excluded.reason,
          queries_tried = excluded.queries_tried, provider = excluded.provider,
-         updated_at = excluded.updated_at`,
+         metadata = excluded.metadata, updated_at = excluded.updated_at`,
     )
     .run(
       input.projectId,
@@ -216,6 +228,7 @@ export function upsertResolutionState(input: NewResolutionState): void {
       input.reason ?? null,
       JSON.stringify(input.queriesTried ?? []),
       input.provider ?? null,
+      input.metadata ? JSON.stringify(input.metadata) : null,
       new Date().toISOString(),
     );
 }
