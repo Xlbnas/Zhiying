@@ -2,7 +2,7 @@
 
 import {useCallback, useEffect, useState} from 'react';
 import {canRequestAudioGeneration} from '@/lib/narration/contamination';
-import {STAGE_STATE_LABELS} from './shared';
+import {STAGE_STATE_LABELS, type ActivityResponse} from './shared';
 
 /**
  * Narration 区（M3-A §二十三/二十四）：Script V2 → Narration Plan。
@@ -134,10 +134,13 @@ const KIND_LABELS: Record<string, string> = {
 export function NarrationPanel({
   projectId,
   scriptV2StageKey,
+  activity,
 }: {
   projectId: string;
   /** script_v2 阶段状态指纹（status+updated_at），变化时重新拉取。 */
   scriptV2StageKey: string;
+  /** M7：统一 activity 订阅；存在时 audio/subtitle 从 activity 自动刷新，不再单独轮询。 */
+  activity?: ActivityResponse | null;
 }) {
   const [data, setData] = useState<NarrationReadiness | null>(null);
   const [audio, setAudio] = useState<AudioOverview | null>(null);
@@ -149,15 +152,24 @@ export function NarrationPanel({
   const [showUnits, setShowUnits] = useState(false);
   const [showCues, setShowCues] = useState(false);
 
-  const load = useCallback(async () => {
+  /** 加载 plan（script_v2 变化时）；audio/subtitle 优先由 activity 订阅驱动。 */
+  const loadPlan = useCallback(async () => {
     try {
-      const [planRes, audioRes, subtitleRes] = await Promise.all([
-        fetch(`/api/projects/${projectId}/narration-plan`, {cache: 'no-store'}),
+      const planRes = await fetch(`/api/projects/${projectId}/narration-plan`, {cache: 'no-store'});
+      if (!planRes.ok) throw new Error(`HTTP ${planRes.status}`);
+      setData((await planRes.json()) as NarrationReadiness);
+      setError(null);
+    } catch {
+      setError('旁白数据加载失败');
+    }
+  }, [projectId]);
+
+  const loadAudioSubtitle = useCallback(async () => {
+    try {
+      const [audioRes, subtitleRes] = await Promise.all([
         fetch(`/api/projects/${projectId}/narration-audio`, {cache: 'no-store'}),
         fetch(`/api/projects/${projectId}/subtitle-timing`, {cache: 'no-store'}),
       ]);
-      if (!planRes.ok) throw new Error(`HTTP ${planRes.status}`);
-      setData((await planRes.json()) as NarrationReadiness);
       if (audioRes.ok) {
         setAudio((await audioRes.json()) as AudioOverview);
       }
@@ -170,9 +182,28 @@ export function NarrationPanel({
     }
   }, [projectId]);
 
+  const load = useCallback(async () => {
+    await loadPlan();
+    await loadAudioSubtitle();
+  }, [loadPlan, loadAudioSubtitle]);
+
   useEffect(() => {
-    void load();
-  }, [load, scriptV2StageKey]);
+    void loadPlan();
+    // 无 activity 时兜底拉一次音频/字幕
+    if (!activity) {
+      void loadAudioSubtitle();
+    }
+  }, [loadPlan, loadAudioSubtitle, scriptV2StageKey, activity]);
+
+  // M7：统一 activity 订阅 → audio/subtitle 自动刷新
+  useEffect(() => {
+    if (activity?.audioOverview) {
+      setAudio(activity.audioOverview);
+    }
+    if (activity?.subtitleReadiness) {
+      setSubtitle(activity.subtitleReadiness);
+    }
+  }, [activity]);
 
   const build = useCallback(async () => {
     setBusy(true);
