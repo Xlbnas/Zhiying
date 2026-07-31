@@ -8,6 +8,10 @@
  *   latestEligibleSuggestionArtifactId 仅作为默认选中建议）。
  * - 明确展示「Candidate only — project remains M6」；
  *   无 Activate/Set current/Lock/下游按钮。
+ * - Worker-side LLM Dispatch：POST 为 enqueue-only（202 queued/running）。
+ *   同一次点击的 requestId 生命周期内轮询 GET（dispatch 状态 + runs），
+ *   queued/running 时按钮 disabled——双击不产生第二个 dispatch；
+ *   「重新生成」才创建新 requestId。页面加载不自动 POST。
  */
 
 import {useCallback, useEffect, useState} from 'react';
@@ -53,6 +57,18 @@ interface GenerationRunSummary {
   finishedAt: string | null;
 }
 
+interface DispatchJobSummary {
+  dispatchId: string;
+  requestId: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  generationRunId: string | null;
+  resultArtifactId: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
 interface ListResponse {
   pipelineVersion: string;
   candidateOnly: boolean;
@@ -60,6 +76,7 @@ interface ListResponse {
   latestEligibleSuggestionArtifactId: string | null;
   candidates: BeatsCandidateSummary[];
   runs: GenerationRunSummary[];
+  dispatchJobs: DispatchJobSummary[];
 }
 
 interface BeatDetail {
@@ -101,6 +118,10 @@ export function NarrativeBeatsPanel({projectId}: {projectId: string}) {
   const [buildError, setBuildError] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailResponse | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  // 本次点击的 requestId 生命周期：queued/running 期间轮询且按钮 disabled，
+  // 双击不产生第二个 dispatch；终态后清空，「重新生成」才创建新 requestId。
+  const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
+  const [phase, setPhase] = useState<'idle' | 'queued' | 'running'>('idle');
 
   const load = useCallback(async () => {
     try {
@@ -121,18 +142,63 @@ export function NarrativeBeatsPanel({projectId}: {projectId: string}) {
     void load();
   }, [load]);
 
+  // dispatch 轮询：同一 requestId 生命周期内跟踪 queued/running → 终态。
+  useEffect(() => {
+    if (!activeRequestId || phase === 'idle') return;
+    let cancelled = false;
+    const tick = async (): Promise<void> => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/narrative-beats`, {cache: 'no-store'});
+        if (!res.ok) return; // 下轮重试
+        const json = (await res.json()) as ListResponse;
+        if (cancelled) return;
+        setData(json);
+        const run = json.runs.find((r) => r.requestId === activeRequestId);
+        const dispatch = (json.dispatchJobs ?? []).find((d) => d.requestId === activeRequestId);
+        if (run?.status === 'succeeded' || dispatch?.status === 'succeeded') {
+          setActiveRequestId(null);
+          setPhase('idle');
+          setBuildError(null);
+          return;
+        }
+        if (run && (run.status === 'failed' || run.status === 'indeterminate')) {
+          setBuildError(`${run.errorCode ?? 'UNKNOWN'}: ${run.errorMessage ?? ''}`);
+          setActiveRequestId(null);
+          setPhase('idle');
+          return;
+        }
+        if (dispatch && (dispatch.status === 'failed' || dispatch.status === 'cancelled')) {
+          setBuildError(`${dispatch.errorCode ?? 'UNKNOWN'}: ${dispatch.errorMessage ?? ''}`);
+          setActiveRequestId(null);
+          setPhase('idle');
+          return;
+        }
+        setPhase(dispatch?.status === 'running' || run?.status === 'running' ? 'running' : 'queued');
+      } catch {
+        // 网络抖动：下轮重试
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeRequestId, phase, projectId]);
+
   const build = async () => {
-    if (!selectedSource) return;
+    if (!selectedSource || phase !== 'idle') return;
     setBuilding(true);
     setBuildError(null);
+    // 每次显式操作都生成新 requestId（regenerate 语义；同 requestId 由服务端幂等复用）
+    const requestId = crypto.randomUUID();
     try {
       const res = await fetch(`/api/projects/${projectId}/narrative-beats`, {
         method: 'POST',
         headers: {'content-type': 'application/json'},
-        // 每次显式操作都生成新 requestId（regenerate 语义；同 requestId 由服务端幂等复用）
         body: JSON.stringify({
           narrationPlanV2ArtifactId: selectedSource,
-          requestId: crypto.randomUUID(),
+          requestId,
         }),
       });
       const json = (await res.json()) as {
@@ -140,18 +206,18 @@ export function NarrativeBeatsPanel({projectId}: {projectId: string}) {
         message?: string;
         status?: string;
         errorCode?: string;
-        retryAfterMs?: number;
       };
       if (res.status === 202) {
-        // durable single-flight：同 requestId 的 generation 正在运行，本请求零成本。
-        setBuildError(`生成中（run ${json.status ?? 'running'}）——请稍后刷新`);
-        window.setTimeout(() => void load(), (json.retryAfterMs ?? 5000) + 1000);
+        // Worker-side dispatch：queued（等待 worker）或 running（worker 执行中）。
+        setActiveRequestId(requestId);
+        setPhase(json.status === 'running' ? 'running' : 'queued');
       } else if (!res.ok) {
         // 409 = 同 requestId 终态（failed/indeterminate）；显式 regenerate 需新 requestId。
         setBuildError(
           `${json.error ?? json.errorCode ?? `HTTP ${res.status}`}: ${json.message ?? ''}`,
         );
       } else {
+        // 200 reused：幂等命中，直接刷新。
         await load();
       }
     } catch {
@@ -212,9 +278,27 @@ export function NarrativeBeatsPanel({projectId}: {projectId: string}) {
                   </option>
                 ))}
               </select>
-              <button type="button" disabled={building || !selectedSource} onClick={() => void build()}>
-                {building ? '生成中…' : '生成 Beats Candidate'}
+              <button
+                type="button"
+                disabled={building || phase !== 'idle' || !selectedSource}
+                onClick={() => void build()}
+              >
+                {phase === 'queued'
+                  ? '排队中…'
+                  : phase === 'running'
+                    ? '生成中…'
+                    : building
+                      ? '提交中…'
+                      : data.candidates.length > 0
+                        ? '重新生成（新 requestId）'
+                        : '生成 Beats Candidate'}
               </button>
+              {phase !== 'idle' ? (
+                <span style={{fontSize: 12, color: 'var(--accent, #7dd3fc)'}}>
+                  {phase === 'queued' ? '已入队，等待 Worker 执行' : 'Worker 生成中'}（requestId{' '}
+                  {activeRequestId?.slice(0, 8)}…）
+                </span>
+              ) : null}
             </div>
           )}
           {buildError ? <div className="error-banner" style={{marginTop: 8}}>{buildError}</div> : null}

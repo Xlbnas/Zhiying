@@ -57,7 +57,7 @@ export class VisualIntentError extends Error {
   }
 }
 
-// ── provider 解析（route 真实新建路径可测；production 无后门） ──
+// ── provider 解析（worker executor/library 测试路径可注入；production 无后门） ──
 
 let testProviderOverride: LLMProvider | null = null;
 
@@ -214,13 +214,16 @@ export function getVisualIntentArtifact(
 
 // ── build ──
 
-interface VisualIntentRowWithContent {
+export interface VisualIntentRowWithContent {
   row: VisualIntentArtifactRow;
   content: VisualIntentPlanArtifactV1;
 }
 
 /** 幂等查找：同 requestId 的已有 candidate（任何 version）。 */
-function findByRequestId(projectId: string, requestId: string): VisualIntentRowWithContent | null {
+export function findVisualIntentByRequestId(
+  projectId: string,
+  requestId: string,
+): VisualIntentRowWithContent | null {
   for (const row of listVisualIntentRows(projectId)) {
     const content = parseVisualIntent(row);
     if (content && content.generation.requestId === requestId) {
@@ -228,6 +231,76 @@ function findByRequestId(projectId: string, requestId: string): VisualIntentRowW
     }
   }
   return null;
+}
+
+/**
+ * exact source 前置检查（fail-closed，throw VisualIntentError）：
+ * requestId 契约 → 项目存在 → exact source beats artifact 存在且属于本项目 →
+ * kind/schema 合法 → candidate status=eligible_candidate → 经 beats provenance
+ * 精确读取 narration plan 并核对 hash。
+ * Web route（enqueue 前）与 worker build 共用——发生在 run claim / dispatch
+ * 入队之前，不创建 run、不调用 provider。
+ */
+export function precheckVisualIntentSource(input: {
+  projectId: string;
+  narrativeBeatsArtifactId: string;
+  requestId: string;
+}): {
+  requestId: string;
+  sourceRef: NonNullable<ReturnType<typeof getNarrativeBeatsArtifact>>;
+  narrationRef: NonNullable<ReturnType<typeof getNarrationPlanV2Artifact>>;
+} {
+  const db: Db = getDb();
+  if (typeof input.requestId !== 'string' || input.requestId.trim().length === 0) {
+    throw new VisualIntentError('REQUEST_ID_REQUIRED', 'requestId 必须为非空字符串（幂等键）');
+  }
+  const requestId = canonicalizeRequestId(input.requestId);
+  if (!requestId) {
+    throw new VisualIntentError(
+      'REQUEST_ID_INVALID',
+      'requestId 非法：trim 后须为 8–128 字符，仅允许 [A-Za-z0-9._:-]（拒绝空白/换行/控制字符/超长）',
+    );
+  }
+  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(input.projectId) as
+    | {id: string}
+    | undefined;
+  if (!project) {
+    throw new VisualIntentError('PROJECT_NOT_FOUND', `项目不存在: ${input.projectId}`);
+  }
+
+  const sourceRef = getNarrativeBeatsArtifact(input.projectId, input.narrativeBeatsArtifactId);
+  if (!sourceRef) {
+    throw new VisualIntentError(
+      'BEATS_NOT_FOUND',
+      `narrative beats artifact ${input.narrativeBeatsArtifactId} 不存在/跨项目/契约非法`,
+    );
+  }
+  const sourceStatus = classifyNarrativeBeatsCandidate(input.projectId, sourceRef.artifact);
+  if (sourceStatus.status !== 'eligible_candidate') {
+    throw new VisualIntentError(
+      'BEATS_NOT_ELIGIBLE',
+      `narrative beats 状态=${sourceStatus.status}（${sourceStatus.statusReason ?? ''}）——只有 eligible_candidate 才能构建 visual intent`,
+    );
+  }
+
+  // 经 beats provenance 精确读取 narration plan（displayText 核对源 + 投影输入）。
+  const narrationRef = getNarrationPlanV2Artifact(
+    input.projectId,
+    sourceRef.beats.source.narrationPlanV2ArtifactId,
+  );
+  if (!narrationRef) {
+    throw new VisualIntentError(
+      'BEATS_NOT_FOUND',
+      `beats provenance 指向的 narration plan artifact ${sourceRef.beats.source.narrationPlanV2ArtifactId} 不可读`,
+    );
+  }
+  if (sha256Text(narrationRef.artifact.content_json) !== sourceRef.beats.source.narrationPlanV2ContentHash) {
+    throw new VisualIntentError(
+      'BEATS_NOT_ELIGIBLE',
+      'beats provenance 的 narration plan 内容 hash 漂移——source 链损坏',
+    );
+  }
+  return {requestId, sourceRef, narrationRef};
 }
 
 /**
@@ -286,58 +359,10 @@ export async function buildVisualIntentPlan(input: {
   signal?: AbortSignal;
 }): Promise<BuildVisualIntentResult> {
   const db: Db = getDb();
-  if (typeof input.requestId !== 'string' || input.requestId.trim().length === 0) {
-    throw new VisualIntentError('REQUEST_ID_REQUIRED', 'requestId 必须为非空字符串（幂等键）');
-  }
-  const requestId = canonicalizeRequestId(input.requestId);
-  if (!requestId) {
-    throw new VisualIntentError(
-      'REQUEST_ID_INVALID',
-      'requestId 非法：trim 后须为 8–128 字符，仅允许 [A-Za-z0-9._:-]（拒绝空白/换行/控制字符/超长）',
-    );
-  }
-  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(input.projectId) as
-    | {id: string}
-    | undefined;
-  if (!project) {
-    throw new VisualIntentError('PROJECT_NOT_FOUND', `项目不存在: ${input.projectId}`);
-  }
-
-  const sourceRef = getNarrativeBeatsArtifact(input.projectId, input.narrativeBeatsArtifactId);
-  if (!sourceRef) {
-    throw new VisualIntentError(
-      'BEATS_NOT_FOUND',
-      `narrative beats artifact ${input.narrativeBeatsArtifactId} 不存在/跨项目/契约非法`,
-    );
-  }
-  const sourceStatus = classifyNarrativeBeatsCandidate(input.projectId, sourceRef.artifact);
-  if (sourceStatus.status !== 'eligible_candidate') {
-    throw new VisualIntentError(
-      'BEATS_NOT_ELIGIBLE',
-      `narrative beats 状态=${sourceStatus.status}（${sourceStatus.statusReason ?? ''}）——只有 eligible_candidate 才能构建 visual intent`,
-    );
-  }
-
-  // 经 beats provenance 精确读取 narration plan（displayText 核对源 + 投影输入）。
-  const narrationRef = getNarrationPlanV2Artifact(
-    input.projectId,
-    sourceRef.beats.source.narrationPlanV2ArtifactId,
-  );
-  if (!narrationRef) {
-    throw new VisualIntentError(
-      'BEATS_NOT_FOUND',
-      `beats provenance 指向的 narration plan artifact ${sourceRef.beats.source.narrationPlanV2ArtifactId} 不可读`,
-    );
-  }
-  if (sha256Text(narrationRef.artifact.content_json) !== sourceRef.beats.source.narrationPlanV2ContentHash) {
-    throw new VisualIntentError(
-      'BEATS_NOT_ELIGIBLE',
-      'beats provenance 的 narration plan 内容 hash 漂移——source 链损坏',
-    );
-  }
+  const {requestId, sourceRef, narrationRef} = precheckVisualIntentSource(input);
 
   // legacy/幂等复用：artifact 内容 requestId 命中 → 零 LLM 成本、零新行。
-  const existing = findByRequestId(input.projectId, requestId);
+  const existing = findVisualIntentByRequestId(input.projectId, requestId);
   if (existing) {
     if (existing.content.source.narrativeBeatsArtifactId !== input.narrativeBeatsArtifactId) {
       throw new VisualIntentError(

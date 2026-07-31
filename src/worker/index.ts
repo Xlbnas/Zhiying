@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {bundle} from '@remotion/bundler';
 import {renderMedia, selectComposition} from '@remotion/renderer';
-import {getDataDir} from '@/lib/db';
+import {getDataDir, getDb} from '@/lib/db';
 import {
   completeJob,
   failJob,
@@ -15,6 +15,7 @@ import {
   type RenderJobRow,
 } from '@/lib/jobs';
 import {recoverStaleLlmJobs} from '@/lib/llm-jobs';
+import {recoverStaleDispatchJobs} from '@/lib/llm-generation/dispatch';
 import {buildStageDetail, detailFromRemotionProgress, round1} from '@/lib/render/progress-detail';
 import {describeRenderPerfConfig, loadRenderPerfConfig} from '@/lib/render/render-config';
 import {probeNvencSupport} from '@/lib/render/nvenc';
@@ -29,6 +30,7 @@ import {
   type ZhiyingFullCutProps,
 } from '@/lib/scene-schema';
 import {runLlmJob} from './llm-executor';
+import {runDispatchJob} from './dispatch-executor';
 import {RuntimeAudioError, stageRuntimeNarrationAudio} from './runtime-audio';
 import {RuntimeAssetError, stageRuntimeAssets} from './runtime-assets';
 import {runTtsJob} from './tts-executor';
@@ -585,9 +587,18 @@ async function main(): Promise<void> {
   if (recoveredTts.cancelled > 0) {
     log(`finalized ${recoveredTts.cancelled} cancelled stale tts job(s)`);
   }
+  // generation dispatch 信封：run 仍 running（租约有效）→ requeue 等待；
+  // 无有效 running run → failed(WORKER_CRASH)，不自动重试可能已计费的请求。
+  const recoveredDispatch = recoverStaleDispatchJobs(getDb());
+  if (recoveredDispatch.requeued > 0) {
+    log(`recovered ${recoveredDispatch.requeued} stale dispatch job(s) → queued`);
+  }
+  if (recoveredDispatch.failed > 0) {
+    log(`finalized ${recoveredDispatch.failed} stale dispatch job(s) → failed(WORKER_CRASH)`);
+  }
 
-  // 2. 单调度循环：render + llm + tts 全局 FIFO，任何时刻只跑一个；
-  //    Remotion bundle 延后到首个 render job 才初始化（LLM/TTS job 零依赖）。
+  // 2. 单调度循环：render + llm + tts + dispatch 全局 FIFO，任何时刻只跑一个；
+  //    Remotion bundle 延后到首个 render job 才初始化（LLM/TTS/dispatch 零依赖）。
   //    每个被 claim 的任务由主循环创建统一 AbortController（currentController），
   //    SIGTERM/SIGINT 经 requestShutdown 同时覆盖三类任务。
   while (!shuttingDown) {
@@ -599,6 +610,16 @@ async function main(): Promise<void> {
     const controller = new AbortController();
     currentController = controller;
     try {
+      if (claimed.type === 'dispatch') {
+        // generation dispatch 信封：Worker 持有 LLM 凭据执行 build
+        // （durable single-flight 由 generation_runs 兜底，重复执行零重复计费）
+        await runDispatchJob(claimed.job, {
+          isShuttingDown: () => shuttingDown,
+          log,
+          shutdownSignal: controller.signal,
+        });
+        continue;
+      }
       if (claimed.type === 'llm') {
         await runLlmJob(claimed.job, {
           isShuttingDown: () => shuttingDown,

@@ -6,6 +6,10 @@
  * displayText 精确引用、continuation 链、input isolation、durable single-flight
  * （generation_runs/attempts 复用 stage='m7_visual_intent'）、candidate 生命周期、
  * API routes、M7.2 narrative beats 回归。
+ * 1.1 补强（compiler/promptVersion=1.1）：subject.kind 全矩阵、authenticity 精确闭集、
+ * displayText 覆盖范围（sourceUnitId∈当前 intent 覆盖 units、sourceChapter==intent.chapter）、
+ * subject.evidenceIds provenance（去重/凭空生成/跨 intent 借用/forbidden kind）、
+ * 1.0 candidate → stale（version mismatch）、Freud 形态 fixture 只读 revalidation。
  * 任一断言失败即非零退出。
  */
 
@@ -36,7 +40,6 @@ import {
   classifyVisualIntentCandidate,
   getVisualIntentArtifact,
   listVisualIntentCandidates,
-  setVisualIntentProviderForTest,
   VisualIntentError,
   type BuildVisualIntentResult,
 } from '../src/lib/visual-intent/plan';
@@ -50,6 +53,41 @@ import {validateVisualIntentPlan} from '../src/lib/visual-intent/validate';
 import {getM7PipelineSnapshotId, getPipelineVersion} from '../src/lib/pipeline-version';
 import {GET as visualGET, POST as visualPOST} from '../src/app/api/projects/[id]/visual-intents/route';
 import {GET as visualDetailGET} from '../src/app/api/projects/[id]/visual-intents/[artifactId]/route';
+import {getDispatchJob} from '../src/lib/llm-generation/dispatch';
+import {claimNextAnyJob} from '../src/lib/scheduler';
+import {runDispatchJob} from '../src/worker/dispatch-executor';
+
+// 上次中断运行可能留下临时 DB（claimNextAnyJob 全局 FIFO 会捡到旧 dispatch）——
+// 启动即清空（getDb 为惰性单例，此处尚未打开）。
+fs.rmSync(path.resolve(process.cwd(), 'data', 'test-m73a-visual-intent'), {recursive: true, force: true});
+
+/** Worker-side dispatch：claim 下一个 dispatch 并以注入 provider 执行（模拟 worker 主循环一步）。 */
+async function runNextDispatch(provider: LLMProvider): Promise<void> {
+  const claimed = claimNextAnyJob('worker-test-m73a');
+  if (!claimed || claimed.type !== 'dispatch') {
+    throw new Error(`expected queued dispatch job, got ${claimed?.type ?? 'null'}`);
+  }
+  await runDispatchJob(
+    claimed.job,
+    {isShuttingDown: () => false, log: () => {}},
+    {provider, heartbeatMs: 60_000},
+  );
+}
+
+function dispatchCount(projectId: string, requestId?: string): number {
+  const row = (
+    requestId === undefined
+      ? getDb()
+          .prepare(`SELECT COUNT(*) AS c FROM generation_dispatch_jobs WHERE project_id = ?`)
+          .get(projectId)
+      : getDb()
+          .prepare(
+            `SELECT COUNT(*) AS c FROM generation_dispatch_jobs WHERE project_id = ? AND request_id = ?`,
+          )
+          .get(projectId, requestId)
+  ) as {c: number};
+  return row.c;
+}
 
 let pass = 0;
 let fail = 0;
@@ -270,7 +308,7 @@ function makeValidIntents(plan: NarrationPlanV2): VisualIntentV1[] {
       beatIds: ['B005'],
       intent: 'SHOW_DATA',
       strategy: 'mg_data',
-      authenticity: 'not_applicable',
+      authenticity: 'synthetic_allowed',
       objective: '用数据图说明规模。',
       subject: {kind: 'data', label: '规模对比', evidenceIds: []},
       continuationOfVisualIntentId: null,
@@ -360,8 +398,8 @@ async function main(): Promise<void> {
   {
     const artifact = {
       schemaVersion: 'visual-intent-plan@1.0',
-      compilerVersion: '1.0',
-      promptVersion: 'visual-intent-plan@1.0',
+      compilerVersion: '1.1',
+      promptVersion: 'visual-intent-plan@1.1',
       source: {
         narrativeBeatsArtifactId: beatsArtifactA,
         narrativeBeatsContentHash: `sha256:${'a'.repeat(64)}`,
@@ -469,6 +507,19 @@ async function main(): Promise<void> {
     ok(
       !visualIntentProposalSchema.safeParse({intents: validIntents, note: 'x'}).success,
       '[A15] LLM proposal 含额外字段 → 拒绝',
+    );
+    // 1.0 candidate 仍可解析（schema 结构未变；stale 判定在 classify 层）
+    ok(
+      visualIntentPlanArtifactV1Schema.safeParse({
+        ...artifact,
+        compilerVersion: '1.0',
+        promptVersion: 'visual-intent-plan@1.0',
+      }).success,
+      '[A16] 1.0 compiler/prompt version artifact 仍可解析（历史兼容）',
+    );
+    ok(
+      !visualIntentPlanArtifactV1Schema.safeParse({...artifact, compilerVersion: '2.0'}).success,
+      '[A17] 未知 compiler version → 拒绝',
     );
   }
 
@@ -585,7 +636,7 @@ async function main(): Promise<void> {
       '[C6] SHOW_PLACE+archive_video 正例',
     );
     ok(
-      codes(swapV003({intent: 'SHOW_ARCHIVE', strategy: 'archive_video'})).length === 0,
+      codes(swapV003({intent: 'SHOW_ARCHIVE', strategy: 'archive_video', subject: {kind: 'archive', label: null, evidenceIds: []}})).length === 0,
       '[C7] SHOW_ARCHIVE+archive_video 正例',
     );
     ok(
@@ -593,7 +644,7 @@ async function main(): Promise<void> {
       '[C8] SHOW_DOCUMENT+document_frame 正例',
     );
     ok(
-      codes(swapV003({intent: 'SHOW_EVIDENCE', strategy: 'evidence_frame', subject: {kind: 'evidence', label: null, evidenceIds: ['E1']}})).length === 0,
+      codes(swapV003({intent: 'SHOW_EVIDENCE', strategy: 'evidence_frame', subject: {kind: 'evidence', label: null, evidenceIds: []}})).length === 0,
       '[C9] SHOW_EVIDENCE+evidence_frame 正例',
     );
     ok(
@@ -601,9 +652,9 @@ async function main(): Promise<void> {
       '[C10] SHOW_EXAMPLE+real_world_example 正例',
     );
     ok(
-      codes(swapV003({intent: 'SHOW_PROCESS', strategy: 'mg_process', authenticity: 'not_applicable', subject: {kind: 'process', label: null, evidenceIds: []}})).length === 0 &&
-        codes(swapV003({intent: 'SHOW_RELATIONSHIP', strategy: 'mg_relationship', authenticity: 'not_applicable', subject: {kind: 'relationship', label: null, evidenceIds: []}})).length === 0 &&
-        codes(swapV003({intent: 'SHOW_COMPARISON', strategy: 'mg_comparison', authenticity: 'not_applicable', subject: {kind: 'comparison', label: null, evidenceIds: []}})).length === 0,
+      codes(swapV003({intent: 'SHOW_PROCESS', strategy: 'mg_process', authenticity: 'synthetic_allowed', subject: {kind: 'process', label: null, evidenceIds: []}})).length === 0 &&
+        codes(swapV003({intent: 'SHOW_RELATIONSHIP', strategy: 'mg_relationship', authenticity: 'synthetic_allowed', subject: {kind: 'relationship', label: null, evidenceIds: []}})).length === 0 &&
+        codes(swapV003({intent: 'SHOW_COMPARISON', strategy: 'mg_comparison', authenticity: 'synthetic_allowed', subject: {kind: 'comparison', label: null, evidenceIds: []}})).length === 0,
       '[C11] SHOW_PROCESS/RELATIONSHIP/COMPARISON MG 正例',
     );
     ok(
@@ -774,6 +825,116 @@ async function main(): Promise<void> {
     ok(
       validateVisualIntentPlan(validBeats, planA, forbidden).some((i) => i.code === 'FORBIDDEN_FIELD'),
       '[C32] intent 含禁止字段 shotId → FORBIDDEN_FIELD',
+    );
+
+    // C33-C44 1.1：subject.kind / authenticity 全矩阵（V003 单 beat intent 换形）
+    const chapterOneTitle = chapterTitles.get(1) ?? '__none__';
+    const matrixPositives: Array<{label: string; patch: Partial<VisualIntentV1>}> = [
+      {label: 'SHOW_PERSON→person/authentic_preferred', patch: {intent: 'SHOW_PERSON', strategy: 'portrait', authenticity: 'authentic_preferred', subject: {kind: 'person', label: null, evidenceIds: []}}},
+      {label: 'SHOW_PLACE→place/authentic_required', patch: {intent: 'SHOW_PLACE', strategy: 'archive_photo', authenticity: 'authentic_required', subject: {kind: 'place', label: null, evidenceIds: []}}},
+      {label: 'SHOW_ARCHIVE→archive/authentic_required', patch: {intent: 'SHOW_ARCHIVE', strategy: 'archive_video', authenticity: 'authentic_required', subject: {kind: 'archive', label: null, evidenceIds: []}}},
+      {label: 'SHOW_DOCUMENT→document/authentic_required', patch: {intent: 'SHOW_DOCUMENT', strategy: 'document_frame', authenticity: 'authentic_required', subject: {kind: 'document', label: null, evidenceIds: []}}},
+      {label: 'SHOW_EVIDENCE→evidence/authentic_required', patch: {intent: 'SHOW_EVIDENCE', strategy: 'evidence_frame', authenticity: 'authentic_required', subject: {kind: 'evidence', label: null, evidenceIds: []}}},
+      {label: 'SHOW_EXAMPLE→example/synthetic_allowed', patch: {intent: 'SHOW_EXAMPLE', strategy: 'real_world_example', authenticity: 'synthetic_allowed', subject: {kind: 'example', label: null, evidenceIds: []}}},
+      {label: 'SHOW_PROCESS→process/synthetic_allowed', patch: {intent: 'SHOW_PROCESS', strategy: 'mg_process', authenticity: 'synthetic_allowed', subject: {kind: 'process', label: null, evidenceIds: []}}},
+      {label: 'SHOW_RELATIONSHIP→relationship/synthetic_allowed', patch: {intent: 'SHOW_RELATIONSHIP', strategy: 'mg_relationship', authenticity: 'synthetic_allowed', subject: {kind: 'relationship', label: null, evidenceIds: []}}},
+      {label: 'SHOW_COMPARISON→comparison/synthetic_allowed', patch: {intent: 'SHOW_COMPARISON', strategy: 'mg_comparison', authenticity: 'synthetic_allowed', subject: {kind: 'comparison', label: null, evidenceIds: []}}},
+      {label: 'SHOW_DATA→data/synthetic_allowed', patch: {intent: 'SHOW_DATA', strategy: 'mg_data', authenticity: 'synthetic_allowed', subject: {kind: 'data', label: null, evidenceIds: []}}},
+      {
+        label: 'EMPHASIZE_TEXT→text/not_applicable',
+        patch: {
+          intent: 'EMPHASIZE_TEXT',
+          strategy: 'title_card',
+          authenticity: 'not_applicable',
+          subject: {kind: 'text', label: null, evidenceIds: []},
+          displayText: {sourceKind: 'chapter_title', sourceUnitId: null, sourceChapter: 1, text: chapterOneTitle},
+        },
+      },
+      {label: 'CONTINUE_PREVIOUS_VISUAL→none/inherited', patch: {intent: 'CONTINUE_PREVIOUS_VISUAL', strategy: 'continue_previous', authenticity: 'inherited', subject: {kind: 'none', label: null, evidenceIds: []}, continuationOfVisualIntentId: 'V001'}},
+      {label: 'NO_VISUAL_CHANGE→none/inherited', patch: {intent: 'NO_VISUAL_CHANGE', strategy: 'hold', authenticity: 'inherited', subject: {kind: 'none', label: null, evidenceIds: []}, continuationOfVisualIntentId: 'V001'}},
+      {label: 'VISUAL_UNRESOLVED→none/not_applicable', patch: {intent: 'VISUAL_UNRESOLVED', strategy: 'unresolved', authenticity: 'not_applicable', subject: {kind: 'none', label: null, evidenceIds: []}, continuationOfVisualIntentId: null}},
+    ];
+    const matrixFailed = matrixPositives.filter(({patch}) => codes(swapV003(patch)).length > 0);
+    ok(matrixFailed.length === 0, '[C33] 全 intent subject/authenticity 矩阵正例（14 类）', matrixFailed.map((f) => f.label));
+    ok(
+      codes(swapV003({subject: {kind: 'person', label: null, evidenceIds: []}})).includes('SUBJECT_KIND_MISMATCH'),
+      '[C34] SHOW_PLACE subject.kind=person → SUBJECT_KIND_MISMATCH',
+    );
+    ok(
+      codes(swapV003({intent: 'SHOW_DATA', strategy: 'mg_data', authenticity: 'synthetic_allowed', subject: {kind: 'person', label: null, evidenceIds: []}})).includes('SUBJECT_KIND_MISMATCH'),
+      '[C35] SHOW_DATA subject.kind≠data → SUBJECT_KIND_MISMATCH',
+    );
+    ok(
+      codes(swapV004({subject: {kind: 'none', label: null, evidenceIds: []}})).includes('SUBJECT_KIND_MISMATCH'),
+      '[C36] EMPHASIZE_TEXT subject.kind≠text → SUBJECT_KIND_MISMATCH',
+    );
+    const unresolvedBadKind = withUnresolvedV005();
+    unresolvedBadKind[4] = {...unresolvedBadKind[4]!, subject: {kind: 'data', label: null, evidenceIds: []}};
+    unresolvedBadKind[5] = {...unresolvedBadKind[5]!, continuationOfVisualIntentId: 'V004'};
+    ok(
+      codes(unresolvedBadKind).includes('SUBJECT_KIND_MISMATCH'),
+      '[C37] VISUAL_UNRESOLVED subject.kind≠none → SUBJECT_KIND_MISMATCH',
+    );
+    ok(
+      codes(swapV001({authenticity: 'inherited'})).includes('AUTHENTICITY_MISMATCH') &&
+        codes(swapV001({authenticity: 'not_applicable'})).includes('AUTHENTICITY_MISMATCH'),
+      '[C38] SHOW_PERSON authenticity=inherited/not_applicable → AUTHENTICITY_MISMATCH（闭集）',
+    );
+    ok(
+      codes(swapV003({intent: 'SHOW_DATA', strategy: 'mg_data', authenticity: 'authentic_required', subject: {kind: 'data', label: null, evidenceIds: []}})).includes('AUTHENTICITY_MISMATCH') &&
+        codes(swapV003({intent: 'SHOW_DATA', strategy: 'mg_data', authenticity: 'authentic_preferred', subject: {kind: 'data', label: null, evidenceIds: []}})).includes('AUTHENTICITY_MISMATCH'),
+      '[C39] SHOW_DATA authenticity=authentic_required/preferred → AUTHENTICITY_MISMATCH（必须 synthetic_allowed）',
+    );
+    ok(
+      codes(swapV003({intent: 'SHOW_EXAMPLE', strategy: 'real_world_example', authenticity: 'authentic_required', subject: {kind: 'example', label: null, evidenceIds: []}})).includes('AUTHENTICITY_MISMATCH'),
+      '[C40] SHOW_EXAMPLE authenticity=authentic_required → AUTHENTICITY_MISMATCH',
+    );
+    ok(
+      codes(swapV003({intent: 'SHOW_ARCHIVE', strategy: 'archive_photo', authenticity: 'synthetic_allowed', subject: {kind: 'archive', label: null, evidenceIds: []}})).includes('AUTHENTICITY_MISMATCH'),
+      '[C41] SHOW_ARCHIVE authenticity=synthetic_allowed → AUTHENTICITY_MISMATCH',
+    );
+    const holdBadAuth = cloneIntents(validIntents);
+    holdBadAuth[5] = {...holdBadAuth[5]!, authenticity: 'not_applicable'};
+    ok(
+      codes(holdBadAuth).includes('AUTHENTICITY_MISMATCH'),
+      '[C42] NO_VISUAL_CHANGE authenticity≠inherited → AUTHENTICITY_MISMATCH',
+    );
+
+    // C43-C46 1.1：displayText 覆盖范围
+    const n1 = planA.units[0]!;
+    const n1Speech = n1.kind === 'speech' ? n1 : null;
+    ok(
+      n1Speech !== null &&
+        codes(
+          swapV004({
+            displayText: {sourceKind: 'spoken_exact', sourceUnitId: n1.id, sourceChapter: null, text: n1Speech.spokenText},
+          }),
+        ).includes('DISPLAY_TEXT_SOURCE_SCOPE'),
+      '[C43] displayText 引用其他 intent 覆盖的 unit（跨 intent/chapter）→ DISPLAY_TEXT_SOURCE_SCOPE',
+    );
+    ok(
+      codes(
+        swapV004({
+          displayText: {sourceKind: 'chapter_title', sourceUnitId: null, sourceChapter: 1, text: chapterOneTitle},
+        }),
+      ).includes('DISPLAY_TEXT_SOURCE_SCOPE'),
+      '[C44] chapter_title 引用其他 chapter → DISPLAY_TEXT_SOURCE_SCOPE',
+    );
+    ok(
+      codes(
+        swapV004({
+          displayText: {sourceKind: 'spoken_exact', sourceUnitId: n4.id, sourceChapter: 2, text: n4Speech?.spokenText ?? '__none__'},
+        }),
+      ).includes('DISPLAY_TEXT_SOURCE_KIND'),
+      '[C45] spoken_exact 带 sourceChapter → DISPLAY_TEXT_SOURCE_KIND',
+    );
+    ok(
+      codes(
+        swapV004({
+          displayText: {sourceKind: 'chapter_title', sourceUnitId: n4.id, sourceChapter: 2, text: chapterTitles.get(2) ?? '__none__'},
+        }),
+      ).includes('DISPLAY_TEXT_SOURCE_KIND'),
+      '[C46] chapter_title 带 sourceUnitId → DISPLAY_TEXT_SOURCE_KIND',
     );
   }
 
@@ -1097,12 +1258,12 @@ async function main(): Promise<void> {
       '[API6] 有 run 的 candidate legacyRunMetadataUnavailable=false',
     );
 
-    // route 真实新建路径：setVisualIntentProviderForTest 注入 Mock
+    // Worker-side LLM Dispatch：route 为 enqueue-only（Web 零 provider、零 secret），
+    // worker executor 持有凭据执行 build（provider 经 deps 注入，不经 route）。
     const routeProvider = new ScriptableProvider();
     routeProvider.push({text: proposalJson(validIntents)});
-    setVisualIntentProviderForTest(routeProvider);
     let createdArtifactId = '';
-    try {
+    {
       const createRes = await visualPOST(
         new Request('http://test', {
           method: 'POST',
@@ -1110,34 +1271,54 @@ async function main(): Promise<void> {
         }),
         {params: Promise.resolve({id: projectA})},
       );
-      ok(createRes.status === 201, '[API7] 新 requestId POST → 201 新建');
+      ok(createRes.status === 202, '[API7] 新 requestId POST → 202 queued（enqueue-only）');
       const createJson = (await createRes.json()) as {
-        reused: boolean;
-        legacy: boolean;
-        runId: string | null;
-        artifactId: string;
-        intentCount: number;
+        dispatchId: string;
+        requestId: string;
+        status: string;
+        candidateOnly: boolean;
       };
-      createdArtifactId = createJson.artifactId;
       ok(
-        createJson.reused === false && createJson.legacy === false && createJson.runId !== null && createJson.intentCount === 6,
-        '[API8] 201 响应含非空 runId + intentCount（durable run 追溯）',
+        createJson.status === 'queued' &&
+          createJson.requestId === 'req-m73a-api01' &&
+          typeof createJson.dispatchId === 'string' &&
+          createJson.dispatchId.length > 0 &&
+          createJson.candidateOnly === true,
+        '[API8] 202 响应含 dispatchId + status=queued + candidateOnly',
         createJson,
       );
-      ok(routeProvider.requests.length === 1, '[API9] route 新建路径真实调用注入的 provider');
+      ok(routeProvider.requests.length === 0, '[API9] Web POST 零 provider 调用（route 无 secret）');
 
-      // route 级 202：可阻塞 provider + 同 requestId 第二次 POST
-      const routeBlock = new BlockableProvider(proposalJson(validIntents));
-      routeBlock.arm();
-      setVisualIntentProviderForTest(routeBlock);
-      const pending = visualPOST(
+      // worker executor 执行 dispatch → build → artifact + dispatch 终态
+      await runNextDispatch(routeProvider);
+      ok(routeProvider.requests.length === 1, '[API9b] worker executor 真实调用 provider（1 次）');
+      const created = listVisualIntentCandidates(projectA).find(
+        (c) => c.visualIntent?.generation.requestId === 'req-m73a-api01',
+      );
+      ok(
+        created !== undefined && created.visualIntent !== null && created.visualIntent.intents.length === 6,
+        '[API9c] worker 执行后生成 6-intent candidate',
+      );
+      createdArtifactId = created?.artifact.id ?? '';
+      const dj = getDispatchJob(getDb(), createJson.dispatchId);
+      ok(
+        dj !== null &&
+          dj.status === 'succeeded' &&
+          dj.generation_run_id !== null &&
+          dj.result_artifact_id === createdArtifactId,
+        '[API9d] dispatch succeeded + generation_run/result_artifact 关联',
+        dj && {status: dj.status, runId: dj.generation_run_id, artifactId: dj.result_artifact_id},
+      );
+
+      // 同 requestId 双 POST（双击）：enqueue 幂等——同一 dispatch，绝不产生第二个。
+      routeProvider.push({text: proposalJson(validIntents)});
+      const first = await visualPOST(
         new Request('http://test', {
           method: 'POST',
           body: JSON.stringify({narrativeBeatsArtifactId: beatsArtifactA, requestId: 'req-m73a-api02'}),
         }),
         {params: Promise.resolve({id: projectA})},
       );
-      await new Promise((resolve) => setTimeout(resolve, 50));
       const dup = await visualPOST(
         new Request('http://test', {
           method: 'POST',
@@ -1145,13 +1326,13 @@ async function main(): Promise<void> {
         }),
         {params: Promise.resolve({id: projectA})},
       );
-      ok(dup.status === 202, '[API10] 同 requestId 进行中 POST → 202 in_progress');
-      routeBlock.release();
-      const done = await pending;
-      ok(done.status === 201, '[API11] barrier 放行后首个 POST → 201');
-      ok(routeBlock.requests.length === 1, '[API12] route 并发全程 provider 恰好 1 次调用');
-    } finally {
-      setVisualIntentProviderForTest(null);
+      ok(first.status === 202 && dup.status === 202, '[API10] 同 requestId 双 POST → 均 202 queued');
+      const firstJson = (await first.json()) as {dispatchId: string};
+      const dupJson = (await dup.json()) as {dispatchId: string};
+      ok(firstJson.dispatchId === dupJson.dispatchId, '[API11] 双击幂等：同一 dispatchId');
+      ok(dispatchCount(projectA, 'req-m73a-api02') === 1, '[API12] 同 requestId 只产生一个 dispatch');
+      await runNextDispatch(routeProvider);
+      ok(routeProvider.requests.length === 2, '[API12b] 两个 requestId 各 1 次 provider 调用（共 2 次）');
     }
 
     // 同 requestId POST → 200 reused（无 provider 注入也不触达 LLM）
@@ -1217,8 +1398,8 @@ async function main(): Promise<void> {
     ok(
       detailJson.status === 'eligible_candidate' &&
         detailJson.intentCount === 6 &&
-        detailJson.coverage.beatTotal === 6 &&
-        detailJson.coverage.coveredBeatIds.length === 6 &&
+        (detailJson.coverage?.beatTotal ?? -1) === 6 &&
+        (detailJson.coverage?.coveredBeatIds.length ?? -1) === 6 &&
         detailJson.unresolvedCount === 0 &&
         detailJson.titleCardCount === 1 &&
         detailJson.continuationCount === 2,
@@ -1226,13 +1407,13 @@ async function main(): Promise<void> {
       detailJson.coverage,
     );
     ok(
-      detailJson.distributions.intent['SHOW_PERSON'] === 1 &&
-        detailJson.distributions.intent['EMPHASIZE_TEXT'] === 1 &&
-        detailJson.distributions.strategy['title_card'] === 1,
+      (detailJson.distributions?.intent['SHOW_PERSON'] ?? -1) === 1 &&
+        (detailJson.distributions?.intent['EMPHASIZE_TEXT'] ?? -1) === 1 &&
+        (detailJson.distributions?.strategy['title_card'] ?? -1) === 1,
       '[API21] detail intent/strategy 分布正确',
     );
     ok(
-      detailJson.intents[0]?.beatRange.first === 'B001' && detailJson.intents[3]?.displayText !== null,
+      (detailJson.intents?.[0]?.beatRange.first ?? '') === 'B001' && detailJson.intents?.[3]?.displayText !== null,
       '[API22] detail intent 含 beatRange + displayText 来源',
     );
     const missingDetail = await visualDetailGET(new Request('http://test'), {
@@ -1378,6 +1559,236 @@ async function main(): Promise<void> {
     ok(getVisualIntentArtifact(projectA, visualArtifactId) !== null, '[F10] exact getter 可读');
     ok(getVisualIntentArtifact(projectZ, visualArtifactId) === null, '[F11] 跨项目 → null');
     ok(getVisualIntentArtifact(projectA, beatsArtifactA) === null, '[F12] kind 不符 → null');
+  }
+
+  // ============ EV：subject.evidenceIds provenance（1.1） ============
+  {
+    /** strict DSL + HTML 注释证据：N001←E01/E02，N002←E03，N003/N004 无证据。 */
+    const EVIDENCE_MD = `# Script V2
+
+## 第 1 章 开场（00:00–01:00）
+
+第一句。<!-- E01 E02 -->
+
+第二句。
+
+<!-- E03 -->
+
+## 第 2 章 展开（01:00–02:00）
+
+第三句。
+
+第四句。
+`;
+    const projectE = newProjectWithScript(EVIDENCE_MD, 'script-v2@2.0');
+    const planE = buildNarrationPlanV2(projectE).plan;
+    const beatsE = makeValidBeats(planE);
+    const speechE = planE.units.filter((u) => u.kind === 'speech');
+    const evUnit1 = speechE.find((u) => u.kind === 'speech' && u.evidenceIds.includes('E01'));
+    const evUnit2 = speechE.find((u) => u.kind === 'speech' && u.evidenceIds.includes('E03'));
+    ok(
+      evUnit1 !== undefined && evUnit1.kind === 'speech' && evUnit1.evidenceIds.join(',') === 'E01,E02' &&
+        evUnit2 !== undefined && evUnit2.kind === 'speech' && evUnit2.evidenceIds.join(',') === 'E03',
+      '[EV1] fixture：N001←E01/E02、N002←E03',
+      speechE.map((u) => (u.kind === 'speech' ? u.evidenceIds : [])),
+    );
+    const n3E = planE.units[2]!;
+    const n3ESpeech = n3E.kind === 'speech' ? n3E : null;
+    /** V001 SHOW_EVIDENCE（E01 子集）/ V002 SHOW_DOCUMENT / V003 title card / V004 hold。 */
+    const intentsE: VisualIntentV1[] = [
+      {
+        visualIntentId: 'V001',
+        chapter: 1,
+        beatIds: ['B001'],
+        intent: 'SHOW_EVIDENCE',
+        strategy: 'evidence_frame',
+        authenticity: 'authentic_required',
+        objective: '展示书证原件。',
+        subject: {kind: 'evidence', label: '关键证据', evidenceIds: ['E01']},
+        continuationOfVisualIntentId: null,
+        displayText: null,
+      },
+      {
+        visualIntentId: 'V002',
+        chapter: 1,
+        beatIds: ['B002'],
+        intent: 'SHOW_DOCUMENT',
+        strategy: 'document_frame',
+        authenticity: 'authentic_required',
+        objective: '展示档案页。',
+        subject: {kind: 'document', label: null, evidenceIds: []},
+        continuationOfVisualIntentId: null,
+        displayText: null,
+      },
+      {
+        visualIntentId: 'V003',
+        chapter: 2,
+        beatIds: ['B003'],
+        intent: 'EMPHASIZE_TEXT',
+        strategy: 'title_card',
+        authenticity: 'not_applicable',
+        objective: '关键句上屏。',
+        subject: {kind: 'text', label: null, evidenceIds: []},
+        continuationOfVisualIntentId: null,
+        displayText: {
+          sourceKind: 'spoken_exact',
+          sourceUnitId: n3E.id,
+          sourceChapter: null,
+          text: n3ESpeech?.spokenText ?? '__none__',
+        },
+      },
+      {
+        visualIntentId: 'V004',
+        chapter: 2,
+        beatIds: ['B004'],
+        intent: 'NO_VISUAL_CHANGE',
+        strategy: 'hold',
+        authenticity: 'inherited',
+        objective: '保持字卡。',
+        subject: {kind: 'none', label: null, evidenceIds: []},
+        continuationOfVisualIntentId: 'V003',
+        displayText: null,
+      },
+    ];
+    const codesE = (intents: VisualIntentV1[]): string[] =>
+      validateVisualIntentPlan(beatsE, planE, intents).map((i) => i.code);
+    const swapE = (index: number, patch: Partial<VisualIntentV1>): VisualIntentV1[] => {
+      const intents = cloneIntents(intentsE);
+      intents[index] = {...intents[index]!, ...patch};
+      return intents;
+    };
+    ok(codesE(intentsE).length === 0, '[EV2] 合法 evidenceIds 子集（E01∈N001）→ 0 issues', codesE(intentsE));
+    ok(
+      codesE(swapE(0, {subject: {kind: 'evidence', label: null, evidenceIds: ['E01', 'E02']}})).length === 0,
+      '[EV3] 完整子集 E01+E02 → 0 issues',
+    );
+    ok(
+      codesE(swapE(0, {subject: {kind: 'evidence', label: null, evidenceIds: ['E01', 'E01']}})).includes('EVIDENCE_DUPLICATE'),
+      '[EV4] evidenceIds 重复 → EVIDENCE_DUPLICATE',
+    );
+    ok(
+      codesE(swapE(0, {subject: {kind: 'evidence', label: null, evidenceIds: ['E99']}})).includes('EVIDENCE_UNKNOWN'),
+      '[EV5] 凭空生成的 ID（plan 中不存在）→ EVIDENCE_UNKNOWN',
+    );
+    ok(
+      codesE(swapE(0, {subject: {kind: 'evidence', label: null, evidenceIds: ['E03']}})).includes('EVIDENCE_OUT_OF_SCOPE'),
+      '[EV6] 跨 intent 借用（E03 属于 V002 覆盖范围）→ EVIDENCE_OUT_OF_SCOPE',
+    );
+    ok(
+      codesE(swapE(2, {subject: {kind: 'text', label: null, evidenceIds: ['E01']}})).includes('EVIDENCE_FORBIDDEN'),
+      '[EV7] EMPHASIZE_TEXT 携带 evidenceIds → EVIDENCE_FORBIDDEN',
+    );
+    ok(
+      codesE(swapE(3, {subject: {kind: 'none', label: null, evidenceIds: ['E01']}})).includes('EVIDENCE_FORBIDDEN'),
+      '[EV8] NO_VISUAL_CHANGE 携带 evidenceIds → EVIDENCE_FORBIDDEN',
+    );
+    ok(
+      codesE(
+        swapE(1, {
+          intent: 'VISUAL_UNRESOLVED',
+          strategy: 'unresolved',
+          authenticity: 'not_applicable',
+          subject: {kind: 'none', label: null, evidenceIds: ['E03']},
+          continuationOfVisualIntentId: null,
+        }),
+      ).includes('EVIDENCE_FORBIDDEN'),
+      '[EV9] VISUAL_UNRESOLVED 携带 evidenceIds → EVIDENCE_FORBIDDEN',
+    );
+    const contBadEvidence = cloneIntents(intentsE);
+    contBadEvidence[3] = {
+      ...contBadEvidence[3]!,
+      intent: 'CONTINUE_PREVIOUS_VISUAL',
+      strategy: 'continue_previous',
+      subject: {kind: 'none', label: null, evidenceIds: ['E01']},
+    };
+    ok(
+      codesE(contBadEvidence).includes('EVIDENCE_FORBIDDEN'),
+      '[EV10] CONTINUE_PREVIOUS_VISUAL 携带 evidenceIds → EVIDENCE_FORBIDDEN',
+    );
+  }
+
+  // ============ H：版本处理 + Freud 形态只读 revalidation（1.1） ============
+  {
+    const ref = getVisualIntentArtifact(projectA, visualArtifactId)!;
+    const insertArtifact = (version: number, content: unknown): string => {
+      const id = crypto.randomUUID();
+      getDb()
+        .prepare(
+          `INSERT INTO artifacts (id, project_id, kind, version, content_json, file_path, created_at)
+           VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+        )
+        .run(id, projectA, VISUAL_INTENT_KIND, version, JSON.stringify(content), new Date().toISOString());
+      return id;
+    };
+
+    // H1-H2：1.0 candidate → stale（version mismatch）；1.1 candidate → eligible
+    const legacy10Id = insertArtifact(100, {
+      ...ref.visualIntent,
+      compilerVersion: '1.0',
+      promptVersion: 'visual-intent-plan@1.0',
+    });
+    const legacy10Row = getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(legacy10Id) as never;
+    const legacy10Classified = classifyVisualIntentCandidate(projectA, legacy10Row);
+    ok(
+      legacy10Classified.status === 'stale' && (legacy10Classified.statusReason ?? '').includes('version'),
+      '[H1] 1.0 candidate classify → stale（version mismatch）',
+      legacy10Classified,
+    );
+    const current11Row = getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(visualArtifactId) as never;
+    ok(
+      classifyVisualIntentCandidate(projectA, current11Row).status === 'eligible_candidate',
+      '[H2] 1.1 candidate classify → eligible_candidate',
+    );
+    getDb().prepare('DELETE FROM artifacts WHERE id = ?').run(legacy10Id);
+
+    // H3-H5：旧 Freud 形态 fixture（1.0 版本 + 1.1 语义违规）只读 revalidation
+    const n1 = planA.units[0]!;
+    const n1Speech = n1.kind === 'speech' ? n1 : null;
+    const freudIntents = cloneIntents(validIntents);
+    // SHOW_PERSON subject.kind≠person（1.0 时代漏校验）
+    freudIntents[0] = {...freudIntents[0]!, subject: {kind: 'archive', label: '弗洛伊德肖像', evidenceIds: []}};
+    // 凭空生成的 evidenceIds
+    freudIntents[2] = {...freudIntents[2]!, subject: {kind: 'place', label: '故居', evidenceIds: ['E99']}};
+    // SHOW_DATA authenticity=authentic_required（闭集外）
+    freudIntents[4] = {...freudIntents[4]!, authenticity: 'authentic_required'};
+    // displayText 引用其他 intent 覆盖范围的 unit
+    freudIntents[3] = {
+      ...freudIntents[3]!,
+      displayText: {
+        sourceKind: 'spoken_exact',
+        sourceUnitId: n1.id,
+        sourceChapter: null,
+        text: n1Speech?.spokenText ?? '__none__',
+      },
+    };
+    const freudId = insertArtifact(101, {
+      ...ref.visualIntent,
+      compilerVersion: '1.0',
+      promptVersion: 'visual-intent-plan@1.0',
+      intents: freudIntents,
+    });
+    const freudRowBefore = getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(freudId) as {content_json: string};
+    const freudClassified = classifyVisualIntentCandidate(projectA, freudRowBefore as never);
+    ok(
+      freudClassified.status === 'stale' && (freudClassified.statusReason ?? '').includes('version'),
+      '[H3] Freud 形态 1.0 candidate → stale（version mismatch，不原地修 artifact）',
+      freudClassified,
+    );
+    const freudIssues = validateVisualIntentPlan(validBeats, planA, freudIntents).map((i) => i.code);
+    ok(
+      freudIssues.includes('SUBJECT_KIND_MISMATCH') &&
+        freudIssues.includes('EVIDENCE_UNKNOWN') &&
+        freudIssues.includes('AUTHENTICITY_MISMATCH') &&
+        freudIssues.includes('DISPLAY_TEXT_SOURCE_SCOPE'),
+      '[H4] Freud 形态内容经 1.1 validator 列出全部 issues（矩阵/evidence/范围）',
+      freudIssues,
+    );
+    const freudRowAfter = getDb().prepare('SELECT content_json FROM artifacts WHERE id = ?').get(freudId) as {content_json: string};
+    ok(
+      freudRowAfter.content_json === freudRowBefore.content_json,
+      '[H5] revalidation 全程只读：artifact content_json 未变',
+    );
+    getDb().prepare('DELETE FROM artifacts WHERE id = ?').run(freudId);
   }
 
   // ============ G：回归——runs 通用化后 m7_narrative_beats 路径不受影响 ============

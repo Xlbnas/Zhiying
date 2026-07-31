@@ -297,6 +297,31 @@ CREATE TABLE IF NOT EXISTS generation_attempts (
   finished_at TEXT,
   UNIQUE(run_id, attempt_number)
 );
+-- ============ Worker-side LLM dispatch（通用排队信封） ============
+-- Production 安全边界：DEEPSEEK_API_KEY/LLM_PROVIDER 只注入 worker 容器，
+-- Web 进程不持有 secret——POST 只做 validation + idempotency + enqueue，
+-- Worker 原子 claim 后执行 build。durable single-flight 仍由 generation_runs
+-- 兜底：dispatch 只是信封，重复执行不会重复调用 provider。
+CREATE TABLE IF NOT EXISTS generation_dispatch_jobs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  stage TEXT NOT NULL,                -- 'm7_narrative_beats' | 'm7_visual_intent'
+  request_id TEXT NOT NULL,
+  source_artifact_id TEXT NOT NULL,   -- exact 输入 artifact（禁止 latest 解析）
+  status TEXT NOT NULL
+    CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+  owner_token TEXT,                   -- claim 持有者；完成/失败转移时校验
+  lease_expires_at TEXT,              -- running 租约（崩溃检测；不自动重调 provider）
+  generation_run_id TEXT,
+  result_artifact_id TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, stage, request_id)
+);
 `;
 
 // M2-A Hardening：版本号数据库级唯一约束（幂等）。

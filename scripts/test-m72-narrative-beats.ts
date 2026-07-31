@@ -32,7 +32,6 @@ import {
   getNarrativeBeatsArtifact,
   listNarrativeBeatsCandidates,
   NarrativeBeatsError,
-  setNarrativeBeatsProviderForTest,
   type BuildNarrativeBeatsResult,
 } from '../src/lib/narrative-beats/plan';
 import {
@@ -58,6 +57,26 @@ import {
 } from '../src/lib/pipeline-version';
 import {GET as beatsGET, POST as beatsPOST} from '../src/app/api/projects/[id]/narrative-beats/route';
 import {GET as beatsDetailGET} from '../src/app/api/projects/[id]/narrative-beats/[artifactId]/route';
+import {getDispatchJob} from '../src/lib/llm-generation/dispatch';
+import {claimNextAnyJob} from '../src/lib/scheduler';
+import {runDispatchJob} from '../src/worker/dispatch-executor';
+
+// 上次中断运行可能留下临时 DB（claimNextAnyJob 全局 FIFO 会捡到旧 dispatch）——
+// 启动即清空（getDb 为惰性单例，此处尚未打开）。
+fs.rmSync(path.resolve(process.cwd(), 'data', 'test-m72-beats'), {recursive: true, force: true});
+
+/** Worker-side dispatch：claim 下一个 dispatch 并以注入 provider 执行（模拟 worker 主循环一步）。 */
+async function runNextDispatch(provider: LLMProvider): Promise<void> {
+  const claimed = claimNextAnyJob('worker-test-m72');
+  if (!claimed || claimed.type !== 'dispatch') {
+    throw new Error(`expected queued dispatch job, got ${claimed?.type ?? 'null'}`);
+  }
+  await runDispatchJob(
+    claimed.job,
+    {isShuttingDown: () => false, log: () => {}},
+    {provider, heartbeatMs: 60_000},
+  );
+}
 
 let pass = 0;
 let fail = 0;
@@ -1099,12 +1118,11 @@ async function main(): Promise<void> {
     );
     ok(badBuild.status === 422 || badBuild.status === 400, '[API5] 缺 artifact ID → 4xx（不允许空 artifact ID）');
 
-    // M7.2.1：route 真实新建路径——经 setNarrativeBeatsProviderForTest 注入 Mock
-    // （route 不传 provider；用例后恢复 null）。
+    // Worker-side LLM Dispatch：route 为 enqueue-only（Web 零 provider、零 secret），
+    // worker executor 持有凭据执行 build（provider 经 deps 注入，不经 route）。
     const routeProvider = new ScriptableProvider();
     routeProvider.push({text: proposalJson(validBeats)});
-    setNarrativeBeatsProviderForTest(routeProvider);
-    try {
+    {
       const createRes = await beatsPOST(
         new Request('http://test', {
           method: 'POST',
@@ -1112,21 +1130,39 @@ async function main(): Promise<void> {
         }),
         {params: Promise.resolve({id: projectA})},
       );
-      ok(createRes.status === 201, '[API5b] 新 requestId POST → 201 新建');
+      ok(createRes.status === 202, '[API5b] 新 requestId POST → 202 queued（enqueue-only）');
       const createJson = (await createRes.json()) as {
-        reused: boolean;
-        legacy: boolean;
-        runId: string | null;
-        artifactId: string;
+        dispatchId: string;
+        requestId: string;
+        status: string;
+        candidateOnly: boolean;
       };
       ok(
-        createJson.reused === false && createJson.legacy === false && createJson.runId !== null,
-        '[API5c] 201 响应含非空 runId（durable run 追溯）',
+        createJson.status === 'queued' &&
+          createJson.requestId === 'req-API-new1' &&
+          createJson.dispatchId.length > 0 &&
+          createJson.candidateOnly === true,
+        '[API5c] 202 响应含 dispatchId + status=queued + candidateOnly',
         createJson,
       );
-      ok(routeProvider.requests.length === 1, '[API5d] route 新建路径真实调用注入的 provider');
-    } finally {
-      setNarrativeBeatsProviderForTest(null);
+      ok(routeProvider.requests.length === 0, '[API5d] Web POST 零 provider 调用（route 无 secret）');
+
+      // worker executor 执行 dispatch → build → artifact + dispatch 终态关联
+      await runNextDispatch(routeProvider);
+      ok(routeProvider.requests.length === 1, '[API5e] worker executor 真实调用 provider（1 次）');
+      const newRun = runRow(projectA, 'req-API-new1');
+      ok(
+        newRun !== undefined && newRun.status === 'succeeded' && newRun.result_artifact_id !== null,
+        '[API5f] worker 执行后 run succeeded + result artifact（durable 追溯）',
+      );
+      const newDispatch = getDispatchJob(getDb(), createJson.dispatchId);
+      ok(
+        newDispatch !== null &&
+          newDispatch.status === 'succeeded' &&
+          newDispatch.generation_run_id === newRun!.id &&
+          newDispatch.result_artifact_id === newRun!.result_artifact_id,
+        '[API5g] dispatch succeeded + generation_run/result_artifact 关联',
+      );
     }
 
     const shortId = await beatsPOST(
@@ -1136,7 +1172,7 @@ async function main(): Promise<void> {
       }),
       {params: Promise.resolve({id: projectA})},
     );
-    ok(shortId.status === 422, '[API5e] 过短 requestId → 422 REQUEST_ID_INVALID');
+    ok(shortId.status === 422, '[API5h] 过短 requestId → 422 REQUEST_ID_INVALID');
 
     // 同 requestId POST → reused（不触达 LLM，无需注入 provider）。
     const rebuildRes = await beatsPOST(

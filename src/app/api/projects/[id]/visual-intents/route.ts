@@ -1,21 +1,40 @@
 /**
  * GET  /api/projects/[id]/visual-intents — Visual Intent candidate 列表 + source 建议（M7.3A）
- * POST /api/projects/[id]/visual-intents — 构建/复用 candidate
+ *      + dispatch jobs 状态面（UI 轮询）
+ * POST /api/projects/[id]/visual-intents — enqueue generation dispatch（Worker-side LLM Dispatch）
  *      body: { narrativeBeatsArtifactId, requestId }
  *
  * 边界：candidate only——不写 current/lock，不切 pipelineVersion，不触发下游。
  * build 必须显式传 exact narrativeBeatsArtifactId（禁止 latest/current 解析）；
  * GET 中的 latestEligibleBeatsSuggestionArtifactId 仅供 UI 人工选择建议。
+ *
+ * Production 安全边界：Web 进程不持有 LLM secret（DEEPSEEK_API_KEY/LLM_PROVIDER
+ * 只注入 worker 容器）——本 route 绝不调用 getProvider/build，只做 validation +
+ * exact source precheck + 幂等复用查询 + enqueue + 状态查询；Worker 持有凭据
+ * 执行 build（durable single-flight 由 generation_runs 兜底）。
+ *
+ * POST 语义：
+ * - artifact 内容 requestId 命中（legacy 复用）→ 200 {reused:true, status:'succeeded'}；
+ * - generation_run succeeded → 200 reused；running（租约有效）→ 202 {status:'running'}；
+ *   failed/indeterminate → 409 {status, errorCode}；
+ * - 否则 enqueue dispatch → 202 {dispatchId, requestId, status:'queued', candidateOnly:true}。
  */
 import {z, ZodError} from 'zod';
 import {
-  buildVisualIntentPlan,
+  findVisualIntentByRequestId,
   getVisualIntentArtifact,
   listVisualIntentCandidates,
+  precheckVisualIntentSource,
   VisualIntentError,
 } from '@/lib/visual-intent/plan';
 import {VISUAL_INTENT_USAGE_STAGE} from '@/lib/visual-intent/generate';
-import {listGenerationRunSummaries} from '@/lib/llm-generation/runs';
+import {enqueueGenerationDispatch, listDispatchJobs} from '@/lib/llm-generation/dispatch';
+import {
+  findGenerationRun,
+  GENERATION_IN_PROGRESS_RETRY_AFTER_MS,
+  listGenerationRunSummaries,
+  RequestIdConflictError,
+} from '@/lib/llm-generation/runs';
 import {listNarrativeBeatsCandidates} from '@/lib/narrative-beats/plan';
 import {getDb} from '@/lib/db';
 import {getM7PipelineSnapshotId, getPipelineVersion} from '@/lib/pipeline-version';
@@ -33,6 +52,9 @@ const buildBodySchema = z
 function visualIntentErrorResponse(err: unknown): Response {
   if (err instanceof ZodError) {
     return jsonError(422, 'invalid_request', {message: err.message});
+  }
+  if (err instanceof RequestIdConflictError) {
+    return jsonError(409, 'REQUEST_ID_CONFLICT', {message: err.message});
   }
   if (err instanceof VisualIntentError) {
     const status =
@@ -109,6 +131,7 @@ export async function GET(
         c.visualIntent != null && !runRequestIds.has(c.visualIntent.generation.requestId),
     })),
     runs,
+    dispatchJobs: listDispatchJobs(getDb(), id, VISUAL_INTENT_USAGE_STAGE),
   });
 }
 
@@ -129,15 +152,89 @@ export async function POST(
   }
   try {
     const input = buildBodySchema.parse(body);
-    const result = await buildVisualIntentPlan({
+    // exact source 前置检查（与 worker build 同一 precheck；fail-closed）
+    const {requestId} = precheckVisualIntentSource({
       projectId: id,
       narrativeBeatsArtifactId: input.narrativeBeatsArtifactId,
       requestId: input.requestId,
     });
-    if (result.kind === 'in_progress') {
-      // 同 requestId 的 run 正在运行——本请求未调用 provider，零成本。
+
+    // legacy/幂等复用：artifact 内容 requestId 命中 → 零 dispatch、零 run、零 provider。
+    const existing = findVisualIntentByRequestId(id, requestId);
+    if (existing) {
+      if (existing.content.source.narrativeBeatsArtifactId !== input.narrativeBeatsArtifactId) {
+        throw new VisualIntentError(
+          'REQUEST_ID_CONFLICT',
+          `requestId ${requestId} 已用于 source ${existing.content.source.narrativeBeatsArtifactId}，不得复用于其他 source`,
+        );
+      }
+      const run = findGenerationRun(getDb(), id, VISUAL_INTENT_USAGE_STAGE, requestId);
       return Response.json(
-        {runId: result.runId, status: 'running', retryAfterMs: result.retryAfterMs, candidateOnly: true},
+        {
+          artifactId: existing.row.id,
+          artifactVersion: existing.row.version,
+          reused: true,
+          legacy: !run,
+          runId: run?.id ?? null,
+          status: 'succeeded',
+          candidateOnly: true,
+          pipelineVersion: getPipelineVersion(id),
+          intentCount: existing.content.intents.length,
+          generation: existing.content.generation,
+          intents: existing.content.intents,
+        },
+        {status: 200},
+      );
+    }
+
+    const result = enqueueGenerationDispatch(getDb(), {
+      projectId: id,
+      stage: VISUAL_INTENT_USAGE_STAGE,
+      requestId,
+      sourceArtifactId: input.narrativeBeatsArtifactId,
+    });
+    if (result.kind === 'reused') {
+      // generation_run succeeded：复用 result artifact（不可读 → fail-closed 409，不重新生成）。
+      const ref = result.resultArtifactId ? getVisualIntentArtifact(id, result.resultArtifactId) : null;
+      if (!ref) {
+        return Response.json(
+          {
+            runId: result.runId,
+            status: 'failed',
+            errorCode: 'RESULT_ARTIFACT_MISSING',
+            message: `run ${result.runId} 已 succeeded 但 result artifact ${result.resultArtifactId ?? '(null)'} 不可读`,
+            candidateOnly: true,
+          },
+          {status: 409},
+        );
+      }
+      return Response.json(
+        {
+          artifactId: ref.artifact.id,
+          artifactVersion: ref.artifact.version,
+          reused: true,
+          legacy: false,
+          runId: result.runId,
+          status: 'succeeded',
+          candidateOnly: true,
+          pipelineVersion: getPipelineVersion(id),
+          intentCount: ref.visualIntent.intents.length,
+          generation: ref.visualIntent.generation,
+          intents: ref.visualIntent.intents,
+        },
+        {status: 200},
+      );
+    }
+    if (result.kind === 'running') {
+      // 同 requestId 的 run 正在运行（worker 持有 claim）——本请求零成本。
+      return Response.json(
+        {
+          dispatchId: result.dispatchId,
+          runId: result.runId,
+          status: 'running',
+          retryAfterMs: GENERATION_IN_PROGRESS_RETRY_AFTER_MS,
+          candidateOnly: true,
+        },
         {status: 202},
       );
     }
@@ -154,21 +251,15 @@ export async function POST(
         {status: 409},
       );
     }
-    const ref = getVisualIntentArtifact(id, result.artifact.id);
+    // queued：Worker 持有凭据执行 build；Web 全程零 secret、零 provider。
     return Response.json(
       {
-        artifactId: result.artifact.id,
-        artifactVersion: result.artifact.version,
-        reused: result.reused,
-        legacy: result.legacy,
-        runId: result.runId,
+        dispatchId: result.dispatchId,
+        requestId,
+        status: 'queued',
         candidateOnly: true,
-        pipelineVersion: getPipelineVersion(id),
-        intentCount: result.visualIntent.intents.length,
-        generation: result.visualIntent.generation,
-        intents: ref?.visualIntent.intents ?? [],
       },
-      {status: result.reused ? 200 : 201},
+      {status: 202},
     );
   } catch (err) {
     return visualIntentErrorResponse(err);

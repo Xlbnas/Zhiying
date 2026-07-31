@@ -56,7 +56,7 @@ export class NarrativeBeatsError extends Error {
   }
 }
 
-// ── provider 解析（route 真实新建路径可测；production 无后门） ──
+// ── provider 解析（worker executor/library 测试路径可注入；production 无后门） ──
 
 let testProviderOverride: LLMProvider | null = null;
 
@@ -191,13 +191,16 @@ export function getNarrativeBeatsArtifact(
 
 // ── build ──
 
-interface BeatsRowWithContent {
+export interface BeatsRowWithContent {
   row: NarrativeBeatsArtifactRow;
   content: NarrativeBeatsArtifactV1;
 }
 
 /** 幂等查找：同 requestId 的已有 candidate（任何 version）。 */
-function findByRequestId(projectId: string, requestId: string): BeatsRowWithContent | null {
+export function findNarrativeBeatsByRequestId(
+  projectId: string,
+  requestId: string,
+): BeatsRowWithContent | null {
   for (const row of listBeatsRows(projectId)) {
     const content = parseBeats(row);
     if (content && content.generation.requestId === requestId) {
@@ -205,6 +208,53 @@ function findByRequestId(projectId: string, requestId: string): BeatsRowWithCont
     }
   }
   return null;
+}
+
+/**
+ * exact source 前置检查（fail-closed，throw NarrativeBeatsError）：
+ * requestId 契约 → 项目存在 → exact source artifact 存在且属于本项目 →
+ * kind/schema 合法 → candidate status=eligible_candidate。
+ * Web route（enqueue 前）与 worker build 共用——发生在 run claim / dispatch
+ * 入队之前，不创建 run、不调用 provider。
+ */
+export function precheckNarrativeBeatsSource(input: {
+  projectId: string;
+  narrationPlanV2ArtifactId: string;
+  requestId: string;
+}): {requestId: string; sourceRef: NonNullable<ReturnType<typeof getNarrationPlanV2Artifact>>} {
+  const db: Db = getDb();
+  if (typeof input.requestId !== 'string' || input.requestId.trim().length === 0) {
+    throw new NarrativeBeatsError('REQUEST_ID_REQUIRED', 'requestId 必须为非空字符串（幂等键）');
+  }
+  const requestId = canonicalizeRequestId(input.requestId);
+  if (!requestId) {
+    throw new NarrativeBeatsError(
+      'REQUEST_ID_INVALID',
+      'requestId 非法：trim 后须为 8–128 字符，仅允许 [A-Za-z0-9._:-]（拒绝空白/换行/控制字符/超长）',
+    );
+  }
+  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(input.projectId) as
+    | {id: string}
+    | undefined;
+  if (!project) {
+    throw new NarrativeBeatsError('PROJECT_NOT_FOUND', `项目不存在: ${input.projectId}`);
+  }
+
+  const sourceRef = getNarrationPlanV2Artifact(input.projectId, input.narrationPlanV2ArtifactId);
+  if (!sourceRef) {
+    throw new NarrativeBeatsError(
+      'NARRATION_PLAN_NOT_FOUND',
+      `narration plan v2 artifact ${input.narrationPlanV2ArtifactId} 不存在/跨项目/契约非法`,
+    );
+  }
+  const sourceStatus = classifyNarrationPlanV2Candidate(input.projectId, sourceRef.artifact);
+  if (sourceStatus.status !== 'eligible_candidate') {
+    throw new NarrativeBeatsError(
+      'NARRATION_PLAN_NOT_ELIGIBLE',
+      `narration plan v2 状态=${sourceStatus.status}（${sourceStatus.statusReason ?? ''}）——只有 eligible_candidate 才能构建 beats`,
+    );
+  }
+  return {requestId, sourceRef};
 }
 
 /**
@@ -262,41 +312,11 @@ export async function buildNarrativeBeats(input: {
   signal?: AbortSignal;
 }): Promise<BuildNarrativeBeatsResult> {
   const db: Db = getDb();
-  if (typeof input.requestId !== 'string' || input.requestId.trim().length === 0) {
-    throw new NarrativeBeatsError('REQUEST_ID_REQUIRED', 'requestId 必须为非空字符串（幂等键）');
-  }
-  const requestId = canonicalizeRequestId(input.requestId);
-  if (!requestId) {
-    throw new NarrativeBeatsError(
-      'REQUEST_ID_INVALID',
-      'requestId 非法：trim 后须为 8–128 字符，仅允许 [A-Za-z0-9._:-]（拒绝空白/换行/控制字符/超长）',
-    );
-  }
-  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(input.projectId) as
-    | {id: string}
-    | undefined;
-  if (!project) {
-    throw new NarrativeBeatsError('PROJECT_NOT_FOUND', `项目不存在: ${input.projectId}`);
-  }
-
-  const sourceRef = getNarrationPlanV2Artifact(input.projectId, input.narrationPlanV2ArtifactId);
-  if (!sourceRef) {
-    throw new NarrativeBeatsError(
-      'NARRATION_PLAN_NOT_FOUND',
-      `narration plan v2 artifact ${input.narrationPlanV2ArtifactId} 不存在/跨项目/契约非法`,
-    );
-  }
-  const sourceStatus = classifyNarrationPlanV2Candidate(input.projectId, sourceRef.artifact);
-  if (sourceStatus.status !== 'eligible_candidate') {
-    throw new NarrativeBeatsError(
-      'NARRATION_PLAN_NOT_ELIGIBLE',
-      `narration plan v2 状态=${sourceStatus.status}（${sourceStatus.statusReason ?? ''}）——只有 eligible_candidate 才能构建 beats`,
-    );
-  }
+  const {requestId, sourceRef} = precheckNarrativeBeatsSource(input);
 
   // legacy/幂等复用：artifact 内容 requestId 命中 → 零 LLM 成本、零新行。
   // 覆盖 M7.2.1 之前的 candidate（无 run row；不伪造 journal，标 legacy）。
-  const existing = findByRequestId(input.projectId, requestId);
+  const existing = findNarrativeBeatsByRequestId(input.projectId, requestId);
   if (existing) {
     if (existing.content.source.narrationPlanV2ArtifactId !== input.narrationPlanV2ArtifactId) {
       throw new NarrativeBeatsError(

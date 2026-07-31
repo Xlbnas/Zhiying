@@ -10,7 +10,8 @@
  * - 租约过期 → indeterminate（孤儿 attempt 一并转移，不自动重调 provider）；
  * - attempt journal（repair 成功 / 三次仍失败）：状态机、response 原文/hash、
  *   validation issues、usage_record_id 精确关联、request 投影无 secret；
- * - API route 真实路径（setNarrativeBeatsProviderForTest 注入）：201/200/409/422；
+ * - API route 真实路径（Worker-side Dispatch：Web enqueue-only 202/200/409/422，
+ *   worker executor 经 provider 注入执行 build）；
  * - requestId canonicalize 契约；production 下 provider override 后门禁用。
  * 任一断言失败即非零退出。
  */
@@ -45,6 +46,26 @@ import {
 } from '../src/lib/narrative-beats/runs';
 import {NARRATIVE_BEATS_KIND, type NarrativeBeatV1} from '../src/lib/narrative-beats/schema';
 import {GET as beatsGET, POST as beatsPOST} from '../src/app/api/projects/[id]/narrative-beats/route';
+import {getDispatchJob} from '../src/lib/llm-generation/dispatch';
+import {claimNextAnyJob} from '../src/lib/scheduler';
+import {runDispatchJob} from '../src/worker/dispatch-executor';
+
+// 上次中断运行可能留下临时 DB（claimNextAnyJob 全局 FIFO 会捡到旧 dispatch）——
+// 启动即清空（getDb 为惰性单例，此处尚未打开）。
+fs.rmSync(path.resolve(process.cwd(), 'data', 'test-m721-singleflight'), {recursive: true, force: true});
+
+/** Worker-side dispatch：claim 下一个 dispatch 并以注入 provider 执行（模拟 worker 主循环一步）。 */
+async function runNextDispatch(provider: LLMProvider): Promise<void> {
+  const claimed = claimNextAnyJob('worker-test-m721');
+  if (!claimed || claimed.type !== 'dispatch') {
+    throw new Error(`expected queued dispatch job, got ${claimed?.type ?? 'null'}`);
+  }
+  await runDispatchJob(
+    claimed.job,
+    {isShuttingDown: () => false, log: () => {}},
+    {provider, heartbeatMs: 60_000},
+  );
+}
 
 let pass = 0;
 let fail = 0;
@@ -627,73 +648,105 @@ async function main(): Promise<void> {
     ok(usageCount(projectId) === usageBefore, '[F8] 终态复用零新增 usage');
   }
 
-  // ============ RT：API route 真实路径（provider override 注入） ============
+  // ============ RT：API route 真实路径（Worker-side Dispatch：Web enqueue-only + worker executor） ============
   {
     const projectId = newProjectWithScript(STRICT_MD, 'script-v2@2.0');
     const build = buildNarrationPlanV2(projectId);
     const validBeats = makeValidBeats(build.plan);
     const routeProvider = new ScriptableProvider();
-    setNarrativeBeatsProviderForTest(routeProvider);
-    try {
-      // 新建 → 201 + 非空 runId
-      routeProvider.push({text: proposalJson(validBeats)});
-      const createRes = await postBeats(projectId, {
-        narrationPlanV2ArtifactId: build.artifact.id,
-        requestId: 'req-rt-0001',
-      });
-      ok(createRes.status === 201, '[RT1] 新 requestId POST → 201');
-      const createJson = (await createRes.json()) as {runId: string | null; reused: boolean; legacy: boolean};
-      ok(
-        createJson.runId !== null && createJson.reused === false && createJson.legacy === false,
-        '[RT2] 201 响应含非空 runId',
-        createJson,
-      );
-      ok(routeProvider.requests.length === 1, '[RT3] route 真实调用注入的 provider（1 次）');
 
-      // 同 requestId → 200 reused
-      const reuseRes = await postBeats(projectId, {
-        narrationPlanV2ArtifactId: build.artifact.id,
-        requestId: 'req-rt-0001',
-      });
-      ok(reuseRes.status === 200, '[RT4] 同 requestId POST → 200 reused');
-      const reuseJson = (await reuseRes.json()) as {reused: boolean; runId: string | null};
-      ok(reuseJson.reused === true && reuseJson.runId === createJson.runId, '[RT5] 200 响应 reused + 同 runId');
+    // 新建 → 202 queued：Web 零 provider 调用、零 run、零 artifact（无 secret 也全程可用）
+    const createRes = await postBeats(projectId, {
+      narrationPlanV2ArtifactId: build.artifact.id,
+      requestId: 'req-rt-0001',
+    });
+    ok(createRes.status === 202, '[RT1] 新 requestId POST → 202 queued（enqueue-only）');
+    const createJson = (await createRes.json()) as {
+      dispatchId: string;
+      requestId: string;
+      status: string;
+      candidateOnly: boolean;
+    };
+    ok(
+      createJson.status === 'queued' &&
+        createJson.requestId === 'req-rt-0001' &&
+        createJson.dispatchId.length > 0 &&
+        createJson.candidateOnly === true,
+      '[RT2] 202 响应含 dispatchId + status=queued + candidateOnly',
+      createJson,
+    );
+    ok(
+      routeProvider.requests.length === 0 && runCount(projectId) === 0 && beatsRows(projectId).length === 0,
+      '[RT3] Web POST 零 provider 调用、零 run、零 artifact',
+    );
 
-      // terminal run → 409（三次非法输出）
-      routeProvider.push({text: proposalJson(validBeats.slice(0, 5))});
-      routeProvider.push({text: proposalJson(validBeats.slice(0, 5))});
-      routeProvider.push({text: proposalJson(validBeats.slice(0, 5))});
-      const failRes = await postBeats(projectId, {
-        narrationPlanV2ArtifactId: build.artifact.id,
-        requestId: 'req-rt-0002',
-      });
-      ok(failRes.status === 409, '[RT6] 三次非法输出 POST → 409');
-      const failJson = (await failRes.json()) as {status: string; errorCode: string; runId: string};
-      ok(
-        failJson.status === 'failed' && failJson.errorCode === 'VALIDATION_FAILED',
-        '[RT7] 409 响应含 status=failed + errorCode',
-        failJson,
-      );
-      // 同 requestId 再 POST → 同一 409（稳定终态）
-      const failAgain = await postBeats(projectId, {
-        narrationPlanV2ArtifactId: build.artifact.id,
-        requestId: 'req-rt-0002',
-      });
-      ok(failAgain.status === 409, '[RT8] terminal 同 requestId 再 POST → 409（稳定）');
+    // worker executor 执行 dispatch → run=1 + artifact=1 + dispatch 终态关联
+    routeProvider.push({text: proposalJson(validBeats)});
+    await runNextDispatch(routeProvider);
+    ok(routeProvider.requests.length === 1, '[RT3b] worker executor 真实调用 provider（1 次）');
+    const rtRun = runRow(projectId, 'req-rt-0001');
+    ok(
+      rtRun !== undefined && rtRun.status === 'succeeded' && rtRun.result_artifact_id !== null,
+      '[RT3c] worker 执行后 run succeeded + result artifact',
+    );
+    const rtDispatch = getDispatchJob(getDb(), createJson.dispatchId);
+    ok(
+      rtDispatch !== null &&
+        rtDispatch.status === 'succeeded' &&
+        rtDispatch.generation_run_id === rtRun!.id &&
+        rtDispatch.result_artifact_id === rtRun!.result_artifact_id,
+      '[RT3d] dispatch succeeded + generation_run/result_artifact 关联',
+    );
 
-      // invalid body（缺 artifact id）→ 422
-      const invalidBody = await postBeats(projectId, {requestId: 'req-rt-0003'});
-      ok(invalidBody.status === 422, '[RT9] 缺 artifact ID → 422');
+    // 同 requestId → 200 reused（零 provider）
+    const reuseRes = await postBeats(projectId, {
+      narrationPlanV2ArtifactId: build.artifact.id,
+      requestId: 'req-rt-0001',
+    });
+    ok(reuseRes.status === 200, '[RT4] 同 requestId POST → 200 reused');
+    const reuseJson = (await reuseRes.json()) as {reused: boolean; runId: string | null; status: string};
+    ok(
+      reuseJson.reused === true && reuseJson.status === 'succeeded' && reuseJson.runId === rtRun!.id,
+      '[RT5] 200 响应 reused + status=succeeded + 同 runId',
+    );
 
-      // 过短 requestId → 422 REQUEST_ID_INVALID
-      const shortId = await postBeats(projectId, {
-        narrationPlanV2ArtifactId: build.artifact.id,
-        requestId: 'abc',
-      });
-      ok(shortId.status === 422, '[RT10] 过短 requestId → 422');
-    } finally {
-      setNarrativeBeatsProviderForTest(null);
-    }
+    // terminal run：enqueue → executor 三次非法输出 → run failed 终态 → POST 409（稳定）
+    const failEnqueue = await postBeats(projectId, {
+      narrationPlanV2ArtifactId: build.artifact.id,
+      requestId: 'req-rt-0002',
+    });
+    ok(failEnqueue.status === 202, '[RT6] 失败用例 enqueue → 202 queued');
+    routeProvider.push({text: proposalJson(validBeats.slice(0, 5))});
+    routeProvider.push({text: proposalJson(validBeats.slice(0, 5))});
+    routeProvider.push({text: proposalJson(validBeats.slice(0, 5))});
+    await runNextDispatch(routeProvider);
+    const failRes = await postBeats(projectId, {
+      narrationPlanV2ArtifactId: build.artifact.id,
+      requestId: 'req-rt-0002',
+    });
+    ok(failRes.status === 409, '[RT6b] 失败 run 同 requestId POST → 409');
+    const failJson = (await failRes.json()) as {status: string; errorCode: string; runId: string};
+    ok(
+      failJson.status === 'failed' && failJson.errorCode === 'VALIDATION_FAILED' && failJson.runId.length > 0,
+      '[RT7] 409 响应含 status=failed + errorCode + runId',
+      failJson,
+    );
+    const failAgain = await postBeats(projectId, {
+      narrationPlanV2ArtifactId: build.artifact.id,
+      requestId: 'req-rt-0002',
+    });
+    ok(failAgain.status === 409, '[RT8] terminal 同 requestId 再 POST → 409（稳定）');
+
+    // invalid body（缺 artifact id）→ 422
+    const invalidBody = await postBeats(projectId, {requestId: 'req-rt-0003'});
+    ok(invalidBody.status === 422, '[RT9] 缺 artifact ID → 422');
+
+    // 过短 requestId → 422 REQUEST_ID_INVALID
+    const shortId = await postBeats(projectId, {
+      narrationPlanV2ArtifactId: build.artifact.id,
+      requestId: 'abc',
+    });
+    ok(shortId.status === 422, '[RT10] 过短 requestId → 422');
 
     // GET：runs 数组 + legacyRunMetadataUnavailable。
     // 手工插入一个无 run row 的 legacy candidate（复制既有 artifact 内容、改 requestId）。
@@ -712,12 +765,19 @@ async function main(): Promise<void> {
     const listJson = (await listRes.json()) as {
       runs: Array<{requestId: string; status: string}>;
       candidates: Array<{requestId: string | null; legacyRunMetadataUnavailable: boolean}>;
+      dispatchJobs: Array<{dispatchId: string; requestId: string; status: string}>;
     };
     ok(
       Array.isArray(listJson.runs) &&
         listJson.runs.some((r) => r.requestId === 'req-rt-0001' && r.status === 'succeeded') &&
         listJson.runs.some((r) => r.requestId === 'req-rt-0002' && r.status === 'failed'),
       '[RT13] GET 响应含 runs（succeeded + failed 均可见）',
+    );
+    ok(
+      Array.isArray(listJson.dispatchJobs) &&
+        listJson.dispatchJobs.some((d) => d.requestId === 'req-rt-0001' && d.status === 'succeeded') &&
+        listJson.dispatchJobs.some((d) => d.requestId === 'req-rt-0002' && d.status === 'failed'),
+      '[RT13b] GET 响应含 dispatchJobs（succeeded + failed 均可见）',
     );
     const legacyCandidate = listJson.candidates.find((c) => c.requestId === 'req-legacy-1');
     const durableCandidate = listJson.candidates.find((c) => c.requestId === 'req-rt-0001');
