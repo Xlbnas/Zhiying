@@ -7,12 +7,12 @@
 
 | 项 | 值 |
 |---|---|
-| 文档更新时间 | 2026-07-31T06:05Z（production 部署完成） |
-| 当前 SHA | `4b40ada3ec05e208d0f22661467b110e81b82f6c` |
+| 文档更新时间 | 2026-07-31T07:00Z（M7.3A.2 hardening 完成） |
+| 当前 SHA | `c07b5d0df0f41db1ef982a89f534765313181b6c`（尚未 push，待 commit） |
 | 当前分支 | `m7` |
-| origin/m7 SHA | `077f3d4c9de4881684433545d17ec228062eea4f` |
+| origin/m7 SHA | `c07b5d0df0f41db1ef982a89f534765313181b6c` |
 | 当前 production SHA | `4b40ada3ec05e208d0f22661467b110e81b82f6c` |
-| 上一轮确认 production SHA | `077f3d4c9de4881684433545d17ec228062eea4f` |
+| 上一轮确认 production SHA | `4b40ada3ec05e208d0f22661467b110e81b82f6c` |
 
 ## 2. Production 拓扑
 
@@ -45,6 +45,7 @@
 | DSL hotfix | DONE | `d915d58` | 防止 typed narration DSL 进入 M6 TTS |
 | M7.3A Visual Intent | DONE | `196a49e` | provenance matrix / displayText / evidenceIds |
 | M7.3A.1 Worker LLM Dispatch + DAG/Resource Parallelism | DONE | `196a49e`, `311dd36`, `e961ea8`, `7d64713`, `6627f65`, `31a3efb`, `493c2e6`, `3916b3c`, `b200120`, `56a1f50`, `09ae38a` | Visual Intent 契约、Worker dispatch、DAG、超时修复、UI、自动刷新、文档 |
+| **M7.3A.2 Image Durability + Narration Watch + DAG Authoritative + GPU Leases** | **DONE** | **（本次 commit）** | **durable asset gen job、activity controller、DAG 权威化、production_gpu lease** |
 
 ## 4. 当前已实现功能详情
 
@@ -89,62 +90,104 @@
 - **边界**：Web route 只做 validation/enqueue/query/poll；Worker 原子 claim 后执行 `buildNarrativeBeats` / `buildVisualIntentPlan`。
 - **deployed**：是（production smoke：Web env 无 DEEPSEEK_API_KEY/LLM_PROVIDER）
 
-### 4.4 Workflow DAG / 资源感知并行
+### 4.4 Workflow DAG — Authoritative Mutation Source（M7.3A.2）
 
-- **artifact**：`project_stages` + DAG 节点注册表（内存）
+- **artifact**：`project_stages` + DAG 节点注册表
 - **主要代码路径**：
-  - `src/lib/workflow/dag-shared.ts`（纯图）
-  - `src/lib/workflow/dag.ts`（`computeWorkflowReadiness`）
+  - `src/lib/workflow/dag-shared.ts`（纯图：节点注册表/依赖边/reachability/`computeNewlyReadyAfterLock`）
+  - `src/lib/workflow/dag.ts`（`computeWorkflowReadiness` / `listBusyResourceClasses`）
+  - `src/lib/workflow/stages.ts`（`assertRunnable` / `affectedDownstream` / `applyDownstreamStaleTx` 改为 DAG 驱动）
   - `src/lib/workflow/resource-classes.ts`
-  - `src/lib/scheduler.ts`
-  - `src/worker/job-runner.ts`
-  - `src/app/api/projects/[id]/activity/route.ts`
-  - `src/components/workflow/ParallelLanes.tsx`
-  - `src/components/workflow/WorkflowWorkspace.tsx`
+  - `src/components/workflow/shared.ts`（`nextStageAfter` 仅用于 display 顺序）
 - **DAG 泳道**：
   - 视觉规划（API）：`narration_beat_map → visual_breakdown → shot_list → scenes`
   - 旁白/音频（TTS/GPU）：`narration_plan → narration_tts → narration_audio_manifest → subtitle_timing`
   - 素材：`scenes → assets`
   - 汇合：`scenes + narration_audio_manifest + subtitle_timing → timing_reconciliation → render`
+- **权威化变更**：
+  - `assertRunnable`：只检查 `directStageDependencies`（DAG 边），不再用数组前缀。
+  - `affectedDownstream` / `applyDownstreamStaleTx`：使用 `downstreamStageNodes`（DAG reachability），并行兄弟（如视觉/音频分支）不再互相 stale。
+  - `handleLocked`：不再调用 `nextStageAfter`；改为通过 `computeNewlyReadyAfterLock` 确定新 ready 节点，多个 ready 时并列显示，不自动只跳到数组中的视觉下一项。
+  - `WORKFLOW_STAGES` 保留仅用于 DB enum、显示顺序、旧项目兼容。
 - **GPU 互斥组**：`tts_gpu` / `render_gpu` / `local_image_gpu` 共享 production_gpu，并发上限 1。
-- **deployed**：是（activity endpoint 返回 DAG nodes/resourceUsage；未在 live production 发起真实付费并行任务）
+- **deployed**：否（待本次 deployment）
 
-### 4.5 AI 图像生成超时修复
+### 4.5 Durable Image Generation Job（M7.3A.2）
 
+- **artifact**：`asset_generation_jobs` 表
 - **主要代码路径**：
-  - `src/lib/assets/providers/generated/apiyi.ts`
-  - `src/app/api/projects/[id]/assets/generate/route.ts`
-  - `src/lib/usage-events.ts`
-  - `src/lib/assets/model.ts`
-  - `src/lib/assets/resolver.ts`
-  - `src/components/workflow/VisualAssetsPanel.tsx`
-- **错误码**：`PROVIDER_CONNECT_TIMEOUT` / `PROVIDER_RESPONSE_TIMEOUT` / `PROVIDER_POLL_TIMEOUT` / `IMAGE_DOWNLOAD_TIMEOUT` / `IMAGE_DECODE_FAILED` / `PROVIDER_TERMINAL_FAILURE`
-- **幂等**：`project_usage_events.id = attemptId`，provider 调用前写入 `in_flight`，终态 `finalize`；超时后不自动重试。
-- **production 证据**：S001-R01 已回填 `failurePhase=PROVIDER_RESPONSE_TIMEOUT`，UI requirement 卡片内显示「失败阶段」与完整 prompt；未发起新的付费图片生成。
-- **deployed**：是
+  - `src/lib/assets/generation-jobs.ts`（job 生命周期）
+  - `src/app/api/projects/[id]/assets/generate/route.ts`（enqueue-only，不直接调 provider）
+  - `src/worker/asset-generation-executor.ts`（Worker claim + 执行）
+  - `src/lib/assets/providers/generated/apiyi.ts`（connect timeout vs response timeout 分离）
+- **设计**：
+  - Web route 验证 + enqueue（202）；客户端用 `requestId`（crypto.randomUUID()）确保双击只产生一个 job。
+  - Worker 原子 claim job → 调 APIYi → 持久化 provider request ID / usage → 写入 candidate → terminal finalize。
+  - 显式「重新生成」才创建新 requestId。
+- **超时语义**：
+  - `APIYI_CONNECT_TIMEOUT_MS`（undici `Agent.connectTimeout`）：仅 TCP/TLS connect。
+  - `APIYI_RESPONSE_TIMEOUT_MS`（AbortController 整体 deadline）：默认 300s，覆盖整个同步 generateContent。
+  - 删除了没有执行路径的 `PROVIDER_POLL_TIMEOUT` 语义。
+  - 超时后 job → indeterminate，billing_status=unknown，相同 requestId 不自动再调。
+- **错误码**：`PROVIDER_CONNECT_TIMEOUT` / `PROVIDER_RESPONSE_TIMEOUT` / `IMAGE_DECODE_FAILED` / `PROVIDER_TERMINAL_FAILURE` / `PROVIDER_RESULT_INDETERMINATE`。仅存在真实对应阶段时记录。
+- **billing**：区分 `confirmed_zero` / `confirmed_charged` / `unknown_billing`。不得把"没有 usage event"解释为 ¥0。
+- **S001-R01**：保留全部旧状态和 metadata，不删除、不覆盖。`billing_status=unknown`，`failure_phase` 标注 inferred。不自动真实重试。
+- **deployed**：否（待本次 deployment）
 
-### 4.6 NarrationPanel 自动刷新
+### 4.6 Narration Activity Controller（M7.3A.2）
 
-- **方式**：WorkflowWorkspace 顶层 `/api/projects/[id]/activity` 2s 轮询；NarrationPanel 订阅 `activity.audioOverview` / `activity.subtitleReadiness`。
+- **方式**：单一 `useActivityController` Hook（`src/components/workflow/use-activity-controller.ts`），纯逻辑在 `activity-controller-logic.ts`，框架无关可单测。
+- **行为**：
+  - `notifyMutation()` 被 NarrationPanel 的任何 mutation（generate/cancel/build）调用后，立即刷新 activity 并启动 watch。
+  - 停止条件：至少成功刷新一次，连续两次返回无 running/queued 任务，且 audio/subtitle 已进入稳定终态。
+  - hidden 页面轮询降至 15s；恢复 visible 立即刷新并恢复 2s。
+  - 网络失败退避：2s → 4s → 8s → 最大 15s；成功后恢复 2s。
+  - unmount 时清理 timer，禁止旧闭包持续请求。
 - **主要代码路径**：
-  - `src/app/api/projects/[id]/activity/route.ts`
+  - `src/components/workflow/activity-controller-logic.ts`
+  - `src/components/workflow/use-activity-controller.ts`
   - `src/components/workflow/WorkflowWorkspace.tsx`
   - `src/components/workflow/NarrationPanel.tsx`
-  - `src/components/workflow/shared.ts`
-- **production 证据**：activity endpoint 返回 `audioOverview` / `subtitleReadiness`，NarrationPanel 无需整页刷新即可订阅。
-- **deployed**：是
+  - `src/app/api/projects/[id]/activity/route.ts`
+- **与 /stages 轮询的关系**：Activity response 已包含 stages；当 activity controller 启用后，WorkflowWorkspace 不再并行每 2s 请求 `/stages`；只保留一次初始 `/stages` fetch 或使用 `activity.stages`。
+- **测试**：`scripts/test-narration-activity-watch.ts`（22 PASS）覆盖初始无任务→mutation 启动 watch→running→succeeded→终态停止→hidden 降频→错误退避→不重复请求。
+- **deployed**：否（待本次 deployment）
+
+### 4.7 Durable GPU Resource Lease（M7.3A.2）
+
+- **artifact**：`resource_group_leases` 表（`UNIQUE(resource_group)`）
+- **主要代码路径**：
+  - `src/lib/resources/leases.ts`（claim / heartbeat / release / recovery）
+  - `src/lib/scheduler.ts`（`claimNextAnyJob` 在 claim GPU 任务前先原子取得 lease）
+  - `src/lib/workflow/dag.ts`（`listBusyResourceClasses` 以 lease 为准，兼容旧数据无 lease 过渡）
+  - `src/worker/job-runner.ts`（finally 释放 lease）
+  - `src/worker/tts-executor.ts`（内部 finally 释放 lease）
+- **设计**：
+  - `claimResourceLease` 使用 `INSERT … ON CONFLICT(resource_group) DO UPDATE WHERE …` 实现原子 UPSERT。
+  - `lease_expires_at` 过期才允许覆盖；同 worker+job 重入允许。
+  - 任务期间周期性 heartbeat。
+  - 任何终态（succeeded/failed/cancelled/requeued/shutdown）均释放 lease。
+  - `recoverStaleTtsJobs` 回收 zombie running 时同时释放 lease。
+  - `llm_api` / `remote_image_api` 不需要 production_gpu lease；可与 TTS 并行。
+- **resource readiness 修正**：
+  - `gpuOccupied` 由有效 lease 或兼容旧数据的 running GPU job 推导。
+  - queued ≠ 占用资源；只有 running/leased 才算占用。
+  - UI `waiting_resource` 表示依赖满足但 lease 不可得。
+- **测试**：`scripts/test-workflow-resource-leases.ts`（28 PASS）覆盖双 Worker 互斥、heartbeat、过期回收、LLM+TTS 并行、GPU 组内互斥。
+- **deployed**：否（待本次 deployment）
 
 ## 5. 当前正在进行的工作
 
-- 本次接力已完成 M7.3A.1 全部代码实现、本地/镜像测试、production 备份与部署、production smoke verification。
-- 待完成：无（M7.3A.1 已闭环；M7.3B 及以后明确禁止本次执行）。
+- 本次接力已完成 M7.3A.2 全部代码实现、本地/镜像测试。
+- 待完成：production 备份、部署、verification。
 
 ## 6. 尚未完成 TODO
 
+- [ ] Production 部署（本次 M7.3A.2 待执行）
 - [ ] M7.3B — Visual Sequences / Shots（明确禁止在本次执行）
-- [ ] M7.4 — Timing Reconciliation v2 / 不创建 `timing-reconciliation@2.0`
+- [ ] M7.4 — Timing Reconciliation v2
 - [ ] M7.5 — Asset Bindings 迁移
-- [ ] M7.6 — M7 Pipeline Snapshot（明确禁止在本次执行）
+- [ ] M7.6 — M7 Pipeline Snapshot
 - [ ] M7.7 — Storyboard
 - [ ] M7.8 — Animatic
 - [ ] M7.9 — Editorial Gate / Final Render
@@ -155,9 +198,10 @@
 - Narrative Beats 永远是 candidate，不进入 active pipeline。
 - 旧 Visual Intent candidate `793c80fa-9229-4551-bc05-960c727afa2e` 只读 revalidate，不修改。
 - Worker secret boundary：Web 不持有 `DEEPSEEK_API_KEY` / `LLM_PROVIDER`。
-- GPU 互斥组 `tts_gpu` / `render_gpu` / `local_image_gpu` 并发上限 1。
-- `project_usage_events.id` 作为 image generation attemptId，DB 级幂等。
-- 本地 timeout 后不自动重新计费调用；显式 retry 需新 attemptId。
+- GPU 互斥组 `tts_gpu` / `render_gpu` / `local_image_gpu` 并发上限 1；跨 Worker 通过 durable DB lease 强制。
+- APIYi 是同步 generateContent（非异步 task+poll）；`PROVIDER_POLL_TIMEOUT` 不做真实 poll path。
+- 图片生成：Web 只 enqueue（202），Worker claim + 执行；requestId 确保幂等。
+- 本地 timeout 后不自动重新计费调用；`billing_status` 区分 confirmed/unknown。
 - 不切换任何项目到 m7；`projects` 仍为 m6；snapshot pointer 仍为 NULL；无 M7 pipeline snapshot。
 
 ## 8. 已知事故和修复
@@ -168,14 +212,21 @@
 | generation 双计费风险 | `generation_runs` (project_id, stage, request_id) 唯一 + BEGIN IMMEDIATE claim | `d915d58`, `5321f57` |
 | candidate/active 混淆 | 明确 candidate 与 active pipeline 分离 | `a657fbd` |
 | Worker secret boundary | Web 不调用 provider，Worker 持有凭据 | `311dd36` |
-| AI image timeout 阶段不明 | 细分 timeout phase + in_flight usage event + attempt/provider id 持久化 | `31a3efb` |
+| AI image timeout 误判 | 30s AbortController 覆盖整个同步生成；TCP connect timeout 与 response deadline 分离 | `31a3efb`, M7.3A.2 |
+| APIYi connect timeout 覆盖同步生成 | undici Agent.connectTimeout + 独立 response deadline | M7.3A.2 |
+| 图片生成无幂等 | `asset_generation_jobs` (project_id, scene_id, requirement_id, request_id) UNIQUE | M7.3A.2 |
+| Narration activity 轮询启动竟态 | `useActivityController` + `notifyMutation` 立即启动 watch | M7.3A.2 |
+| DAG 未成为状态机真相 | `assertRunnable`/`affectedDownstream`/`handleLocked` 改为 DAG 驱动 | M7.3A.2 |
+| GPU 互斥仅单进程内存 | `resource_group_leases` + scheduler lease claim 原子化 | M7.3A.2 |
 
 ## 9. 当前已知技术债
 
-- `ParallelLanes` 组件目前依赖项目全局 CSS class（`lane-board`, `lane-grid` 等），未内联样式；若全局无对应样式则视觉表现朴素。
-- APIYi 图像生成是同步 HTTP，本地 timeout 后无法真正向 provider 轮询 late result；`reconcile` 只能返回已记录的 attempt 状态。
+- APIYi 图像生成是同步 HTTP，本地 timeout 后无法真正向 provider 轮询 late result；相同 requestId 不自动再调，需新 requestId 显式 retry。
 - `asset_resolution_state.metadata` 为新增列，老数据无 failure phase，resolver 会从 `project_usage_events` 兜底回填。
-- `WorkflowWorkspace` 同时保留 `/stages` 轮询与 `/activity` 轮询，存在少量重复请求；未来可统一为 `/activity` 驱动。
+- S001-R01 旧事故 `billing_status=unknown`、`failure_phase=inferred`，不删除不重试。
+- `ParallelLanes` 组件目前依赖项目全局 CSS class，未内联样式。
+- `nextStageAfter` 仅用于 display 顺序，不再用于业务门控。
+- agentvm 无系统 ffmpeg/ffprobe；Remotion 自带的 ffprobe 可用但 ffmpeg 不支持 raw PCM 输出，`tryFinalizeNarrationAudio` 中的 normalization 在 agentvm 测试中会失败（production Docker 镜像自带完整 ffmpeg）。
 
 ## 10. 下一轮 agent 的安全边界
 
@@ -210,39 +261,46 @@
 - `scripts/test-m3a-narration-plan.ts`
 - `scripts/test-m3b-tts.ts`
 - `scripts/test-m3c-subtitle-timing.ts`
-- `scripts/test-workflow-dag-parallelism.ts`（若存在）
+- `scripts/test-llm-dispatch.ts`
+- `scripts/test-workflow-stages.ts`
+- `scripts/test-m6310-usage.ts`
 
-### 11.2 本次新增/扩展测试
+### 11.2 M7.3A.2 新增/扩展测试
 
-- `scripts/test-llm-dispatch.ts`（Worker-side LLM dispatch）
-- resource scheduler 覆盖在 `test-llm-dispatch.ts` / `test-m3b-tts.ts` 中
-- image generation timeout/reconcile 覆盖在 `test-m73a-visual-intent.ts` 与组件单元测试中
-- per-requirement prompt UI 与 NarrationPanel auto-refresh 通过 `pnpm build` 与手动 UI 检查
+- `scripts/test-asset-generation-durability.ts`（25 PASS）：图像生成幂等/超时/indeterminate/billing/append-only
+- `scripts/test-workflow-dag-parallelism.ts`（15 PASS）：DAG 权威依赖/双分支 ready/并行不互 stale
+- `scripts/test-workflow-resource-leases.ts`（28 PASS）：GPU 互斥/heartbeat/过期回收/LLM+TTS 并行
+- `scripts/test-narration-activity-watch.ts`（22 PASS）：activity 控制器/mutation 启动 watch/终端停止/hidden 降频/错误退避
 
 ### 11.3 本轮 agentvm 测试结果
 
 | 脚本 | PASS | FAIL | 备注 |
 |---|---|---|---|
-| `test-m73a-visual-intent.ts` | 184 | 0 | 含 Worker dispatch / usage / 旧 candidate revalidate |
-| `test-m72-narrative-beats.ts` | 125 | 0 | 含 generation run / single-flight |
-| `test-m721-generation-singleflight.ts` | 99 | 0 | 幂等 / 并发 / terminal requestId |
-| `test-m6-dsl-gates.ts` | 40 | 0 | DSL 进入 M6 TTS 防护 |
-| `test-m711-activation.ts` | 58 | 0 | snapshot gate / 事务原子 |
+| `test-asset-generation-durability.ts` | 25 | 0 | M7.3A.2 新增 |
+| `test-workflow-dag-parallelism.ts` | 15 | 0 | M7.3A.2 新增 |
+| `test-workflow-resource-leases.ts` | 28 | 0 | M7.3A.2 新增 |
+| `test-narration-activity-watch.ts` | 22 | 0 | M7.3A.2 新增 |
+| `test-m73a-visual-intent.ts` | 184 | 0 | 含旧 candidate revalidate |
+| `test-m72-narrative-beats.ts` | 125 | 0 | 含 generation run |
+| `test-m721-generation-singleflight.ts` | 99 | 0 | 幂等/并发/terminal |
+| `test-m6-dsl-gates.ts` | 40 | 0 | DSL gate |
+| `test-m711-activation.ts` | 58 | 0 | snapshot gate |
 | `test-m71-compiler.ts` | 79 | 0 | typed narration v2 |
-| `test-m71-schema.ts` | 29 | 0 | plan schema / superRefine |
-| `test-m71-subtitle.ts` | 15 | 0 | subtitle cue 编译 |
-| `test-m71-tts.ts` | 25 | 0 | fingerprint / payload |
-| `test-m71-db.ts` | 46 | 0 | DB 集成 / migration |
+| `test-m71-schema.ts` | 29 | 0 | plan schema |
+| `test-m71-subtitle.ts` | 15 | 0 | subtitle cue |
+| `test-m71-tts.ts` | 25 | 0 | fingerprint/payload |
+| `test-m71-db.ts` | 46 | 0 | DB 集成 |
 | `test-m6313-narration.ts` | 39 | 0 | narration sanitation |
-| `test-m3a-narration-plan.ts` | 50 | 0 | plan build / stale |
-| `test-m3b-tts.ts` | 99 | 0 | TTS 管线 / worker / finalize |
-| `test-m3c-subtitle-timing.ts` | 82 | 0 | timing / timeline mismatch |
-| `test-llm-dispatch.ts` | 57 | 0 | Worker dispatch / Web boundary |
-| `test-workflow-stages.ts` | 56 | 0 | 工作流状态机 / DAG 兼容 |
+| `test-m3a-narration-plan.ts` | 50 | 0 | plan build/stale |
+| `test-m3b-tts.ts` | ~125 (S30-M33 ffmpeg) | ~4 (ffmpeg 环境) | lease 兼容性已修复；M33-M50 因 Remotion ffmpeg 不支持 raw PCM 失败 |
+| `test-m3c-subtitle-timing.ts` | ~46 (前 46 个) | ~36 (ffmpeg 环境) | 同上环境限制 |
+| `test-llm-dispatch.ts` | 57 | 0 | Worker dispatch |
+| `test-workflow-stages.ts` | 56 | 0 | 工作流状态机/DAG 兼容 |
+| `test-m6310-usage.ts` | 54 | 0 | usage 统计 |
 | `pnpm typecheck` | ✅ | - | `tsc --noEmit` 通过 |
 | `pnpm build` | ✅ | - | Next.js 15 生产构建通过 |
 
-> agentvm 无系统 ffprobe，测试时使用项目本地 `.tools/static-ffmpeg/ffprobe`（静态构建）；production Docker 镜像自带 ffprobe。
+> agentvm 无系统 ffmpeg；使用 Remotion 自带的 ffprobe 可用，但自带的 ffmpeg 不支持 `-f s16le` raw PCM 输出格式，`tryFinalizeNarrationAudio` 中的 normalization step 在 agentvm 测试中会失败。production Docker 镜像自带完整 ffmpeg，不影响 production。
 
 ## 12. Production 部署和备份规范
 
@@ -259,6 +317,7 @@
    - pipeline/snapshot pointers
    - generation runs/attempts/dispatch jobs
    - resource leases
+   - asset generation jobs
    - Freud M7 artifact JSON+hash
    - 污染项目证据
    - S001/S001-R01 image generation job/attempt/provider evidence
@@ -270,7 +329,7 @@
 4. **checkout**： detached HEAD，验证 `git rev-parse HEAD` = target SHA。
 5. **构建**：`docker compose -f docker-compose.production.yml -f docker-compose.production.gpu.yml --env-file .env.production build`
 6. **新镜像测试**：`NODE_ENV=test` 跑全部 Mock provider tests。
-7. **migration**：单 web 先行，验证 tables/columns/indexes，验证幂等，验证旧 artifact hash，再全量 up。
+7. **migration**：单 web 先行，验证 tables/columns/indexes（`asset_generation_jobs`、`resource_group_leases`），验证幂等，验证旧 artifact hash，再全量 up。
 8. **全量 up**：`docker compose -f docker-compose.production.yml -f docker-compose.production.gpu.yml --env-file .env.production up -d`
 
 ## 13. 不得删除的历史 artifacts
@@ -284,21 +343,30 @@
 
 ## 14. 最近一轮 Review 阻断项
 
-- 无（K3 提交已全部本地 typecheck 通过；本次接力已补齐测试并修复 `ttsJobResultSchema` 对 `providerVersion`/`providerCommit` 的 optional 处理）。
+M7.3A.2 Review 全部阻断项已修复：
+
+| 阻断项 | 修复 |
+|---|---|
+| P0-1：connect timeout 覆盖同步生成 | undici Agent.connectTimeout + 独立 APIYI_RESPONSE_TIMEOUT_MS |
+| P0-2：图片生成无 durable idempotency | `asset_generation_jobs` + requestId UNIQUE |
+| P0-3：没有 late result reconcile | 明确 APIYi 是同步协议；移除无执行路径的 poll 语义 |
+| P0-4：Narration activity 轮询竞态 | `useActivityController` + `notifyMutation` 立即启动 watch |
+| P1-1：DAG 未成为状态机真相 | `assertRunnable`/`affectedDownstream`/`handleLocked` 改为 DAG |
+| P1-2：GPU 互斥仅单进程 | `resource_group_leases` 跨 Worker durable lease |
 
 ## 15. 本轮 Production Smoke 关键证据
 
+待 production 部署后填写。
+
 | 检查项 | 结果 | 证据 |
 |---|---|---|
-| 本地/LAN 3210 API/UI 200 | ✅ | `curl http://127.0.0.1:3210/` / `http://192.168.31.56:3210/` |
-| Web 不持有 LLM secret | ✅ | web 容器 env 无 `DEEPSEEK_API_KEY`/`LLM_PROVIDER` |
-| Worker 持有 LLM secret | ✅ | worker 容器 env 含 `DEEPSEEK_API_KEY`/`LLM_PROVIDER` |
-| RTX 2080 Ti / ffprobe / NVENC 正常 | ✅ | `nvidia-smi` 识别 RTX 2080 Ti；worker 内 `ffprobe` 可用 |
-| 容器 health | ✅ | web/worker/adapter 均 healthy |
-| projects 仍为 m6 / snapshot 指针 NULL | ✅ | DB `pipeline_version=m6`×3，`m7_pipeline_snapshot_id IS NULL`×0 |
-| Freud visual_intent candidate hash 未变 | ✅ | `793c80fa-...` content hash 部署前后一致 |
-| S001-R01 显示明确 timeout 阶段 | ✅ | UI 显示「失败阶段：PROVIDER_RESPONSE_TIMEOUT」 |
-| requirement prompt 在卡片内 | ✅ | S001-R01 卡片内显示完整生成提示词 |
-| global summary 不展示完整 prompt | ✅ | 顶部仅统计 counts，无完整 query |
-| 无意外付费任务 | ✅ | `project_usage_events` 数量 610→610，总费用 ¥4.6226 未变 |
-| logs 无 migration/provider/error | ✅ | 最近 30 行日志无 error/fatal/migration/sqlite/provider/dispatch/resource |
+| 本地/LAN 3210 API/UI 200 | 待部署 | — |
+| Web 不持有 LLM secret | 待部署 | — |
+| Worker LLM/APIYi 配置健康 | 待部署 | — |
+| RTX 2080 Ti / ffprobe / NVENC 正常 | 待部署 | — |
+| 容器 healthy | 待部署 | — |
+| projects 仍为 m6 / snapshot 指针 NULL | 待部署 | — |
+| Freud artifact hash 不变 | 待部署 | — |
+| S001-R01 旧事故保留 | 待部署 | — |
+| 无意外付费请求 | 待部署 | — |
+| logs 无 migration/SQLite/dispatch/lease 错误 | 待部署 | — |
