@@ -15,6 +15,7 @@ process.env.LLM_PROVIDER = 'mock';
 process.env.TTS_PROVIDER = 'mock';
 
 import {closeDb, getDb, getDataDir} from '../src/lib/db';
+import {releaseResourceLeaseForJob, releaseExpiredLeases} from '../src/lib/resources/leases';
 import {buildNarrationPlan} from '../src/lib/narration/plan';
 import {
   enqueueNarrationAudioJobs,
@@ -605,6 +606,8 @@ async function main(): Promise<void> {
 
   // ============ S. Scheduler（30–32） ============
   {
+    // 清理前面 W 段可能残留的 production_gpu lease（如 recovery 未释放）
+    releaseExpiredLeases(0);
     const pid = newProject();
     await lockThroughScriptV2(pid);
     setScriptV2(pid, SCRIPT_V2);
@@ -624,10 +627,16 @@ async function main(): Promise<void> {
     db.prepare("UPDATE tts_jobs SET queued_at = '2026-01-01T00:00:02.000Z' WHERE project_id = ?").run(pid);
     const c1 = claimAny();
     const c2 = claimAny();
+    // 释放 c2 的 GPU lease 以便后续 TTS 可 claim
+    if (c2?.type === 'tts') releaseResourceLeaseForJob('production_gpu', 'tts', c2.job.id);
     const c3 = claimAny();
+    if (c3?.type === 'tts') releaseResourceLeaseForJob('production_gpu', 'tts', c3.job.id);
     const c4 = claimAny();
+    if (c4?.type === 'tts') releaseResourceLeaseForJob('production_gpu', 'tts', c4.job.id);
     const c5 = claimAny();
+    if (c5?.type === 'tts') releaseResourceLeaseForJob('production_gpu', 'tts', c5.job.id);
     const c6 = claimAny();
+    if (c6?.type === 'render') releaseResourceLeaseForJob('production_gpu', 'render', c6.job.id);
     ok(
       c1?.type === 'llm' && c2?.type === 'tts' && c3?.type === 'tts' &&
         c4?.type === 'tts' && c5?.type === 'tts' && c6?.type === 'render',
@@ -638,6 +647,8 @@ async function main(): Promise<void> {
     db.prepare("UPDATE render_jobs SET status = 'cancelled'").run();
     db.prepare("UPDATE llm_jobs SET status = 'cancelled' WHERE status IN ('queued','running')").run();
     db.prepare("UPDATE tts_jobs SET status = 'cancelled' WHERE status IN ('queued','running')").run();
+    // 确保没有残留 production_gpu lease 影响后续测试
+    releaseExpiredLeases(0);
     // tie-break：相同 queued_at → type 字母序（llm < render < tts）确定性
     const pid2 = newProject();
     await lockThroughScriptV2(pid2);
@@ -658,7 +669,9 @@ async function main(): Promise<void> {
     db.prepare("UPDATE tts_jobs SET queued_at = '2026-01-02T00:00:00.000Z' WHERE project_id = ?").run(pid2);
     const t1 = claimAny();
     const t2 = claimAny();
+    if (t2?.type === 'render') releaseResourceLeaseForJob('production_gpu', 'render', t2.job.id);
     const t3 = claimAny();
+    if (t3?.type === 'tts') releaseResourceLeaseForJob('production_gpu', 'tts', t3.job.id);
     ok(
       t1?.type === 'llm' && t2?.type === 'render' && t3?.type === 'tts',
       '[S31] 同 queued_at：type+id 稳定 tie-break（确定性）',
