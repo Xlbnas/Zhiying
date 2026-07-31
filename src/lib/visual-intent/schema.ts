@@ -1,5 +1,5 @@
 /**
- * Visual Intent Plan artifact 契约（M7.3A，visual-intent-plan@1.0）。
+ * Visual Intent Plan artifact 契约（M7.3A，visual-intent-plan@1.0；compiler/prompt 1.1）。
  *
  * 语义边界（冻结）：
  * - Visual Intent 只回答「每个 Narrative Beat 在画面上意图展示什么、
@@ -17,9 +17,17 @@
 import {z} from 'zod';
 
 export const VISUAL_INTENT_KIND = 'visual_intent_plan';
+/** schemaVersion 保持 1.0：结构未变（1.1 只是补齐 1.0 已声明语义的漏实现）。 */
 export const VISUAL_INTENT_SCHEMA_VERSION = 'visual-intent-plan@1.0';
-export const VISUAL_INTENT_COMPILER_VERSION = '1.0';
-export const VISUAL_INTENT_PROMPT_VERSION = 'visual-intent-plan@1.0';
+export const VISUAL_INTENT_COMPILER_VERSION = '1.1';
+export const VISUAL_INTENT_PROMPT_VERSION = 'visual-intent-plan@1.1';
+
+/**
+ * 历史兼容的 compiler/prompt version（1.0 candidate 仍可解析，
+ * 由 classify 层判 stale——version mismatch，不得原地修 artifact）。
+ */
+export const VISUAL_INTENT_COMPILER_VERSIONS = ['1.0', '1.1'] as const;
+export const VISUAL_INTENT_PROMPT_VERSIONS = ['visual-intent-plan@1.0', 'visual-intent-plan@1.1'] as const;
 
 /** objective/subject.label 长度上限（编辑备注，不是文案）。 */
 export const MAX_INTENT_OBJECTIVE_LEN = 240;
@@ -166,8 +174,9 @@ export type VisualIntentGeneration = z.infer<typeof visualIntentGenerationSchema
 export const visualIntentPlanArtifactV1Schema = z
   .object({
     schemaVersion: z.literal(VISUAL_INTENT_SCHEMA_VERSION),
-    compilerVersion: z.literal(VISUAL_INTENT_COMPILER_VERSION),
-    promptVersion: z.literal(VISUAL_INTENT_PROMPT_VERSION),
+    /** 接受历史 1.0 与当前 1.1；stale 判定在 classify 层（fail-closed）。 */
+    compilerVersion: z.enum(VISUAL_INTENT_COMPILER_VERSIONS),
+    promptVersion: z.enum(VISUAL_INTENT_PROMPT_VERSIONS),
     source: visualIntentSourceSchema,
     generation: visualIntentGenerationSchema,
     intents: z.array(visualIntentV1Schema).min(1),

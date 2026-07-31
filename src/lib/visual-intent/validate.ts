@@ -7,7 +7,7 @@
  * - 全部问题以 issues 返回（fail-closed，列全不短路），
  *   由 generate 层进入有限 repair；repair 仍失败则本次 generation 失败。
  *
- * 规则（提示词契约 §六）：
+ * 规则（提示词契约 §六，1.1 补强）：
  *  1. visualIntentId 严格 V001…V00N 连续；
  *  2. 每个 intent.beatIds 非空（zod 已保证，防御性复查）；
  *  3. 每个 beatId 存在于精确来源 beats；
@@ -15,8 +15,14 @@
  *  7. 每个 intent 的 beat range 在 beats 顺序中连续；
  *  8. intents 全局顺序与 beats 顺序一致（previousMax 算法）；
  *  9-10. intent 不跨 chapter；intent.chapter 等于其全部 beats 的 chapter；
- * 12. intent↔strategy↔authenticity↔subject 矩阵 + displayText 精确引用 +
+ * 12. intent↔strategy↔authenticity↔subject 全矩阵（精确闭集）+
+ *     displayText 精确引用与覆盖范围（sourceUnitId 必须属于当前 intent
+ *     覆盖的 units 并集；sourceChapter 必须等于 intent.chapter）+
  *     continuation 链 + V001 不得为 continuation + unresolved 形态；
+ * 12d. subject.evidenceIds provenance：数组内去重；每个 ID 必须来自当前
+ *     intent 覆盖 beats 所引用 narration speech units 的 evidenceIds 并集
+ *    （凭空生成/跨 intent 借用都是错误）；continuation/hold/
+ *     title-card/unresolved 必须为空；
  * 13. objective/subject.label/displayText.text 内容卫生（leakage）；
  * 14. forbidden 下游字段显式拒绝。
  */
@@ -29,6 +35,7 @@ import {
   type AuthenticityRequirement,
   type VisualIntentV1,
   type VisualStrategy,
+  type VisualSubjectKind,
 } from './schema';
 
 export interface VisualIntentIssue {
@@ -54,28 +61,50 @@ const STRATEGY_MATRIX: Record<string, readonly VisualStrategy[]> = {
   VISUAL_UNRESOLVED: ['unresolved'],
 };
 
-/** intent kind → authenticity 约束（'eq'=必须等于；'neq'=不得等于；null=不约束）。 */
-const AUTHENTICITY_MATRIX: Record<
-  string,
-  {eq?: AuthenticityRequirement; neq?: AuthenticityRequirement} | null
-> = {
-  SHOW_PERSON: {neq: 'synthetic_allowed'},
-  SHOW_PLACE: {eq: 'authentic_required'},
-  SHOW_ARCHIVE: {eq: 'authentic_required'},
-  SHOW_DOCUMENT: {eq: 'authentic_required'},
-  SHOW_EVIDENCE: {eq: 'authentic_required'},
-  SHOW_EXAMPLE: null,
-  SHOW_PROCESS: null,
-  SHOW_RELATIONSHIP: null,
-  SHOW_COMPARISON: null,
-  SHOW_DATA: null,
-  EMPHASIZE_TEXT: {eq: 'not_applicable'},
-  CONTINUE_PREVIOUS_VISUAL: {eq: 'inherited'},
-  NO_VISUAL_CHANGE: {eq: 'inherited'},
-  VISUAL_UNRESOLVED: {eq: 'not_applicable'},
+/** intent kind → subject.kind（全矩阵，每个 intent 强制，1.1 补齐）。 */
+const SUBJECT_KIND_MATRIX: Record<string, VisualSubjectKind> = {
+  SHOW_PERSON: 'person',
+  SHOW_PLACE: 'place',
+  SHOW_ARCHIVE: 'archive',
+  SHOW_DOCUMENT: 'document',
+  SHOW_EVIDENCE: 'evidence',
+  SHOW_EXAMPLE: 'example',
+  SHOW_PROCESS: 'process',
+  SHOW_RELATIONSHIP: 'relationship',
+  SHOW_COMPARISON: 'comparison',
+  SHOW_DATA: 'data',
+  EMPHASIZE_TEXT: 'text',
+  CONTINUE_PREVIOUS_VISUAL: 'none',
+  NO_VISUAL_CHANGE: 'none',
+  VISUAL_UNRESOLVED: 'none',
+};
+
+/** intent kind → authenticity 允许闭集（精确闭集约束，1.1 补齐）。 */
+const AUTHENTICITY_MATRIX: Record<string, readonly AuthenticityRequirement[]> = {
+  SHOW_PERSON: ['authentic_required', 'authentic_preferred'],
+  SHOW_PLACE: ['authentic_required'],
+  SHOW_ARCHIVE: ['authentic_required'],
+  SHOW_DOCUMENT: ['authentic_required'],
+  SHOW_EVIDENCE: ['authentic_required'],
+  SHOW_EXAMPLE: ['authentic_preferred', 'synthetic_allowed'],
+  SHOW_PROCESS: ['synthetic_allowed'],
+  SHOW_RELATIONSHIP: ['synthetic_allowed'],
+  SHOW_COMPARISON: ['synthetic_allowed'],
+  SHOW_DATA: ['synthetic_allowed'],
+  EMPHASIZE_TEXT: ['not_applicable'],
+  CONTINUE_PREVIOUS_VISUAL: ['inherited'],
+  NO_VISUAL_CHANGE: ['inherited'],
+  VISUAL_UNRESOLVED: ['not_applicable'],
 };
 
 const CONTINUATION_KINDS = new Set(['CONTINUE_PREVIOUS_VISUAL', 'NO_VISUAL_CHANGE']);
+/** evidenceIds 必须为空的 intent kind（continuation/hold/title-card/unresolved）。 */
+const EVIDENCE_FORBIDDEN_KINDS = new Set([
+  'CONTINUE_PREVIOUS_VISUAL',
+  'NO_VISUAL_CHANGE',
+  'EMPHASIZE_TEXT',
+  'VISUAL_UNRESOLVED',
+]);
 /** continuation 目标的合法 kind：非 continuation 且非 unresolved。 */
 function isValidContinuationTarget(kind: string): boolean {
   return !CONTINUATION_KINDS.has(kind) && kind !== 'VISUAL_UNRESOLVED';
@@ -95,6 +124,13 @@ export function validateVisualIntentPlan(
   beats.forEach((beat, index) => indexByBeatId.set(beat.beatId, index));
   const unitById = new Map(plan.units.map((u) => [u.id, u] as const));
   const titleByChapter = new Map(plan.chapters.map((c) => [c.chapter, c.title] as const));
+  /** plan 内全部 speech unit 的 evidenceIds 并集（区分「凭空生成」与「跨 intent 借用」）。 */
+  const planEvidenceIds = new Set<string>();
+  for (const unit of plan.units) {
+    if (unit.kind === 'speech') {
+      for (const evidenceId of unit.evidenceIds) planEvidenceIds.add(evidenceId);
+    }
+  }
 
   // 1. visualIntentId 严格连续
   intents.forEach((intent, index) => {
@@ -130,6 +166,8 @@ export function validateVisualIntentPlan(
 
     const indexes: number[] = [];
     const chapters = new Set<number>();
+    /** 当前 intent 覆盖 beats 引用的全部 unitIds（displayText/evidenceIds 范围核对源）。 */
+    const coveredUnitIds = new Set<string>();
     for (const beatId of intent.beatIds) {
       // 3. beat 存在
       const beatIndex = indexByBeatId.get(beatId);
@@ -144,6 +182,7 @@ export function validateVisualIntentPlan(
       seenBeatIds.add(beatId);
       indexes.push(beatIndex);
       chapters.add(beats[beatIndex]!.chapter);
+      for (const unitId of beats[beatIndex]!.unitIds) coveredUnitIds.add(unitId);
     }
 
     // 7. intent 内 beat range 连续
@@ -182,24 +221,59 @@ export function validateVisualIntentPlan(
         `${id} intent=${intent.intent} 不允许 strategy=${intent.strategy}（允许 ${allowedStrategies.join('|')}）`,
       );
     }
-    const authRule = AUTHENTICITY_MATRIX[intent.intent];
-    if (authRule?.eq && intent.authenticity !== authRule.eq) {
+    const allowedAuthenticity = AUTHENTICITY_MATRIX[intent.intent];
+    if (allowedAuthenticity && !allowedAuthenticity.includes(intent.authenticity)) {
       push(
         'AUTHENTICITY_MISMATCH',
-        `${id} intent=${intent.intent} 的 authenticity 必须是 ${authRule.eq}（实际 ${intent.authenticity}）`,
+        `${id} intent=${intent.intent} 的 authenticity 必须在 ${allowedAuthenticity.join('|')}（实际 ${intent.authenticity}）`,
       );
     }
-    if (authRule?.neq && intent.authenticity === authRule.neq) {
+    const requiredSubjectKind = SUBJECT_KIND_MATRIX[intent.intent];
+    if (requiredSubjectKind && intent.subject.kind !== requiredSubjectKind) {
       push(
-        'AUTHENTICITY_MISMATCH',
-        `${id} intent=${intent.intent} 的 authenticity 不得为 ${authRule.neq}（真实性要求）`,
+        'SUBJECT_KIND_MISMATCH',
+        `${id} intent=${intent.intent} 的 subject.kind 必须是 ${requiredSubjectKind}（实际 ${intent.subject.kind}）`,
       );
     }
-    if (intent.intent === 'SHOW_PERSON' && intent.subject.kind !== 'person') {
-      push('SUBJECT_KIND_MISMATCH', `${id} intent=SHOW_PERSON 的 subject.kind 必须是 person（实际 ${intent.subject.kind}）`);
-    }
-    if (CONTINUATION_KINDS.has(intent.intent) && intent.subject.kind !== 'none') {
-      push('SUBJECT_KIND_MISMATCH', `${id} intent=${intent.intent} 的 subject.kind 必须是 none（实际 ${intent.subject.kind}）`);
+
+    // 12d. subject.evidenceIds provenance（只报告错误，不自动删除/补齐）
+    const evidenceIds = intent.subject.evidenceIds;
+    if (EVIDENCE_FORBIDDEN_KINDS.has(intent.intent)) {
+      if (evidenceIds.length > 0) {
+        push(
+          'EVIDENCE_FORBIDDEN',
+          `${id} intent=${intent.intent} 的 subject.evidenceIds 必须为空（实际 ${evidenceIds.length} 个）`,
+        );
+      }
+    } else if (evidenceIds.length > 0) {
+      // 合法来源：当前 intent 覆盖 beats 所引用 narration speech units 的 evidenceIds 并集
+      const coveredEvidenceIds = new Set<string>();
+      for (const unitId of coveredUnitIds) {
+        const unit = unitById.get(unitId);
+        if (unit && unit.kind === 'speech') {
+          for (const evidenceId of unit.evidenceIds) coveredEvidenceIds.add(evidenceId);
+        }
+      }
+      const seenEvidenceIds = new Set<string>();
+      for (const evidenceId of evidenceIds) {
+        if (seenEvidenceIds.has(evidenceId)) {
+          push('EVIDENCE_DUPLICATE', `${id} subject.evidenceIds 含重复 ID ${evidenceId}`);
+          continue;
+        }
+        seenEvidenceIds.add(evidenceId);
+        if (coveredEvidenceIds.has(evidenceId)) continue;
+        if (planEvidenceIds.has(evidenceId)) {
+          push(
+            'EVIDENCE_OUT_OF_SCOPE',
+            `${id} subject.evidenceIds 的 ${evidenceId} 不在当前 intent 覆盖范围内（不得跨 intent 借用证据）`,
+          );
+        } else {
+          push(
+            'EVIDENCE_UNKNOWN',
+            `${id} subject.evidenceIds 的 ${evidenceId} 不存在于来源 narration（凭空生成的证据 ID）`,
+          );
+        }
+      }
     }
 
     // 12b. displayText 规则
@@ -210,6 +284,12 @@ export function validateVisualIntentPlan(
         const ref = intent.displayText;
         let sourceText: string | null = null;
         if (ref.sourceKind === 'spoken_exact' || ref.sourceKind === 'subtitle_exact') {
+          if (ref.sourceChapter !== null) {
+            push(
+              'DISPLAY_TEXT_SOURCE_KIND',
+              `${id} displayText.sourceKind=${ref.sourceKind} 的 sourceChapter 必须为 null（仅 chapter_title 允许）`,
+            );
+          }
           if (ref.sourceUnitId === null) {
             push('DISPLAY_TEXT_SOURCE_MISSING', `${id} displayText.sourceKind=${ref.sourceKind} 必须携带 sourceUnitId`);
           } else {
@@ -217,6 +297,13 @@ export function validateVisualIntentPlan(
             if (!unit || unit.kind !== 'speech') {
               push('DISPLAY_TEXT_SOURCE_UNKNOWN', `${id} displayText 引用不存在/非 speech 的 unit ${ref.sourceUnitId}`);
             } else {
+              // 范围：sourceUnitId 必须属于当前 intent 覆盖 beats 的 unitIds 并集
+              if (!coveredUnitIds.has(unit.id)) {
+                push(
+                  'DISPLAY_TEXT_SOURCE_SCOPE',
+                  `${id} displayText 引用的 unit ${unit.id} 不在当前 intent 覆盖范围内（不得跨 intent/chapter 引用）`,
+                );
+              }
               sourceText = ref.sourceKind === 'spoken_exact' ? unit.spokenText : unit.subtitleText;
               if (sourceText === null) {
                 push('DISPLAY_TEXT_SOURCE_UNKNOWN', `${id} displayText 引用的 unit ${ref.sourceUnitId} 无 subtitleText`);
@@ -224,9 +311,22 @@ export function validateVisualIntentPlan(
             }
           }
         } else {
+          if (ref.sourceUnitId !== null) {
+            push(
+              'DISPLAY_TEXT_SOURCE_KIND',
+              `${id} displayText.sourceKind=chapter_title 的 sourceUnitId 必须为 null（仅 spoken/subtitle 允许）`,
+            );
+          }
           if (ref.sourceChapter === null) {
             push('DISPLAY_TEXT_SOURCE_MISSING', `${id} displayText.sourceKind=chapter_title 必须携带 sourceChapter`);
           } else {
+            // 范围：sourceChapter 必须等于当前 intent 的 chapter
+            if (ref.sourceChapter !== intent.chapter) {
+              push(
+                'DISPLAY_TEXT_SOURCE_SCOPE',
+                `${id} displayText 引用的 chapter ${ref.sourceChapter} 不等于当前 intent 的 chapter ${intent.chapter}（不得跨 chapter 引用）`,
+              );
+            }
             const title = titleByChapter.get(ref.sourceChapter);
             if (title === undefined) {
               push('DISPLAY_TEXT_SOURCE_UNKNOWN', `${id} displayText 引用不存在的 chapter ${ref.sourceChapter}`);
