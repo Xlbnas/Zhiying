@@ -7,11 +7,11 @@
 
 | 项 | 值 |
 |---|---|
-| 文档更新时间 | 2026-07-31T05:45Z（以当前 VM 时间为准，部署后需刷新） |
-| 当前 SHA | `09ae38aab6e46f77b37bd98ad3e1eed46100d7a7` |
+| 文档更新时间 | 2026-07-31T06:05Z（production 部署完成） |
+| 当前 SHA | `4b40ada3ec05e208d0f22661467b110e81b82f6c` |
 | 当前分支 | `m7` |
 | origin/m7 SHA | `077f3d4c9de4881684433545d17ec228062eea4f` |
-| 当前 production SHA | **待本次部署后确认并回填** |
+| 当前 production SHA | `4b40ada3ec05e208d0f22661467b110e81b82f6c` |
 | 上一轮确认 production SHA | `077f3d4c9de4881684433545d17ec228062eea4f` |
 
 ## 2. Production 拓扑
@@ -61,8 +61,8 @@
   - `src/lib/visual-intent/generate.ts`
   - `src/app/api/projects/[id]/visual-intents/route.ts`
 - **旧 candidate ID**：`793c80fa-9229-4551-bc05-960c727afa2e`（只读 revalidate，不得删除/覆盖/修改）
-- **production candidate**：待 dry-run / production 验证后回填
-- **deployed**：待 production 部署后确认
+- **production candidate**：`793c80fa-9229-4551-bc05-960c727afa2e`
+- **deployed**：是（production 部署后 content hash 未变）
 
 ### 4.2 Narrative Beats Candidate
 
@@ -87,7 +87,7 @@
   - `src/worker/index.ts`
   - `src/worker/job-runner.ts`
 - **边界**：Web route 只做 validation/enqueue/query/poll；Worker 原子 claim 后执行 `buildNarrativeBeats` / `buildVisualIntentPlan`。
-- **deployed**：待 production 部署后确认
+- **deployed**：是（production smoke：Web env 无 DEEPSEEK_API_KEY/LLM_PROVIDER）
 
 ### 4.4 Workflow DAG / 资源感知并行
 
@@ -107,7 +107,7 @@
   - 素材：`scenes → assets`
   - 汇合：`scenes + narration_audio_manifest + subtitle_timing → timing_reconciliation → render`
 - **GPU 互斥组**：`tts_gpu` / `render_gpu` / `local_image_gpu` 共享 production_gpu，并发上限 1。
-- **deployed**：待 production 部署后确认
+- **deployed**：是（activity endpoint 返回 DAG nodes/resourceUsage；未在 live production 发起真实付费并行任务）
 
 ### 4.5 AI 图像生成超时修复
 
@@ -120,7 +120,8 @@
   - `src/components/workflow/VisualAssetsPanel.tsx`
 - **错误码**：`PROVIDER_CONNECT_TIMEOUT` / `PROVIDER_RESPONSE_TIMEOUT` / `PROVIDER_POLL_TIMEOUT` / `IMAGE_DOWNLOAD_TIMEOUT` / `IMAGE_DECODE_FAILED` / `PROVIDER_TERMINAL_FAILURE`
 - **幂等**：`project_usage_events.id = attemptId`，provider 调用前写入 `in_flight`，终态 `finalize`；超时后不自动重试。
-- **deployed**：待 production 部署后确认
+- **production 证据**：S001-R01 已回填 `failurePhase=PROVIDER_RESPONSE_TIMEOUT`，UI requirement 卡片内显示「失败阶段」与完整 prompt；未发起新的付费图片生成。
+- **deployed**：是
 
 ### 4.6 NarrationPanel 自动刷新
 
@@ -130,12 +131,13 @@
   - `src/components/workflow/WorkflowWorkspace.tsx`
   - `src/components/workflow/NarrationPanel.tsx`
   - `src/components/workflow/shared.ts`
-- **deployed**：待 production 部署后确认
+- **production 证据**：activity endpoint 返回 `audioOverview` / `subtitleReadiness`，NarrationPanel 无需整页刷新即可订阅。
+- **deployed**：是
 
 ## 5. 当前正在进行的工作
 
-- 本次接力已完成 M7.3A.1 全部代码实现、本地 typecheck/build 与必跑测试套件。
-- 待完成：push 到 origin/m7、production 备份与部署、production smoke verification。
+- 本次接力已完成 M7.3A.1 全部代码实现、本地/镜像测试、production 备份与部署、production smoke verification。
+- 待完成：无（M7.3A.1 已闭环；M7.3B 及以后明确禁止本次执行）。
 
 ## 6. 尚未完成 TODO
 
@@ -146,7 +148,6 @@
 - [ ] M7.7 — Storyboard
 - [ ] M7.8 — Animatic
 - [ ] M7.9 — Editorial Gate / Final Render
-- [ ] 本次 production 部署后的 SHA 回填与 smoke 证据回填
 
 ## 7. 已冻结架构决策
 
@@ -284,3 +285,20 @@
 ## 14. 最近一轮 Review 阻断项
 
 - 无（K3 提交已全部本地 typecheck 通过；本次接力已补齐测试并修复 `ttsJobResultSchema` 对 `providerVersion`/`providerCommit` 的 optional 处理）。
+
+## 15. 本轮 Production Smoke 关键证据
+
+| 检查项 | 结果 | 证据 |
+|---|---|---|
+| 本地/LAN 3210 API/UI 200 | ✅ | `curl http://127.0.0.1:3210/` / `http://192.168.31.56:3210/` |
+| Web 不持有 LLM secret | ✅ | web 容器 env 无 `DEEPSEEK_API_KEY`/`LLM_PROVIDER` |
+| Worker 持有 LLM secret | ✅ | worker 容器 env 含 `DEEPSEEK_API_KEY`/`LLM_PROVIDER` |
+| RTX 2080 Ti / ffprobe / NVENC 正常 | ✅ | `nvidia-smi` 识别 RTX 2080 Ti；worker 内 `ffprobe` 可用 |
+| 容器 health | ✅ | web/worker/adapter 均 healthy |
+| projects 仍为 m6 / snapshot 指针 NULL | ✅ | DB `pipeline_version=m6`×3，`m7_pipeline_snapshot_id IS NULL`×0 |
+| Freud visual_intent candidate hash 未变 | ✅ | `793c80fa-...` content hash 部署前后一致 |
+| S001-R01 显示明确 timeout 阶段 | ✅ | UI 显示「失败阶段：PROVIDER_RESPONSE_TIMEOUT」 |
+| requirement prompt 在卡片内 | ✅ | S001-R01 卡片内显示完整生成提示词 |
+| global summary 不展示完整 prompt | ✅ | 顶部仅统计 counts，无完整 query |
+| 无意外付费任务 | ✅ | `project_usage_events` 数量 610→610，总费用 ¥4.6226 未变 |
+| logs 无 migration/provider/error | ✅ | 最近 30 行日志无 error/fatal/migration/sqlite/provider/dispatch/resource |
