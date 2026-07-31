@@ -185,8 +185,6 @@ CREATE TABLE IF NOT EXISTS asset_resolution_state (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (project_id, scene_id, requirement_id)
 );
--- M7：为已存在表补齐 metadata 列（幂等）
-ALTER TABLE asset_resolution_state ADD COLUMN metadata TEXT;
 -- M3-B：TTS 任务队列（一个 speech unit 一个 job，独立 retry/cancel）
 CREATE TABLE IF NOT EXISTS tts_jobs (
   id TEXT PRIMARY KEY,
@@ -364,6 +362,16 @@ export function getDb(): Db {
   db.pragma('foreign_keys = ON');
   db.pragma('synchronous = NORMAL');
   db.exec(SCHEMA_SQL);
+  // M7：为已存在表补齐 asset_resolution_state.metadata 列（幂等）
+  try {
+    db.exec(`ALTER TABLE asset_resolution_state ADD COLUMN metadata TEXT`);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('duplicate column name')) {
+      // 已存在，忽略
+    } else {
+      throw err;
+    }
+  }
   // M2-A Hardening 迁移（幂等）：
   // 1. 版本号唯一索引前先查重——有重复必须停止并报告，不得静默删除
   const dup = db.prepare(VERSION_DUP_CHECK_SQL).get() as
