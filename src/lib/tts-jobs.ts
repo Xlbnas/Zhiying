@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {z} from 'zod';
 import {getDb} from './db';
+import {releaseResourceLeaseForJob} from './resources/leases';
 
 /**
  * TTS 任务队列数据层（M3-B §二十三/二十四/四十二/四十三）。
@@ -336,13 +337,24 @@ export function recoverStaleTtsJobs(timeoutMs: number): {requeued: number; cance
   const tx = db.transaction(() => {
     const at = now();
     const cutoff = new Date(Date.now() - timeoutMs).toISOString();
+
+    // 先读取要回收的 job id，以便后续释放 production_gpu lease
+    const staleJobIds = (
+      db.prepare(
+        `SELECT id FROM tts_jobs
+         WHERE status = 'running' AND heartbeat_at IS NOT NULL AND heartbeat_at < ?`,
+      )
+      .all(cutoff) as Array<{id: string}>
+    ).map((r) => r.id);
+
     const cancelled = db
       .prepare(
         `UPDATE tts_jobs
          SET status = 'cancelled', finished_at = ?,
              claimed_by = NULL, claimed_at = NULL, heartbeat_at = NULL
-         WHERE status = 'running' AND heartbeat_at IS NOT NULL AND heartbeat_at < ?
-           AND cancel_requested = 1`,
+         WHERE id IN (SELECT id FROM tts_jobs WHERE status = 'running'
+           AND heartbeat_at IS NOT NULL AND heartbeat_at < ?
+           AND cancel_requested = 1)`,
       )
       .run(at, cutoff).changes;
     const requeued = db
@@ -353,6 +365,15 @@ export function recoverStaleTtsJobs(timeoutMs: number): {requeued: number; cance
            AND cancel_requested = 0`,
       )
       .run(cutoff).changes;
+
+    // 释放所有回收的 TTS job 的 production_gpu lease
+    for (const jobId of staleJobIds) {
+      try {
+        releaseResourceLeaseForJob('production_gpu', 'tts', jobId);
+      } catch {
+        // lease 可能已被回收，静默忽略
+      }
+    }
     return {requeued, cancelled};
   });
   return tx.immediate();
