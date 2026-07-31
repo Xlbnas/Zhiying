@@ -1,5 +1,7 @@
 # M7.0 — Editorial Pipeline Architecture Audit and Redesign Report
 
+> 后续 M7 实施状态、TODO 与 production 证据见 [`docs/M7_IMPLEMENTATION_STATUS.md`](./M7_IMPLEMENTATION_STATUS.md)。
+
 ## 审计基线（Audit Baseline）
 
 - **Repository**: `github.com/Xlbnas/Zhiying`（origin）
