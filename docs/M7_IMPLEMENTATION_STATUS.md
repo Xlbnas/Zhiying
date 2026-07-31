@@ -7,11 +7,11 @@
 
 | 项 | 值 |
 |---|---|
-| 文档更新时间 | 2026-07-31T14:10Z（M7.3A.2 收尾 review hardening 补齐） |
-| 当前 SHA | `9b1869373a38489270bae356f2bbb885f0b61e2f` |
+| 文档更新时间 | 2026-07-31T17:30Z（M7.3A.2 收尾部署 + smoke 完成） |
+| 当前 SHA | `e62f5c2af9702538163d4f7583f456cd900ca550` |
 | 当前分支 | `m7` |
-| origin/m7 SHA | `9b1869373a38489270bae356f2bbb885f0b61e2f` |
-| 当前 production SHA | `4b40ada3ec05e208d0f22661467b110e81b82f6c` |
+| origin/m7 SHA | `e62f5c2af9702538163d4f7583f456cd900ca550` |
+| 当前 production SHA | `e62f5c2af9702538163d4f7583f456cd900ca550` |
 | 上一轮确认 production SHA | `4b40ada3ec05e208d0f22661467b110e81b82f6c` |
 
 ## 2. Production 拓扑
@@ -179,8 +179,9 @@
 
 ## 5. 当前正在进行的工作
 
-- M7.3A.2 收尾：6 项 review blocker 独立复核完成，补齐 lease 心跳实现/requestId UI 生命周期修复/测试实证；全量测试绿。
-- 待完成：production 备份、部署、verification（本次执行）。
+- M7.3A.2 收尾完成：6 项 review blocker 独立复核 + 补齐（lease 心跳、requestId UI 生命周期、provenance/stable-stop 测试实证）；全量测试绿。
+- **production 已部署 `e62f5c2`（备份 `m73a2-20260731T140940Z`），smoke 全项通过。**
+- 下一步：M7.3B（明确不在本次范围）。
 
 ## 6. 尚未完成 TODO
 
@@ -362,17 +363,19 @@ M7.3A.2 Review 全部阻断项已修复（第二轮 hardening）。接续复核�
 
 ## 15. 本轮 Production Smoke 关键证据
 
-待 production 部署后填写。
+已部署：`e62f5c2af9702538163d4f7583f456cd900ca550`（M7.3A.2 收尾），备份 `m73a2-20260731T140940Z`（DB SHA `256dcfe6…c2b980`，integrity=ok）。
 
 | 检查项 | 结果 | 证据 |
 |---|---|---|
-| 本地/LAN 3210 API/UI 200 | 待部署 | — |
-| Web 不持有 LLM secret | 待部署 | — |
-| Worker LLM/APIYi 配置健康 | 待部署 | — |
-| RTX 2080 Ti / ffprobe / NVENC 正常 | 待部署 | — |
-| 容器 healthy | 待部署 | — |
-| projects 仍为 m6 / snapshot 指针 NULL | 待部署 | — |
-| Freud artifact hash 不变 | 待部署 | — |
-| S001-R01 旧事故保留 | 待部署 | — |
-| 无意外付费请求 | 待部署 | — |
-| logs 无 migration/SQLite/dispatch/lease 错误 | 待部署 | — |
+| 本地/LAN 3210 API/UI 200 | ✅ | `127.0.0.1:3210/api/projects`=200；`192.168.31.56:3210` API/UI 均 200 |
+| Web 不持有 LLM secret | ✅ | web env 仅 `APIYI_API_KEY=`；`DEEPSEEK_API_KEY`/`LLM_PROVIDER` 仅存在于 worker |
+| Worker LLM/APIYi 配置健康 | ✅ | worker env 含 DEEPSEEK/LLM_PROVIDER/APIYI；启动日志正常 |
+| RTX 2080 Ti / ffprobe / NVENC 正常 | ✅ | worker 内 `RTX 2080 Ti 14261MiB`、ffprobe 5.1.9、`libnvidia-encode.so.1` 存在；日志 `GPU mode: hardware(angle-egl), NVENC: enabled` |
+| 容器 healthy | ✅ | zhiying-web / zhiying-worker / indextts2-adapter 均 `e62f5c2` + healthy |
+| projects 仍为 m6 / snapshot 指针 NULL | ✅ | 全项目 `pipeline_version=m6`、`m7_pipeline_snapshot_id` 空 |
+| Freud artifact hash 不变 | ✅ | narration_plan_v2 `01ff6fbd…` 与 narrative_beats `e226cadd…` 规范化 sha256 与备份全等 |
+| S001-R01 旧事故保留 | ✅ | S014-R01 generation_failed(apiyi) 保留；S001 历史 generated assets×2；40 条 bindings 保留；旧 candidate `793c80fa…` 规范化内容与备份全等（备份 JSON dump 转义差异导致 raw hash 不同，语义相等） |
+| 无意外付费请求 | ✅ | 17:15 后 `project_usage_events`=0；llm/generation 状态为历史存量；`asset_generation_jobs`=0 行、`resource_group_leases`=0 行 |
+| logs 无 migration/SQLite/dispatch/lease 错误 | ✅ | web/worker 日志无相关 error（仅 Node SQLite experimental warning） |
+| migration 单 web 先行验证 | ✅ | 新表/索引/5 个 additive 列/UNIQUE 约束就位；幂等重启 healthy；`BACKUP_COMPLETED_AT`(14:11:45Z) < `CHECKOUT_STARTED_AT`(14:12:11Z) |
+| 新镜像 mock 测试 | ✅ | 容器内 11 套件全绿（scripts 以宿主同 SHA 挂载，runner 镜像不含 scripts/） |
