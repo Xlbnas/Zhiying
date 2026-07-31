@@ -7,10 +7,10 @@
 
 | 项 | 值 |
 |---|---|
-| 文档更新时间 | 2026-07-31T07:00Z（M7.3A.2 hardening 完成） |
-| 当前 SHA | `c07b5d0df0f41db1ef982a89f534765313181b6c`（尚未 push，待 commit） |
+| 文档更新时间 | 2026-07-31T07:30Z（M7.3A.2 hardening 完成，已 push） |
+| 当前 SHA | `c18ca5a32ba04707c96f8da828a19dadd6330c4d` |
 | 当前分支 | `m7` |
-| origin/m7 SHA | `c07b5d0df0f41db1ef982a89f534765313181b6c` |
+| origin/m7 SHA | `c18ca5a32ba04707c96f8da828a19dadd6330c4d` |
 | 当前 production SHA | `4b40ada3ec05e208d0f22661467b110e81b82f6c` |
 | 上一轮确认 production SHA | `4b40ada3ec05e208d0f22661467b110e81b82f6c` |
 
