@@ -100,8 +100,8 @@ export function payloadSpokenText(payload: AnyTtsJobPayload): string {
 export const ttsJobResultSchema = z.object({
   provider: z.string().min(1),
   model: z.string().min(1),
-  providerVersion: z.string().min(1).nullable(),
-  providerCommit: z.string().min(1).nullable(),
+  providerVersion: z.string().min(1).nullable().default(null),
+  providerCommit: z.string().min(1).nullable().default(null),
   settings: z.object({
     voiceProfileId: z.string().min(1),
     voiceProfileRevision: z.string().min(1),
