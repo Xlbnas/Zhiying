@@ -192,6 +192,22 @@ export function downstreamOf(nodeId: string): string[] {
 /** reachability = downstreamOf（语义同义，供调度/失效传播调用方使用）。 */
 export const reachability = downstreamOf;
 
+// ---------- Project-stage 专属 DAG 辅助（M7.3A.2 authoritative DAG） ----------
+
+const PROJECT_STAGE_SET = new Set<string>(WORKFLOW_STAGES);
+
+/** 某 project_stage 的直接 DAG 依赖（仅返回同为 project_stages 的节点）。 */
+export function directStageDependencies(stage: WorkflowStage): WorkflowStage[] {
+  const node = NODE_BY_ID.get(stage);
+  if (!node) return [];
+  return node.dependencies.filter((d) => PROJECT_STAGE_SET.has(d)) as WorkflowStage[];
+}
+
+/** 某 project_stage 的 DAG 可达下游（仅返回同为 project_stages 的节点）。 */
+export function downstreamStageNodes(stage: WorkflowStage): WorkflowStage[] {
+  return downstreamOf(stage).filter((id) => PROJECT_STAGE_SET.has(id)) as WorkflowStage[];
+}
+
 /**
  * 锁定某节点后新解锁的 ready 节点（纯函数，UI handleLocked 与测试共用）。
  * 输入为锁定前的 readiness 快照；某节点此前为 locked 且其全部依赖

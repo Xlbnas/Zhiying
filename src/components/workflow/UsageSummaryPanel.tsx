@@ -18,6 +18,7 @@ interface ImageUsageSummary {
   costCny: number;
   unknownBilling: number;
   authFailed: number;
+  confirmedZero: number;
   providers: string[];
   models: string[];
   backfilled: number;
@@ -187,11 +188,12 @@ export function UsageSummaryPanel({projectId, refreshKey}: {projectId: string; r
               CPU = 容器 cgroup cpu.stat usage_usec delta 累计（worker 串行归属单个任务）<br />
               GPU = 真实走 NVENC 路径的渲染 attempt wall duration 累计，不按利用率加权<br />
               总耗时 = render/tts 任务 started_at→finished_at（不含 LLM API 等待）<br />
-              {data.image.calls + data.image.unknownBilling + data.image.authFailed > 0 ? (
+              {data.image.calls + data.image.unknownBilling + data.image.authFailed + data.image.confirmedZero > 0 ? (
                 <>
                   图像生成: {data.image.calls} 次成功计费 · {data.image.images} 张
                   {data.image.unknownBilling > 0 ? ` · ${data.image.unknownBilling} 次费用未知（未计入）` : ''}
                   {data.image.authFailed > 0 ? ` · ${data.image.authFailed} 次认证失败（¥0）` : ''}
+                  {data.image.confirmedZero > 0 ? ` · ${data.image.confirmedZero} 次确认未计费（¥0）` : ''}
                   {data.image.backfilled > 0 ? ` · ${data.image.backfilled} 次历史回填` : ''}<br />
                   provider: {data.image.providers.join(', ') || 'N/A'} · model: {data.image.models.join(', ') || 'N/A'}<br />
                   图像费用 = 每次 generation attempt × 写入时单价快照（configured_estimate，含未采用 candidate）<br />

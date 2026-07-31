@@ -41,7 +41,7 @@ export interface StagesResponse {
 
 /** /api/projects/[id]/activity 的 runningJobs 行（M7）。 */
 export interface ActivityRunningJob {
-  type: 'render' | 'llm' | 'tts' | 'dispatch';
+  type: 'render' | 'llm' | 'tts' | 'dispatch' | 'asset_generation';
   id: string;
   stage: string | null;
   resourceClass: ResourceClass;

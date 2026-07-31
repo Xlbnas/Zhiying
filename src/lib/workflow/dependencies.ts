@@ -1,6 +1,7 @@
 import {getDb} from '../db';
 import {requireStage, WorkflowError} from './stages';
-import {upstreamStages, type WorkflowStage} from './types';
+import {directStageDependencies} from './dag-shared';
+import type {WorkflowStage} from './types';
 
 /**
  * 上游依赖快照（M2-D §五/六）。
@@ -30,7 +31,7 @@ export function captureLockedUpstreamVersionsTx(
   stage: WorkflowStage,
 ): UpstreamVersionSnapshot {
   const snapshot: UpstreamVersionSnapshot = {};
-  for (const up of upstreamStages(stage)) {
+  for (const up of directStageDependencies(stage)) {
     const row = requireStage(projectId, up);
     if (row.status !== 'locked' || row.locked_version === null) {
       throw new WorkflowError(

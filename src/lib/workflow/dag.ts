@@ -10,6 +10,7 @@ import {checkTimingReconciliationReadiness} from '@/lib/reconciliation/timing';
 import {evaluateVisualReadiness} from '@/lib/assets/readiness';
 import {loadCurrentScenes} from '@/lib/scenes/visual-overrides';
 import {WORKFLOW_STAGES} from './types';
+import {getActiveLease} from '@/lib/resources/leases';
 import {
   GPU_EXCLUSIVE_GROUP,
   JOB_TYPE_RESOURCE_CLASS,
@@ -62,24 +63,50 @@ const GPU_OCCUPANT_LABELS: Partial<Record<ResourceClass, string>> = {
   local_image_gpu: '本地生图',
 };
 
-/** 全局忙碌资源类别（GPU 是整机资源，跨项目统计）。 */
+/**
+ * 全局真正占用资源类别（running / 持有有效 DB lease）。
+ * queued 不等于占用；GPU 整机资源以 production_gpu lease 为准，
+ * 同时兼容旧数据 running GPU job 无 lease 的过渡情况。
+ */
 export function listBusyResourceClasses(db: Db): ResourceClass[] {
   const busy = new Set<ResourceClass>();
   const running = (sql: string): number => (db.prepare(sql).get() as {c: number}).c;
-  if (running(`SELECT COUNT(*) AS c FROM render_jobs WHERE status IN ('queued','running')`) > 0) {
-    busy.add(JOB_TYPE_RESOURCE_CLASS.render);
-  }
-  if (running(`SELECT COUNT(*) AS c FROM tts_jobs WHERE status IN ('queued','running')`) > 0) {
-    busy.add(JOB_TYPE_RESOURCE_CLASS.tts);
-  }
-  if (running(`SELECT COUNT(*) AS c FROM llm_jobs WHERE status IN ('queued','running')`) > 0) {
+
+  // LLM / dispatch：API 任务，按 running 计
+  if (running(`SELECT COUNT(*) AS c FROM llm_jobs WHERE status = 'running'`) > 0) {
     busy.add(JOB_TYPE_RESOURCE_CLASS.llm);
   }
-  if (
-    running(`SELECT COUNT(*) AS c FROM generation_dispatch_jobs WHERE status IN ('queued','running')`) > 0
-  ) {
+  if (running(`SELECT COUNT(*) AS c FROM generation_dispatch_jobs WHERE status = 'running'`) > 0) {
     busy.add(JOB_TYPE_RESOURCE_CLASS.dispatch);
   }
+
+  // GPU 任务：优先以 production_gpu lease 为准；兼容旧 running job 无 lease
+  const gpuLease = getActiveLease('production_gpu');
+  if (gpuLease) {
+    switch (gpuLease.owner_job_type) {
+      case 'render':
+        busy.add(JOB_TYPE_RESOURCE_CLASS.render);
+        break;
+      case 'tts':
+        busy.add(JOB_TYPE_RESOURCE_CLASS.tts);
+        break;
+      case 'asset_generation':
+        busy.add('local_image_gpu');
+        break;
+    }
+  } else {
+    // 兼容旧数据：无有效 lease 但仍有 running GPU job
+    if (running(`SELECT COUNT(*) AS c FROM render_jobs WHERE status = 'running'`) > 0) {
+      busy.add(JOB_TYPE_RESOURCE_CLASS.render);
+    }
+    if (running(`SELECT COUNT(*) AS c FROM tts_jobs WHERE status = 'running'`) > 0) {
+      busy.add(JOB_TYPE_RESOURCE_CLASS.tts);
+    }
+    if (running(`SELECT COUNT(*) AS c FROM asset_generation_jobs WHERE status = 'running'`) > 0) {
+      busy.add('local_image_gpu');
+    }
+  }
+
   return [...busy];
 }
 

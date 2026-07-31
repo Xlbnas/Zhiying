@@ -1,9 +1,11 @@
 import {getDb} from '@/lib/db';
 import {getActiveLlmJobTx} from '../llm-job-state';
 import {
+  directStageDependencies,
+  downstreamStageNodes,
+} from './dag-shared';
+import {
   WORKFLOW_STAGES,
-  downstreamStages,
-  upstreamStages,
   type ProjectStageRow,
   type StageStatus,
   type WorkflowStage,
@@ -106,7 +108,7 @@ export function assertRunnable(
   projectId: string,
   stage: WorkflowStage,
 ): void {
-  for (const up of upstreamStages(stage)) {
+  for (const up of directStageDependencies(stage)) {
     const row = getStage(projectId, up);
     if (!row || row.status !== 'locked' || row.locked_version === null) {
       throw new WorkflowError(
@@ -128,7 +130,7 @@ export function affectedDownstream(
   projectId: string,
   stage: WorkflowStage,
 ): WorkflowStage[] {
-  return downstreamStages(stage).filter((down) => {
+  return downstreamStageNodes(stage).filter((down) => {
     const row = getStage(projectId, down);
     return row !== undefined && row.status !== 'not_started';
   });
@@ -163,7 +165,7 @@ export function applyDownstreamStaleTx(
     `UPDATE project_stages SET status = 'stale', updated_at = ?
      WHERE project_id = ? AND stage = ? AND status != 'not_started'`,
   );
-  for (const down of downstreamStages(stage)) {
+  for (const down of downstreamStageNodes(stage)) {
     mark.run(at, projectId, down);
   }
 }

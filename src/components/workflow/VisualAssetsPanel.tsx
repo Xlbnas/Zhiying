@@ -103,6 +103,9 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
   const [genPrompt, setGenPrompt] = useState<string>('');
   const [generatingKey, setGeneratingKey] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null); // 搜索/绑定按钮 busy
+  // M7.3A.2：同一次点击生命周期内复用同一个 requestId；显式「重新生成」才创建新 requestId
+  const requestIdRef = useRef<Map<string, string>>(new Map());
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // M6.3.13：「改用 MG」预览确认区（preview 不落库，确认才 switch）
   const [mgPreview, setMgPreview] = useState<{sceneId: string; template: string; templateProps: Record<string, unknown>} | null>(null);
 
@@ -129,6 +132,15 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
   }, [projectId]);
 
   useEffect(() => { void load(); }, [load, scenesStageKey]);
+
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const errMsg = async (res: Response, fallback: string): Promise<string> =>
     ((await res.json().catch(() => null)) as {message?: string})?.message ?? `${fallback}（HTTP ${res.status}）`;
@@ -182,22 +194,82 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
     if (!genTarget || !genPrompt.trim()) return;
     const key = `${genTarget.sceneId}:${genTarget.requirementId}:generate`;
     setGeneratingKey(key); setError(null); setResult(null);
+
+    // M7.3A.2：同一次点击生命周期复用 requestId；显式重新生成（重新打开编辑器）才新 requestId
+    const reqKey = `${genTarget.sceneId}:${genTarget.requirementId}`;
+    let requestId = requestIdRef.current.get(reqKey);
+    if (!requestId) {
+      requestId = crypto.randomUUID();
+      requestIdRef.current.set(reqKey, requestId);
+    }
+
     try {
       const res = await fetch(`/api/projects/${projectId}/assets/generate`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({sceneId: genTarget.sceneId, requirementId: genTarget.requirementId, prompt: genPrompt}),
+        body: JSON.stringify({
+          sceneId: genTarget.sceneId,
+          requirementId: genTarget.requirementId,
+          prompt: genPrompt,
+          requestId,
+        }),
       });
       if (!res.ok) throw new Error(await errMsg(res, '生成失败'));
-      setResult('AI 生成完成（候选）。确认效果后点击「使用这张」才会绑定。');
+      const body = (await res.json()) as {jobId: string; requestId: string; status: string; reused: boolean};
+      setResult(
+        body.reused
+          ? '该素材生成任务已存在，继续等待结果…'
+          : 'AI 生成任务已提交（候选）。确认效果后点击「使用这张」才会绑定。',
+      );
       setGenTarget(null);
       setGenPrompt('');
-      await load();
-      onAssetsChanged?.();
+      startPolling(genTarget.sceneId, genTarget.requirementId, body.requestId);
     } catch (err) {
       setError(err instanceof Error ? err.message : '生成失败');
     } finally { setGeneratingKey(null); }
-  }, [projectId, genTarget, genPrompt, load, onAssetsChanged]);
+  }, [projectId, genTarget, genPrompt]);
+
+  const startPolling = useCallback((sceneId: string, requirementId: string, requestId: string) => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    let terminal = false;
+    const tick = async () => {
+      if (terminal) return;
+      try {
+        const res = await fetch(
+          `/api/projects/${projectId}/assets/generate?sceneId=${sceneId}&requirementId=${requirementId}&requestId=${requestId}`,
+          {cache: 'no-store'},
+        );
+        if (!res.ok) return;
+        const json = (await res.json()) as {job: {status: string; resultAssetId: string | null; failurePhase: string | null} | null};
+        if (!json.job) return;
+        if (json.job.status === 'succeeded' && json.job.resultAssetId) {
+          terminal = true;
+          setResult('AI 生成完成，候选已可用。');
+          await load();
+          onAssetsChanged?.();
+          if (pollTimerRef.current) {
+            clearInterval(pollTimerRef.current);
+            pollTimerRef.current = null;
+          }
+        } else if (json.job.status === 'failed' || json.job.status === 'indeterminate') {
+          terminal = true;
+          setResult(`AI 生成结束：${json.job.status}${json.job.failurePhase ? `（${json.job.failurePhase}）` : ''}`);
+          await load();
+          if (pollTimerRef.current) {
+            clearInterval(pollTimerRef.current);
+            pollTimerRef.current = null;
+          }
+        }
+      } catch {
+        // ignore polling errors
+      }
+    };
+    void tick();
+    pollTimerRef.current = setInterval(() => void tick(), 2000);
+  }, [projectId, load, onAssetsChanged]);
 
   const bindCandidate = useCallback(async (sceneId: string, requirementId: string, assetId: string) => {
     const key = `${sceneId}:${requirementId}:bind:${assetId}`;
