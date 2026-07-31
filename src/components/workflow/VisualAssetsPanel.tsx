@@ -39,6 +39,14 @@ interface RequirementData {
   failureReason: string | null;
   statusHint: string;
   queriesTried: string[];
+  // M7：超时/失败对账字段
+  failurePhase: string | null;
+  attemptId: string | null;
+  providerRequestId: string | null;
+  promptUsed: string | null;
+  provider: string | null;
+  model: string | null;
+  elapsedMs: number | null;
   // M6.3.13：「改用 MG」语义闸门（authentic_required → 不渲染该动作）
   switchToMgEligible?: boolean;
   switchToMgDisabledReason?: string | null;
@@ -310,11 +318,27 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
       {error ? <div className="error-banner" style={{margin: 0, borderRadius: 0}}>{error}</div> : null}
 
       <div style={{padding: '0 24px 20px'}}>
-        <div style={{display: 'flex', gap: 20, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap'}}>
-          <span style={{fontSize: 14}}>素材需求：<strong>{summary.needAssets}</strong> 项</span>
-          <span style={{fontSize: 14}}>已准备：<strong style={{color: summary.pendingAssets === 0 ? 'var(--success)' : 'var(--accent)'}}>{summary.readyRequirements}</strong> / {summary.needAssets}</span>
-          {summary.pendingAssets > 0 ? <span style={{fontSize: 12, color: 'var(--muted)'}}>待处理：{summary.pendingAssets} 项</span> : null}
-        </div>
+        {(() => {
+          const unresolvedScenes = needScenes.filter((s) => s.ready < s.totalRequired).length;
+          const unresolvedReqs = needScenes.reduce((acc, s) => acc + s.requirements.filter((r) => r.status !== 'ready').length, 0);
+          const searchFailed = needScenes.reduce(
+            (acc, s) => acc + s.requirements.filter((r) => r.status === 'no_result' || r.status === 'download_failed').length,
+            0,
+          );
+          const genFailed = needScenes.reduce(
+            (acc, s) => acc + s.requirements.filter((r) => r.status === 'generation_failed').length,
+            0,
+          );
+          return (
+            <div style={{display: 'flex', gap: 20, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap'}}>
+              <span style={{fontSize: 14}}>未解决场景：<strong>{unresolvedScenes}</strong></span>
+              <span style={{fontSize: 14}}>未解决需求：<strong>{unresolvedReqs}</strong></span>
+              <span style={{fontSize: 14}}>已准备：<strong style={{color: summary.pendingAssets === 0 ? 'var(--success)' : 'var(--accent)'}}>{summary.readyRequirements}</strong> / {summary.needAssets}</span>
+              {searchFailed > 0 ? <span style={{fontSize: 12, color: 'var(--danger)'}}>搜索失败：{searchFailed}</span> : null}
+              {genFailed > 0 ? <span style={{fontSize: 12, color: 'var(--danger)'}}>AI 生成失败：{genFailed}</span> : null}
+            </div>
+          );
+        })()}
 
         {result ? <div style={{fontSize: 12, color: 'var(--success)', marginBottom: 8}}>{result}</div> : null}
 
@@ -451,14 +475,25 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
                         }
                         return null;
                       };
+                      const actualPrompt = req.promptUsed ?? req.requirement.query;
                       return (
                         <div key={req.requirementId} style={{marginBottom: 14, paddingBottom: 12, borderBottom: '1px dashed var(--border)'}}>
                           <div style={{display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4, flexWrap: 'wrap'}}>
                             <span style={{fontSize: 12, fontWeight: 600}}>需求 {req.index + 1}</span>
-                            <span style={{fontSize: 12, color: 'var(--muted)'}}>{req.requirement.subject}</span>
+                            <span className="mono" style={{fontSize: 11, color: 'var(--muted)'}}>{req.requirementId}</span>
+                            <span style={{fontSize: 11, color: 'var(--muted)'}}>policy={req.requirement.policy} · authenticity={req.authenticity}</span>
                             <span style={{fontSize: 12, fontWeight: 600, color: statusColor}}>
                               {isReady ? '✓ ' : ''}{req.friendlyStatus}
                             </span>
+                            {req.recommendedAction ? (
+                              <span style={{fontSize: 11, color: 'var(--accent)'}}>推荐：{req.recommendedAction}</span>
+                            ) : null}
+                          </div>
+
+                          {/* 完整 query / prompt 必须在 requirement 卡片内可见 */}
+                          <div style={{fontSize: 12, marginBottom: 6, padding: 8, borderRadius: 6, background: 'var(--surface-raised)', lineHeight: 1.5}}>
+                            <span style={{color: 'var(--muted)'}}>{req.promptUsed ? '生成提示词：' : '搜索 query：'}</span>
+                            <span>{actualPrompt}</span>
                           </div>
 
                           {/* 用户态说明：发生了什么 / 为什么 / 建议下一步（无需展开技术详情） */}
@@ -546,13 +581,24 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
                             </div>
                           ) : null}
 
+                          {/* 失败详情：直接显示在 requirement 框内 */}
+                          {req.status === 'generation_failed' ? (
+                            <div style={{fontSize: 11, color: 'var(--danger)', marginBottom: 6, lineHeight: 1.5}}>
+                              <div><strong>失败阶段：</strong>{req.failurePhase ?? 'unknown'}</div>
+                              <div><strong>原因：</strong>{req.failureReason ?? '—'}</div>
+                              {req.elapsedMs !== null ? <div><strong>耗时：</strong>{(req.elapsedMs / 1000).toFixed(1)}s</div> : null}
+                              {req.attemptId ? <div><strong>attemptId：</strong><span className="mono">{req.attemptId}</span></div> : null}
+                              {req.providerRequestId ? <div><strong>providerRequestId：</strong><span className="mono">{req.providerRequestId}</span></div> : null}
+                              {req.provider ? <div><strong>provider/model：</strong>{req.provider}/{req.model ?? '—'}</div> : null}
+                            </div>
+                          ) : null}
+
                           <details style={{marginTop: 6}}>
                             <summary style={{cursor: 'pointer', fontSize: 11, opacity: 0.6}}>技术详情</summary>
                             <div style={{fontSize: 10, opacity: 0.5, marginTop: 4}}>
                               sceneId={s.sceneId} requirementId={req.requirementId} policy={req.requirement.policy} authenticity={req.authenticity}<br />
-                              query=&quot;{req.requirement.query}&quot; status={req.status} recommended={req.recommendedAction ?? '—'}<br />
+                              status={req.status} recommended={req.recommendedAction ?? '—'}<br />
                               queriesTried=[{req.queriesTried.join(', ')}]
-                              {req.failureReason ? <> failureReason=&quot;{req.failureReason}&quot;</> : null}
                               {req.generateDisabledReason ? <> generateDisabled=&quot;{req.generateDisabledReason}&quot;</> : null}
                             </div>
                           </details>
