@@ -94,6 +94,17 @@ function insertAssetGenerationJob(projectId: string, queuedAt: string): string {
   return id;
 }
 
+function insertLocalImageGenerationJob(projectId: string, queuedAt: string): string {
+  const id = crypto.randomUUID();
+  getDb().prepare(
+    `INSERT INTO asset_generation_jobs (
+       id, project_id, scene_id, requirement_id, request_id,
+       prompt, provider, model, resource_class, resource_group, status, created_at, updated_at
+     ) VALUES (?, ?, 'S001', 'S001-R01', ?, 'prompt', 'comfyui', 'sd3', 'local_image_gpu', 'production_gpu', 'queued', ?, ?)`,
+  ).run(id, projectId, `req-${id}`, queuedAt, queuedAt);
+  return id;
+}
+
 function jobStatus(table: 'llm_jobs' | 'tts_jobs' | 'render_jobs' | 'asset_generation_jobs', id: string): string | undefined {
   const row = getDb().prepare(`SELECT status FROM ${table} WHERE id = ?`).get(id) as {status: string} | undefined;
   return row?.status;
@@ -190,26 +201,47 @@ async function main(): Promise<void> {
     releaseResourceLeaseForJob('production_gpu', 'render', renderId);
   }
 
-  // ============ L5：调度器 —— local_image_gpu（asset_generation）与 TTS 互斥 ============
+  // ============ L5：remote_image_api（APIYi）与 TTS 可同时 running ============
   {
     const now = new Date().toISOString();
     const ttsId = insertTtsJob(projectId, now);
-    const assetId = insertAssetGenerationJob(projectId, new Date(Date.now() + 1000).toISOString());
+    const remoteImgId = insertAssetGenerationJob(projectId, new Date(Date.now() + 1000).toISOString());
 
     const claimedA = claimNextAnyJob('worker-img-a');
     ok(claimedA?.type === 'tts' && claimedA.job.id === ttsId, '[L5a] worker-a claim TTS（占 GPU）', claimedA);
+    ok(getActiveLease('production_gpu')?.owner_job_type === 'tts', '[L5b] production_gpu 被 TTS 占用');
 
+    // APIYi → remote_image_api → 不需要 production_gpu → 可与 TTS 同时 claim
     const claimedB = claimNextAnyJob('worker-img-b');
-    ok(claimedB === null, '[L5b] asset_generation 与 TTS 同属 GPU 组，被互斥');
-    ok(jobStatus('asset_generation_jobs', assetId) === 'queued', '[L5c] asset_generation job 仍 queued');
+    ok(claimedB?.type === 'asset_generation' && claimedB.job.id === remoteImgId, '[L5c] APIYi (remote) 无需 GPU，可与 TTS 同时 running');
+    ok(claimedB?.resourceClass === 'remote_image_api', '[L5d] APIYi job resourceClass = remote_image_api');
+
+    getDb().prepare(`UPDATE tts_jobs SET status='succeeded' WHERE id=?`).run(ttsId);
+    releaseResourceLeaseForJob('production_gpu', 'tts', ttsId);
+    getDb().prepare(`UPDATE asset_generation_jobs SET status='succeeded' WHERE id=?`).run(remoteImgId);
+  }
+
+  // ============ L6：local_image_gpu（ComfyUI/local）与 TTS 互斥 ============
+  {
+    const now = new Date().toISOString();
+    const ttsId = insertTtsJob(projectId, now);
+    const localImgId = insertLocalImageGenerationJob(projectId, new Date(Date.now() + 1000).toISOString());
+
+    const claimedA = claimNextAnyJob('worker-local-a');
+    ok(claimedA?.type === 'tts' && claimedA.job.id === ttsId, '[L6a] worker-a claim TTS（占 GPU）', claimedA);
+
+    const claimedB = claimNextAnyJob('worker-local-b');
+    ok(claimedB === null, '[L6b] local_image_gpu 与 TTS 同属 GPU 组，被互斥');
+    ok(jobStatus('asset_generation_jobs', localImgId) === 'queued', '[L6c] local image job 仍 queued');
 
     getDb().prepare(`UPDATE tts_jobs SET status='succeeded' WHERE id=?`).run(ttsId);
     releaseResourceLeaseForJob('production_gpu', 'tts', ttsId);
 
-    const claimedC = claimNextAnyJob('worker-img-b');
-    ok(claimedC?.type === 'asset_generation' && claimedC.job.id === assetId, '[L5d] TTS 释放后 asset_generation 可被 claim', claimedC);
-    getDb().prepare(`UPDATE asset_generation_jobs SET status='succeeded' WHERE id=?`).run(assetId);
-    releaseResourceLeaseForJob('production_gpu', 'asset_generation', assetId);
+    const claimedC = claimNextAnyJob('worker-local-b');
+    ok(claimedC?.type === 'asset_generation' && claimedC.job.id === localImgId, '[L6d] TTS 释放后 local image 可被 claim', claimedC);
+    ok(claimedC?.resourceClass === 'local_image_gpu', '[L6e] local image job resourceClass = local_image_gpu');
+    getDb().prepare(`UPDATE asset_generation_jobs SET status='succeeded' WHERE id=?`).run(localImgId);
+    releaseResourceLeaseForJob('production_gpu', 'asset_generation', localImgId);
   }
 
   closeDb();

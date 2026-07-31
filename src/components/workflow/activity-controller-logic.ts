@@ -41,11 +41,11 @@ export interface ActivityController {
 }
 
 function isTerminalAudioStatus(status: string): boolean {
-  return status === 'ready' || status === 'failed' || status === 'blocked_contaminated' || status === 'missing';
+  return status === 'ready' || status === 'failed' || status === 'blocked_contaminated' || status === 'missing' || status === 'stale' || status === 'not_ready';
 }
 
 function isTerminalSubtitleStatus(status: string): boolean {
-  return status === 'ready' || status === 'missing';
+  return status === 'ready' || status === 'stale' || status === 'missing' || status === 'not_ready';
 }
 
 function hasRunningJob(runningJobs: ActivityRunningJob[]): boolean {

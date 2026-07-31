@@ -173,11 +173,14 @@ function main(): void {
 
     const affected = affectedDownstream(projectId, 'script_v2');
     const reachableFromScriptV2 = downstreamOf('script_v2');
+    // affectedDownstream 只返回 project_stages（视觉支），不返回音频节点
+    // 但 DAG reachability（downstreamOf）正确包含了音频支
     ok(
       affected.includes('narration_beat_map') && affected.includes('visual_breakdown') &&
         affected.includes('shot_list') && affected.includes('scenes') &&
-        !reachableFromScriptV2.includes('narration_plan') && !reachableFromScriptV2.includes('narration_tts'),
-      '[D4a] script_v2 下游只含视觉支 project stages，音频节点不在 project_stages 中',
+        reachableFromScriptV2.includes('narration_plan') && reachableFromScriptV2.includes('narration_tts') &&
+        !affected.includes('narration_plan' as WorkflowStage),
+      '[D4a] script_v2 下游 project_stages 含视觉支；DAG 全量含音频支，但 affectedDownstream 不含',
       {affected, reachableFromScriptV2},
     );
 
