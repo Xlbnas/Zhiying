@@ -8,9 +8,9 @@
 | 项 | 值 |
 |---|---|
 | 文档更新时间 | 2026-07-31T14:10Z（M7.3A.2 收尾 review hardening 补齐） |
-| 当前 SHA | `7e886e7`+（本次收尾 commit，push 后回填） |
+| 当前 SHA | `9b1869373a38489270bae356f2bbb885f0b61e2f` |
 | 当前分支 | `m7` |
-| origin/m7 SHA | push 后回填 |
+| origin/m7 SHA | `9b1869373a38489270bae356f2bbb885f0b61e2f` |
 | 当前 production SHA | `4b40ada3ec05e208d0f22661467b110e81b82f6c` |
 | 上一轮确认 production SHA | `4b40ada3ec05e208d0f22661467b110e81b82f6c` |
 
