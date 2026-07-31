@@ -135,12 +135,15 @@ export function NarrationPanel({
   projectId,
   scriptV2StageKey,
   activity,
+  onActivityMutation,
 }: {
   projectId: string;
   /** script_v2 阶段状态指纹（status+updated_at），变化时重新拉取。 */
   scriptV2StageKey: string;
   /** M7：统一 activity 订阅；存在时 audio/subtitle 从 activity 自动刷新，不再单独轮询。 */
   activity?: ActivityResponse | null;
+  /** M7.3A.2：任何会创建后台任务的操作成功后通知 Workspace 启动 activity watch。 */
+  onActivityMutation?: () => void;
 }) {
   const [data, setData] = useState<NarrationReadiness | null>(null);
   const [audio, setAudio] = useState<AudioOverview | null>(null);
@@ -214,13 +217,14 @@ export function NarrationPanel({
         const json = (await res.json().catch(() => null)) as {message?: string} | null;
         throw new Error(json?.message ?? `HTTP ${res.status}`);
       }
+      onActivityMutation?.();
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : '构建失败');
     } finally {
       setBusy(false);
     }
-  }, [projectId, load]);
+  }, [projectId, load, onActivityMutation]);
 
   const generateAudio = useCallback(async () => {
     setAudioBusy('generate');
@@ -231,13 +235,14 @@ export function NarrationPanel({
         const json = (await res.json().catch(() => null)) as {message?: string} | null;
         throw new Error(json?.message ?? `HTTP ${res.status}`);
       }
+      onActivityMutation?.();
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : '音频任务创建失败');
     } finally {
       setAudioBusy(null);
     }
-  }, [projectId, load]);
+  }, [projectId, load, onActivityMutation]);
 
   const cancelAudio = useCallback(async () => {
     setAudioBusy('cancel');
@@ -245,13 +250,14 @@ export function NarrationPanel({
     try {
       const res = await fetch(`/api/projects/${projectId}/narration-audio/cancel`, {method: 'POST'});
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      onActivityMutation?.();
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : '取消失败');
     } finally {
       setAudioBusy(null);
     }
-  }, [projectId, load]);
+  }, [projectId, load, onActivityMutation]);
 
   const buildSubtitles = useCallback(async () => {
     setSubtitleBusy(true);
@@ -262,13 +268,14 @@ export function NarrationPanel({
         const json = (await res.json().catch(() => null)) as {message?: string} | null;
         throw new Error(json?.message ?? `HTTP ${res.status}`);
       }
+      onActivityMutation?.();
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : '字幕构建失败');
     } finally {
       setSubtitleBusy(false);
     }
-  }, [projectId, load]);
+  }, [projectId, load, onActivityMutation]);
 
   const plan = data?.currentPlan ?? null;
   const counts = plan

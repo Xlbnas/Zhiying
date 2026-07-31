@@ -17,6 +17,7 @@ import {
   ttsJobResultSchema,
   type TtsJobRow,
 } from '@/lib/tts-jobs';
+import {releaseResourceLeaseForJob} from '@/lib/resources/leases';
 import {describeLeakage, findDirectiveLeakage} from '@/lib/narration/leakage';
 
 /**
@@ -107,8 +108,9 @@ export async function runTtsJob(
   };
 
   try {
-    // 排队期间被请求取消：直接 cancelled
-    if (isTtsCancelRequested(job.id)) {
+    try {
+      // 排队期间被请求取消：直接 cancelled
+      if (isTtsCancelRequested(job.id)) {
       markTtsCancelled(job.id);
       log(`tts job ${job.id} cancelled before start`);
       return;
@@ -299,5 +301,12 @@ export async function runTtsJob(
     const message = err instanceof Error ? err.message : String(err);
     failTtsJob(job.id, 'TTS_ERROR', message.slice(0, 500), {retryable: true});
     log(`tts job ${job.id} failed (attempt ${job.attempt}/${job.max_attempts}): ${message}`);
+  }
+  } finally {
+    try {
+      releaseResourceLeaseForJob('production_gpu', 'tts', job.id);
+    } catch {
+      // lease 释放失败不阻断
+    }
   }
 }

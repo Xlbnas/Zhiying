@@ -21,6 +21,8 @@ import {describeRenderPerfConfig, loadRenderPerfConfig} from '@/lib/render/rende
 import {probeNvencSupport} from '@/lib/render/nvenc';
 import {recoverStaleTtsJobs} from '@/lib/tts-jobs';
 import {recordJobComputeUsage, snapshotComputeStart} from '@/lib/usage/compute';
+import {recoverStaleAssetGenerationJobs} from '@/lib/assets/generation-jobs';
+import {releaseExpiredLeases} from '@/lib/resources/leases';
 import {
   COMPOSITION_ID,
   COMPOSITION_ID_NO_SUBTITLES,
@@ -623,8 +625,17 @@ async function main(): Promise<void> {
   if (recoveredDispatch.failed > 0) {
     log(`finalized ${recoveredDispatch.failed} stale dispatch job(s) → failed(WORKER_CRASH)`);
   }
+  // M7.3A.2：回收 stale asset generation jobs 与过期 resource leases
+  const recoveredAssetGen = recoverStaleAssetGenerationJobs(STALE_TIMEOUT_MS);
+  if (recoveredAssetGen.indeterminate > 0) {
+    log(`finalized ${recoveredAssetGen.indeterminate} stale asset generation job(s) → indeterminate`);
+  }
+  const expiredLeases = releaseExpiredLeases(STALE_TIMEOUT_MS);
+  if (expiredLeases > 0) {
+    log(`released ${expiredLeases} expired resource lease(s)`);
+  }
 
-  // 2. 并行调度循环（M7）：render + llm + tts + dispatch 全局 FIFO claim，
+  // 2. 并行调度循环（M7.3A.2）：render + llm + tts + dispatch + asset_generation 全局 FIFO claim，
   //    资源兼容的任务并发执行（GPU 互斥组同时只跑一个）；
   //    Remotion bundle 延后到首个 render job 才初始化（LLM/TTS/dispatch 零依赖）。
   //    每个被 claim 的任务获得独立 AbortController，SIGTERM/SIGINT 经

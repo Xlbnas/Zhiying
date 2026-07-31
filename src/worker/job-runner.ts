@@ -8,9 +8,12 @@ import {
   isGpuExclusive,
   type ResourceClass,
 } from '@/lib/workflow/resource-classes';
+import {releaseResourceLease} from '@/lib/resources/leases';
 import {runDispatchJob} from './dispatch-executor';
 import {runLlmJob} from './llm-executor';
 import {runTtsJob} from './tts-executor';
+import {runAssetGenerationJob} from './asset-generation-executor';
+import {releaseResourceLeaseForJob} from '@/lib/resources/leases';
 
 /**
  * 并行 Worker 的 per-job 运行器 + 调度循环（M7 依赖/资源感知并行化）。
@@ -88,6 +91,10 @@ export async function executeClaimedJob(
     } catch (err) {
       log(`tts job ${claimed.job.id} compute usage 记录失败（不影响任务结果）: ${err instanceof Error ? err.message : String(err)}`);
     }
+    return;
+  }
+  if (claimed.type === 'asset_generation') {
+    await runAssetGenerationJob(claimed.job, ctx);
     return;
   }
   await hooks.runRenderJob(claimed.job);
@@ -175,6 +182,14 @@ export function createParallelLoop(deps: ParallelLoopDeps): ParallelLoop {
           })
           .finally(() => {
             running.delete(key);
+            // M7.3A.2：确保 production_gpu lease 被释放（render/tts/asset_generation）
+            if (claimed.type === 'render' || claimed.type === 'tts' || claimed.type === 'asset_generation') {
+              try {
+                releaseResourceLeaseForJob('production_gpu', claimed.type, claimed.job.id);
+              } catch {
+                // ignore
+              }
+            }
           }),
       };
       running.set(key, entry);

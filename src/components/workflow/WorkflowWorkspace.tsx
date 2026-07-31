@@ -15,7 +15,9 @@ import {NarrativeBeatsPanel} from './NarrativeBeatsPanel';
 import {VisualIntentPanel} from './VisualIntentPanel';
 import {WorkflowStepper} from './WorkflowStepper';
 import {ParallelLanes} from './ParallelLanes';
-import {nextStageAfter, STAGE_NAMES, type StagesResponse, type ActivityResponse} from './shared';
+import {STAGE_NAMES, type StagesResponse} from './shared';
+import {computeNewlyReadyAfterLock} from '@/lib/workflow/dag-shared';
+import {useActivityController} from './use-activity-controller';
 
 /**
  * Workflow Workspace Shell（M2-C §二十/二十一）。
@@ -55,10 +57,8 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
   }, []);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // M7：统一 activity 轮询（DAG readiness + running jobs + audio/subtitle）
-  const [activity, setActivity] = useState<ActivityResponse | null>(null);
-  const [activityError, setActivityError] = useState<string | null>(null);
-  const activityPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // M7.3A.2：统一 activity 控制器
+  const {activity, error: activityError, notifyMutation} = useActivityController(projectId);
   const [dagVisible, setDagVisible] = useState(true); // 用户可折叠 DAG 视图
 
   const handleSelect = useCallback((stage: WorkflowStage) => {
@@ -67,16 +67,44 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
   }, []);
 
   const handleLocked = useCallback((stage: WorkflowStage) => {
-    const next = nextStageAfter(stage);
-    if (next && isStageEnabled(next)) {
-      setAdvanceNotice(`「${STAGE_NAMES[stage]}」已锁定，正在进入下一步：${STAGE_NAMES[next]}`);
-      setSelected(next);
-    } else {
-      // 最后阶段（场景数据）：不跳到不存在的阶段，引导至旁白制作区
-      setAdvanceNotice(`「${STAGE_NAMES[stage]}」已锁定。十个阶段全部完成，下一步：生成旁白（见下方「旁白」区域）。`);
-      document.getElementById('narration-panel')?.scrollIntoView({behavior: 'smooth', block: 'start'});
+    // M7.3A.2：锁定后立即刷新 activity，并基于 DAG 计算新解锁的 ready 节点
+    notifyMutation();
+    const nodes = activity?.nodes;
+    if (!nodes) {
+      setAdvanceNotice(`「${STAGE_NAMES[stage]}」已锁定。`);
+      return;
     }
-  }, []);
+    const newlyReady = computeNewlyReadyAfterLock(nodes, stage);
+    if (newlyReady.length === 1) {
+      const nodeId = newlyReady[0]!;
+      setAdvanceNotice(`「${STAGE_NAMES[stage]}」已锁定，${nodeId} 已可启动。`);
+      // 若仍是 project_stage 则聚焦对应面板
+      if (isStageEnabled(nodeId as WorkflowStage)) {
+        setSelected(nodeId as WorkflowStage);
+      }
+    } else if (newlyReady.length > 1) {
+      setAdvanceNotice(
+        `「${STAGE_NAMES[stage]}」已锁定，已解锁 ${newlyReady.length} 个可并行任务：${newlyReady.join('、')}。`,
+      );
+      // script_v2 锁定后通常同时解锁 narration_plan 与 narration_beat_map
+      if (stage === 'script_v2') {
+        document.getElementById('narration-panel')?.scrollIntoView({behavior: 'smooth', block: 'start'});
+      }
+    } else {
+      // 零 ready：列出未完成的直接 DAG 依赖
+      const lockedNode = nodes.find((n) => n.id === stage);
+      const unmet = lockedNode?.dependencies
+        .map((dep) => {
+          const depNode = nodes.find((n) => n.id === dep);
+          return depNode && depNode.status !== 'done' ? depNode.label : null;
+        })
+        .filter(Boolean);
+      setAdvanceNotice(
+        `「${STAGE_NAMES[stage]}」已锁定。` +
+          (unmet && unmet.length > 0 ? ` 仍需完成依赖：${unmet.join('、')}。` : ' 暂无新任务可启动。'),
+      );
+    }
+  }, [activity, notifyMutation]);
 
   const refresh = useCallback(async () => {
     try {
@@ -99,12 +127,17 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
 
   const hasActiveJob = data?.stages.some((s) => s.activeJob !== null) ?? false;
 
+  // M7.3A.2：当 activity 控制器已启用时，不再单独高频轮询 /stages；
+  // activity 响应已包含 stages 状态。仅在初始加载和 activity 未启动时保留 /stages 轮询。
+  const activityHasRunningJob = (activity?.runningJobs.length ?? 0) > 0;
+  const shouldPollStages = hasActiveJob && !activityHasRunningJob;
+
   useEffect(() => {
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
-    if (hasActiveJob) {
+    if (shouldPollStages) {
       pollRef.current = setInterval(() => void refresh(), POLL_INTERVAL_MS);
     }
     return () => {
@@ -113,43 +146,7 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
         pollRef.current = null;
       }
     };
-  }, [hasActiveJob, refresh]);
-
-  // M7：统一 activity 轮询（2–3s；有 running job 或 DAG 展开时启动）
-  const refreshActivity = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/projects/${projectId}/activity`, {cache: 'no-store'});
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setActivity((await res.json()) as ActivityResponse);
-      setActivityError(null);
-    } catch {
-      setActivityError('活动状态加载失败');
-    }
-  }, [projectId]);
-
-  // activity.runningJobs 只包含 queued/running 任务
-  const hasRunningJobInActivity = (activity?.runningJobs.length ?? 0) > 0;
-
-  useEffect(() => {
-    void refreshActivity();
-  }, [refreshActivity]);
-
-  useEffect(() => {
-    if (activityPollRef.current) {
-      clearInterval(activityPollRef.current);
-      activityPollRef.current = null;
-    }
-    // 启动条件：LLM/TTS/render/dispatch 任一 running/queued（保证 NarrationPanel 自动刷新）
-    if (hasRunningJobInActivity || hasActiveJob) {
-      activityPollRef.current = setInterval(() => void refreshActivity(), POLL_INTERVAL_MS);
-    }
-    return () => {
-      if (activityPollRef.current) {
-        clearInterval(activityPollRef.current);
-        activityPollRef.current = null;
-      }
-    };
-  }, [hasRunningJobInActivity, hasActiveJob, refreshActivity]);
+  }, [shouldPollStages, refresh]);
 
   if (notFound) {
     return (
@@ -261,6 +258,7 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
           })()
         }
         activity={activity}
+        onActivityMutation={notifyMutation}
       />
 
       <TimingReconciliationPanel

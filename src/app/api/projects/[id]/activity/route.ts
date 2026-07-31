@@ -27,7 +27,7 @@ import {getProject, jsonError} from '../../../_lib/shared';
 export const runtime = 'nodejs';
 
 interface RunningJobSummary {
-  type: 'render' | 'llm' | 'tts' | 'dispatch';
+  type: 'render' | 'llm' | 'tts' | 'dispatch' | 'asset_generation';
   id: string;
   stage: string | null;
   resourceClass: ResourceClass;
@@ -129,6 +129,21 @@ async function handle(params: Promise<{id: string}>): Promise<Response> {
       id: r.id,
       stage: r.stage,
       resourceClass: JOB_TYPE_RESOURCE_CLASS.dispatch,
+      startedAt: r.started_at,
+    })),
+    ...(
+      db
+        .prepare(
+          `SELECT id, scene_id || '/' || requirement_id AS stage, started_at
+           FROM asset_generation_jobs
+           WHERE project_id = ? AND status IN ('queued','running')`,
+        )
+        .all(id) as Array<{id: string; stage: string | null; started_at: string | null}>
+    ).map((r) => ({
+      type: 'asset_generation' as const,
+      id: r.id,
+      stage: r.stage,
+      resourceClass: 'local_image_gpu' as const,
       startedAt: r.started_at,
     })),
   ];
