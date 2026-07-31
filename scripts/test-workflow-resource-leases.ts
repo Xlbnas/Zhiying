@@ -21,10 +21,19 @@ import path from 'node:path';
 process.env.ZHIYING_DATA_DIR = path.join('data', 'test-workflow-resource-leases');
 process.env.LLM_PROVIDER = 'mock';
 process.env.TTS_PROVIDER = 'mock';
+// 短租约：验证长时间任务期间的 heartbeat 续约（L7/L8）
+process.env.ZHIYING_RESOURCE_LEASE_MS = '400';
+// 短心跳间隔：与短 TTL 匹配（生产默认 2s 不变）
+process.env.ZHIYING_ASSET_HEARTBEAT_MS = '100';
+// 供 L7b 的 asset executor 使用（mock provider，零真实调用）
+process.env.APIYI_API_KEY = 'test-key';
 
 import {closeDb, getDb} from '../src/lib/db';
 import {createProjectWithWorkflow} from '../src/lib/projects';
 import {claimNextAnyJob} from '../src/lib/scheduler';
+import {MockTtsProvider} from '../src/lib/tts/mock';
+import type {GeneratedImageProvider} from '../src/lib/assets/providers/generated';
+import {runTtsJob} from '../src/worker/tts-executor';
 import {
   claimResourceLease,
   getActiveLease,
@@ -69,6 +78,30 @@ function insertTtsJob(projectId: string, queuedAt: string): string {
        provider, voice_profile_id, voice_profile_revision, status, payload_json, queued_at
      ) VALUES (?, ?, ?, 1, 'N001', 'mock', 'default', '1', 'queued', ?, ?)`,
   ).run(id, projectId, crypto.randomUUID(), JSON.stringify({text: 'test'}), queuedAt);
+  return id;
+}
+
+/** L7a 专用：payload 满足 anyTtsJobPayloadSchema v1.0（可被 executor 实际执行）。 */
+function insertTtsJobV1(projectId: string, queuedAt: string): string {
+  const id = crypto.randomUUID();
+  getDb().prepare(
+    `INSERT INTO tts_jobs (
+       id, project_id, narration_plan_artifact_id, narration_plan_version, unit_id,
+       provider, voice_profile_id, voice_profile_revision, status, payload_json, queued_at
+     ) VALUES (?, ?, ?, 1, 'N001', 'mock', 'default', '1', 'queued', ?, ?)`,
+  ).run(
+    id, projectId, crypto.randomUUID(),
+    JSON.stringify({
+      schemaVersion: '1.0',
+      narrationPlanArtifactId: crypto.randomUUID(),
+      narrationPlanArtifactVersion: 1,
+      scriptV2Version: 1,
+      compilerVersion: '1.0',
+      unitId: 'N001',
+      unitText: 'long running lease test',
+    }),
+    queuedAt,
+  );
   return id;
 }
 
@@ -244,8 +277,120 @@ async function main(): Promise<void> {
     releaseResourceLeaseForJob('production_gpu', 'asset_generation', localImgId);
   }
 
+  // ============ L7：长时间运行任务期间的 lease 心跳续约（真实 executor 路径） ============
+  // 租约 TTL=400ms（env 覆盖）；任务运行 ~1.2s > TTL，靠 heartbeat 续约保住 lease。
+  {
+    // L7a：长 TTS 任务（MockTtsProvider delayMs=1200 + heartbeatMs=100）
+    const now = new Date().toISOString();
+    const ttsId = insertTtsJobV1(projectId, now);
+    const localImgId = insertLocalImageGenerationJob(projectId, new Date(Date.now() + 1000).toISOString());
+
+    const claimedA = claimNextAnyJob('worker-long-tts');
+    ok(claimedA?.type === 'tts' && claimedA.job.id === ttsId, '[L7a] 长 TTS 任务 claim 成功（持有 lease）', claimedA);
+    if (!claimedA || claimedA.type !== 'tts' || claimedA.job.id !== ttsId) {
+      throw new Error('L7a: 未能 claim 长 TTS 任务');
+    }
+    ok(getActiveLease('production_gpu')?.owner_job_id === ttsId, '[L7b] TTS claim 后持有 production_gpu lease');
+
+    const runningA = runTtsJob(
+      claimedA.job,
+      {
+        isShuttingDown: () => false,
+        log: () => {},
+        resourceLease: claimedA.resourceLease
+          ? {group: claimedA.resourceLease.group, ownerToken: claimedA.resourceLease.ownerToken}
+          : undefined,
+      },
+      {providers: {mock: new MockTtsProvider({delayMs: 1200})}, heartbeatMs: 100},
+    );
+
+    // 原始 TTL(400ms) 已过；heartbeat(100ms) 应已多次续约
+    await sleep(600);
+    const leaseMid = getActiveLease('production_gpu');
+    ok(leaseMid !== null && leaseMid.owner_job_id === ttsId, '[L7c] 超过原始 TTL 后 lease 仍有效（heartbeat 续约）', leaseMid);
+
+    const competitor = claimNextAnyJob('worker-competitor');
+    ok(competitor === null, '[L7d] 长 TTS 运行期间竞争者无法抢占 GPU（local image 被 lease 挡住）', competitor);
+    ok(jobStatus('asset_generation_jobs', localImgId) === 'queued', '[L7e] local image job 在长 TTS 期间保持 queued');
+
+    await runningA;
+    ok(jobStatus('tts_jobs', ttsId) === 'succeeded', '[L7f] 长 TTS 任务 succeeded');
+    ok(getActiveLease('production_gpu') === null, '[L7g] 长 TTS 结束后 lease 释放');
+
+    const claimedB = claimNextAnyJob('worker-competitor');
+    ok(claimedB?.type === 'asset_generation' && claimedB.job.id === localImgId, '[L7h] TTS 结束后竞争者可 claim local image', claimedB);
+    if (!claimedB || claimedB.type !== 'asset_generation') {
+      throw new Error('L7h: TTS 结束后未能 claim local image');
+    }
+    getDb().prepare(`UPDATE asset_generation_jobs SET status='succeeded' WHERE id=?`).run(localImgId);
+    releaseResourceLeaseForJob('production_gpu', 'asset_generation', localImgId);
+  }
+
+  // ============ L8：长 local_image_gpu 任务期间的 lease 心跳续约（真实 executor 路径） ============
+  {
+    const {runAssetGenerationJob} = await import('../src/worker/asset-generation-executor');
+    const {getGeneratedImageProvider} = await import('../src/lib/assets/providers/generated');
+    const provider = getGeneratedImageProvider();
+    (provider as GeneratedImageProvider & {configured: boolean}).configured = true;
+    provider.health = {healthy: true, available: true, reason: 'healthy', checkedAt: Date.now()};
+    provider.generate = async () => {
+      await sleep(1200);
+      return [{
+        candidateId: 'mock-long',
+        mimeType: 'image/png',
+        data: Buffer.from('fake-png-data', 'utf8'),
+        width: 1920,
+        height: 1080,
+        provider: provider.name,
+        model: 'mock',
+        prompt: 'long-run',
+        metadata: {providerRequestId: 'req-long'},
+      }];
+    };
+
+    const now = new Date().toISOString();
+    // local image 先入队（先 claim）；TTS 后入队作为被 lease 挡住的竞争者
+    const localImgId2 = insertLocalImageGenerationJob(projectId, now);
+
+    const claimedImg = claimNextAnyJob('worker-long-img');
+    ok(claimedImg?.type === 'asset_generation' && claimedImg.job.id === localImgId2, '[L8a] 长 local image 任务 claim 成功', claimedImg);
+    if (!claimedImg || claimedImg.type !== 'asset_generation' || claimedImg.job.id !== localImgId2) {
+      throw new Error('L8a: 未能 claim 长 local image 任务');
+    }
+    const ttsId2 = insertTtsJob(projectId, new Date(Date.now() + 1000).toISOString());
+
+    const runningB = runAssetGenerationJob(
+      claimedImg.job,
+      {isShuttingDown: () => false, log: () => {}, shutdownSignal: new AbortController().signal},
+      claimedImg.resourceLease
+        ? {group: claimedImg.resourceLease.group, ownerToken: claimedImg.resourceLease.ownerToken}
+        : undefined,
+    );
+
+    await sleep(600);
+    const leaseMid2 = getActiveLease('production_gpu');
+    ok(leaseMid2 !== null && leaseMid2.owner_job_id === localImgId2, '[L8b] 超过原始 TTL 后 lease 仍有效（生成中 heartbeat）', leaseMid2);
+
+    const competitor2 = claimNextAnyJob('worker-competitor');
+    ok(competitor2 === null, '[L8c] 长 image 生成期间竞争者无法抢占 GPU（TTS 被挡）', competitor2);
+    ok(jobStatus('tts_jobs', ttsId2) === 'queued', '[L8d] TTS job 在长 image 生成期间保持 queued');
+
+    await runningB;
+    ok(jobStatus('asset_generation_jobs', localImgId2) === 'succeeded', '[L8e] 长 image 任务 succeeded');
+    ok(getActiveLease('production_gpu') === null, '[L8f] 长 image 结束后 lease 释放');
+
+    const claimedTts = claimNextAnyJob('worker-competitor');
+    ok(claimedTts?.type === 'tts' && claimedTts.job.id === ttsId2, '[L8g] image 结束后竞争者可 claim TTS', claimedTts);
+    if (!claimedTts || claimedTts.type !== 'tts') {
+      throw new Error('L8g: image 结束后未能 claim TTS');
+    }
+    getDb().prepare(`UPDATE tts_jobs SET status='succeeded' WHERE id=?`).run(ttsId2);
+    releaseResourceLeaseForJob('production_gpu', 'tts', ttsId2);
+  }
+
   closeDb();
   fs.rmSync(path.resolve(process.cwd(), 'data', 'test-workflow-resource-leases'), {recursive: true, force: true});
+  fs.rmSync(path.resolve(process.cwd(), 'public', 'assets', projectId), {recursive: true, force: true});
 
   console.log(`\n[test] 汇总: PASS=${pass} FAIL=${fail}`);
   if (fail > 0) {

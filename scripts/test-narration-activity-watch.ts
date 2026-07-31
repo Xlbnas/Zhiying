@@ -325,6 +325,49 @@ async function main(): Promise<void> {
     ctrl.dispose();
   }
 
+  // ============ W9: stable-stop 精确规则（连续两次空+terminal 才停；一次不停止；running 重置 streak） ============
+  {
+    let fetchCount = 0;
+    const snapshots: Array<{count: number; watchActive: boolean}> = [];
+    const ctrl = createActivityController({
+      baseIntervalMs: 50,
+      fetchActivity: async () => {
+        fetchCount++;
+        const a = makeInitialActivity();
+        // f1（构造期）/ f2（notifyMutation）/ f4：running；其余（f3/f5/f6）：terminal 空
+        if (fetchCount === 1 || fetchCount === 2 || fetchCount === 4) {
+          a.runningJobs = [{type: 'llm', id: `job-${fetchCount}`, stage: 'narration_beat_map', resourceClass: 'llm_api', startedAt: new Date().toISOString()}];
+        }
+        return a;
+      },
+      onChange: (s) => {
+        snapshots.push({count: fetchCount, watchActive: s.watchActive});
+      },
+      getVisibilityState: () => 'visible',
+      setInterval: setIntervalAdapter,
+      clearInterval: clearIntervalAdapter,
+    });
+
+    await sleep(50); // 等构造期初始刷新完成
+    ctrl.notifyMutation(); // watchActive=true（streak 规则生效的路径）
+
+    // 等序列跑完：f1/f2 running → f3 terminal(streak=1) → f4 running(reset) → f5/f6 terminal(streak=2) → 停止
+    await sleep(600);
+    ok(fetchCount >= 6, '[W9a] 序列到达停止点（f3 后仍在轮询，f4 重置后连续两次 terminal）', {fetchCount});
+
+    const snap = (count: number) => snapshots.find((s) => s.count === count);
+    ok(snap(3)?.watchActive === true, '[W9b] 第一次 terminal 空（streak=1）时 watch 仍激活');
+    ok(snap(4)?.watchActive === true, '[W9c] running 重置 streak 后 watch 仍激活');
+    ok(snap(5)?.watchActive === true, '[W9d] 第二次 terminal 空（streak=2 前一刻）watch 仍激活');
+    ok(snap(6)?.watchActive === false, '[W9e] 连续两次 terminal 空后 watch 关闭');
+
+    const stoppedCount = fetchCount;
+    await sleep(400);
+    ok(fetchCount === stoppedCount, '[W9f] 停止后不再 fetch', {before: stoppedCount, after: fetchCount});
+
+    ctrl.dispose();
+  }
+
   closeDb();
   fs.rmSync(path.resolve(process.cwd(), 'data', 'test-narration-activity-watch'), {recursive: true, force: true});
 

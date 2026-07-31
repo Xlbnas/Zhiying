@@ -6,7 +6,7 @@ import type {TtsJobRow} from './tts-jobs';
 import {DISPATCH_LEASE_MS, type DispatchJobRow} from './llm-generation/dispatch';
 import {
   claimResourceLease,
-  DEFAULT_LEASE_MS as RESOURCE_LEASE_MS,
+  getResourceLeaseMs,
   releaseResourceLease,
 } from './resources/leases';
 import {
@@ -167,7 +167,7 @@ export function claimNextAnyJob(workerId: string, opts?: ClaimOptions): ClaimedJ
         // GPU 任务：先原子 claim production_gpu lease（仅 GPU_EXCLUSIVE_GROUP 成员）
         let gpuLeaseToken: string | null = null;
         if (isGpuExclusive(resourceClass)) {
-          const lease = claimResourceLease('production_gpu', next.type as 'render' | 'tts' | 'asset_generation', next.id, claimedBy, RESOURCE_LEASE_MS);
+          const lease = claimResourceLease('production_gpu', next.type as 'render' | 'tts' | 'asset_generation', next.id, claimedBy, getResourceLeaseMs());
           if (!lease.ok || !lease.ownerToken) {
             // 本候选跳过，继续尝试下一个（资源不可得，不是全局无任务）
             continue;
@@ -193,7 +193,7 @@ export function claimNextAnyJob(workerId: string, opts?: ClaimOptions): ClaimedJ
 
         if (next.type === 'asset_generation') {
           const ownerToken = `${claimedBy}:${crypto.randomUUID()}`;
-          const leaseExpiresAt = new Date(Date.parse(at) + RESOURCE_LEASE_MS).toISOString();
+          const leaseExpiresAt = new Date(Date.parse(at) + getResourceLeaseMs()).toISOString();
           const res = db
             .prepare(
               `UPDATE asset_generation_jobs

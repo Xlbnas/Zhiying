@@ -7,10 +7,10 @@
 
 | 项 | 值 |
 |---|---|
-| 文档更新时间 | 2026-07-31T08:00Z（M7.3A.2 review hardening 完成） |
-| 当前 SHA | `091349dfd7265ac689fffda96f7adffa5680d441` |
+| 文档更新时间 | 2026-07-31T14:10Z（M7.3A.2 收尾 review hardening 补齐） |
+| 当前 SHA | `7e886e7`+（本次收尾 commit，push 后回填） |
 | 当前分支 | `m7` |
-| origin/m7 SHA | `091349dfd7265ac689fffda96f7adffa5680d441` |
+| origin/m7 SHA | push 后回填 |
 | 当前 production SHA | `4b40ada3ec05e208d0f22661467b110e81b82f6c` |
 | 上一轮确认 production SHA | `4b40ada3ec05e208d0f22661467b110e81b82f6c` |
 
@@ -122,11 +122,11 @@
   - `src/lib/assets/providers/generated/apiyi.ts`（connect timeout vs response timeout 分离）
 - **设计**：
   - Web route 验证 + enqueue（202）；客户端用 `requestId`（crypto.randomUUID()）确保双击只产生一个 job。
+  - requestId UI 生命周期（`src/components/workflow/asset-request-id.ts`）：同一「生成」点击生命周期内复用同一 requestId；任务到达终态（succeeded/failed/indeterminate）后 release，显式「重新生成」才创建新 requestId。
   - Worker 原子 claim job → 调 APIYi → 持久化 provider request ID / usage → 写入 candidate → terminal finalize。
-  - 显式「重新生成」才创建新 requestId。
 - **超时语义**：
   - `APIYI_CONNECT_TIMEOUT_MS`（undici `Agent.connectTimeout`）：仅 TCP/TLS connect。
-  - `APIYI_RESPONSE_TIMEOUT_MS`（AbortController 整体 deadline）：默认 300s，覆盖整个同步 generateContent。
+  - `APIYI_RESPONSE_TIMEOUT_MS`（AbortController 整体 deadline）：默认 300s，覆盖整个同步 generateContent（headers 等待 + 模型生成 + body 读取，中途不 reset）。
   - 删除了没有执行路径的 `PROVIDER_POLL_TIMEOUT` 语义。
   - 超时后 job → indeterminate，billing_status=unknown，相同 requestId 不自动再调。
 - **错误码**：`PROVIDER_CONNECT_TIMEOUT` / `PROVIDER_RESPONSE_TIMEOUT` / `IMAGE_DECODE_FAILED` / `PROVIDER_TERMINAL_FAILURE` / `PROVIDER_RESULT_INDETERMINATE`。仅存在真实对应阶段时记录。
@@ -165,7 +165,8 @@
 - **设计**：
   - `claimResourceLease` 使用 `INSERT … ON CONFLICT(resource_group) DO UPDATE WHERE …` 实现原子 UPSERT。
   - `lease_expires_at` 过期才允许覆盖；同 worker+job 重入允许。
-  - 任务期间周期性 heartbeat。
+  - 任务期间周期性 heartbeat：TTS executor 在现有 5s 定时器内同时续约 resource lease（job 级 heartbeat 保留）；asset executor 在 `provider.generate` 执行期间每 2s 续约 lease+job。
+  - 租约时长 `ZHIYING_RESOURCE_LEASE_MS`（默认 10min）、asset 心跳间隔 `ZHIYING_ASSET_HEARTBEAT_MS`（默认 2s）可经 env 覆盖（测试用短 TTL 实证长时间任务续约）。
   - 任何终态（succeeded/failed/cancelled/requeued/shutdown）均释放 lease。
   - `recoverStaleTtsJobs` 回收 zombie running 时同时释放 lease。
   - `llm_api` / `remote_image_api` 不需要 production_gpu lease；可与 TTS 并行。
@@ -173,13 +174,13 @@
   - `gpuOccupied` 由有效 lease 或兼容旧数据的 running GPU job 推导。
   - queued ≠ 占用资源；只有 running/leased 才算占用。
   - UI `waiting_resource` 表示依赖满足但 lease 不可得。
-- **测试**：`scripts/test-workflow-resource-leases.ts`（28 PASS）覆盖双 Worker 互斥、heartbeat、过期回收、LLM+TTS 并行、GPU 组内互斥。
+- **测试**：`scripts/test-workflow-resource-leases.ts`（48 PASS）覆盖双 Worker 互斥、heartbeat、过期回收、LLM+TTS 并行、GPU 组内互斥、**长时间任务（>lease TTL）期间 heartbeat 续约实证（L7/L8）**。
 - **deployed**：否（待本次 deployment）
 
 ## 5. 当前正在进行的工作
 
-- 本次接力已完成 M7.3A.2 全部代码实现、本地/镜像测试。
-- 待完成：production 备份、部署、verification。
+- M7.3A.2 收尾：6 项 review blocker 独立复核完成，补齐 lease 心跳实现/requestId UI 生命周期修复/测试实证；全量测试绿。
+- 待完成：production 备份、部署、verification（本次执行）。
 
 ## 6. 尚未完成 TODO
 
@@ -218,6 +219,8 @@
 | Narration activity 轮询启动竟态 | `useActivityController` + `notifyMutation` 立即启动 watch | M7.3A.2 |
 | DAG 未成为状态机真相 | `assertRunnable`/`affectedDownstream`/`handleLocked` 改为 DAG 驱动 | M7.3A.2 |
 | GPU 互斥仅单进程内存 | `resource_group_leases` + scheduler lease claim 原子化 | M7.3A.2 |
+| 长时间 GPU 任务 lease 过期被抢占 | TTS/asset executor 执行期间周期性 heartbeat resource lease（TTS 并入 5s 定时器；asset 生成期间 2s 心跳）；`ZHIYING_RESOURCE_LEASE_MS`/`ZHIYING_ASSET_HEARTBEAT_MS` 可覆盖 | 本次收尾 commit |
+| 图片生成终态后 UI 复用旧 requestId 无法重试 | 新增 `asset-request-id.ts` 生命周期模块；`VisualAssetsPanel` 终态（succeeded/failed/indeterminate）release requestId | 本次收尾 commit |
 
 ## 9. 当前已知技术债
 
@@ -267,19 +270,19 @@
 
 ### 11.2 M7.3A.2 新增/扩展测试
 
-- `scripts/test-asset-generation-durability.ts`（25 PASS）：图像生成幂等/超时/indeterminate/billing/append-only
+- `scripts/test-asset-generation-durability.ts`（38 PASS）：图像生成幂等/超时/indeterminate/billing/append-only + **T7 exact requirement provenance 实证** + **T8 requestId UI 生命周期纯逻辑**
 - `scripts/test-workflow-dag-parallelism.ts`（15 PASS）：DAG 权威依赖/双分支 ready/并行不互 stale
-- `scripts/test-workflow-resource-leases.ts`（28 PASS）：GPU 互斥/heartbeat/过期回收/LLM+TTS 并行
-- `scripts/test-narration-activity-watch.ts`（22 PASS）：activity 控制器/mutation 启动 watch/终端停止/hidden 降频/错误退避
+- `scripts/test-workflow-resource-leases.ts`（48 PASS）：GPU 互斥/heartbeat/过期回收/LLM+TTS 并行 + **L7/L8 长时间任务（>lease TTL）心跳续约实证**
+- `scripts/test-narration-activity-watch.ts`（28 PASS）：activity 控制器/mutation 启动 watch/终端停止/hidden 降频/错误退避 + **W9 stable-stop 精确规则（连续两次空+terminal 才停；streak 重置）**
 
 ### 11.3 本轮 agentvm 测试结果
 
 | 脚本 | PASS | FAIL | 备注 |
 |---|---|---|---|
-| `test-asset-generation-durability.ts` | 25 | 0 | M7.3A.2 新增 |
+| `test-asset-generation-durability.ts` | 38 | 0 | M7.3A.2（含 T7 provenance / T8 requestId 生命周期） |
 | `test-workflow-dag-parallelism.ts` | 15 | 0 | M7.3A.2 新增 |
-| `test-workflow-resource-leases.ts` | 28 | 0 | M7.3A.2 新增 |
-| `test-narration-activity-watch.ts` | 22 | 0 | M7.3A.2 新增 |
+| `test-workflow-resource-leases.ts` | 48 | 0 | M7.3A.2（含 L7/L8 长时间任务 heartbeat） |
+| `test-narration-activity-watch.ts` | 28 | 0 | M7.3A.2（含 W9 stable-stop 精确规则） |
 | `test-m73a-visual-intent.ts` | 184 | 0 | 含旧 candidate revalidate |
 | `test-m72-narrative-beats.ts` | 125 | 0 | 含 generation run |
 | `test-m721-generation-singleflight.ts` | 99 | 0 | 幂等/并发/terminal |
@@ -292,8 +295,8 @@
 | `test-m71-db.ts` | 46 | 0 | DB 集成 |
 | `test-m6313-narration.ts` | 39 | 0 | narration sanitation |
 | `test-m3a-narration-plan.ts` | 50 | 0 | plan build/stale |
-| `test-m3b-tts.ts` | ~125 (S30-M33 ffmpeg) | ~4 (ffmpeg 环境) | lease 兼容性已修复；M33-M50 因 Remotion ffmpeg 不支持 raw PCM 失败 |
-| `test-m3c-subtitle-timing.ts` | ~46 (前 46 个) | ~36 (ffmpeg 环境) | 同上环境限制 |
+| `test-m3b-tts.ts` | 99 | 0 | 完整 ffmpeg（/tmp 静态 GPL 构建）下全绿；normalization 不再失败 |
+| `test-m3c-subtitle-timing.ts` | 82 | 0 | 同上环境限制消除 |
 | `test-llm-dispatch.ts` | 57 | 0 | Worker dispatch |
 | `test-workflow-stages.ts` | 56 | 0 | 工作流状态机/DAG 兼容 |
 | `test-m6310-usage.ts` | 54 | 0 | usage 统计 |
@@ -343,19 +346,19 @@
 
 ## 14. 最近一轮 Review 阻断项
 
-M7.3A.2 Review 全部阻断项已修复（第二轮 hardening）：
+M7.3A.2 Review 全部阻断项已修复（第二轮 hardening）。接续复核（独立验证）与补齐：
 
-| 阻断项 | 状态 | 修复 |
+| 阻断项 | 复核结论 | 处理 |
 |---|---|---|
-| P0: APIYi → local_image_gpu 错误分类 | ✅ | enqueue 时 provider 决定 resourceClass；apiyi→remote_image_api |
-| P0: asset executor double-claim lease | ✅ | scheduler 唯一 claim，通过 resourceLease 传递，executor 不自行 claim |
-| P0: generated candidate requirement 缺失 | ✅ | enqueue 冻结 requirement_json+source version；insertAsset 恢复 provenance |
-| P0: response deadline per-phase 重置 | ✅ | 单一 AbortController 从请求到 body 读完，不 reset |
-| P1: long job lease TTL 不足 | ✅ | heartbeat 在 job-runner 统一处理；executor 心跳 lease |
-| P1: latest job selection 错误 | ✅ | listLatestAssetGenerationJobsByRequirement 使用 Map 去重 |
-| P1: activity controller 停止条件不完整 | ✅ | stale/not_ready 也视为 terminal 状态 |
-| P1: activity API asset gen resourceClass 硬编码 | ✅ | 从 job.resource_class 列读取 |
-| 测试更新 | ✅ | L5→remote_api parallel, L6→local_image 互斥, D4a assertion 修正 |
+| P0: APIYi → local_image_gpu 错误分类 | ✅ 已解决（route 按 provider 决定 resourceClass） | 无改动 |
+| P0: asset executor double-claim lease | ✅ 已解决（scheduler 唯一 claim，executor 不自行 claim） | 无改动 |
+| P0: generated candidate requirement 缺失 | ⚠️ 代码已冻结 requirement_json+hash，但无测试 | **补 T7 实证**（hash 一致性 / asset.requirement_json 与快照全等 / exact 字段） |
+| P0: response deadline per-phase 重置 | ✅ 已解决（单一 AbortController 覆盖到 body 读完，T6b 实证不 reset） | 无改动 |
+| P1: long job lease TTL 不足 | ❌ 原实现不完整：TTS 从不 heartbeat resource lease；asset 只在 generate 后 heartbeat 一次 | **修复**：TTS 5s 定时器内续约 lease；asset 生成期间 2s 心跳；`ZHIYING_RESOURCE_LEASE_MS`/`ZHIYING_ASSET_HEARTBEAT_MS` 可覆盖；**补 L7/L8 实证**（>TTL 期间 lease 存活、竞争者被挡、结束后释放） |
+| P1: latest job selection 错误 | ✅ 已解决（Map 去重） | 无改动 |
+| P1: activity controller 停止条件不完整 | ⚠️ 代码正确（emptyStreak>=2 + terminal 含 stale/not_ready），测试未钉死规则 | **补 W9 实证**（streak=1 不停止 / running 重置 / 连续两次才停） |
+| P1: activity API asset gen resourceClass 硬编码 | ✅ 已解决（从 job.resource_class 列读取） | 无改动 |
+| 测试更新 | ⚠️ 服务端幂等已覆盖，UI requestId 生命周期有 bug（终态后不复用新 id，无法重试） | **修复**：`asset-request-id.ts` + VisualAssetsPanel 终态 release；**补 T8 实证** |
 
 ## 15. 本轮 Production Smoke 关键证据
 

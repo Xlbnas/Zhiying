@@ -17,7 +17,7 @@ import {
   ttsJobResultSchema,
   type TtsJobRow,
 } from '@/lib/tts-jobs';
-import {releaseResourceLeaseForJob} from '@/lib/resources/leases';
+import {releaseResourceLeaseForJob, heartbeatResourceLease, getResourceLeaseMs} from '@/lib/resources/leases';
 import {describeLeakage, findDirectiveLeakage} from '@/lib/narration/leakage';
 
 /**
@@ -46,6 +46,12 @@ export interface TtsExecutorContext {
   isShuttingDown: () => boolean;
   log: (...args: unknown[]) => void;
   shutdownSignal?: AbortSignal;
+  /**
+   * M7.3A.2：scheduler 在 claim 时取得的 production_gpu lease token。
+   * 执行期间随 job heartbeat 一起续约，避免长时间合成（>lease TTL）期间
+   * lease 过期被其他 worker 抢占。
+   */
+  resourceLease?: {group: 'production_gpu'; ownerToken: string};
 }
 
 export interface TtsExecutorDeps {
@@ -154,6 +160,11 @@ export async function runTtsJob(
     ctx.shutdownSignal?.addEventListener('abort', onShutdownAbort, {once: true});
     const timer = setInterval(() => {
       heartbeatTtsJob(job.id);
+      // M7.3A.2：长时间 TTS 任务期间同步续约 production_gpu lease，
+      // 防止 lease 过期后其他 worker 抢占 GPU。
+      if (ctx.resourceLease?.group === 'production_gpu') {
+        heartbeatResourceLease('production_gpu', ctx.resourceLease.ownerToken, getResourceLeaseMs());
+      }
       if (isTtsCancelRequested(job.id)) {
         controller.abort();
       }

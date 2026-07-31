@@ -176,6 +176,9 @@ async function main(): Promise<void> {
           result_asset_id: string | null;
           billing_status: string | null;
           failure_phase: string | null;
+          requirement_json: string | null;
+          source_requirement_hash: string | null;
+          source_scenes_version_id: string | null;
         }
       | undefined;
   }
@@ -320,6 +323,68 @@ async function main(): Promise<void> {
     } finally {
       server.close();
     }
+  }
+
+  // ============ T7：generated candidate exact requirement provenance ============
+  {
+    resetProvider();
+    const projectId = createProjectWithWorkflow({topic: 'asset-durability-7', coreQuestion: 'q'}).project.id;
+    seedProject(projectId);
+    const requestId = 'req-t7-001';
+    await postGenerate(projectId, requestId);
+    await runNextAssetJob();
+
+    const job = jobRow(projectId, requestId)!;
+    ok(job.status === 'succeeded', '[T7a] provenance job succeeded');
+    ok(job.requirement_json !== null, '[T7b] enqueue 冻结 requirement_json');
+    const requirementJson = JSON.parse(job.requirement_json!);
+    const expectedHash = crypto.createHash('sha256').update(job.requirement_json!).digest('hex').slice(0, 16);
+    ok(job.source_requirement_hash === expectedHash, '[T7c] source_requirement_hash = sha256(requirement_json)[:16]', {
+      actual: job.source_requirement_hash,
+      expected: expectedHash,
+    });
+    ok(
+      requirementJson.requirementId === 'S001-R01' &&
+        requirementJson.query === 'test subject' &&
+        requirementJson.policy === 'generated' &&
+        requirementJson.authenticity === 'synthetic_allowed',
+      '[T7d] requirement snapshot 冻结 exact requirement 字段（id/query/policy/authenticity）',
+      requirementJson,
+    );
+    ok(job.source_scenes_version_id !== null && job.source_scenes_version_id !== '0', '[T7e] source scenes version 已冻结');
+
+    const assetRow = getDb()
+      .prepare(`SELECT requirement_json FROM assets WHERE id = ?`)
+      .get(job.result_asset_id!) as {requirement_json: string | null} | undefined;
+    ok(assetRow !== undefined, '[T7f] result asset 存在');
+    ok(assetRow!.requirement_json === job.requirement_json, '[T7g] asset.requirement_json 与 job 冻结快照完全一致', {
+      asset: assetRow?.requirement_json,
+      job: job.requirement_json,
+    });
+    const assetReq = JSON.parse(assetRow!.requirement_json!);
+    ok(
+      assetReq.requirementId === 'S001-R01' && assetReq.policy === 'generated' && assetReq.authenticity === 'synthetic_allowed',
+      '[T7h] candidate 携带 exact requirement provenance',
+      assetReq,
+    );
+  }
+
+  // ============ T8：requestId UI 生命周期纯逻辑（双击复用 / 终态后新 id） ============
+  {
+    const {acquireRequestId, releaseRequestId} = await import('../src/components/workflow/asset-request-id');
+    const map = new Map<string, string>();
+    const a = acquireRequestId(map, 'S001:S001-R01');
+    const b = acquireRequestId(map, 'S001:S001-R01');
+    ok(a === b, '[T8a] 同一 key 生命周期内复用同一 requestId（双击幂等）');
+    releaseRequestId(map, 'S001:S001-R01');
+    const c = acquireRequestId(map, 'S001:S001-R01');
+    ok(c !== a, '[T8b] 终态 release 后重新生成得到新 requestId');
+    const d = acquireRequestId(map, 'S002:S001-R01');
+    ok(d !== c, '[T8c] 不同 requirement 的 requestId 互相独立');
+    ok(map.size === 2, '[T8d] map 只保留活跃 requestId', {size: map.size});
+    releaseRequestId(map, 'S001:S001-R01');
+    releaseRequestId(map, 'S002:S001-R01');
+    ok(map.size === 0, '[T8e] 全部 release 后 map 清空');
   }
 
   // 清理

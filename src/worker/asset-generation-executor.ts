@@ -22,18 +22,30 @@ import {
   type AssetGenerationJobRow,
 } from '@/lib/assets/generation-jobs';
 import {insertAsset} from '@/lib/assets/model';
-import {getGeneratedImageProvider, ImageGenerationError} from '@/lib/assets/providers/generated';
+import {
+  getGeneratedImageProvider,
+  ImageGenerationError,
+  type GeneratedImageCandidate,
+} from '@/lib/assets/providers/generated';
 import {clearResolutionState, upsertResolutionState} from '@/lib/assets/model';
 import {
+  getResourceLeaseMs,
   heartbeatResourceLease,
   releaseResourceLease,
 } from '@/lib/resources/leases';
 import {finalizeImageGenerationUsage, recordImageGenerationUsage} from '@/lib/usage-events';
 import type {JobRunnerContext} from './job-runner';
-import {DEFAULT_LEASE_MS} from '@/lib/resources/leases';
 import {getDb} from '@/lib/db';
 
-const HEARTBEAT_INTERVAL_MS = 2000;
+const HEARTBEAT_INTERVAL_MS = getAssetHeartbeatMs();
+
+/** 生成期间 lease/job 心跳间隔（默认 2s；ZHIYING_ASSET_HEARTBEAT_MS 可覆盖，测试用短间隔+短 TTL）。 */
+function getAssetHeartbeatMs(): number {
+  const raw = process.env.ZHIYING_ASSET_HEARTBEAT_MS;
+  if (raw === undefined) return 2000;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 50 ? n : 2000;
+}
 
 export interface AssetGenerationJobLease {
   group: 'production_gpu';
@@ -63,10 +75,10 @@ export async function runAssetGenerationJob(
     if (nowMs - lastHeartbeat < HEARTBEAT_INTERVAL_MS) return;
     lastHeartbeat = nowMs;
     if (resourceLease?.group === 'production_gpu') {
-      heartbeatResourceLease('production_gpu', resourceLease.ownerToken, DEFAULT_LEASE_MS);
+      heartbeatResourceLease('production_gpu', resourceLease.ownerToken, getResourceLeaseMs());
     }
     if (job.owner_token) {
-      heartbeatAssetGenerationJob(job.id, job.owner_token, DEFAULT_LEASE_MS);
+      heartbeatAssetGenerationJob(job.id, job.owner_token, getResourceLeaseMs());
     }
   };
 
@@ -136,8 +148,16 @@ export async function runAssetGenerationJob(
     // 记录 in-flight usage event（幂等键 = job.request_id）
     recordImageGenerationUsageInFlight(job);
 
-    const candidates = await provider.generate({prompt: job.prompt, model: job.model});
-    heartbeatAll();
+    // M7.3A.2：生成期间周期性 heartbeat（lease + job），
+    // 防止执行超过 lease TTL 时 lease 过期被其他 worker 抢占 GPU。
+    const heartbeatTimer = setInterval(heartbeatAll, HEARTBEAT_INTERVAL_MS);
+    let candidates: GeneratedImageCandidate[];
+    try {
+      candidates = await provider.generate({prompt: job.prompt, model: job.model});
+    } finally {
+      clearInterval(heartbeatTimer);
+      heartbeatAll();
+    }
 
     if (!candidates.length) {
       const reason = '未生成有效图片';

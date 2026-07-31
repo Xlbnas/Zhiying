@@ -2,6 +2,7 @@
 
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {defaultGeneratePrompt} from '@/lib/assets/generate-prompt';
+import {acquireRequestId, releaseRequestId} from './asset-request-id';
 
 interface GeneratedCandidateData {
   assetId: string;
@@ -195,13 +196,10 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
     const key = `${genTarget.sceneId}:${genTarget.requirementId}:generate`;
     setGeneratingKey(key); setError(null); setResult(null);
 
-    // M7.3A.2：同一次点击生命周期复用 requestId；显式重新生成（重新打开编辑器）才新 requestId
+    // M7.3A.2：同一次点击生命周期复用 requestId；终态后 release，
+    // 显式重新生成（重新打开编辑器）才新 requestId
     const reqKey = `${genTarget.sceneId}:${genTarget.requirementId}`;
-    let requestId = requestIdRef.current.get(reqKey);
-    if (!requestId) {
-      requestId = crypto.randomUUID();
-      requestIdRef.current.set(reqKey, requestId);
-    }
+    const requestId = acquireRequestId(requestIdRef.current, reqKey);
 
     try {
       const res = await fetch(`/api/projects/${projectId}/assets/generate`, {
@@ -247,6 +245,7 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
         if (!json.job) return;
         if (json.job.status === 'succeeded' && json.job.resultAssetId) {
           terminal = true;
+          releaseRequestId(requestIdRef.current, `${sceneId}:${requirementId}`);
           setResult('AI 生成完成，候选已可用。');
           await load();
           onAssetsChanged?.();
@@ -256,6 +255,7 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
           }
         } else if (json.job.status === 'failed' || json.job.status === 'indeterminate') {
           terminal = true;
+          releaseRequestId(requestIdRef.current, `${sceneId}:${requirementId}`);
           setResult(`AI 生成结束：${json.job.status}${json.job.failurePhase ? `（${json.job.failurePhase}）` : ''}`);
           await load();
           if (pollTimerRef.current) {

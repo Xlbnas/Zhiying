@@ -25,6 +25,18 @@ export const DEFAULT_LEASE_MS = 10 * 60 * 1000;
 /** 崩溃判定宽限：lease 过期超过该时长才强制回收。 */
 export const LEASE_STALE_MS = 2 * 60 * 1000;
 
+/**
+ * 当前生效的租约时长：ZHIYING_RESOURCE_LEASE_MS env 可覆盖（测试用短 TTL 验证
+ * 长时间任务的心跳续约）；非法/非正数回退默认值。scheduler claim 与各 executor
+ * heartbeat 统一走此入口，避免测试与生产语义分叉。
+ */
+export function getResourceLeaseMs(): number {
+  const raw = process.env.ZHIYING_RESOURCE_LEASE_MS;
+  if (raw === undefined) return DEFAULT_LEASE_MS;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_LEASE_MS;
+}
+
 export interface ResourceLeaseRow {
   resource_group: ResourceGroup;
   owner_job_type: JobType;

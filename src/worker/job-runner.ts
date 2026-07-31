@@ -65,7 +65,11 @@ export async function executeClaimedJob(
     // M6.3.10：TTS compute usage（cpu only；IndexTTS2 是外部服务，
     // 其 GPU 消耗不计入本地 GPU 口径）。终态从 DB 读回。
     const ttsSnapshot = snapshotComputeStart();
-    await runTtsJob(claimed.job, ctx);
+    const leaseMeta = (claimed as unknown as {resourceLease?: {group: 'production_gpu'; ownerToken: string}}).resourceLease;
+    await runTtsJob(
+      claimed.job,
+      leaseMeta ? {...ctx, resourceLease: {group: leaseMeta.group, ownerToken: leaseMeta.ownerToken}} : ctx,
+    );
     try {
       const final = getTtsJob(claimed.job.id);
       const status = final?.status === 'succeeded'
