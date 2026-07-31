@@ -32,7 +32,16 @@ import {
   NARRATION_PLAN_ARTIFACT_KIND,
   NarrationPlanError,
 } from '../src/lib/narration/plan';
-import {enqueueNarrationAudioJobs, NarrationAudioError} from '../src/lib/narration/audio';
+import {
+  enqueueNarrationAudioJobs,
+  getNarrationAudioOverview,
+  NarrationAudioError,
+} from '../src/lib/narration/audio';
+import {
+  canRequestAudioGeneration,
+  CONTAMINATION_RECOVERY_STEPS,
+  detectPlanContamination,
+} from '../src/lib/narration/contamination';
 import {
   NARRATION_COMPILER_VERSION,
   NARRATION_PLAN_SCHEMA_VERSION,
@@ -372,6 +381,106 @@ async function main(): Promise<void> {
         status: after.status,
       });
     }
+  }
+
+  // ============ UX 闭环：blocked_contaminated overview ============
+  {
+    // clean plan → 正常 audio status（无 contamination）
+    const pid = newProject();
+    lockScriptV2(pid, CLEAN_SCRIPT, 'script-v2@1.0');
+    buildNarrationPlan(pid);
+    const clean = getNarrationAudioOverview(pid);
+    ok(
+      clean.status === 'missing' && clean.contamination === null && canRequestAudioGeneration(clean.status),
+      '[U1] clean plan → 正常 audio status（missing，contamination=null，按钮可用）',
+      {status: clean.status},
+    );
+  }
+  {
+    // contaminated plan（含历史 succeeded 污染 job）→ blocked_contaminated
+    const pid = newProject();
+    lockScriptV2(pid, CLEAN_SCRIPT, 'script-v2@1.0');
+    const contaminatedPlan = {
+      schemaVersion: NARRATION_PLAN_SCHEMA_VERSION,
+      compilerVersion: NARRATION_COMPILER_VERSION,
+      source: {stage: 'script_v2', version: 1, promptVersion: 'script-v2@2.0'},
+      chapters: [{chapter: 1, title: '开场', firstUnitId: 'N001', lastUnitId: 'N003'}],
+      units: [
+        {id: 'N001', chapter: 1, kind: 'speech', text: '@delivery soft 月底了。@pause 400ms 你有没有问过自己。', directive: null, pauseMs: null, evidenceIds: [], sourceText: 'x'},
+        {id: 'N002', chapter: 1, kind: 'speech', text: '这三块拼起来，就是你的财务地图。', directive: null, pauseMs: null, evidenceIds: [], sourceText: 'x'},
+        {id: 'N003', chapter: 1, kind: 'speech', text: '@silence 1s reason=visual_breath', directive: null, pauseMs: null, evidenceIds: [], sourceText: 'x'},
+      ],
+    };
+    const artifactId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO artifacts (id, project_id, kind, version, content_json, file_path, created_at)
+       VALUES (?, ?, ?, 1, ?, NULL, ?)`,
+    ).run(artifactId, pid, NARRATION_PLAN_ARTIFACT_KIND, JSON.stringify(contaminatedPlan), new Date().toISOString());
+    // 历史 succeeded 污染 job（模拟事故期 6 个已合成音频）
+    const histJob = enqueueTtsJobTx(pid, 'mock', DEFAULT_VOICE_PROFILE.id, DEFAULT_VOICE_PROFILE.revision, {
+      schemaVersion: '1.0',
+      narrationPlanArtifactId: artifactId,
+      narrationPlanArtifactVersion: 1,
+      scriptV2Version: 1,
+      compilerVersion: NARRATION_COMPILER_VERSION,
+      unitId: 'N001',
+      unitText: '@delivery soft 月底了。',
+    });
+    db.prepare(`UPDATE tts_jobs SET status = 'succeeded', duration_ms = 800, output_path = 'x.wav', finished_at = ? WHERE id = ?`)
+      .run(new Date().toISOString(), histJob.id);
+
+    const overview = getNarrationAudioOverview(pid);
+    ok(
+      overview.status === 'blocked_contaminated',
+      '[U2] 污染 plan（含历史 succeeded job）→ blocked_contaminated（历史成功不变 ready）',
+      {status: overview.status, complete: overview.speechComplete},
+    );
+    ok(
+      overview.contamination !== null &&
+        overview.contamination.unitCount === 2 &&
+        overview.contamination.units.map((u) => u.unitId).join(',') === 'N001,N003',
+      '[U3] contamination 列出全部污染 unit（N001+N003，非部分）',
+      overview.contamination?.units,
+    );
+    ok(
+      overview.contamination !== null &&
+        overview.contamination.units[0]!.summary.includes('@delivery') &&
+        !overview.contamination.units[0]!.summary.includes('你有没有问过自己'),
+      '[U4] API 只返回 token 摘要，不泄露完整正文',
+      overview.contamination?.units[0],
+    );
+    ok(
+      overview.contamination !== null &&
+        overview.contamination.recoveryRequired === true &&
+        overview.contamination.recoverySteps.length === CONTAMINATION_RECOVERY_STEPS.length,
+      '[U5] recoveryRequired=true + 恢复步骤完整',
+    );
+    ok(
+      !canRequestAudioGeneration(overview.status) && !canRequestAudioGeneration('ready') &&
+        canRequestAudioGeneration('missing') && canRequestAudioGeneration('failed'),
+      '[U6] UI 按钮判定：blocked/ready 禁用，missing/failed 可用（同一纯函数）',
+    );
+    // POST 仍 fail-closed：409 等价错误 + 零新增 job
+    const jobsBefore = (db.prepare(`SELECT COUNT(*) AS c FROM tts_jobs WHERE project_id = ?`).get(pid) as {c: number}).c;
+    try {
+      enqueueNarrationAudioJobs(pid);
+      ok(false, '[U7] blocked plan POST enqueue → NARRATION_PLAN_CONTAMINATED');
+    } catch (err) {
+      ok(
+        err instanceof NarrationAudioError && err.code === 'NARRATION_PLAN_CONTAMINATED',
+        '[U7] blocked plan POST enqueue → NARRATION_PLAN_CONTAMINATED（route 映射 409）',
+      );
+    }
+    const jobsAfter = (db.prepare(`SELECT COUNT(*) AS c FROM tts_jobs WHERE project_id = ?`).get(pid) as {c: number}).c;
+    ok(jobsAfter === jobsBefore, '[U8] POST 零新增 job', {before: jobsBefore, after: jobsAfter});
+  }
+  {
+    // 正常语义 plan 的 overview 不被误判为污染
+    const pid = newProject();
+    lockScriptV2(pid, `# Script V2\n\n${CHAPTER}\n\n说到这里，他停顿了一下。沉默持续了一分钟。\n`, 'script-v2@1.0');
+    const {plan} = buildNarrationPlan(pid);
+    ok(detectPlanContamination(plan) === null, '[U9] 正常语义「他停顿了一下」overview 不误杀');
+    ok(getNarrationAudioOverview(pid).status !== 'blocked_contaminated', '[U10] 正常 plan 不进入 blocked 状态');
   }
 
   // ============ 9. M7 compiler-v2 对合法 DSL 仍正确 ============

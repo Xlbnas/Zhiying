@@ -16,6 +16,7 @@ import {
 } from '../tts-jobs';
 import {getCurrentNarrationPlan} from './plan';
 import type {NarrationPlan, NarrationUnit} from './schema';
+import {detectPlanContamination, type PlanContamination} from './contamination';
 import {describeLeakage, findDirectiveLeakage} from './leakage';
 import {isSpeakableText} from './speech-text';
 
@@ -242,7 +243,8 @@ export type NarrationAudioStatus =
   | 'failed'
   | 'stale'
   | 'missing'
-  | 'not_ready';
+  | 'not_ready'
+  | 'blocked_contaminated';
 
 export interface UnitAudioProgress {
   unitId: string;
@@ -264,6 +266,11 @@ export interface NarrationAudioOverview {
   speechComplete: number;
   speechTotal: number;
   master: {filePath: string; durationMs: number} | null;
+  /**
+   * 污染阻断状态（M7.2.1 hotfix UX 闭环）：非 null 时 status=blocked_contaminated。
+   * 只含 unit ID + token 摘要，不含完整正文；历史污染 job/音频保留可审计。
+   */
+  contamination: PlanContamination | null;
   /** manifest ready 时透出真实 Provider 快照（源自 job.result_json，非推断）。 */
   providerDetail: {
     model: string;
@@ -336,11 +343,15 @@ export function getNarrationAudioOverview(projectId: string): NarrationAudioOver
       speechComplete: 0,
       speechTotal: 0,
       master: null,
+      contamination: null,
       providerDetail: null,
       units: [],
     };
   }
   const {plan, artifact} = current;
+  // 污染判定优先于一切 job/manifest 状态（复用统一 leakage validator）：
+  // 历史 succeeded 污染 job 不得使 overall status 变 ready/generating。
+  const contamination = detectPlanContamination(plan);
   const units = collectUnitProgress(projectId, plan, artifact.id, provider.name, voice);
   const speechUnits = units.filter((u) => u.kind === 'speech');
   const complete = speechUnits.filter((u) => u.jobStatus === 'succeeded').length;
@@ -349,7 +360,9 @@ export function getNarrationAudioOverview(projectId: string): NarrationAudioOver
 
   const manifest = readCurrentManifest(projectId);
   let status: NarrationAudioStatus;
-  if (manifest) {
+  if (contamination) {
+    status = 'blocked_contaminated';
+  } else if (manifest) {
     status = 'ready';
   } else if (anyFailed) {
     status = 'failed';
@@ -370,6 +383,7 @@ export function getNarrationAudioOverview(projectId: string): NarrationAudioOver
     master: manifest
       ? {filePath: manifest.master.filePath, durationMs: manifest.master.durationMs}
       : null,
+    contamination,
     providerDetail: manifest
       ? {
           model: manifest.provider.model,

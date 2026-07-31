@@ -1,6 +1,7 @@
 'use client';
 
 import {useCallback, useEffect, useState} from 'react';
+import {canRequestAudioGeneration} from '@/lib/narration/contamination';
 import {STAGE_STATE_LABELS} from './shared';
 
 /**
@@ -35,13 +36,19 @@ interface NarrationReadiness {
 }
 
 interface AudioOverview {
-  status: 'ready' | 'generating' | 'failed' | 'stale' | 'missing' | 'not_ready';
+  status: 'ready' | 'generating' | 'failed' | 'stale' | 'missing' | 'not_ready' | 'blocked_contaminated';
   planReady: boolean;
   providerName: string;
   voiceProfile: {id: string; revision: string};
   speechComplete: number;
   speechTotal: number;
   master: {filePath: string; durationMs: number} | null;
+  contamination: {
+    unitCount: number;
+    units: Array<{unitId: string; summary: string}>;
+    recoveryRequired: true;
+    recoverySteps: string[];
+  } | null;
   providerDetail: {
     model: string;
     providerVersion: string | null;
@@ -107,6 +114,7 @@ const AUDIO_STATUS_LABELS: Record<string, string> = {
   stale: '已失效',
   missing: '未生成',
   not_ready: '待汇总',
+  blocked_contaminated: '已阻断（含控制指令）',
 };
 
 const SUBTITLE_STATUS_LABELS: Record<string, string> = {
@@ -363,19 +371,21 @@ export function NarrationPanel({
               <button
                 type="button"
                 className="btn btn-primary btn-sm"
-                disabled={audioBusy !== null || audio.status === 'ready'}
+                disabled={audioBusy !== null || !canRequestAudioGeneration(audio.status)}
                 onClick={() => void generateAudio()}
               >
                 {audioBusy === 'generate'
                   ? '提交中…'
                   : audio.status === 'ready'
                     ? '配音已就绪'
-                    : '生成配音'}
+                    : audio.status === 'blocked_contaminated'
+                      ? '已阻断，需重建旁白'
+                      : '生成配音'}
               </button>
             </div>
           </div>
           <div className="stage-meta">
-            <span className="badge" data-stage-state={audio.status === 'ready' ? 'locked' : audio.status === 'failed' ? 'stale' : 'generated'}>
+            <span className="badge" data-stage-state={audio.status === 'ready' ? 'locked' : audio.status === 'failed' || audio.status === 'blocked_contaminated' ? 'stale' : 'generated'}>
               {AUDIO_STATUS_LABELS[audio.status]}
             </span>
             <span>
@@ -405,6 +415,46 @@ export function NarrationPanel({
               </details>
             ) : null}
           </div>
+          {audio.contamination ? (
+            <div
+              role="alert"
+              style={{
+                margin: '10px 20px',
+                padding: '12px 14px',
+                border: '1px solid var(--danger, #c0392b)',
+                borderRadius: 6,
+                background: 'color-mix(in srgb, var(--danger, #c0392b) 8%, transparent)',
+              }}
+            >
+              <strong>当前旁白计划含控制指令，不能生成配音。</strong>
+              <div style={{marginTop: 6, fontSize: 13}}>
+                检测到 <span className="mono">{audio.contamination.unitCount}</span> 个口播单元含
+                @delivery/@pause/@silence 等控制指令。生成配音已被禁用；历史污染音频仅供事故审计，
+                不可继续使用。
+              </div>
+              <details style={{marginTop: 6, fontSize: 12}}>
+                <summary style={{cursor: 'pointer'}}>
+                  污染单元（{audio.contamination.unitCount}）
+                </summary>
+                <ul className="mono" style={{margin: '6px 0 0', paddingLeft: 18}}>
+                  {audio.contamination.units.slice(0, 10).map((u) => (
+                    <li key={u.unitId}>
+                      {u.unitId} — {u.summary}
+                    </li>
+                  ))}
+                  {audio.contamination.unitCount > 10 ? <li>…</li> : null}
+                </ul>
+              </details>
+              <div style={{marginTop: 8, fontSize: 13}}>
+                <strong>恢复步骤：</strong>
+                <ol style={{margin: '4px 0 0', paddingLeft: 20}}>
+                  {audio.contamination.recoverySteps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+              </div>
+            </div>
+          ) : null}
           <div className="scene-list" style={{maxHeight: 280}}>
             {audio.units.map((unit) => (
               <div key={unit.unitId} className="scene-row" style={{cursor: 'default', gridTemplateColumns: '72px 1fr auto'}}>
@@ -426,15 +476,17 @@ export function NarrationPanel({
                 <span className="scene-dur mono" style={{display: 'flex', alignItems: 'center', gap: 8}}>
                   {unit.kind === 'speech' && unit.jobStatus ? (
                     <span className="badge" data-status={unit.jobStatus}>
-                      {unit.jobStatus === 'succeeded'
-                        ? '已完成'
-                        : unit.jobStatus === 'failed'
-                          ? '失败'
-                          : unit.jobStatus === 'cancelled'
-                            ? '已取消'
-                            : unit.jobStatus === 'running'
-                              ? '合成中'
-                              : '排队中'}
+                      {audio.contamination && unit.jobStatus === 'succeeded'
+                        ? '历史污染音频 · 仅供审计'
+                        : unit.jobStatus === 'succeeded'
+                          ? '已完成'
+                          : unit.jobStatus === 'failed'
+                            ? '失败'
+                            : unit.jobStatus === 'cancelled'
+                              ? '已取消'
+                              : unit.jobStatus === 'running'
+                                ? '合成中'
+                                : '排队中'}
                     </span>
                   ) : null}
                   {unit.durationMs !== null ? `${(unit.durationMs / 1000).toFixed(1)}s` : ''}
