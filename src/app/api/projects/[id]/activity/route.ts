@@ -20,6 +20,8 @@ import {listDispatchJobs} from '@/lib/llm-generation/dispatch';
 import {listGenerationRunSummaries} from '@/lib/llm-generation/runs';
 import {BEATS_USAGE_STAGE} from '@/lib/narrative-beats/generate';
 import {VISUAL_INTENT_USAGE_STAGE} from '@/lib/visual-intent/generate';
+import {getNarrationAudioOverview} from '@/lib/narration/audio';
+import {checkSubtitleTimingReadiness} from '@/lib/subtitles/timing';
 import {getProject, jsonError} from '../../../_lib/shared';
 
 export const runtime = 'nodejs';
@@ -138,6 +140,20 @@ async function handle(params: Promise<{id: string}>): Promise<Response> {
     ...listGenerationRunSummaries(db, id, VISUAL_INTENT_USAGE_STAGE),
   ];
 
+  // 旁白音频 / 字幕（供 NarrationPanel 统一订阅，避免各自高频轮询）
+  let audioOverview = getNarrationAudioOverview(id);
+  if (audioOverview.status === 'not_ready') {
+    // 与 /narration-audio GET 保持一致：尝试 lazy finalize 后重读
+    try {
+      const {tryFinalizeNarrationAudio} = await import('@/lib/narration/audio');
+      tryFinalizeNarrationAudio(id);
+      audioOverview = getNarrationAudioOverview(id);
+    } catch {
+      // finalize 失败保持 not_ready，不阻断 activity 响应
+    }
+  }
+  const subtitleReadiness = checkSubtitleTimingReadiness(id);
+
   let inputs = null;
   try {
     inputs = getProjectInput(id);
@@ -155,6 +171,8 @@ async function handle(params: Promise<{id: string}>): Promise<Response> {
     runningJobs,
     dispatchJobs,
     generationRuns,
+    audioOverview,
+    subtitleReadiness,
     resourceUsage: {
       busyClasses: readiness.busyClasses,
       gpuOccupied: readiness.gpuOccupied,

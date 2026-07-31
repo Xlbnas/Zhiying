@@ -7,6 +7,8 @@ import type {StageStatus, WorkflowStage} from '@/lib/workflow/types';
 import {WORKFLOW_STAGES} from '@/lib/workflow/types';
 import type {ResourceClass} from '@/lib/workflow/resource-classes';
 import type {WorkflowNodeState} from '@/lib/workflow/dag-shared';
+import type {NarrationAudioOverview} from '@/lib/narration/audio';
+import type {SubtitleTimingReadiness} from '@/lib/subtitles/timing';
 
 export interface StageJobSummary {
   id: string;
@@ -52,6 +54,8 @@ export interface ActivityResponse {
   readyNodes: string[];
   runningJobs: ActivityRunningJob[];
   resourceUsage: {busyClasses: ResourceClass[]; gpuOccupied: boolean};
+  audioOverview: NarrationAudioOverview;
+  subtitleReadiness: SubtitleTimingReadiness;
 }
 
 export const STAGE_NAMES: Record<WorkflowStage, string> = {
