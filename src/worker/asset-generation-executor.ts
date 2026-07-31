@@ -1,67 +1,108 @@
 /**
  * Asset Generation Job Executor（M7.3A.2）。
  *
- * Worker 原子 claim asset_generation_job → claim production_gpu lease →
- * 调用图像 provider → 持久化 candidate → 记录 usage → 释放 lease。
+ * Worker 通过 scheduler 原子 claim asset_generation_job → 获取 resource lease →
+ * 校验 source 版本 → 调用图像 provider → 持久化 candidate（含 requirement provenance）→
+ * 记录 usage → 释放 lease。
  * 任何终态或 shutdown 均释放 lease；请求已发出但结果未知 → indeterminate。
+ *
+ * Executor 不自行 claim production_gpu；lease token 由 scheduler 提供并通过
+ * job-runner 传入。仅 scheduler 持有唯一 lease ownerToken。
  */
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  AssetGenerationJobRow,
   completeAssetGenerationFailed,
   completeAssetGenerationIndeterminate,
   completeAssetGenerationSucceeded,
   heartbeatAssetGenerationJob,
   requeueAssetGenerationJob,
+  type AssetGenerationJobRow,
 } from '@/lib/assets/generation-jobs';
 import {insertAsset} from '@/lib/assets/model';
 import {getGeneratedImageProvider, ImageGenerationError} from '@/lib/assets/providers/generated';
 import {clearResolutionState, upsertResolutionState} from '@/lib/assets/model';
 import {
-  claimResourceLease,
-  DEFAULT_LEASE_MS,
   heartbeatResourceLease,
   releaseResourceLease,
 } from '@/lib/resources/leases';
 import {finalizeImageGenerationUsage, recordImageGenerationUsage} from '@/lib/usage-events';
 import type {JobRunnerContext} from './job-runner';
+import {DEFAULT_LEASE_MS} from '@/lib/resources/leases';
+import {getDb} from '@/lib/db';
 
 const HEARTBEAT_INTERVAL_MS = 2000;
+
+export interface AssetGenerationJobLease {
+  group: 'production_gpu';
+  ownerToken: string;
+}
 
 export async function runAssetGenerationJob(
   job: AssetGenerationJobRow,
   ctx: JobRunnerContext,
+  resourceLease?: AssetGenerationJobLease,
 ): Promise<void> {
   const {log, isShuttingDown} = ctx;
-  const workerId = job.owner_token?.split(':')[0] ?? 'unknown-worker';
 
-  // 1. 先原子取得 production_gpu lease，再真正调用 provider
-  const lease = claimResourceLease('production_gpu', 'asset_generation', job.id, workerId);
-  if (!lease.ok || !lease.ownerToken) {
-    log(`asset job ${job.id}: production_gpu lease 不可得，跳过`);
-    return;
-  }
-  const leaseToken = lease.ownerToken;
-
-  const releaseLease = (): void => {
-    try {
-      releaseResourceLease('production_gpu', leaseToken);
-    } catch {
-      // 释放失败不阻断终态
+  const releaseProductionGpuLease = (): void => {
+    if (resourceLease?.group === 'production_gpu') {
+      try {
+        releaseResourceLease('production_gpu', resourceLease.ownerToken);
+      } catch {
+        // 释放失败不阻断终态
+      }
     }
   };
 
   let lastHeartbeat = 0;
-  const heartbeatBoth = (): void => {
+  const heartbeatAll = (): void => {
     const nowMs = Date.now();
     if (nowMs - lastHeartbeat < HEARTBEAT_INTERVAL_MS) return;
     lastHeartbeat = nowMs;
-    heartbeatResourceLease('production_gpu', leaseToken, DEFAULT_LEASE_MS);
-    heartbeatAssetGenerationJob(job.id, job.owner_token!, DEFAULT_LEASE_MS);
+    if (resourceLease?.group === 'production_gpu') {
+      heartbeatResourceLease('production_gpu', resourceLease.ownerToken, DEFAULT_LEASE_MS);
+    }
+    if (job.owner_token) {
+      heartbeatAssetGenerationJob(job.id, job.owner_token, DEFAULT_LEASE_MS);
+    }
   };
+
+  // 校验 source scenes version 是否仍为预期版本
+  if (job.source_scenes_version_id) {
+    const db = getDb();
+    const current = db.prepare(
+      `SELECT s.active_version AS latest_version
+       FROM projects p
+       JOIN project_stages s ON s.project_id = p.id AND s.stage = 'scenes'
+       WHERE p.id = ?`,
+    ).get(job.project_id) as {latest_version: number | null} | undefined;
+    if (current?.latest_version != null) {
+      const expectedVersion = Number.parseInt(job.source_scenes_version_id, 10);
+      if (!Number.isNaN(expectedVersion) && current.latest_version !== expectedVersion) {
+        completeAssetGenerationFailed(job.id, job.owner_token!, {
+          errorCode: 'SOURCE_STALE',
+          errorMessage: `scenes version 变为 ${current.latest_version}，预期 ${expectedVersion}，不调用 provider`,
+          failurePhase: 'SOURCE_STALE',
+          billingStatus: 'confirmed_zero',
+        });
+        upsertResolutionState({
+          projectId: job.project_id,
+          sceneId: job.scene_id,
+          requirementId: job.requirement_id,
+          status: 'generation_failed',
+          reason: 'SOURCE_STALE',
+          provider: job.provider,
+          metadata: {requestId: job.request_id, failurePhase: 'SOURCE_STALE'},
+        });
+        releaseProductionGpuLease();
+        log(`asset job ${job.id}: source scenes stale (${expectedVersion}→${current.latest_version})，零 provider call`);
+        return;
+      }
+    }
+  }
 
   const provider = getGeneratedImageProvider();
   const startAt = Date.now();
@@ -69,7 +110,7 @@ export async function runAssetGenerationJob(
   try {
     if (isShuttingDown()) {
       requeueAssetGenerationJob(job.id, job.owner_token!);
-      releaseLease();
+      releaseProductionGpuLease();
       log(`asset job ${job.id}: shutdown 前回 queued`);
       return;
     }
@@ -88,7 +129,7 @@ export async function runAssetGenerationJob(
         reason: '图像生成服务未配置或不可用',
         provider: provider.name,
       });
-      releaseLease();
+      releaseProductionGpuLease();
       return;
     }
 
@@ -96,7 +137,7 @@ export async function runAssetGenerationJob(
     recordImageGenerationUsageInFlight(job);
 
     const candidates = await provider.generate({prompt: job.prompt, model: job.model});
-    heartbeatBoth();
+    heartbeatAll();
 
     if (!candidates.length) {
       const reason = '未生成有效图片';
@@ -116,7 +157,7 @@ export async function runAssetGenerationJob(
         provider: provider.name,
         metadata: {requestId: job.request_id, failurePhase: 'IMAGE_DECODE_FAILED', prompt: job.prompt},
       });
-      releaseLease();
+      releaseProductionGpuLease();
       return;
     }
 
@@ -154,13 +195,13 @@ export async function runAssetGenerationJob(
       licenseNote: `AI 生成 · ${first.model} (待确认)`,
       attribution: `API易 / ${first.model}`,
       description: first.prompt.slice(0, 200),
-      requirement: undefined, // candidate 不自动绑定；保留 requirement_json 为空
+      requirement: job.requirement_json ? (JSON.parse(job.requirement_json) as Record<string, unknown>) as Parameters<typeof insertAsset>[0]['requirement'] : undefined,
     });
 
     clearResolutionState(job.project_id, job.scene_id, job.requirement_id);
 
     completeAssetGenerationSucceeded(job.id, job.owner_token!, row.id, providerRequestId);
-    releaseLease();
+    releaseProductionGpuLease();
     log(`asset job ${job.id} succeeded → asset ${row.id}`);
   } catch (err) {
     const elapsedMs = Date.now() - startAt;
@@ -168,7 +209,7 @@ export async function runAssetGenerationJob(
 
     if (isShuttingDown()) {
       requeueAssetGenerationJob(job.id, job.owner_token!);
-      releaseLease();
+      releaseProductionGpuLease();
       log(`asset job ${job.id}: 执行中 shutdown，回 queued`);
       return;
     }
@@ -220,7 +261,7 @@ export async function runAssetGenerationJob(
       },
     });
 
-    releaseLease();
+    releaseProductionGpuLease();
     log(`asset job ${job.id} terminal: ${failurePhase} (${billingStatus})`);
   }
 }

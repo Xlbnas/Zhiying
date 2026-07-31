@@ -95,7 +95,30 @@ export async function POST(
   const requirement = found.requirement;
   const prompt = body.prompt?.trim() || defaultGeneratePrompt(requirement);
 
-  const prov = getGeneratedImageProvider();
+  const provider = getGeneratedImageProvider();
+  // 根据 provider 确定 resource class：apiyi → remote_image_api；local/comfyui → local_image_gpu
+  const isRemoteApi = provider.name === 'apiyi';
+  const resourceClass = isRemoteApi ? 'remote_image_api' : 'local_image_gpu';
+  const resourceGroup = isRemoteApi ? null : 'production_gpu';
+
+  // 冻结 requirement snapshot（含 requirementId 等，供 candidate provenance）
+  const requirementSnapshot = {
+    requirementId: body.requirementId,
+    kind: requirement.kind,
+    subject: requirement.subject,
+    query: requirement.query,
+    usage: requirement.usage,
+    policy: requirement.policy,
+    authenticity: requirement.authenticity ?? 'synthetic_allowed',
+  };
+
+  // source scenes version（enqueue 时冻结，执行期校验是否仍为预期）
+  const db = (await import('@/lib/db')).getDb();
+  const scenesVer = db.prepare(
+    `SELECT version FROM project_versions
+     WHERE project_id = ? AND stage = 'scenes' ORDER BY version DESC LIMIT 1`,
+  ).get(id) as {version: number} | undefined;
+  const sourceScenesVersionId = String(scenesVer?.version ?? '0');
 
   try {
     const result = enqueueAssetGenerationJob({
@@ -104,8 +127,12 @@ export async function POST(
       requirementId: body.requirementId,
       requestId: body.requestId,
       prompt,
-      provider: prov.name,
+      provider: provider.name,
       model: process.env.APIYI_IMAGE_MODEL || 'gemini-3.1-flash-image',
+      resourceClass,
+      resourceGroup,
+      sourceScenesVersionId,
+      requirementSnapshot,
     });
 
     return Response.json(

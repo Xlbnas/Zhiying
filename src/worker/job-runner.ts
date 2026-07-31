@@ -13,7 +13,6 @@ import {runDispatchJob} from './dispatch-executor';
 import {runLlmJob} from './llm-executor';
 import {runTtsJob} from './tts-executor';
 import {runAssetGenerationJob} from './asset-generation-executor';
-import {releaseResourceLeaseForJob} from '@/lib/resources/leases';
 
 /**
  * 并行 Worker 的 per-job 运行器 + 调度循环（M7 依赖/资源感知并行化）。
@@ -94,7 +93,12 @@ export async function executeClaimedJob(
     return;
   }
   if (claimed.type === 'asset_generation') {
-    await runAssetGenerationJob(claimed.job, ctx);
+    const leaseMeta = (claimed as unknown as {resourceLease?: {group: 'production_gpu'; ownerToken: string}}).resourceLease;
+    await runAssetGenerationJob(
+      claimed.job,
+      ctx,
+      leaseMeta ? {group: leaseMeta.group, ownerToken: leaseMeta.ownerToken} : undefined,
+    );
     return;
   }
   await hooks.runRenderJob(claimed.job);
@@ -182,10 +186,11 @@ export function createParallelLoop(deps: ParallelLoopDeps): ParallelLoop {
           })
           .finally(() => {
             running.delete(key);
-            // M7.3A.2：确保 production_gpu lease 被释放（render/tts/asset_generation）
-            if (claimed.type === 'render' || claimed.type === 'tts' || claimed.type === 'asset_generation') {
+            // M7.3A.2：按 exact ownerToken 释放 production_gpu lease
+            const leaseMeta = (claimed as {resourceLease?: {group: 'production_gpu'; ownerToken: string}}).resourceLease;
+            if (leaseMeta?.group === 'production_gpu') {
               try {
-                releaseResourceLeaseForJob('production_gpu', claimed.type, claimed.job.id);
+                releaseResourceLease('production_gpu', leaseMeta.ownerToken);
               } catch {
                 // ignore
               }

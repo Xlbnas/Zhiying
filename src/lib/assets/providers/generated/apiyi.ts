@@ -156,13 +156,16 @@ export class ApiYiImageProvider implements GeneratedImageProvider {
       },
     };
 
-    // 使用 undici 显式区分 TCP/TLS connect timeout 与整体 response deadline
+    // 使用 undici 显式区分 TCP/TLS connect timeout 与整体 response deadline。
+    // 一个 AbortController 从 HTTP 请求开始到 response body 完整读取结束，整体
+    // deadline = APIYI_RESPONSE_TIMEOUT_MS（含 headers 等待 + 模型生成 + body 读取）。
     const dispatcher = new Agent({connectTimeout: this.connectTimeoutMs});
     const abortController = new AbortController();
     const responseTimer = setTimeout(() => abortController.abort(), this.responseTimeoutMs);
 
     const startAt = Date.now();
     let res: Awaited<ReturnType<typeof undiciFetch>>;
+    let providerRequestId: string | undefined;
     try {
       res = await undiciFetch(url, {
         method: 'POST',
@@ -171,12 +174,12 @@ export class ApiYiImageProvider implements GeneratedImageProvider {
         dispatcher,
         signal: abortController.signal,
       });
-      clearTimeout(responseTimer);
+      // headers 已到达，记录 providerRequestId 用于错误上下文，但不重置 timer
+      providerRequestId = res.headers.get('x-request-id') ?? undefined;
     } catch (err) {
       clearTimeout(responseTimer);
       dispatcher.close().catch(() => {});
       const root = extractErrorRoot(err);
-      // 连接层 timeout：TCP/TLS 未建立（undici ConnectTimeoutError）
       if (isConnectTimeoutError(root)) {
         throw new ImageGenerationError(
           'PROVIDER_CONNECT_TIMEOUT',
@@ -185,7 +188,6 @@ export class ApiYiImageProvider implements GeneratedImageProvider {
           {model, size, aspectRatio},
         );
       }
-      // 整体 response deadline（含首字节等待）被 AbortController 触发
       if (isAbortError(root)) {
         throw new ImageGenerationError(
           'PROVIDER_RESPONSE_TIMEOUT',
@@ -202,19 +204,15 @@ export class ApiYiImageProvider implements GeneratedImageProvider {
       );
     }
 
-    // 已建立连接：整体响应 body 读取超时（含模型生成）
-    const providerRequestId = res.headers.get('x-request-id') ?? undefined;
+    // 读取 body：timer 仍生效，覆盖整体 response deadline。
+    // 若 body 读取阶段超时 → PROVIDER_RESPONSE_TIMEOUT（触发 abortController）。
     let data: Record<string, unknown>;
     try {
-      data = (await Promise.race([
-        res.json(),
-        new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('RESPONSE_TIMEOUT')), this.responseTimeoutMs);
-        }),
-      ])) as Record<string, unknown>;
+      data = (await res.json()) as Record<string, unknown>;
     } catch (err) {
+      clearTimeout(responseTimer);
       dispatcher.close().catch(() => {});
-      if (err instanceof Error && err.message === 'RESPONSE_TIMEOUT') {
+      if (err instanceof Error && err.name === 'AbortError') {
         throw new ImageGenerationError(
           'PROVIDER_RESPONSE_TIMEOUT',
           `图像生成响应超时（${this.responseTimeoutMs}ms 未收到完整响应）`,
@@ -228,6 +226,8 @@ export class ApiYiImageProvider implements GeneratedImageProvider {
         res.status,
         {model, size, aspectRatio, providerRequestId},
       );
+    } finally {
+      clearTimeout(responseTimer);
     }
 
     dispatcher.close().catch(() => {});

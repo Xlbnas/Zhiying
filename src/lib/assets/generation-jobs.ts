@@ -34,6 +34,11 @@ export interface AssetGenerationJobRow {
   prompt: string;
   provider: string;
   model: string;
+  resource_class: string;
+  resource_group: string | null;
+  source_scenes_version_id: string | null;
+  source_requirement_hash: string | null;
+  requirement_json: string | null;
   status: AssetGenerationJobStatus;
   owner_token: string | null;
   lease_expires_at: string | null;
@@ -49,6 +54,16 @@ export interface AssetGenerationJobRow {
   updated_at: string;
 }
 
+export interface AssetRequirementSnapshot {
+  requirementId: string;
+  kind: string;
+  subject: unknown;
+  query: string;
+  usage: string;
+  policy: string;
+  authenticity: string;
+}
+
 export interface EnqueueAssetGenerationInput {
   projectId: string;
   sceneId: string;
@@ -57,6 +72,10 @@ export interface EnqueueAssetGenerationInput {
   prompt: string;
   provider: string;
   model: string;
+  resourceClass: string;
+  resourceGroup: string | null;
+  sourceScenesVersionId: string;
+  requirementSnapshot: AssetRequirementSnapshot;
 }
 
 export interface EnqueueAssetGenerationResult {
@@ -118,8 +137,32 @@ export function listAssetGenerationJobs(
 }
 
 /**
+ * 每个 requirement 的最新 job（用于 resolver/reconciliation）。
+ * DESC 遍历，每个 requirement_id 只保留第一个（即最新的）。
+ */
+export function listLatestAssetGenerationJobsByRequirement(
+  projectId: string,
+): Map<string, AssetGenerationJobRow> {
+  const jobs = getDb()
+    .prepare(
+      `SELECT * FROM asset_generation_jobs
+       WHERE project_id = ?
+       ORDER BY created_at DESC`,
+    )
+    .all(projectId) as AssetGenerationJobRow[];
+  const byReq = new Map<string, AssetGenerationJobRow>();
+  for (const job of jobs) {
+    if (!byReq.has(job.requirement_id)) {
+      byReq.set(job.requirement_id, job);
+    }
+  }
+  return byReq;
+}
+
+/**
  * Web 入队入口：在单个 BEGIN IMMEDIATE 内完成 exact requirement 校验 +
  * 幂等 INSERT（UNIQUE 冲突 → 重读现有行返回其状态）。
+ * enqueue 时冻结 exact source scenes version + requirement snapshot。
  */
 export function enqueueAssetGenerationJob(
   input: EnqueueAssetGenerationInput,
@@ -145,17 +188,28 @@ export function enqueueAssetGenerationJob(
       );
     }
 
+    // 计算 source requirement hash（用于执行期校验 source version 匹配）
+    const requirementJson = JSON.stringify(input.requirementSnapshot);
+    const sourceHash = crypto
+      .createHash('sha256')
+      .update(requirementJson)
+      .digest('hex')
+      .slice(0, 16);
+
     const id = crypto.randomUUID();
     const at = now();
     db.prepare(
       `INSERT INTO asset_generation_jobs (
          id, project_id, scene_id, requirement_id, request_id,
-         prompt, provider, model, status,
+         prompt, provider, model,
+         resource_class, resource_group,
+         source_scenes_version_id, source_requirement_hash, requirement_json,
+         status,
          owner_token, lease_expires_at,
          provider_request_id, result_asset_id,
          error_code, error_message, failure_phase, billing_status,
          created_at, started_at, finished_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued',
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued',
          NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
          ?, NULL, NULL, ?)
        ON CONFLICT(project_id, scene_id, requirement_id, request_id) DO NOTHING`,
@@ -168,6 +222,11 @@ export function enqueueAssetGenerationJob(
       input.prompt,
       input.provider,
       input.model,
+      input.resourceClass,
+      input.resourceGroup,
+      input.sourceScenesVersionId,
+      sourceHash,
+      requirementJson,
       at,
       at,
     );

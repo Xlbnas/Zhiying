@@ -301,6 +301,10 @@ CREATE TABLE IF NOT EXISTS generation_attempts (
 -- ============ M7.3A.2：素材生成 durable worker job ============
 -- Web 不再同步等待 provider；Worker 原子 claim 后执行，同 requestId 生命周期
 -- 内只产生一个 job，跨进程/重试/双击均不重复调用 provider。
+-- resource_class：provider 驱动（apiyi→remote_image_api、local/comfyui→local_image_gpu）。
+-- resource_group：仅 local_image_gpu 归 production_gpu；remote API 为 NULL。
+-- source_scenes_version_id + requirement_json：enqueue 时冻结 exact source，
+--   执行期校验 source version 仍匹配；若已 stale → SOURCE_STALE → confirmed_zero。
 CREATE TABLE IF NOT EXISTS asset_generation_jobs (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id),
@@ -310,6 +314,11 @@ CREATE TABLE IF NOT EXISTS asset_generation_jobs (
   prompt TEXT NOT NULL,
   provider TEXT NOT NULL,
   model TEXT NOT NULL,
+  resource_class TEXT NOT NULL DEFAULT 'remote_image_api',
+  resource_group TEXT,
+  source_scenes_version_id TEXT,
+  source_requirement_hash TEXT,
+  requirement_json TEXT,
   status TEXT NOT NULL
     CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'indeterminate', 'cancelled')),
   owner_token TEXT,
@@ -463,6 +472,23 @@ export function getDb(): Db {
   // immutable m7_pipeline_snapshot。绝不依赖 latest 解析。
   if (!projectCols.some((c) => c.name === 'm7_pipeline_snapshot_id')) {
     db.exec('ALTER TABLE projects ADD COLUMN m7_pipeline_snapshot_id TEXT');
+  }
+  // M7.3A.2 additive columns for asset_generation_jobs（review hardening）
+  const agCols = db.prepare('PRAGMA table_info(asset_generation_jobs)').all() as Array<{name: string}>;
+  if (!agCols.some((c) => c.name === 'resource_class')) {
+    db.exec("ALTER TABLE asset_generation_jobs ADD COLUMN resource_class TEXT NOT NULL DEFAULT 'remote_image_api'");
+  }
+  if (!agCols.some((c) => c.name === 'resource_group')) {
+    db.exec('ALTER TABLE asset_generation_jobs ADD COLUMN resource_group TEXT');
+  }
+  if (!agCols.some((c) => c.name === 'source_scenes_version_id')) {
+    db.exec('ALTER TABLE asset_generation_jobs ADD COLUMN source_scenes_version_id TEXT');
+  }
+  if (!agCols.some((c) => c.name === 'source_requirement_hash')) {
+    db.exec('ALTER TABLE asset_generation_jobs ADD COLUMN source_requirement_hash TEXT');
+  }
+  if (!agCols.some((c) => c.name === 'requirement_json')) {
+    db.exec('ALTER TABLE asset_generation_jobs ADD COLUMN requirement_json TEXT');
   }
   instance = db;
   return db;

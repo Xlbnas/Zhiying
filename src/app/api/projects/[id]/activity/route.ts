@@ -134,16 +134,17 @@ async function handle(params: Promise<{id: string}>): Promise<Response> {
     ...(
       db
         .prepare(
-          `SELECT id, scene_id || '/' || requirement_id AS stage, started_at
+          `SELECT id, scene_id || '/' || requirement_id AS stage, started_at,
+                  COALESCE(resource_class, 'remote_image_api') AS resource_class
            FROM asset_generation_jobs
            WHERE project_id = ? AND status IN ('queued','running')`,
         )
-        .all(id) as Array<{id: string; stage: string | null; started_at: string | null}>
+        .all(id) as Array<{id: string; stage: string | null; started_at: string | null; resource_class: string}>
     ).map((r) => ({
       type: 'asset_generation' as const,
       id: r.id,
       stage: r.stage,
-      resourceClass: 'local_image_gpu' as const,
+      resourceClass: r.resource_class as ResourceClass,
       startedAt: r.started_at,
     })),
   ];

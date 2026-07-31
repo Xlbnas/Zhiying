@@ -13,6 +13,7 @@ import {
   getResourceLimits,
   GPU_EXCLUSIVE_GROUP,
   JOB_TYPE_RESOURCE_CLASS,
+  isGpuExclusive,
   type ResourceClass,
 } from './workflow/resource-classes';
 import type {AssetGenerationJobRow} from './assets/generation-jobs';
@@ -25,16 +26,22 @@ import type {AssetGenerationJobRow} from './assets/generation-jobs';
  * 时间相同时以 job type + id 稳定 tie-break。
  *
  * M7 并行化：Worker 主循环可同时运行多个资源兼容的任务。
- * M7.3A.2：GPU 任务（render/tts/asset_generation）在 claim 前必须先原子取得
+ * M7.3A.2：GPU 任务（render/tts/local_image_gpu）在 claim 前必须先原子取得
  * production_gpu lease；lease 不可得则跳过该候选，绝不在发现冲突前改 running。
+ * remote_image_api 等不申请 production_gpu；可与 GPU 任务同时 running。
  */
 
+export interface ResourceLeaseMeta {
+  group: 'production_gpu';
+  ownerToken: string;
+}
+
 export type ClaimedJob =
-  | {type: 'render'; job: RenderJobRow; resourceClass: ResourceClass}
+  | {type: 'render'; job: RenderJobRow; resourceClass: ResourceClass; resourceLease?: ResourceLeaseMeta}
   | {type: 'llm'; job: LlmJobRow; resourceClass: ResourceClass}
-  | {type: 'tts'; job: TtsJobRow; resourceClass: ResourceClass}
+  | {type: 'tts'; job: TtsJobRow; resourceClass: ResourceClass; resourceLease?: ResourceLeaseMeta}
   | {type: 'dispatch'; job: DispatchJobRow; resourceClass: ResourceClass}
-  | {type: 'asset_generation'; job: AssetGenerationJobRow; resourceClass: ResourceClass};
+  | {type: 'asset_generation'; job: AssetGenerationJobRow; resourceClass: ResourceClass; resourceLease?: ResourceLeaseMeta};
 
 /** 资源感知 claim 选项（M7）。 */
 export interface ClaimOptions {
@@ -100,10 +107,7 @@ const CLAIM_UPDATE_SQL: Record<'render' | 'llm' | 'tts' | 'dispatch', string> = 
      WHERE id = ? AND status = 'queued'`,
 };
 
-const GPU_TYPES: ReadonlyArray<ClaimedJob['type']> = ['render', 'tts', 'asset_generation'];
-function isGpuJobType(type: ClaimedJob['type']): type is 'render' | 'tts' | 'asset_generation' {
-  return (GPU_TYPES as ReadonlyArray<string>).includes(type);
-}
+const GPU_JOB_TYPES = new Set<string>(['render', 'tts', 'asset_generation']);
 
 /**
  * 原子领取全局下一个 queued 任务。无事可做返回 null。
@@ -142,8 +146,16 @@ export function claimNextAnyJob(workerId: string, opts?: ClaimOptions): ClaimedJ
           queued_at: string;
         }>;
       for (const next of candidates) {
-        const resourceClass =
-          next.type === 'asset_generation' ? 'local_image_gpu' : JOB_TYPE_RESOURCE_CLASS[next.type];
+        let resourceClass: ResourceClass;
+        if (next.type === 'asset_generation') {
+          // 从 job 行读取 resource_class（由 enqueue 时 provider 决定）
+          const agJob = db.prepare(
+            'SELECT resource_class FROM asset_generation_jobs WHERE id = ?',
+          ).get(next.id) as {resource_class: string} | undefined;
+          resourceClass = (agJob?.resource_class ?? 'remote_image_api') as ResourceClass;
+        } else {
+          resourceClass = JOB_TYPE_RESOURCE_CLASS[next.type];
+        }
         if (opts?.excludeResourceClasses?.includes(resourceClass)) {
           continue;
         }
@@ -152,16 +164,18 @@ export function claimNextAnyJob(workerId: string, opts?: ClaimOptions): ClaimedJ
           continue;
         }
 
-        // GPU 任务：先原子 claim production_gpu lease，失败则跳过
+        // GPU 任务：先原子 claim production_gpu lease（仅 GPU_EXCLUSIVE_GROUP 成员）
         let gpuLeaseToken: string | null = null;
-        if (isGpuJobType(next.type)) {
-          const lease = claimResourceLease('production_gpu', next.type, next.id, claimedBy, RESOURCE_LEASE_MS);
+        if (isGpuExclusive(resourceClass)) {
+          const lease = claimResourceLease('production_gpu', next.type as 'render' | 'tts' | 'asset_generation', next.id, claimedBy, RESOURCE_LEASE_MS);
           if (!lease.ok || !lease.ownerToken) {
             // 本候选跳过，继续尝试下一个（资源不可得，不是全局无任务）
             continue;
           }
           gpuLeaseToken = lease.ownerToken;
         }
+        const resourceLease: ResourceLeaseMeta | undefined =
+          gpuLeaseToken ? {group: 'production_gpu', ownerToken: gpuLeaseToken} : undefined;
 
         if (next.type === 'dispatch') {
           const ownerToken = `${claimedBy}:${crypto.randomUUID()}`;
@@ -193,7 +207,7 @@ export function claimNextAnyJob(workerId: string, opts?: ClaimOptions): ClaimedJ
             continue;
           }
           const job = getAssetGenerationJobById(next.id);
-          return job ? {type: 'asset_generation', job, resourceClass} : null;
+          return job ? {type: 'asset_generation', job, resourceClass, resourceLease} : null;
         }
 
         const res = db
@@ -205,14 +219,14 @@ export function claimNextAnyJob(workerId: string, opts?: ClaimOptions): ClaimedJ
         }
         if (next.type === 'render') {
           const job = getRenderJobById(next.id);
-          return job ? {type: 'render', job, resourceClass} : null;
+          return job ? {type: 'render', job, resourceClass, resourceLease} : null;
         }
         if (next.type === 'llm') {
           const job = getLlmJobById(next.id);
           return job ? {type: 'llm', job, resourceClass} : null;
         }
         const job = getTtsJobById(next.id);
-        return job ? {type: 'tts', job, resourceClass} : null;
+        return job ? {type: 'tts', job, resourceClass, resourceLease} : null;
       }
       return null;
     },
