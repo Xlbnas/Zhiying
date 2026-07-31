@@ -38,3 +38,9 @@ services/indextts2-api-adapter/.venv/
 /voice-registry.json
 /voices/
 /_m4c1/
+
+# 本地开发/测试工具与临时截图（不入库）
+/.tools/
+/.playwright-cli/
+/mg-preview-check.png
+/render-eta-ui.png
