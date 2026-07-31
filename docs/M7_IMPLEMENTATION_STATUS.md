@@ -7,10 +7,10 @@
 
 | 项 | 值 |
 |---|---|
-| 文档更新时间 | 2026-07-31T07:30Z（M7.3A.2 hardening 完成，已 push） |
-| 当前 SHA | `c18ca5a32ba04707c96f8da828a19dadd6330c4d` |
+| 文档更新时间 | 2026-07-31T08:00Z（M7.3A.2 review hardening 完成） |
+| 当前 SHA | `091349dfd7265ac689fffda96f7adffa5680d441` |
 | 当前分支 | `m7` |
-| origin/m7 SHA | `c18ca5a32ba04707c96f8da828a19dadd6330c4d` |
+| origin/m7 SHA | `091349dfd7265ac689fffda96f7adffa5680d441` |
 | 当前 production SHA | `4b40ada3ec05e208d0f22661467b110e81b82f6c` |
 | 上一轮确认 production SHA | `4b40ada3ec05e208d0f22661467b110e81b82f6c` |
 
@@ -343,16 +343,19 @@
 
 ## 14. 最近一轮 Review 阻断项
 
-M7.3A.2 Review 全部阻断项已修复：
+M7.3A.2 Review 全部阻断项已修复（第二轮 hardening）：
 
-| 阻断项 | 修复 |
-|---|---|
-| P0-1：connect timeout 覆盖同步生成 | undici Agent.connectTimeout + 独立 APIYI_RESPONSE_TIMEOUT_MS |
-| P0-2：图片生成无 durable idempotency | `asset_generation_jobs` + requestId UNIQUE |
-| P0-3：没有 late result reconcile | 明确 APIYi 是同步协议；移除无执行路径的 poll 语义 |
-| P0-4：Narration activity 轮询竞态 | `useActivityController` + `notifyMutation` 立即启动 watch |
-| P1-1：DAG 未成为状态机真相 | `assertRunnable`/`affectedDownstream`/`handleLocked` 改为 DAG |
-| P1-2：GPU 互斥仅单进程 | `resource_group_leases` 跨 Worker durable lease |
+| 阻断项 | 状态 | 修复 |
+|---|---|---|
+| P0: APIYi → local_image_gpu 错误分类 | ✅ | enqueue 时 provider 决定 resourceClass；apiyi→remote_image_api |
+| P0: asset executor double-claim lease | ✅ | scheduler 唯一 claim，通过 resourceLease 传递，executor 不自行 claim |
+| P0: generated candidate requirement 缺失 | ✅ | enqueue 冻结 requirement_json+source version；insertAsset 恢复 provenance |
+| P0: response deadline per-phase 重置 | ✅ | 单一 AbortController 从请求到 body 读完，不 reset |
+| P1: long job lease TTL 不足 | ✅ | heartbeat 在 job-runner 统一处理；executor 心跳 lease |
+| P1: latest job selection 错误 | ✅ | listLatestAssetGenerationJobsByRequirement 使用 Map 去重 |
+| P1: activity controller 停止条件不完整 | ✅ | stale/not_ready 也视为 terminal 状态 |
+| P1: activity API asset gen resourceClass 硬编码 | ✅ | 从 job.resource_class 列读取 |
+| 测试更新 | ✅ | L5→remote_api parallel, L6→local_image 互斥, D4a assertion 修正 |
 
 ## 15. 本轮 Production Smoke 关键证据
 
