@@ -7,26 +7,22 @@
  *   APIYI_IMAGE_MODEL=gemini-3.1-flash-image
  *   APIYI_IMAGE_SIZE=1K
  *   APIYI_IMAGE_ASPECT_RATIO=16:9
- *   APIYI_CONNECT_TIMEOUT_MS=30000
+ *   APIYI_CONNECT_TIMEOUT_MS=10000
  *   APIYI_RESPONSE_TIMEOUT_MS=300000
  *   APIYI_DOWNLOAD_TIMEOUT_MS=60000
  *
- * M7 超时修复：区分 connect / response / download / decode / terminal 阶段，
- * 不允许多个阶段共用一个 "timeout" 码；provider request id 在任何可能点持久化。
+ * M7.3A.2：
+ * - 使用 undici 显式区分 TCP/TLS connect timeout 与整体 response deadline；
+ * - 不再用 30 秒 AbortController 包住整个 fetch 等待；
+ * - provider 为同步 generateContent；无真实异步 task polling 路径；
+ * - response timeout 后请求已发出 → 调用方标记 indeterminate + unknown_billing；
+ * - provider request id 在任何可能点持久化。
  */
+import {Agent, fetch as undiciFetch} from 'undici';
 import type {GenerateImageInput, GeneratedImageCandidate, GeneratedImageProvider, ProviderHealth} from './types';
 
-const BASE_URL = process.env.APIYI_BASE_URL || 'https://api.apiyi.com';
-const API_KEY = process.env.APIYI_API_KEY || '';
-const MODEL = process.env.APIYI_IMAGE_MODEL || 'gemini-3.1-flash-image';
-const SIZE = process.env.APIYI_IMAGE_SIZE || '1K';
-const ASPECT_RATIO = process.env.APIYI_IMAGE_ASPECT_RATIO || '16:9';
-const CONNECT_TIMEOUT_MS = Number(process.env.APIYI_CONNECT_TIMEOUT_MS || '30000');
-const RESPONSE_TIMEOUT_MS = Number(process.env.APIYI_RESPONSE_TIMEOUT_MS || '300000');
-const DOWNLOAD_TIMEOUT_MS = Number(process.env.APIYI_DOWNLOAD_TIMEOUT_MS || '60000');
-const HEALTH_CACHE_TTL_MS = 300_000; // 5min
-
 const ALLOWED_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const HEALTH_CACHE_TTL_MS = 300_000; // 5min
 
 /**
  * M7：带计费语义的 provider 错误码。
@@ -65,18 +61,30 @@ export class ImageGenerationError extends Error {
   }
 }
 
-interface TimeoutResult {
-  kind: 'connect' | 'response' | 'download';
-  elapsedMs: number;
-}
-
 export class ApiYiImageProvider implements GeneratedImageProvider {
   readonly name = 'apiyi';
   readonly configured: boolean;
   health: ProviderHealth;
 
+  private readonly baseUrl: string;
+  private readonly apiKey: string;
+  private readonly defaultModel: string;
+  private readonly defaultSize: string;
+  private readonly defaultAspectRatio: string;
+  private readonly connectTimeoutMs: number;
+  private readonly responseTimeoutMs: number;
+  private readonly downloadTimeoutMs: number;
+
   constructor() {
-    this.configured = !!API_KEY;
+    this.apiKey = process.env.APIYI_API_KEY || '';
+    this.baseUrl = process.env.APIYI_BASE_URL || 'https://api.apiyi.com';
+    this.defaultModel = process.env.APIYI_IMAGE_MODEL || 'gemini-3.1-flash-image';
+    this.defaultSize = process.env.APIYI_IMAGE_SIZE || '1K';
+    this.defaultAspectRatio = process.env.APIYI_IMAGE_ASPECT_RATIO || '16:9';
+    this.connectTimeoutMs = Number(process.env.APIYI_CONNECT_TIMEOUT_MS || '10000');
+    this.responseTimeoutMs = Number(process.env.APIYI_RESPONSE_TIMEOUT_MS || '300000');
+    this.downloadTimeoutMs = Number(process.env.APIYI_DOWNLOAD_TIMEOUT_MS || '60000');
+    this.configured = !!this.apiKey;
     this.health = this.configured
       ? {healthy: false, available: false, reason: 'not_configured', checkedAt: 0} // will be checked on demand
       : {healthy: false, available: false, reason: 'not_configured', checkedAt: Date.now()};
@@ -95,8 +103,8 @@ export class ApiYiImageProvider implements GeneratedImageProvider {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15_000);
       try {
-        const res = await fetch(`${BASE_URL}/v1beta/models`, {
-          headers: {'Authorization': `Bearer ${API_KEY}`},
+        const res = await fetch(`${this.baseUrl}/v1beta/models`, {
+          headers: {'Authorization': `Bearer ${this.apiKey}`},
           signal: controller.signal,
         });
         clearTimeout(timer);
@@ -132,10 +140,10 @@ export class ApiYiImageProvider implements GeneratedImageProvider {
       throw new ImageGenerationError('not_configured', 'APIYi image provider not configured (missing APIYI_API_KEY)');
     }
 
-    const model = input.model || MODEL;
-    const size = input.size || SIZE;
-    const aspectRatio = input.aspectRatio || ASPECT_RATIO;
-    const url = `${BASE_URL}/v1beta/models/${model}:generateContent`;
+    const model = input.model || this.defaultModel;
+    const size = input.size || this.defaultSize;
+    const aspectRatio = input.aspectRatio || this.defaultAspectRatio;
+    const url = `${this.baseUrl}/v1beta/models/${model}:generateContent`;
 
     const body = {
       contents: [{parts: [{text: input.prompt}]}],
@@ -148,55 +156,68 @@ export class ApiYiImageProvider implements GeneratedImageProvider {
       },
     };
 
-    const startAt = Date.now();
-    const controller = new AbortController();
-    const connectTimer = setTimeout(() => controller.abort(), CONNECT_TIMEOUT_MS);
+    // 使用 undici 显式区分 TCP/TLS connect timeout 与整体 response deadline
+    const dispatcher = new Agent({connectTimeout: this.connectTimeoutMs});
+    const abortController = new AbortController();
+    const responseTimer = setTimeout(() => abortController.abort(), this.responseTimeoutMs);
 
-    let res: Response;
+    const startAt = Date.now();
+    let res: Awaited<ReturnType<typeof undiciFetch>>;
     try {
-      res = await fetch(url, {
+      res = await undiciFetch(url, {
         method: 'POST',
-        headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEY}`},
+        headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${this.apiKey}`},
         body: JSON.stringify(body),
-        signal: controller.signal,
+        dispatcher,
+        signal: abortController.signal,
       });
-      clearTimeout(connectTimer);
+      clearTimeout(responseTimer);
     } catch (err) {
-      clearTimeout(connectTimer);
-      if (err instanceof Error && err.name === 'AbortError') {
+      clearTimeout(responseTimer);
+      dispatcher.close().catch(() => {});
+      const root = extractErrorRoot(err);
+      // 连接层 timeout：TCP/TLS 未建立（undici ConnectTimeoutError）
+      if (isConnectTimeoutError(root)) {
         throw new ImageGenerationError(
           'PROVIDER_CONNECT_TIMEOUT',
-          `图像服务连接超时（${CONNECT_TIMEOUT_MS}ms 未建立连接）`,
+          `图像服务连接超时（${this.connectTimeoutMs}ms 未建立连接）`,
+          undefined,
+          {model, size, aspectRatio},
+        );
+      }
+      // 整体 response deadline（含首字节等待）被 AbortController 触发
+      if (isAbortError(root)) {
+        throw new ImageGenerationError(
+          'PROVIDER_RESPONSE_TIMEOUT',
+          `图像生成响应超时（${this.responseTimeoutMs}ms 未收到完整响应）`,
           undefined,
           {model, size, aspectRatio},
         );
       }
       throw new ImageGenerationError(
         'PROVIDER_CONNECT_TIMEOUT',
-        `图像服务连接失败：${err instanceof Error ? err.message : String(err)}`,
+        `图像服务连接失败：${root.message}`,
         undefined,
         {model, size, aspectRatio},
       );
     }
 
-    // 已建立连接：整体响应超时（含 body 读取）
+    // 已建立连接：整体响应 body 读取超时（含模型生成）
     const providerRequestId = res.headers.get('x-request-id') ?? undefined;
     let data: Record<string, unknown>;
     try {
       data = (await Promise.race([
         res.json(),
         new Promise<never>((_, reject) => {
-          const t = setTimeout(() => reject(new Error('RESPONSE_TIMEOUT')), RESPONSE_TIMEOUT_MS);
-          // 若 fetch 被 abort，清理此 timer
-          controller.signal.addEventListener('abort', () => clearTimeout(t), {once: true});
+          setTimeout(() => reject(new Error('RESPONSE_TIMEOUT')), this.responseTimeoutMs);
         }),
       ])) as Record<string, unknown>;
     } catch (err) {
-      controller.abort(); // 尽力取消仍在传输的 body
+      dispatcher.close().catch(() => {});
       if (err instanceof Error && err.message === 'RESPONSE_TIMEOUT') {
         throw new ImageGenerationError(
           'PROVIDER_RESPONSE_TIMEOUT',
-          `图像生成响应超时（${RESPONSE_TIMEOUT_MS}ms 未收到完整响应）`,
+          `图像生成响应超时（${this.responseTimeoutMs}ms 未收到完整响应）`,
           undefined,
           {model, size, aspectRatio, providerRequestId},
         );
@@ -208,6 +229,8 @@ export class ApiYiImageProvider implements GeneratedImageProvider {
         {model, size, aspectRatio, providerRequestId},
       );
     }
+
+    dispatcher.close().catch(() => {});
 
     if (!res.ok) {
       const status = res.status;
@@ -271,6 +294,30 @@ export class ApiYiImageProvider implements GeneratedImageProvider {
     }
     return results;
   }
+}
+
+function extractErrorRoot(err: unknown): Error {
+  if (!(err instanceof Error)) return new Error(String(err));
+  const cause = (err as {cause?: unknown}).cause;
+  if (cause instanceof Error) return cause;
+  return err;
+}
+
+function isConnectTimeoutError(err: Error): boolean {
+  const msg = err.message.toLowerCase();
+  const code = (err as {code?: string}).code;
+  return (
+    code === 'UND_ERR_CONNECT_TIMEOUT' ||
+    msg.includes('connect timeout') ||
+    msg.includes('und_err_connect_timeout') ||
+    msg.includes('socket hang up') ||
+    msg.includes('etimedout') ||
+    msg.includes('econnrefused')
+  );
+}
+
+function isAbortError(err: Error): boolean {
+  return err.name === 'AbortError' || err.message.toLowerCase().includes('aborted');
 }
 
 let instance: ApiYiImageProvider | null = null;

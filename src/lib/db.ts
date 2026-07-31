@@ -298,6 +298,52 @@ CREATE TABLE IF NOT EXISTS generation_attempts (
   finished_at TEXT,
   UNIQUE(run_id, attempt_number)
 );
+-- ============ M7.3A.2：素材生成 durable worker job ============
+-- Web 不再同步等待 provider；Worker 原子 claim 后执行，同 requestId 生命周期
+-- 内只产生一个 job，跨进程/重试/双击均不重复调用 provider。
+CREATE TABLE IF NOT EXISTS asset_generation_jobs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  scene_id TEXT NOT NULL,
+  requirement_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  status TEXT NOT NULL
+    CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'indeterminate', 'cancelled')),
+  owner_token TEXT,
+  lease_expires_at TEXT,
+  provider_request_id TEXT,
+  result_asset_id TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  failure_phase TEXT,
+  billing_status TEXT
+    CHECK (billing_status IN ('confirmed_zero', 'confirmed_charged', 'unknown_billing')),
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, scene_id, requirement_id, request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_asset_generation_jobs_project
+  ON asset_generation_jobs (project_id, scene_id, requirement_id);
+
+-- ============ M7.3A.2：durable 跨 Worker GPU 资源租约 ============
+-- production_gpu 整机互斥；claim 先于 status=running；lease heartbeat 保活；
+-- 崩溃后 lease 过期可回收，但不得释放仍有有效 heartbeat 的 lease。
+CREATE TABLE IF NOT EXISTS resource_group_leases (
+  resource_group TEXT PRIMARY KEY,
+  owner_job_type TEXT NOT NULL,
+  owner_job_id TEXT NOT NULL,
+  owner_worker_id TEXT NOT NULL,
+  owner_token TEXT NOT NULL,
+  lease_expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 -- ============ Worker-side LLM dispatch（通用排队信封） ============
 -- Production 安全边界：DEEPSEEK_API_KEY/LLM_PROVIDER 只注入 worker 容器，
 -- Web 进程不持有 secret——POST 只做 validation + idempotency + enqueue，

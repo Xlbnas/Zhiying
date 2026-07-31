@@ -108,8 +108,12 @@ export function syncLlmUsageToEvents(projectId: string): number {
 export type ImageGenerationStatus =
   /** provider 成功产出 candidate → 按价目表计费（含后续被拒绝/未绑定的 candidate） */
   | 'succeeded'
+  /** M7：已确认发生真实费用（APIYi 同步 generateContent 成功产出 candidate） */
+  | 'confirmed_charged'
   /** 认证失败（401/403）：请求未进入生成 → cost 0 */
   | 'auth_failed'
+  /** M7：已确认未产生费用（请求未真实发出或 provider 明确未计费） */
+  | 'confirmed_zero'
   /** 429/超时/5xx/空结果/网络错误：是否产生费用无法确认 → cost 不计入 */
   | 'unknown_billing'
   /** M7：调用 provider 前写入的 in_flight 状态，用于幂等防重与 reconcile。 */
@@ -178,7 +182,7 @@ export function recordImageGenerationUsage(
   let costSource: ImageGenerationUsageResult['costSource'] = 'none';
   let pricingError: string | null = null;
 
-  if (input.status === 'succeeded') {
+  if (input.status === 'succeeded' || input.status === 'confirmed_charged') {
     try {
       const priced = computeImageCostCny({
         provider: input.provider,
@@ -196,7 +200,7 @@ export function recordImageGenerationUsage(
         throw err;
       }
     }
-  } else if (input.status === 'auth_failed') {
+  } else if (input.status === 'auth_failed' || input.status === 'confirmed_zero') {
     costCny = 0;
   }
 
@@ -310,7 +314,7 @@ export function finalizeImageGenerationUsage(
   let costSource: ImageGenerationUsageResult['costSource'] = 'none';
   let pricingError: string | null = null;
 
-  if (input.status === 'succeeded') {
+  if (input.status === 'succeeded' || input.status === 'confirmed_charged') {
     try {
       const priced = computeImageCostCny({
         provider: input.provider,
@@ -328,7 +332,7 @@ export function finalizeImageGenerationUsage(
         throw err;
       }
     }
-  } else if (input.status === 'auth_failed') {
+  } else if (input.status === 'auth_failed' || input.status === 'confirmed_zero') {
     costCny = 0;
   }
 
@@ -582,6 +586,8 @@ export interface ImageUsageSummary {
   unknownBilling: number;
   /** 认证失败 attempt 数（cost 0） */
   authFailed: number;
+  /** 已确认未计费 attempt 数（cost 0，与 auth_failed 区分） */
+  confirmedZero: number;
   providers: string[];
   models: string[];
   /** 历史回填 event 数（M6.3.10 前无逐次记录） */
@@ -629,7 +635,7 @@ export function getProjectUsageSummary(projectId: string): UsageSummary {
   let gpuEvents = 0;
 
   const image: ImageUsageSummary = {
-    calls: 0, images: 0, costCny: 0, unknownBilling: 0, authFailed: 0,
+    calls: 0, images: 0, costCny: 0, unknownBilling: 0, authFailed: 0, confirmedZero: 0,
     providers: [], models: [], backfilled: 0,
   };
   const imageProviders = new Set<string>();
@@ -669,7 +675,7 @@ export function getProjectUsageSummary(projectId: string): UsageSummary {
       let meta: Record<string, unknown> = {};
       try { meta = row.metadata ? JSON.parse(row.metadata) as Record<string, unknown> : {}; } catch { /* 忽略脏数据 */ }
       const status = typeof meta.status === 'string' ? meta.status : 'succeeded';
-      if (status === 'succeeded') {
+      if (status === 'succeeded' || status === 'confirmed_charged') {
         image.calls++;
         image.images += typeof meta.imageCount === 'number' ? meta.imageCount : 0;
         image.costCny += row.cost_cny ?? 0;
@@ -677,6 +683,8 @@ export function getProjectUsageSummary(projectId: string): UsageSummary {
         image.unknownBilling++;
       } else if (status === 'auth_failed') {
         image.authFailed++;
+      } else if (status === 'confirmed_zero') {
+        image.confirmedZero++;
       }
       if (meta.backfilled === true) image.backfilled++;
       if (row.provider) imageProviders.add(row.provider);

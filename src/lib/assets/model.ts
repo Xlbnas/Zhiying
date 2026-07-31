@@ -190,6 +190,7 @@ export interface AssetResolutionStateRow {
 
 export interface ResolutionStateMetadata {
   attemptId?: string;
+  requestId?: string;
   providerRequestId?: string;
   failurePhase?: string;
   model?: string;

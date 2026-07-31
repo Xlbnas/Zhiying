@@ -22,6 +22,7 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "remotion": "4.0.492",
+    "undici": "^8.9.0",
     "zod": "^3.25.67"
   },
   "devDependencies": {

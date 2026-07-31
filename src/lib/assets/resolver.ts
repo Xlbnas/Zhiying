@@ -22,6 +22,7 @@ import {
   type AssetRow,
 } from './model';
 import {getLatestImageUsageForRequirement} from '@/lib/usage-events';
+import {listAssetGenerationJobs} from './generation-jobs';
 import {authenticityOf, buildSceneAssetPlan} from './requirements';
 import {
   applyVisualOverrides,
@@ -38,6 +39,7 @@ import type {
   ResolutionStatus,
   SceneAssetResolution,
 } from './resolver-types';
+import type {AssetGenerationJobRow} from './generation-jobs';
 
 export interface GenerateEligibility {
   /** 语义上允许 AI 生成（authenticity 闸门，不含 provider health）。 */
@@ -249,11 +251,14 @@ function buildRequirementResolution(
   persisted: AssetResolutionStateRow | null,
   generateProviderAvailable: boolean,
   mgSwitch: MgSwitchEligibility,
+  assetGenJob: AssetGenerationJobRow | null,
 ): RequirementResolution {
-  // 状态合并优先级：exact binding → 未绑定 AI 候选 → 持久化失败状态 → pending
+  // 状态合并优先级：exact binding → 未绑定 AI 候选 → running asset_generation_job →
+  // 持久化失败状态 → pending
   const boundStatus = statusForAsset(boundAsset);
   const status: ResolutionStatus = boundStatus
     ?? (generatedCandidates.length > 0 ? 'candidate_waiting' : null)
+    ?? (assetGenJob && (assetGenJob.status === 'queued' || assetGenJob.status === 'running') ? 'generating' : null)
     ?? persisted?.status
     ?? 'pending';
   const authenticity = authenticityOf(category, req);
@@ -339,6 +344,8 @@ export interface ResolveSceneOptions {
   generateProviderAvailable?: boolean;
   /** M6.3.13：该 scene 生效中的「改用 MG」override（UI 徽标/改回入口用）。 */
   mgOverride?: {template: string} | null;
+  /** M7.3A.2：该 scene 的 asset generation jobs（按 requirement 最新）。 */
+  assetGenerationJobs?: AssetGenerationJobRow[];
 }
 
 export function resolveSceneAssets(
@@ -359,6 +366,11 @@ export function resolveSceneAssets(
   const activelyBoundAssetIds = new Set(activeBindings.map((b) => b.asset_id));
   const stateByReq = new Map(
     (opts?.resolutionStates ?? []).filter((s) => s.scene_id === scene.id).map((s) => [s.requirement_id, s]),
+  );
+  const jobByReq = new Map(
+    (opts?.assetGenerationJobs ?? [])
+      .filter((j) => j.scene_id === scene.id)
+      .map((j) => [j.requirement_id, j]),
   );
   const generateProviderAvailable = opts?.generateProviderAvailable ?? true;
 
@@ -393,6 +405,7 @@ export function resolveSceneAssets(
       stateByReq.get(req.requirementId) ?? null,
       generateProviderAvailable,
       mgSwitch,
+      jobByReq.get(req.requirementId) ?? null,
     );
   });
 
@@ -425,6 +438,7 @@ export function buildProjectResolution(
   const all = listAssetsForProject(projectId);
   const bindings = listActiveBindingsForProject(projectId);
   const states = listResolutionStatesForProject(projectId);
+  const assetGenJobs = listAssetGenerationJobs(projectId);
   // M6.3.13：scene 级「改用 MG」override 在 scene 输入处生效；
   // version 漂移（重新生成/锁定新 scenes 版本）→ override 失效跳过
   const overrides = listVisualOverrides(projectId);
@@ -440,6 +454,7 @@ export function buildProjectResolution(
       resolutionStates: states,
       generateProviderAvailable: opts?.generateProviderAvailable,
       mgOverride: mgOverrideByScene.get(s.id) ?? null,
+      assetGenerationJobs: assetGenJobs,
     }),
   );
 }
