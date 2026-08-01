@@ -8,9 +8,9 @@
 | 项 | 值 |
 |---|---|
 | 文档更新时间 | 2026-08-01T02:40Z（M7.3A.3 部署 + smoke 完成） |
-| 当前 SHA | `07b39dcf38ef86c802bcd5d99f49770e0a376d90` |
+| 当前 SHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59` |
 | 当前分支 | `m7` |
-| origin/m7 SHA | `07b39dcf38ef86c802bcd5d99f49770e0a376d90` |
+| origin/m7 SHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59` |
 | 当前 production SHA | `07b39dc2c3c7ebd10635a4d91d80a800495318f4` |
 | 上一轮确认 production SHA | `07b39dc2c3c7ebd10635a4d91d80a800495318f4` |
 
