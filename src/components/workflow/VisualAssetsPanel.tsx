@@ -51,6 +51,14 @@ interface RequirementData {
   // M6.3.13：「改用 MG」语义闸门（authentic_required → 不渲染该动作）
   switchToMgEligible?: boolean;
   switchToMgDisabledReason?: string | null;
+  // M7.3A.3：来源已漂移/lease lost 的历史候选与最新 attempt 审计
+  staleGeneratedCandidates?: GeneratedCandidateData[];
+  latestGenerationAttempt?: {
+    status: string;
+    resultRelevance: string | null;
+    requestId: string;
+    failurePhase: string | null;
+  } | null;
 }
 
 interface ResolutionData {
@@ -627,6 +635,15 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
                             </div>
                           ) : null}
 
+                          {/* M7.3A.3：来源已漂移的历史候选（保留审计，不作为 current） */}
+                          {req.staleGeneratedCandidates && req.staleGeneratedCandidates.length > 0 ? (
+                            <div style={{fontSize: 11, color: 'var(--muted)', marginBottom: 6, lineHeight: 1.5}}>
+                              <strong style={{color: 'var(--muted)'}}>历史候选：</strong>
+                              图片已生成，但来源场景已更新（或 GPU 租约丢失）；保留为历史候选，不能用于当前版本。
+                              {req.staleGeneratedCandidates.length > 0 ? `（${req.staleGeneratedCandidates.length} 张）` : ''}
+                            </div>
+                          ) : null}
+
                           {/* 未绑定 AI 生成候选（candidate-first：显式「使用这张」才绑定） */}
                           {req.generatedCandidates.length > 0 ? (
                             <div style={{marginTop: 8}}>
@@ -672,6 +689,14 @@ export function VisualAssetsPanel({projectId, scenesStageKey, onAssetsChanged}: 
                               status={req.status} recommended={req.recommendedAction ?? '—'}<br />
                               queriesTried=[{req.queriesTried.join(', ')}]
                               {req.generateDisabledReason ? <> generateDisabled=&quot;{req.generateDisabledReason}&quot;</> : null}
+                              {req.latestGenerationAttempt ? (
+                                <>
+                                  <br />latestAttempt status={req.latestGenerationAttempt.status}
+                                  {' '}relevance={req.latestGenerationAttempt.resultRelevance ?? '—'}
+                                  {' '}requestId={req.latestGenerationAttempt.requestId.slice(0, 8)}
+                                  {req.latestGenerationAttempt.failurePhase ? ` failurePhase=${req.latestGenerationAttempt.failurePhase}` : ''}
+                                </>
+                              ) : null}
                             </div>
                           </details>
                         </div>

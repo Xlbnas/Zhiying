@@ -25,7 +25,32 @@ export interface AssetRow {
   attribution: string | null;
   description: string | null;
   requirement_json: string | null;
+  provenance_json: string | null;
   created_at: string;
+}
+
+/**
+ * M7.3A.3：generated asset 的严格 provenance（独立于 requirement_json 本体，
+ * 兼容历史纯 requirement_json 资产）。
+ */
+export interface AssetProvenance {
+  sourceScenesVersionId: string | null;
+  sourceRequirementHash: string | null;
+  assetGenerationJobId: string | null;
+  requestId: string | null;
+  /** 'current' = 来源与当前 scenes 匹配；'stale' = 来源已漂移/lease lost，仅历史。 */
+  relevance: 'current' | 'stale';
+  staleReason?: string | null;
+}
+
+export function parseAssetProvenance(row: {provenance_json: string | null}): AssetProvenance | null {
+  if (!row.provenance_json) return null;
+  try {
+    const parsed = JSON.parse(row.provenance_json) as AssetProvenance;
+    return typeof parsed.relevance === 'string' ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface NewAsset {
@@ -45,6 +70,7 @@ export interface NewAsset {
   attribution?: string | null;
   description?: string | null;
   requirement?: AssetRequirement | null;
+  provenance?: AssetProvenance | null;
 }
 
 export function insertAsset(input: NewAsset): AssetRow {
@@ -54,8 +80,8 @@ export function insertAsset(input: NewAsset): AssetRow {
       id, project_id, scene_id, media_type, source_type, source_provider,
       source_url, local_path, mime_type, width, height, duration_ms,
       license_status, license_note, attribution, description,
-      requirement_json, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      requirement_json, provenance_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     input.projectId,
@@ -74,6 +100,7 @@ export function insertAsset(input: NewAsset): AssetRow {
     input.attribution ?? null,
     input.description ?? null,
     input.requirement ? JSON.stringify(input.requirement) : null,
+    input.provenance ? JSON.stringify(input.provenance) : null,
     new Date().toISOString(),
   );
   return getAssetById(id)!;

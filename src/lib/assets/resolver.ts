@@ -21,9 +21,16 @@ import {
   type AssetResolutionStateRow,
   type AssetRow,
 } from './model';
+import {getDb} from '../db';
 import {getLatestImageUsageForRequirement} from '@/lib/usage-events';
-import {listAssetGenerationJobs} from './generation-jobs';
-import {authenticityOf, buildSceneAssetPlan} from './requirements';
+import {listLatestAssetGenerationJobsByRequirement} from './generation-jobs';
+import {parseAssetProvenance} from './model';
+import {
+  authenticityOf,
+  buildRequirementSnapshot,
+  buildSceneAssetPlan,
+  computeRequirementSnapshotHash,
+} from './requirements';
 import {
   applyVisualOverrides,
   canSwitchToMg,
@@ -252,6 +259,10 @@ function buildRequirementResolution(
   generateProviderAvailable: boolean,
   mgSwitch: MgSwitchEligibility,
   assetGenJob: AssetGenerationJobRow | null,
+  extras: {
+    staleGeneratedCandidates: GeneratedCandidateInfo[];
+    latestGenerationAttempt: RequirementResolution['latestGenerationAttempt'];
+  },
 ): RequirementResolution {
   // 状态合并优先级：exact binding → 未绑定 AI 候选 → running asset_generation_job →
   // 持久化失败状态 → pending
@@ -316,6 +327,8 @@ function buildRequirementResolution(
     queryUsed: boundAsset ? req.query : null,
     candidates: [],
     generatedCandidates,
+    staleGeneratedCandidates: extras.staleGeneratedCandidates,
+    latestGenerationAttempt: extras.latestGenerationAttempt,
     availableActions: decision.actions,
     friendlyStatus: friendlyStatus(status, req.policy),
     authenticity,
@@ -344,8 +357,46 @@ export interface ResolveSceneOptions {
   generateProviderAvailable?: boolean;
   /** M6.3.13：该 scene 生效中的「改用 MG」override（UI 徽标/改回入口用）。 */
   mgOverride?: {template: string} | null;
-  /** M7.3A.2：该 scene 的 asset generation jobs（按 requirement 最新）。 */
+  /** M7.3A.2：该 scene 的 asset generation jobs（必须已是 per-requirement latest）。 */
   assetGenerationJobs?: AssetGenerationJobRow[];
+  /**
+   * M7.3A.3：当前 active/selected scenes version（数字版本号，与 enqueue 冻结的
+   * source_scenes_version_id 同口径——Fence A 用 active_version，此处一致）。
+   * generated candidate 的 source 匹配条件之一（缺失时跳过 version 过滤）。
+   */
+  scenesVersionNumber?: string | null;
+}
+
+/**
+ * M7.3A.3：generated candidate 的 source 匹配判定。
+ * - 无 provenance_json（历史资产）→ legacy：按既有兼容规则展示；
+ * - relevance=stale（Fence B / lease lost 时写入）→ stale：不作为 current；
+ * - scenes version / requirement hash 与当前不一致 → stale；
+ * - 其余 → current。
+ */
+function candidateSourceMatch(
+  asset: AssetRow,
+  versionNumber: string | null,
+  requirementSnapshotHash: string | null,
+): 'current' | 'stale' | 'legacy' {
+  const prov = parseAssetProvenance(asset);
+  if (!prov) return 'legacy';
+  if (prov.relevance === 'stale') return 'stale';
+  if (
+    versionNumber !== null &&
+    prov.sourceScenesVersionId !== null &&
+    prov.sourceScenesVersionId !== versionNumber
+  ) {
+    return 'stale';
+  }
+  if (
+    requirementSnapshotHash !== null &&
+    prov.sourceRequirementHash !== null &&
+    prov.sourceRequirementHash !== requirementSnapshotHash
+  ) {
+    return 'stale';
+  }
+  return 'current';
 }
 
 export function resolveSceneAssets(
@@ -370,30 +421,47 @@ export function resolveSceneAssets(
   const jobByReq = new Map(
     (opts?.assetGenerationJobs ?? [])
       .filter((j) => j.scene_id === scene.id)
-      .map((j) => [j.requirement_id, j]),
+      .map((j) => [`${j.scene_id}:${j.requirement_id}`, j]),
   );
   const generateProviderAvailable = opts?.generateProviderAvailable ?? true;
+  const versionNumber = opts?.scenesVersionNumber ?? null;
 
   const requirements = plan.requirements.map((req, i) => {
     // exact binding：唯一 READY 依据
     const binding = bindingByReq.get(req.requirementId);
     const boundAsset = binding ? (assetById.get(binding.asset_id) ?? null) : null;
-    // 未绑定 generated 候选：目标为本 requirement 且当前无 active binding
-    const generatedCandidates: GeneratedCandidateInfo[] = assetRows
-      .filter(
-        (a) =>
-          a.source_type === 'generated' &&
-          !activelyBoundAssetIds.has(a.id) &&
-          a.scene_id === scene.id &&
-          intendedRequirementId(a) === req.requirementId,
-      )
-      .map((a) => ({
+    // M7.3A.3：requirement snapshot hash（candidate source 匹配用）
+    const reqSnapshotHash = computeRequirementSnapshotHash(
+      JSON.stringify(buildRequirementSnapshot(req)),
+    );
+    // 未绑定 generated 候选：目标为本 requirement 且当前无 active binding；
+    // current（含历史 legacy）候选供「使用这张」，stale 候选仅保留审计展示
+    const generatedCandidates: GeneratedCandidateInfo[] = [];
+    const staleGeneratedCandidates: GeneratedCandidateInfo[] = [];
+    for (const a of assetRows) {
+      if (
+        a.source_type !== 'generated' ||
+        activelyBoundAssetIds.has(a.id) ||
+        a.scene_id !== scene.id ||
+        intendedRequirementId(a) !== req.requirementId
+      ) {
+        continue;
+      }
+      const info: GeneratedCandidateInfo = {
         assetId: a.id,
         publicPath: a.local_path,
         provider: a.source_provider,
         prompt: a.description ?? '',
         createdAt: a.created_at,
-      }));
+      };
+      const match = candidateSourceMatch(a, versionNumber, reqSnapshotHash);
+      if (match === 'current' || match === 'legacy') {
+        generatedCandidates.push(info);
+      } else {
+        staleGeneratedCandidates.push(info);
+      }
+    }
+    const latestJob = jobByReq.get(`${scene.id}:${req.requirementId}`) ?? null;
     return buildRequirementResolution(
       projectId,
       scene.id,
@@ -405,7 +473,18 @@ export function resolveSceneAssets(
       stateByReq.get(req.requirementId) ?? null,
       generateProviderAvailable,
       mgSwitch,
-      jobByReq.get(req.requirementId) ?? null,
+      latestJob,
+      {
+        staleGeneratedCandidates,
+        latestGenerationAttempt: latestJob
+          ? {
+              status: latestJob.status,
+              resultRelevance: latestJob.result_relevance,
+              requestId: latestJob.request_id,
+              failurePhase: latestJob.failure_phase,
+            }
+          : null,
+      },
     );
   });
 
@@ -438,11 +517,14 @@ export function buildProjectResolution(
   const all = listAssetsForProject(projectId);
   const bindings = listActiveBindingsForProject(projectId);
   const states = listResolutionStatesForProject(projectId);
-  const assetGenJobs = listAssetGenerationJobs(projectId);
+  // M7.3A.3：使用 latest helper（复合 key scene_id:requirement_id），
+  // 禁止全量历史 jobs + Map 重建（DESC 顺序下旧 job 会覆盖新 job）。
+  const assetGenJobs = [...listLatestAssetGenerationJobsByRequirement(projectId).values()];
   // M6.3.13：scene 级「改用 MG」override 在 scene 输入处生效；
   // version 漂移（重新生成/锁定新 scenes 版本）→ override 失效跳过
   const overrides = listVisualOverrides(projectId);
   const versionId = opts?.scenesVersionId ?? currentScenesVersionId(projectId);
+  const versionNumber = currentScenesVersionNumber(projectId);
   const effectiveScenes = applyVisualOverrides(scenes, overrides, versionId);
   const mgOverrideByScene = new Map(
     overrides
@@ -455,6 +537,24 @@ export function buildProjectResolution(
       generateProviderAvailable: opts?.generateProviderAvailable,
       mgOverride: mgOverrideByScene.get(s.id) ?? null,
       assetGenerationJobs: assetGenJobs,
+      scenesVersionNumber: versionNumber,
     }),
   );
+}
+
+/**
+ * M7.3A.3：当前 scenes 数字版本号（active_version 优先，其次 locked_version，
+ * 最后最新 version 行；无则 null）。与 enqueue 冻结的 source_scenes_version_id
+ * 同口径（Fence A 以 active_version 为准）。
+ */
+function currentScenesVersionNumber(projectId: string): string | null {
+  const stage = getDb()
+    .prepare("SELECT active_version, locked_version FROM project_stages WHERE project_id = ? AND stage = 'scenes'")
+    .get(projectId) as {active_version: number | null; locked_version: number | null} | undefined;
+  if (stage?.active_version != null) return String(stage.active_version);
+  if (stage?.locked_version != null) return String(stage.locked_version);
+  const latest = getDb()
+    .prepare("SELECT version FROM project_versions WHERE project_id = ? AND stage = 'scenes' ORDER BY version DESC LIMIT 1")
+    .get(projectId) as {version: number} | undefined;
+  return latest ? String(latest.version) : null;
 }

@@ -50,8 +50,17 @@ export interface RequirementResolution {
   queryUsed: string | null;
   /** 搜索候选（搜索成功但未绑定的候选项） */
   candidates: AssetSearchCandidate[];
-  /** 未绑定的 AI 生成候选（candidate-first：需用户显式"使用这张"才绑定） */
+  /** 未绑定的 AI 生成候选（candidate-first：需用户显式"使用这张"才绑定；仅来源仍匹配当前的） */
   generatedCandidates: GeneratedCandidateInfo[];
+  /** M7.3A.3：来源已漂移/lease lost 的历史生成候选（保留 append-only，不作为 current） */
+  staleGeneratedCandidates: GeneratedCandidateInfo[];
+  /** M7.3A.3：该 requirement 最新一次 generation attempt 的技术详情（展示层审计） */
+  latestGenerationAttempt: {
+    status: string;
+    resultRelevance: string | null;
+    requestId: string;
+    failurePhase: string | null;
+  } | null;
   /** 该 requirement 支持的操作（recommendedAction 排在首位） */
   availableActions: ResolverAction[];
   /** 用户可见的状态描述（中文） */

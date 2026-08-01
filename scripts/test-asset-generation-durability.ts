@@ -29,6 +29,8 @@ process.env.APIYI_IMAGE_SIZE = '1K';
 process.env.APIYI_IMAGE_ASPECT_RATIO = '16:9';
 process.env.LLM_PROVIDER = 'mock';
 process.env.TTS_PROVIDER = 'mock';
+// M7.3A.3：短心跳间隔（lease-lost 快速检测）
+process.env.ZHIYING_ASSET_HEARTBEAT_MS = '100';
 
 import {closeDb, getDb} from '../src/lib/db';
 import {createProjectWithWorkflow} from '../src/lib/projects';
@@ -38,6 +40,10 @@ import {ImageGenerationError} from '../src/lib/assets/providers/generated';
 
 let pass = 0;
 let fail = 0;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function ok(cond: boolean, label: string, detail?: unknown): void {
   if (cond) {
@@ -103,7 +109,7 @@ async function main(): Promise<void> {
   fs.rmSync(path.resolve(process.cwd(), 'data', 'test-asset-generation-durability'), {recursive: true, force: true});
 
   // 动态导入 provider / route / worker，使上面的 env 在模块初始化时生效
-  const [{GET, POST}, {getGeneratedImageProvider, ImageGenerationError: ProvErr}, {ApiYiImageProvider}, {claimNextAnyJob}, {runAssetGenerationJob}, {getActiveLease}] = await Promise.all([
+  const [{GET, POST}, {getGeneratedImageProvider, ImageGenerationError: ProvErr}, {ApiYiImageProvider}, {claimNextAnyJob}, {runAssetGenerationJob}, {getActiveLease, releaseResourceLeaseForJob}] = await Promise.all([
     import('../src/app/api/projects/[id]/assets/generate/route'),
     import('../src/lib/assets/providers/generated'),
     import('../src/lib/assets/providers/generated/apiyi'),
@@ -158,11 +164,20 @@ async function main(): Promise<void> {
     if (!claimed || claimed.type !== 'asset_generation') {
       throw new Error(`expected asset_generation job, got ${claimed?.type ?? 'null'}`);
     }
-    await runAssetGenerationJob(claimed.job, {
-      isShuttingDown: () => false,
-      log: () => {},
-      shutdownSignal: new AbortController().signal,
-    });
+    // M7.3A.3：模拟 job-runner 生命周期（executor 不再执行 normal lease release）
+    try {
+      await runAssetGenerationJob(claimed.job, {
+        isShuttingDown: () => false,
+        log: () => {},
+        shutdownSignal: new AbortController().signal,
+      }, claimed.resourceLease
+        ? {group: claimed.resourceLease.group, ownerToken: claimed.resourceLease.ownerToken}
+        : undefined);
+    } finally {
+      if (claimed.resourceLease) {
+        releaseResourceLeaseForJob('production_gpu', 'asset_generation', claimed.job.id);
+      }
+    }
   }
 
   function jobRow(projectId: string, requestId: string) {
@@ -179,6 +194,7 @@ async function main(): Promise<void> {
           requirement_json: string | null;
           source_requirement_hash: string | null;
           source_scenes_version_id: string | null;
+          result_relevance: string | null;
         }
       | undefined;
   }
@@ -385,6 +401,178 @@ async function main(): Promise<void> {
     releaseRequestId(map, 'S001:S001-R01');
     releaseRequestId(map, 'S002:S001-R01');
     ok(map.size === 0, '[T8e] 全部 release 后 map 清空');
+  }
+
+  // ============ T9：mid-flight source drift —— Fence B 提交为 stale historical ============
+  {
+    resetProvider();
+    // 先制造一个旧 failure state（Fence B stale 时不得清除）
+    const projectId = createProjectWithWorkflow({topic: 'asset-durability-9', coreQuestion: 'q'}).project.id;
+    seedProject(projectId);
+    getDb().prepare(
+      `INSERT INTO asset_resolution_state (project_id, scene_id, requirement_id, status, reason, queries_tried, provider, metadata, updated_at)
+       VALUES (?, 'S001', 'S001-R01', 'generation_failed', '旧失败', '[]', 'apiyi', '{}', ?)`,
+    ).run(projectId, new Date().toISOString());
+
+    // enqueue（v1）→ provider 阻塞 → scenes 切 v2 → provider 返回
+    const requestId = 'req-t9-001';
+    await postGenerate(projectId, requestId);
+    const jobBefore = jobRow(projectId, requestId)!;
+    ok(jobBefore.source_scenes_version_id === '1', '[T9a] job 冻结 v1 source version');
+
+    let releaseProvider!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseProvider = resolve; });
+    provider.generate = async () => {
+      providerCalls++;
+      await gate;
+      return [{
+        candidateId: 'mock-t9',
+        mimeType: 'image/png',
+        data: Buffer.from('fake-png-data', 'utf8'),
+        width: 1920,
+        height: 1080,
+        provider: provider.name,
+        model: 'mock',
+        prompt: 't9',
+        metadata: {providerRequestId: 'req-t9-provider'},
+      }];
+    };
+
+    const running = (async () => {
+      const claimed = claimNextAnyJob('worker-t9');
+      if (!claimed || claimed.type !== 'asset_generation') throw new Error('T9: claim 失败');
+      try {
+        await runAssetGenerationJob(claimed.job, {
+          isShuttingDown: () => false,
+          log: () => {},
+          shutdownSignal: new AbortController().signal,
+        }, claimed.resourceLease
+          ? {group: claimed.resourceLease.group, ownerToken: claimed.resourceLease.ownerToken}
+          : undefined);
+      } finally {
+        if (claimed.resourceLease) {
+          releaseResourceLeaseForJob('production_gpu', 'asset_generation', claimed.job.id);
+        }
+      }
+    })();
+
+    await sleep(150); // provider 已阻塞（gate 未放行）
+    seedProject(projectId); // 切 scenes version 2
+    const v2 = (getDb().prepare(
+      `SELECT version FROM project_versions WHERE project_id = ? AND stage = 'scenes' ORDER BY version DESC LIMIT 1`,
+    ).get(projectId) as {version: number}).version;
+    ok(v2 === 2, '[T9b] scenes 已切到 v2');
+
+    releaseProvider();
+    await running;
+
+    const job = jobRow(projectId, requestId)!;
+    ok(providerCalls === 1, '[T9c] provider calls=1（Fence B 不重试不重调）');
+    ok(job.status === 'succeeded' && job.result_relevance === 'stale', '[T9d] job succeeded + result_relevance=stale（不自动重试）', {
+      status: job.status,
+      relevance: job.result_relevance,
+    });
+    const usage = getDb().prepare(
+      `SELECT metadata FROM project_usage_events WHERE id = ?`,
+    ).get(requestId) as {metadata: string} | undefined;
+    const usageStatus = usage ? (JSON.parse(usage.metadata) as {status?: string}).status : undefined;
+    ok(usageStatus === 'confirmed_charged', '[T9e] usage confirmed_charged（费用已发生）', usageStatus);
+
+    const assetRow = getDb()
+      .prepare(`SELECT provenance_json, requirement_json FROM assets WHERE id = ?`)
+      .get(job.result_asset_id!) as {provenance_json: string; requirement_json: string} | undefined;
+    ok(assetRow !== undefined, '[T9f] historical asset 已保存（append-only）');
+    const prov = JSON.parse(assetRow!.provenance_json);
+    ok(
+      prov.relevance === 'stale' && prov.staleReason === 'source_drift' &&
+        prov.sourceScenesVersionId === '1' && prov.assetGenerationJobId === job.id && prov.requestId === requestId,
+      '[T9g] provenance 携带 source version/hash/jobId/requestId + stale',
+      prov,
+    );
+
+    // resolver 视角：stale 不作为 current candidate；旧 failure state 保留
+    const {buildProjectResolution} = await import('../src/lib/assets/resolver');
+    const scenesJson = (getDb().prepare(
+      `SELECT content FROM project_versions WHERE project_id = ? AND stage = 'scenes' ORDER BY version DESC LIMIT 1`,
+    ).get(projectId) as {content: string}).content;
+    const parsed = JSON.parse(scenesJson) as {scenes: Array<Record<string, unknown>>};
+    const res = buildProjectResolution(projectId, parsed.scenes as never);
+    const req = res.find((s) => s.sceneId === 'S001')?.requirements.find((r) => r.requirementId === 'S001-R01')!;
+    ok(req.generatedCandidates.length === 0, '[T9h] current generatedCandidates=0', req.generatedCandidates);
+    ok(req.staleGeneratedCandidates.length === 1, '[T9i] staleGeneratedCandidates=1（UI 审计标记）', req.staleGeneratedCandidates);
+    ok(req.latestGenerationAttempt?.resultRelevance === 'stale', '[T9j] latest attempt 标记 stale');
+    ok(req.status === 'generation_failed', '[T9k] 旧 failure/readiness 状态未被错误清除', req.status);
+  }
+
+  // ============ T10：lease lost —— 结果保留为 stale historical，不冒充 current ============
+  {
+    resetProvider();
+    const projectId = createProjectWithWorkflow({topic: 'asset-durability-10', coreQuestion: 'q'}).project.id;
+    seedProject(projectId);
+    const requestId = 'req-t10-001';
+    await postGenerate(projectId, requestId);
+    // 手动改为 local_image_gpu（走 production_gpu lease 的执行路径）
+    getDb().prepare(
+      `UPDATE asset_generation_jobs SET resource_class='local_image_gpu', resource_group='production_gpu' WHERE request_id=?`,
+    ).run(requestId);
+
+    let releaseProvider!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseProvider = resolve; });
+    provider.generate = async () => {
+      providerCalls++;
+      await gate;
+      return [{
+        candidateId: 'mock-t10',
+        mimeType: 'image/png',
+        data: Buffer.from('fake-png-data', 'utf8'),
+        width: 1920,
+        height: 1080,
+        provider: provider.name,
+        model: 'mock',
+        prompt: 't10',
+        metadata: {providerRequestId: 'req-t10-provider'},
+      }];
+    };
+
+    const running = (async () => {
+      const claimed = claimNextAnyJob('worker-t10');
+      if (!claimed || claimed.type !== 'asset_generation') throw new Error('T10: claim 失败');
+      if (!claimed.resourceLease) throw new Error('T10: local_image_gpu 应持有 production_gpu lease');
+      try {
+        await runAssetGenerationJob(claimed.job, {
+          isShuttingDown: () => false,
+          log: () => {},
+          shutdownSignal: new AbortController().signal,
+        }, {group: claimed.resourceLease.group, ownerToken: claimed.resourceLease.ownerToken});
+      } finally {
+        releaseResourceLeaseForJob('production_gpu', 'asset_generation', claimed.job.id);
+      }
+    })();
+
+    await sleep(150); // provider 阻塞中，lease 已 claim
+    ok(getActiveLease('production_gpu') !== null, '[T10a] 执行中持有 lease');
+    // 测试线程删除 lease row（模拟另一 worker 回收/抢占）
+    getDb().prepare(`DELETE FROM resource_group_leases WHERE resource_group='production_gpu'`).run();
+    // 等下一次 heartbeat（100ms）检测到 lost → onLost 触发
+    await sleep(200);
+    releaseProvider();
+    await running;
+
+    const job = jobRow(projectId, requestId)!;
+    ok(job.status === 'succeeded' && job.result_relevance === 'stale', '[T10b] lease lost → job succeeded + relevance=stale', {
+      status: job.status,
+      relevance: job.result_relevance,
+    });
+    const assetRow = getDb()
+      .prepare(`SELECT provenance_json FROM assets WHERE id = ?`)
+      .get(job.result_asset_id!) as {provenance_json: string} | undefined;
+    const prov = JSON.parse(assetRow!.provenance_json);
+    ok(prov.relevance === 'stale' && prov.staleReason === 'lease_lost', '[T10c] asset provenance 标记 lease_lost stale', prov);
+    const usage = getDb().prepare(
+      `SELECT metadata FROM project_usage_events WHERE id = ?`,
+    ).get(requestId) as {metadata: string} | undefined;
+    const usageStatus = usage ? (JSON.parse(usage.metadata) as {status?: string}).status : undefined;
+    ok(usageStatus === 'confirmed_charged', '[T10d] usage confirmed_charged（结果已收费 → 保留为历史）', usageStatus);
   }
 
   // 清理
