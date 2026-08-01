@@ -102,6 +102,11 @@ function seedProject(projectId: string): void {
     `INSERT INTO project_versions (id, project_id, stage, version, content, content_type, source, created_at)
      VALUES (?, ?, 'scenes', 1, ?, 'json', 'repair', ?)`,
   ).run(`${projectId}-scenes-v1`, projectId, artifact, now);
+  // M7.3A.3.1：loadActiveScenesSource 需要 project_stages.active_version（fail-closed）
+  getDb().prepare(
+    `INSERT INTO project_stages (project_id, stage, status, active_version, locked_version, updated_at)
+     VALUES (?, 'scenes', 'generated', 1, NULL, ?)`,
+  ).run(projectId, now);
 }
 
 function imageEventCount(projectId: string): number {

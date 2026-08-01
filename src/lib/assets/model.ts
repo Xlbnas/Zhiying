@@ -54,6 +54,8 @@ export function parseAssetProvenance(row: {provenance_json: string | null}): Ass
 }
 
 export interface NewAsset {
+  /** M7.3A.3.1：可选显式 id（原子 commit 需要 job.result_asset_id 与 asset 行精确一致）。 */
+  id?: string;
   projectId: string;
   sceneId: string | null;
   mediaType: 'image' | 'video';
@@ -74,7 +76,7 @@ export interface NewAsset {
 }
 
 export function insertAsset(input: NewAsset): AssetRow {
-  const id = crypto.randomUUID();
+  const id = input.id ?? crypto.randomUUID();
   getDb().prepare(
     `INSERT INTO assets (
       id, project_id, scene_id, media_type, source_type, source_provider,

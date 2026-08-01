@@ -25,7 +25,7 @@ export async function POST(
   }
 
   try {
-    const {binding, asset} = bindGeneratedCandidate({
+    const {binding, asset, legacyProvenance} = bindGeneratedCandidate({
       projectId: id,
       candidateId,
       sceneId: body.sceneId,
@@ -38,6 +38,7 @@ export async function POST(
       requirementId: binding.requirement_id,
       bindingId: binding.id,
       licenseStatus: asset.license_status,
+      legacyProvenance,
     });
   } catch (err) {
     if (err instanceof BindError) {
