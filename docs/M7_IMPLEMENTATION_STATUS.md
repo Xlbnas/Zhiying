@@ -8,9 +8,9 @@
 | 项 | 值 |
 |---|---|
 | 文档更新时间 | 2026-07-31T19:00Z（M7.3A.3 收口完成，待部署） |
-| 当前 SHA | 待 commit/push 后回填 |
+| 当前 SHA | `07b39dcf38ef86c802bcd5d99f49770e0a376d90` |
 | 当前分支 | `m7` |
-| origin/m7 SHA | 待 push 后回填 |
+| origin/m7 SHA | `07b39dcf38ef86c802bcd5d99f49770e0a376d90` |
 | 当前 production SHA | `e62f5c2af9702538163d4f7583f456cd900ca550` |
 | 上一轮确认 production SHA | `e62f5c2af9702538163d4f7583f456cd900ca550` |
 
