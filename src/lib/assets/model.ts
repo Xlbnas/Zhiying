@@ -32,17 +32,88 @@ export interface AssetRow {
 /**
  * M7.3A.3：generated asset 的严格 provenance（独立于 requirement_json 本体，
  * 兼容历史纯 requirement_json 资产）。
+ * M7.3A.3.2：新 generated asset 的严格 provenance 全部字段必填
+ * （assetGenerationJobId / requestId 不得为 null）。
  */
+export interface StrictAssetProvenance {
+  sourceScenesVersionId: string;
+  sourceRequirementHash: string;
+  assetGenerationJobId: string;
+  requestId: string;
+  /** 'current' = 来源与当前 scenes 匹配；'stale' = 来源已漂移/lease lost，仅历史。 */
+  relevance: 'current' | 'stale';
+  staleReason: string | null;
+}
+
 export interface AssetProvenance {
   sourceScenesVersionId: string | null;
   sourceRequirementHash: string | null;
   assetGenerationJobId: string | null;
   requestId: string | null;
-  /** 'current' = 来源与当前 scenes 匹配；'stale' = 来源已漂移/lease lost，仅历史。 */
   relevance: 'current' | 'stale';
   staleReason?: string | null;
 }
 
+/**
+ * M7.3A.3.2：三态 provenance 解析。
+ * - provenance_json === NULL → legacy（历史兼容路径）；
+ * - provenance_json 非 NULL 且结构完整严格 → valid；
+ * - provenance_json 非 NULL 但 JSON 无法解析 / 必填字段缺失 / relevance 非法
+ *   → invalid（禁止绑定，绝不降级为 legacy）。
+ */
+export type ParsedAssetProvenance =
+  | {kind: 'legacy'}
+  | {kind: 'valid'; value: StrictAssetProvenance}
+  | {kind: 'invalid'; issues: string[]};
+
+const REQUIRED_STRICT_FIELDS: Array<[keyof StrictAssetProvenance, string]> = [
+  ['sourceScenesVersionId', 'sourceScenesVersionId'],
+  ['sourceRequirementHash', 'sourceRequirementHash'],
+  ['assetGenerationJobId', 'assetGenerationJobId'],
+  ['requestId', 'requestId'],
+];
+
+export function parseAssetProvenanceStrict(row: {provenance_json: string | null}): ParsedAssetProvenance {
+  if (row.provenance_json === null || row.provenance_json === undefined) {
+    return {kind: 'legacy'};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.provenance_json);
+  } catch {
+    return {kind: 'invalid', issues: ['provenance_json 不是合法 JSON']};
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return {kind: 'invalid', issues: ['provenance_json 不是对象']};
+  }
+  const issues: string[] = [];
+  const p = parsed as Record<string, unknown>;
+  if (p.relevance !== 'current' && p.relevance !== 'stale') {
+    issues.push(`relevance 非法（${String(p.relevance)}）`);
+  }
+  for (const [key, label] of REQUIRED_STRICT_FIELDS) {
+    const v = p[key];
+    if (typeof v !== 'string' || v.length === 0) {
+      issues.push(`${label} 缺失`);
+    }
+  }
+  if (issues.length > 0) {
+    return {kind: 'invalid', issues};
+  }
+  return {
+    kind: 'valid',
+    value: {
+      sourceScenesVersionId: p.sourceScenesVersionId as string,
+      sourceRequirementHash: p.sourceRequirementHash as string,
+      assetGenerationJobId: p.assetGenerationJobId as string,
+      requestId: p.requestId as string,
+      relevance: p.relevance as 'current' | 'stale',
+      staleReason: typeof p.staleReason === 'string' ? p.staleReason : null,
+    },
+  };
+}
+
+/** 兼容旧调用方：宽松解析（仅 relevance 校验）；M7.3A.3.2 起新代码应使用三态版本。 */
 export function parseAssetProvenance(row: {provenance_json: string | null}): AssetProvenance | null {
   if (!row.provenance_json) return null;
   try {

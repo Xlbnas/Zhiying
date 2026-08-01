@@ -1,31 +1,25 @@
 /**
- * M6.3.8：generated candidate → exact requirement 的显式绑定。
+ * M6.3.8 / M7.3A.3.x：generated candidate → exact requirement 的显式绑定。
  *
  * 安全不变量：
- * - candidate 只能绑定到它生成时的 intended 目标（sceneId + requirementId 完全一致）；
- *   candidate R01 → R02、candidate S012 → S013 一律拒绝。
- * - 目标 requirement 必须真实存在于 active scenes artifact（exact 查找，禁止 LIKE/猜测）。
+ * - candidate 只能绑定到它生成时的 intended 目标（sceneId + requirementId 完全一致）。
+ * - 目标 requirement 必须真实存在于 active scenes artifact（exact，禁止猜测）。
  * - 同一 requirement 重复绑定 = replace 语义（旧 binding 转历史，asset/文件/provenance 保留）。
  *
- * M7.3A.3.1：服务端权威 stale 门禁（不依赖 UI 是否展示）。
- * 带 provenance_json 的新 generated asset 必须同时满足：
- *   - provenance.relevance === 'current'；
- *   - provenance.sourceScenesVersionId === active scenes version；
- *   - provenance.sourceRequirementHash === 当前 requirement snapshot hash；
- *   - provenance.assetGenerationJobId 对应 job 存在；
- *   - job.result_asset_id === candidate id；
- *   - job.result_relevance === 'current'；
- *   - job.project/scene/requirement 与请求一致。
- * 任何缺失/不匹配 → 409（CANDIDATE_STALE / CANDIDATE_SOURCE_STALE）。
- * provenance_json IS NULL 的历史资产：保留兼容（legacyProvenance=true），
- * 按旧 sceneId+requirementId 规则允许绑定，不批量伪造历史 provenance。
+ * M7.3A.3.1：服务端权威 stale 门禁（带 provenance 的候选必须为 current）。
+ * M7.3A.3.2：整个 bind 在单个 BEGIN IMMEDIATE 事务内完成
+ * （bindGeneratedCandidateTx）：source 校验 → 三态 provenance 解析 → job 校验 →
+ * binding 写入 → license 更新 → resolution state 清除，中间不释放 SQLite 写锁；
+ * 从 source 校验开始到 binding 写入完成无 TOCTOU 窗口。
+ * provenance 三态：NULL → legacy（兼容，legacyProvenance=true）；严格完整 → valid；
+ * malformed（JSON/缺字段/relevance 非法）→ 409 CANDIDATE_PROVENANCE_INVALID，
+ * 绝不降级为 legacy。
  */
+
+import crypto from 'node:crypto';
 import {getDb} from '../db';
 import {
-  bindAssetToRequirement,
-  clearResolutionState,
-  getAssetById,
-  parseAssetProvenance,
+  parseAssetProvenanceStrict,
   type AssetBindingRow,
   type AssetRow,
 } from './model';
@@ -66,160 +60,160 @@ function intendedTargetOf(asset: AssetRow): {sceneId: string | null; requirement
 }
 
 /**
- * M7.3A.3.1：服务端 stale 门禁。带 provenance 的 candidate 必须与当前 active
- * scenes source 严格匹配，且其生成 job 必须确认为 current。
- * 返回 'current' | 'legacy'；不匹配抛 BindError(409)。
+ * M7.3A.3.2：原子绑定。单 BEGIN IMMEDIATE 事务：
+ * 读取 candidate → project/source_type → intended 目标 → provenance 三态 →
+ * active source（exact）+ current hash → strict 候选 job 全量校验 →
+ * MG override → 未绑他处 → deactivate 旧 binding → insert 新 binding →
+ * license 更新 → clear resolution state → commit。
  */
-function assertCandidateCurrent(input: {
+export function bindGeneratedCandidateTx(input: {
   projectId: string;
+  candidateId: string;
   sceneId: string;
   requirementId: string;
-  asset: AssetRow;
-}): 'current' | 'legacy' {
-  const {asset} = input;
-  const prov = parseAssetProvenance(asset);
-  if (!prov) {
-    // 历史资产（无 provenance_json）：保留兼容路径
-    return 'legacy';
-  }
-  if (prov.relevance !== 'current') {
-    throw new BindError(
-      'CANDIDATE_STALE',
-      `该候选素材已被标记为历史（relevance=${prov.relevance}），来源已变化，不能绑定到当前版本`,
-      409,
-    );
-  }
-  const source = loadActiveScenesSource(input.projectId);
-  if (!source) {
-    throw new BindError(
-      'CANDIDATE_SOURCE_STALE',
-      '项目缺少 active scenes artifact，无法验证候选素材来源',
-      409,
-    );
-  }
-  const found = findRequirementInPlans(source.plans, input.sceneId, input.requirementId);
-  if (!found) {
-    throw new BindError(
-      'CANDIDATE_SOURCE_STALE',
-      `需求 ${input.requirementId} 不存在于当前 scenes 版本`,
-      409,
-    );
-  }
-  const curHash = computeRequirementSnapshotHash(
-    JSON.stringify(buildRequirementSnapshot(found.requirement)),
-  );
-  const activeVersion = String(source.activeVersion);
-  if (prov.sourceScenesVersionId !== activeVersion) {
-    throw new BindError(
-      'CANDIDATE_SOURCE_STALE',
-      `候选素材生成于 scenes v${prov.sourceScenesVersionId ?? '?'}，当前为 v${activeVersion}`,
-      409,
-    );
-  }
-  if (prov.sourceRequirementHash !== curHash) {
-    throw new BindError(
-      'CANDIDATE_SOURCE_STALE',
-      '候选素材的 requirement 快照与当前版本不一致',
-      409,
-    );
-  }
-  if (prov.assetGenerationJobId) {
-    const job = getAssetGenerationJobById(prov.assetGenerationJobId);
-    if (!job) {
-      throw new BindError('CANDIDATE_SOURCE_STALE', '候选素材的生成 job 不存在', 409);
+}): {binding: AssetBindingRow; asset: AssetRow; legacyProvenance: boolean} {
+  const db = getDb();
+  const tx = db.transaction((): {binding: AssetBindingRow; asset: AssetRow; legacyProvenance: boolean} => {
+    // 1：读取 candidate asset
+    const asset = db
+      .prepare('SELECT * FROM assets WHERE id = ?')
+      .get(input.candidateId) as AssetRow | undefined;
+    if (!asset || asset.project_id !== input.projectId) {
+      throw new BindError('candidate_not_found', '候选素材不存在', 404);
     }
-    if (
-      job.result_asset_id !== asset.id ||
-      job.result_relevance !== 'current' ||
-      job.project_id !== input.projectId ||
-      job.scene_id !== input.sceneId ||
-      job.requirement_id !== input.requirementId
-    ) {
-      throw new BindError('CANDIDATE_SOURCE_STALE', '候选素材的生成 job 与当前绑定请求不一致', 409);
+    // 2：source_type
+    if (asset.source_type !== 'generated') {
+      throw new BindError('not_generated_candidate', '只能绑定 AI 生成的候选素材');
     }
-  }
-  return 'current';
+
+    // 3：intended 目标（优先于 provenance 门禁，cross 绑定保持明确语义）
+    const intended = intendedTargetOf(asset);
+    if (intended.sceneId !== null && intended.sceneId !== input.sceneId) {
+      throw new BindError(
+        'scene_mismatch',
+        `该候选素材的目标场景是 ${intended.sceneId}，不能绑定到 ${input.sceneId}`,
+      );
+    }
+    if (intended.requirementId !== null && intended.requirementId !== input.requirementId) {
+      throw new BindError(
+        'requirement_mismatch',
+        `该候选素材的目标需求是 ${intended.requirementId}，不能绑定到 ${input.requirementId}`,
+      );
+    }
+
+    // 4：provenance 三态解析
+    const parsed = parseAssetProvenanceStrict(asset);
+    let legacyProvenance = false;
+    if (parsed.kind === 'invalid') {
+      throw new BindError(
+        'CANDIDATE_PROVENANCE_INVALID',
+        `候选素材 provenance 不完整：${parsed.issues.join('；')}`,
+        409,
+      );
+    }
+    if (parsed.kind === 'valid') {
+      // 5：active scenes source（exact，fail-closed）
+      const source = loadActiveScenesSource(input.projectId);
+      if (!source) {
+        throw new BindError('CANDIDATE_SOURCE_STALE', '项目缺少 active scenes artifact，无法验证候选素材来源', 409);
+      }
+      const found = findRequirementInPlans(source.plans, input.sceneId, input.requirementId);
+      if (!found) {
+        throw new BindError('CANDIDATE_SOURCE_STALE', `需求 ${input.requirementId} 不存在于当前 scenes 版本`, 409);
+      }
+      const curHash = computeRequirementSnapshotHash(
+        JSON.stringify(buildRequirementSnapshot(found.requirement)),
+      );
+      const activeVersion = String(source.activeVersion);
+      const prov = parsed.value;
+
+      // 6：strict 候选全量校验
+      if (prov.relevance !== 'current') {
+        throw new BindError(
+          'CANDIDATE_STALE',
+          `该候选素材已被标记为历史（relevance=${prov.relevance}），来源已变化，不能绑定到当前版本`,
+          409,
+        );
+      }
+      if (prov.sourceScenesVersionId !== activeVersion) {
+        throw new BindError(
+          'CANDIDATE_SOURCE_STALE',
+          `候选素材生成于 scenes v${prov.sourceScenesVersionId}，当前为 v${activeVersion}`,
+          409,
+        );
+      }
+      if (prov.sourceRequirementHash !== curHash) {
+        throw new BindError('CANDIDATE_SOURCE_STALE', '候选素材的 requirement 快照与当前版本不一致', 409);
+      }
+      const job = getAssetGenerationJobById(prov.assetGenerationJobId);
+      if (!job) {
+        throw new BindError('CANDIDATE_SOURCE_STALE', '候选素材的生成 job 不存在', 409);
+      }
+      if (
+        job.status !== 'succeeded' ||
+        job.result_asset_id !== input.candidateId ||
+        job.result_relevance !== 'current' ||
+        job.project_id !== input.projectId ||
+        job.scene_id !== input.sceneId ||
+        job.requirement_id !== input.requirementId ||
+        job.request_id !== prov.requestId
+      ) {
+        throw new BindError('CANDIDATE_SOURCE_STALE', '候选素材的生成 job 与绑定请求不一致', 409);
+      }
+    } else {
+      legacyProvenance = true; // 历史 NULL provenance：保留 sceneId+requirementId 兼容，不伪造
+    }
+
+    // 7：MG override
+    if (isSceneVisuallyOverridden(input.projectId, input.sceneId)) {
+      throw new BindError('scene_overridden', `场景 ${input.sceneId} 已改用 MG 模板，如需绑定素材请先「改回素材」`, 409);
+    }
+
+    // 8：asset 未被其他目标 active 绑定
+    const existing = db
+      .prepare('SELECT scene_id, requirement_id FROM asset_bindings WHERE asset_id = ? AND active = 1')
+      .get(input.candidateId) as {scene_id: string; requirement_id: string} | undefined;
+    if (existing && (existing.scene_id !== input.sceneId || existing.requirement_id !== input.requirementId)) {
+      throw new BindError('already_bound_elsewhere', `该候选素材已绑定到 ${existing.scene_id}/${existing.requirement_id}`, 409);
+    }
+
+    // 9：deactivate 当前 requirement 旧 binding（replace 语义，历史行保留）
+    db.prepare(
+      `UPDATE asset_bindings SET active = 0
+       WHERE project_id = ? AND scene_id = ? AND requirement_id = ? AND active = 1`,
+    ).run(input.projectId, input.sceneId, input.requirementId);
+
+    // 10：插入新 active binding
+    const bindingId = crypto.randomUUID();
+    const at = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO asset_bindings (id, project_id, scene_id, requirement_id, asset_id, active, created_at)
+       VALUES (?, ?, ?, ?, ?, 1, ?)`,
+    ).run(bindingId, input.projectId, input.sceneId, input.requirementId, input.candidateId, at);
+
+    // 11：license 更新（去除「待确认」）
+    db.prepare('UPDATE assets SET license_status = ?, license_note = ? WHERE id = ?')
+      .run('generated', asset.license_note?.replace('(待确认)', '').trim() || 'AI 生成', input.candidateId);
+
+    // 12：清除 exact resolution state
+    db.prepare(
+      'DELETE FROM asset_resolution_state WHERE project_id = ? AND scene_id = ? AND requirement_id = ?',
+    ).run(input.projectId, input.sceneId, input.requirementId);
+
+    const binding = db
+      .prepare('SELECT * FROM asset_bindings WHERE id = ?')
+      .get(bindingId) as AssetBindingRow;
+    return {binding, asset: db.prepare('SELECT * FROM assets WHERE id = ?').get(input.candidateId) as AssetRow, legacyProvenance};
+  });
+  return tx.immediate();
 }
 
+/** M7.3A.3.2：非事务包装（等价语义；路由与测试统一走原子版本）。 */
 export function bindGeneratedCandidate(input: {
   projectId: string;
   candidateId: string;
   sceneId: string;
   requirementId: string;
 }): {binding: AssetBindingRow; asset: AssetRow; legacyProvenance: boolean} {
-  const asset = getAssetById(input.candidateId);
-  if (!asset || asset.project_id !== input.projectId) {
-    throw new BindError('candidate_not_found', '候选素材不存在', 404);
-  }
-  if (asset.source_type !== 'generated') {
-    throw new BindError('not_generated_candidate', '只能绑定 AI 生成的候选素材');
-  }
-
-  // 跨目标绑定拒绝优先（candidate 记录的 intended 目标与请求不一致 → reject）
-  const intended = intendedTargetOf(asset);
-  if (intended.sceneId !== null && intended.sceneId !== input.sceneId) {
-    throw new BindError(
-      'scene_mismatch',
-      `该候选素材的目标场景是 ${intended.sceneId}，不能绑定到 ${input.sceneId}`,
-    );
-  }
-  if (intended.requirementId !== null && intended.requirementId !== input.requirementId) {
-    throw new BindError(
-      'requirement_mismatch',
-      `该候选素材的目标需求是 ${intended.requirementId}，不能绑定到 ${input.requirementId}`,
-    );
-  }
-
-  // M7.3A.3.1：服务端 stale 门禁（带 provenance 的候选必须为 current）
-  const provenanceKind = assertCandidateCurrent({
-    projectId: input.projectId,
-    sceneId: input.sceneId,
-    requirementId: input.requirementId,
-    asset,
-  });
-
-  // 目标 requirement 必须真实存在于 active scenes artifact
-  const source = loadActiveScenesSource(input.projectId);
-  if (!source) throw new BindError('scenes_not_found', '项目缺少 active scenes artifact', 404);
-  if (!findRequirementInPlans(source.plans, input.sceneId, input.requirementId)) {
-    throw new BindError(
-      'requirement_not_found',
-      `需求 ${input.requirementId} 不存在于场景 ${input.sceneId}`,
-    );
-  }
-  // M6.3.13：已「改用 MG」的 scene 拒绝绑定（防半截状态）
-  if (isSceneVisuallyOverridden(input.projectId, input.sceneId)) {
-    throw new BindError(
-      'scene_overridden',
-      `场景 ${input.sceneId} 已改用 MG 模板，如需绑定素材请先「改回素材」`,
-      409,
-    );
-  }
-
-  // candidate 已被其他目标 active 绑定 → 拒绝（先解除原绑定才能改绑）
-  const existing = getDb()
-    .prepare('SELECT scene_id, requirement_id FROM asset_bindings WHERE asset_id = ? AND active = 1')
-    .get(input.candidateId) as {scene_id: string; requirement_id: string} | undefined;
-  if (existing && (existing.scene_id !== input.sceneId || existing.requirement_id !== input.requirementId)) {
-    throw new BindError(
-      'already_bound_elsewhere',
-      `该候选素材已绑定到 ${existing.scene_id}/${existing.requirement_id}`,
-      409,
-    );
-  }
-
-  const binding = bindAssetToRequirement({
-    projectId: input.projectId,
-    sceneId: input.sceneId,
-    requirementId: input.requirementId,
-    assetId: input.candidateId,
-  });
-  // 确认使用：license 标记 generated，去除「待确认」
-  getDb()
-    .prepare('UPDATE assets SET license_status = ?, license_note = ? WHERE id = ?')
-    .run('generated', asset.license_note?.replace('(待确认)', '').trim() || 'AI 生成', input.candidateId);
-  // M6.3.9：绑定成功 → 清除该 requirement 的失败状态
-  clearResolutionState(input.projectId, input.sceneId, input.requirementId);
-
-  return {binding, asset: getAssetById(input.candidateId)!, legacyProvenance: provenanceKind === 'legacy'};
+  return bindGeneratedCandidateTx(input);
 }
