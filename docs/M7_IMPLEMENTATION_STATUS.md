@@ -53,6 +53,7 @@
 | **M7.3A.3 Asset Commit Fence + Strict Idempotency + Lease-loss Fail-closed** | **DONE** | `7a0aeb7`/`ba90d98`/`67c6dba`/`07b39dc`（runtime `07b39dc`，docs `09c5b64`/`4bf4be6`） | request fingerprint、Fence A/B、lease lost fail-closed、构建网络 runbook |
 | **M7.3A.3.1 Atomic Candidate Commit + Server-side Bind Gate** | **DONE** | `df99384`/`32bc8b3`/`2131c6a`/`d7bc9e1`/`9dc3c6a`（runtime `9dc3c6a`，docs `2cd2b92`/`e337b61`，ops `6709882`） | 原子 commit、服务端 stale 绑定门禁、精确 source loader、完整请求快照、render bundle lease |
 | **M7.3A.3.2 Atomic Candidate Binding + Monotonic Image Billing + Render Heartbeat Cleanup** | **DONE** | `528f5c9`/`a8056b4`/`b243233`/`6ddf720`/`8eb23d0`（runtime `8eb23d0`） | 原子绑定、三态 provenance、billing 单调、provider result 审计、heartbeat dispose、SHA 元数据模型 |
+| **M7.3A.3.3 Legacy Binding Safety + Charged Provider Result Audit + Render Bundle Exit Classification** | **DONE** | （本轮 commit，runtime 部署后回填） | legacy 目标可验证门禁、provider 返回即 charged、usage 证据只追加、bundle 退出分类、M7.3A frozen |
 
 ## 4. 当前已实现功能详情
 
@@ -239,9 +240,30 @@
   loopback、check 验证 listener+TLS(SNI)、代理 host 可配置。
 - **deployed**：是（8eb23d0）
 
+### 4.10 M7.3A.3.3 Final Safety Closure
+
+- **legacy 目标可验证门禁**（bind.ts）：active scenes source 读取前置（所有 candidate 含 legacy）；
+  legacy（provenance_json IS NULL）必须满足 scene_id 非空且匹配、requirement_json 合法且
+  requirementId 匹配、active scenes 中 exact requirement 存在，否则 409
+  LEGACY_CANDIDATE_TARGET_UNVERIFIABLE。strict 分支行为不变。bind 失败整体 rollback
+  （旧 active binding / license / resolution state 均不动）。
+- **provider 返回即 charged**：generate 返回非空 candidates 后立即锁定
+  providerOutcome=confirmed_charged + returnedImageCount/actualModel/actualProvider/
+  providerRequestId（函数级 hoist，catch 使用真实值，禁止重声明）；result validation
+  （candidate.provider 等）失败 → PROVIDER_INVALID_RESPONSE：job failed、billing 保持
+  charged、不保存 current asset、不自动重试。
+- **usage 证据只追加**（finalizeImageGenerationUsage）：incoming undefined/null 时保留
+  prior（providerRequestId/generationId/usageMetadata/actualModel/requestedModel/
+  providerConfigVersion/assetId/imageCount/failurePhase）；charged 后既有 cost 非 null
+  永远保留、cost null 保持 null（pricingUnavailable=true），不得被 imageCount=0 重算成 0。
+- **render bundle 退出分类**（`src/lib/render/bundle-classify.ts` classifyBundleExit）：
+  优先级 lease lost > shutdown(requeue) > cancel(cancelled) > bundle_error；所有路径
+  finally dispose heartbeat。
+- **deployed**：否（待本轮 deployment）
+
 ## 5. 当前正在进行的工作
 
-- M7.3A.3.2 完成并部署（production `8eb23d0`，备份 `m73a2-20260801T041025Z`），smoke 全项通过。
+- M7.3A.3.3 完成（部署后回填 runtime SHA），M7.3A 进入 frozen 状态。
 - 下一步：M7.3B（明确不在本次范围）。
 
 ## 6. 尚未完成 TODO
@@ -266,6 +288,12 @@
 - 图片生成：Web 只 enqueue（202），Worker claim + 执行；requestId 确保幂等。
 - 本地 timeout 后不自动重新计费调用；`billing_status` 区分 confirmed/unknown。
 - 不切换任何项目到 m7；`projects` 仍为 m6；snapshot pointer 仍为 NULL；无 M7 pipeline snapshot。
+- **M7.3A.3.3 冻结决策**：
+  - legacy generated candidate 仅在 intended target 可验证（scene_id 非空且匹配、requirement_json 合法且 requirementId 匹配、active scenes 中 exact requirement 存在）时允许新绑定；否则 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE（fail-closed）。
+  - provider 返回非空图片结果即视为 confirmed_charged（无论后续 result validation / 本地持久化是否失败）；PROVIDER_INVALID_RESPONSE 时 job failed 但 billing 保持 charged，不保存 current asset，不自动重试。
+  - billing evidence 单调，只能升级不能降级；usage metadata 只追加不丢失已知证据（providerRequestId/generationId/actualModel/requestedModel/imageCount 等）；charged 且 cost 未知保持 null（pricingUnavailable=true），不得伪造成 0。
+  - render bundle 退出按优先级分类：lease lost > shutdown(requeue) > cancel(cancelled) > bundle_error。
+  - **M7.3A 完成后 frozen**：后续里程碑不得顺带重构 M7.3A 已冻结语义；改动需显式评审。
 
 ## 8. 已知事故和修复
 
