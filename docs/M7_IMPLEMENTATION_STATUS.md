@@ -111,7 +111,7 @@
   - `handleLocked`：不再调用 `nextStageAfter`；改为通过 `computeNewlyReadyAfterLock` 确定新 ready 节点，多个 ready 时并列显示，不自动只跳到数组中的视觉下一项。
   - `WORKFLOW_STAGES` 保留仅用于 DB enum、显示顺序、旧项目兼容。
 - **GPU 互斥组**：`tts_gpu` / `render_gpu` / `local_image_gpu` 共享 production_gpu，并发上限 1。
-- **deployed**：否（待本次 deployment）
+- **deployed**：是（e62f5c2）
 
 ### 4.5 Durable Image Generation Job（M7.3A.2）
 
@@ -133,7 +133,7 @@
 - **错误码**：`PROVIDER_CONNECT_TIMEOUT` / `PROVIDER_RESPONSE_TIMEOUT` / `IMAGE_DECODE_FAILED` / `PROVIDER_TERMINAL_FAILURE` / `PROVIDER_RESULT_INDETERMINATE`。仅存在真实对应阶段时记录。
 - **billing**：区分 `confirmed_zero` / `confirmed_charged` / `unknown_billing`。不得把"没有 usage event"解释为 ¥0。
 - **S001-R01**：保留全部旧状态和 metadata，不删除、不覆盖。`billing_status=unknown`，`failure_phase` 标注 inferred。不自动真实重试。
-- **deployed**：否（待本次 deployment）
+- **deployed**：是（e62f5c2）
 
 ### 4.6 Narration Activity Controller（M7.3A.2）
 
@@ -152,67 +152,7 @@
   - `src/app/api/projects/[id]/activity/route.ts`
 - **与 /stages 轮询的关系**：Activity response 已包含 stages；当 activity controller 启用后，WorkflowWorkspace 不再并行每 2s 请求 `/stages`；只保留一次初始 `/stages` fetch 或使用 `activity.stages`。
 - **测试**：`scripts/test-narration-activity-watch.ts`（22 PASS）覆盖初始无任务→mutation 启动 watch→running→succeeded→终态停止→hidden 降频→错误退避→不重复请求。
-- **deployed**：否（待本次 deployment）
-
-### 4.8 M7.3A.3 Asset Generation Commit Fence（本轮）
-
-- **Strict request idempotency**：`asset_generation_jobs.request_fingerprint`（sha256 over
-  projectId/sceneId/requirementId/normalizedPrompt/provider/model/resourceClass/
-  sourceScenesVersionId/sourceRequirementHash）。相同 requestId + 相同 fingerprint →
-  reused；不同 → `REQUEST_ID_CONFLICT`（HTTP 409，列差异字段，零 provider call，
-  不修改旧 job）。历史无 fingerprint 行按字段级兼容判定并确定性回填。
-- **Fence A（provider 前）**：active scenes version + exact requirement hash 与 job
-  冻结快照一致；不一致 → SOURCE_STALE（confirmed_zero，provider calls=0）。
-- **Fence B（provider 返回后）**：source 漂移或 production_gpu lease 丢失 → 结果仍
-  append-only 保存为 historical asset（`assets.provenance_json`：source version/hash/
-  jobId/requestId/relevance/staleReason），job succeeded + `result_relevance=stale`，
-  不清除当前 requirement 的失败/readiness 状态，不自动重试，不自动重新计费调用。
-- **resolver**：`buildProjectResolution` 改用 `listLatestAssetGenerationJobsByRequirement`
-  （复合 key `scene_id:requirement_id`）；generated candidate 须 source 匹配
-  （sceneId + requirementId + sourceScenesVersionId + sourceRequirementHash），
-  stale 候选进入 `staleGeneratedCandidates`（UI 审计展示）；新增
-  `latestGenerationAttempt` 技术详情。
-- **lease-loss fail-closed**：统一 `createResourceLeaseHeartbeat`（`src/lib/resources/
-  lease-heartbeat.ts`）供 TTS / Render / local image 共用。heartbeat 返回 false →
-  lost：TTS abort synthesize + requeue（本地 GPU 无计费）；render abort + 不提交
-  final success（RESOURCE_LEASE_LOST）；local image 结果按 stale historical 保留。
-  Executor 不再执行 normal lease release（scheduler 唯一 claim，job-runner finally
-  唯一 release）。
-- **构建网络固化**：`scripts/production-build-network.sh`（start/check/stop）+ 
-  `docs/PRODUCTION_BUILD_NETWORK.md` + 根目录 `AGENTS.md`。宿主机 Docker build 用
-  `--network=host` + `--add-host remotion.media:127.0.0.1` + nginx:alpine+socat
-  CONNECT 隧道（经 127.0.0.1:7890 代理）+ `APT_MIRROR`/`NPM_REGISTRY` 镜像源。
-- **deployed**：否（待本次 deployment）
-
-### 4.8 M7.3A.3 Asset Generation Commit Fence（本轮）
-
-- **Strict request idempotency**：`asset_generation_jobs.request_fingerprint`（sha256 over
-  projectId/sceneId/requirementId/normalizedPrompt/provider/model/resourceClass/
-  sourceScenesVersionId/sourceRequirementHash）。相同 requestId + 相同 fingerprint →
-  reused；不同 → `REQUEST_ID_CONFLICT`（HTTP 409，列差异字段，零 provider call，
-  不修改旧 job）。历史无 fingerprint 行按字段级兼容判定并确定性回填。
-- **Fence A（provider 前）**：active scenes version + exact requirement hash 与 job
-  冻结快照一致；不一致 → SOURCE_STALE（confirmed_zero，provider calls=0）。
-- **Fence B（provider 返回后）**：source 漂移或 production_gpu lease 丢失 → 结果仍
-  append-only 保存为 historical asset（`assets.provenance_json`：source version/hash/
-  jobId/requestId/relevance/staleReason），job succeeded + `result_relevance=stale`，
-  不清除当前 requirement 的失败/readiness 状态，不自动重试，不自动重新计费调用。
-- **resolver**：`buildProjectResolution` 改用 `listLatestAssetGenerationJobsByRequirement`
-  （复合 key `scene_id:requirement_id`）；generated candidate 须 source 匹配
-  （sceneId + requirementId + sourceScenesVersionId + sourceRequirementHash），
-  stale 候选进入 `staleGeneratedCandidates`（UI 审计展示）；新增
-  `latestGenerationAttempt` 技术详情。
-- **lease-loss fail-closed**：统一 `createResourceLeaseHeartbeat`（`src/lib/resources/
-  lease-heartbeat.ts`）供 TTS / Render / local image 共用。heartbeat 返回 false →
-  lost：TTS abort synthesize + requeue（本地 GPU 无计费）；render abort + 不提交
-  final success（RESOURCE_LEASE_LOST）；local image 结果按 stale historical 保留。
-  Executor 不再执行 normal lease release（scheduler 唯一 claim，job-runner finally
-  唯一 release）。
-- **构建网络固化**：`scripts/production-build-network.sh`（start/check/stop）+ 
-  `docs/PRODUCTION_BUILD_NETWORK.md` + 根目录 `AGENTS.md`。宿主机 Docker build 用
-  `--network=host` + `--add-host remotion.media:127.0.0.1` + nginx:alpine+socat
-  CONNECT 隧道（经 127.0.0.1:7890 代理）+ `APT_MIRROR`/`NPM_REGISTRY` 镜像源。
-- **deployed**：否（待本次 deployment）
+- **deployed**：是（e62f5c2）
 
 ### 4.7 Durable GPU Resource Lease（M7.3A.2）
 
@@ -222,7 +162,7 @@
   - `src/lib/scheduler.ts`（`claimNextAnyJob` 在 claim GPU 任务前先原子取得 lease）
   - `src/lib/workflow/dag.ts`（`listBusyResourceClasses` 以 lease 为准，兼容旧数据无 lease 过渡）
   - `src/worker/job-runner.ts`（finally 释放 lease）
-  - `src/worker/tts-executor.ts`（内部 finally 释放 lease）
+  - `src/worker/tts-executor.ts` / `src/worker/asset-generation-executor.ts`（只消费 lease-lost 信号，不执行 normal release）
 - **设计**：
   - `claimResourceLease` 使用 `INSERT … ON CONFLICT(resource_group) DO UPDATE WHERE …` 实现原子 UPSERT。
   - `lease_expires_at` 过期才允许覆盖；同 worker+job 重入允许。
@@ -235,8 +175,63 @@
   - `gpuOccupied` 由有效 lease 或兼容旧数据的 running GPU job 推导。
   - queued ≠ 占用资源；只有 running/leased 才算占用。
   - UI `waiting_resource` 表示依赖满足但 lease 不可得。
-- **测试**：`scripts/test-workflow-resource-leases.ts`（48 PASS）覆盖双 Worker 互斥、heartbeat、过期回收、LLM+TTS 并行、GPU 组内互斥、**长时间任务（>lease TTL）期间 heartbeat 续约实证（L7/L8）**。
-- **deployed**：否（待本次 deployment）
+- **测试**：`scripts/test-workflow-resource-leases.ts`（63 PASS）覆盖双 Worker 互斥、heartbeat、过期回收、LLM+TTS 并行、GPU 组内互斥、长时间任务心跳续约（L7/L8）、lease lost fail-closed（L9）、render bundle 阶段 lease 保活（L10）。
+- **deployed**：是（e62f5c2）
+
+### 4.8 M7.3A.3 Asset Generation Commit Fence
+
+- **Strict request idempotency**：`asset_generation_jobs.request_fingerprint`（sha256 over
+  projectId/sceneId/requirementId/normalizedPrompt/provider/model/resourceClass/
+  sourceScenesVersionId/sourceRequirementHash）。相同 requestId + 相同 fingerprint →
+  reused；不同 → `REQUEST_ID_CONFLICT`（HTTP 409，列差异字段，零 provider call，
+  不修改旧 job）。历史无 fingerprint 行按字段级兼容判定并确定性回填。
+- **Fence A（provider 前）**：active scenes version + exact requirement hash 与 job
+  冻结快照一致；不一致 → SOURCE_STALE（confirmed_zero，provider calls=0）。
+- **Fence B（provider 返回后）**：source 漂移或 production_gpu lease 丢失 → 结果仍
+  append-only 保存为 historical asset（`assets.provenance_json`：source version/hash/
+  jobId/requestId/relevance/staleReason），job succeeded + `result_relevance=stale`，
+  不清除当前 requirement 的失败/readiness 状态，不自动重试，不自动重新计费调用。
+- **resolver**：`buildProjectResolution` 改用 `listLatestAssetGenerationJobsByRequirement`
+  （复合 key `scene_id:requirement_id`）；generated candidate 须 source 匹配
+  （sceneId + requirementId + sourceScenesVersionId + sourceRequirementHash），
+  stale 候选进入 `staleGeneratedCandidates`（UI 审计展示）；新增
+  `latestGenerationAttempt` 技术详情。
+- **lease-loss fail-closed**：统一 `createResourceLeaseHeartbeat`（`src/lib/resources/
+  lease-heartbeat.ts`）供 TTS / Render / local image 共用。heartbeat 返回 false →
+  lost：TTS abort synthesize + requeue（本地 GPU 无计费）；render abort + 不提交
+  final success（RESOURCE_LEASE_LOST）；local image 结果按 stale historical 保留。
+  Executor 不再执行 normal lease release（scheduler 唯一 claim，job-runner finally
+  唯一 release）。
+- **构建网络固化**：`scripts/production-build-network.sh`（start/check/stop）+ 
+  `docs/PRODUCTION_BUILD_NETWORK.md` + 根目录 `AGENTS.md`。宿主机 Docker build 用
+  `--network=host` + `--add-host remotion.media:127.0.0.1` + nginx:alpine+socat
+  CONNECT 隧道（经 127.0.0.1:7890 代理）+ `APT_MIRROR`/`NPM_REGISTRY` 镜像源。
+- **deployed**：是（e62f5c2）
+
+### 4.9 M7.3A.3.1 Atomic Candidate Commit + Server-side Bind Gate
+
+- **服务端 stale 绑定门禁**（`src/lib/assets/bind.ts`）：带 `provenance_json` 的候选必须
+  relevance=current + sourceScenesVersionId=active version + sourceRequirementHash=当前
+  hash + 生成 job 存在且 result_asset_id/result_relevance/project/scene/requirement 全部
+  匹配，否则 409（CANDIDATE_STALE / CANDIDATE_SOURCE_STALE）；历史无 provenance 资产
+  兼容（legacyProvenance=true），不批量伪造。
+- **原子 commit**（`src/lib/assets/commit.ts` `commitGeneratedAssetResultTx`）：Fence B
+  判定 + asset 落库 + job 终态 + resolution state 清除在同一 BEGIN IMMEDIATE；判定读取
+  事务内最新 active source（无 TOCTOU）；事务失败删除本轮新文件、不动历史 asset。
+- **精确 source loader**（`loadActiveScenesSource`）：project_stages.active_version JOIN
+  project_versions 精确读取，fail-closed（缺失 → 拒绝，不 latest fallback）；用于
+  enqueue / Fence A / Fence B / bind gate / resolver。
+- **完整请求快照**：`asset_generation_jobs.image_size/aspect_ratio/provider_config_version`
+  enqueue 冻结；fingerprint 含 imageSize/aspectRatio/resourceGroup；Worker 从 job 快照
+  调用 provider（禁止 env 重新推导）；provider.name !== job.provider → CONFIG_ERROR
+  零调用；usage 也取快照。
+- **Render lease 覆盖 bundle 阶段**：heartbeat 在 claim 后、ensureBundleLazy 前启动，
+  覆盖 bundle+render 全程；bundle 期间 lost → 不进入 renderMedia。
+  **技术债**：CPU bundle 阶段仍持有 production_gpu（未来可拆 cpu_compile → render_gpu
+  两阶段以便 bundle 与 TTS 并行；该优化未实现，不得声称已完成）。
+- **构建网络硬化**：脚本幂等（自有容器 running 时二次 start 直接通过）、socat 仅绑
+  loopback、check 验证 listener+TLS(SNI)、代理 host 可配置。
+- **deployed**：否（待本次 M7.3A.3.1 deployment）
 
 ## 5. 当前正在进行的工作
 
@@ -246,7 +241,7 @@
 
 ## 6. 尚未完成 TODO
 
-- [ ] Production 部署（本次 M7.3A.2 待执行）
+- [x] Production 部署（M7.3A.2 e62f5c2 / M7.3A.3 07b39dc 已完成）
 - [ ] M7.3B — Visual Sequences / Shots（明确禁止在本次执行）
 - [ ] M7.4 — Timing Reconciliation v2
 - [ ] M7.5 — Asset Bindings 迁移
