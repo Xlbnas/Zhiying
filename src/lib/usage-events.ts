@@ -307,7 +307,13 @@ export interface ImageGenerationFinalizeInput {
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
+  // M7.3A.3.3R2：真实 plain-object 判断（prototype 必须为 Object.prototype 或 null）。
+  // Date/Map/RegExp/class instance 等不参与 object merge。
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(v);
+  return prototype === Object.prototype || prototype === null;
 }
 
 /**
@@ -321,7 +327,10 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 export function mergeUsageMetadata(prior: unknown, incoming: unknown): unknown {
   if (incoming === undefined) return prior ?? null;
   if (!isPlainObject(prior) || !isPlainObject(incoming)) {
-    return isPlainObject(incoming) ? sanitizeObject(incoming) : incoming;
+    // 非 plain-object incoming（Date/Map/class 实例/数组/字符串/数字/null 等）
+    // 按明确 replacement 处理；不写入 merged 对象，因此无 prototype pollution 面。
+    // JSON.parse 产生的含危险 own-key 对象是 plain object，会走下方 merge 过滤。
+    return incoming;
   }
   const merged: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(prior)) {

@@ -47,9 +47,9 @@ function ok(cond: boolean, label: string, detail?: unknown): void {
   }
 }
 
-function makeScene(query: string, requirementId = 'S001-R01'): Record<string, unknown> {
+function makeScene(query: string, requirementId = 'S001-R01', sceneId = 'S001'): Record<string, unknown> {
   return {
-    id: 'S001',
+    id: sceneId,
     chapter: 1,
     chapterTitle: '测试章',
     start: 0,
@@ -557,13 +557,18 @@ async function main(): Promise<void> {
       }).id;
       expectLegacy(legacyId, '[B16j] legacy + active scenes 缺失 → 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE', 'S001', 'S001-R01', pNoScenes);
     }
-    // 11 active scene 已删除（scenes 切到不含 S001）
+    // 11 active scene 已删除（scenes 真实只含 S002，不含 S001）
     {
       const pDel = createProjectWithWorkflow({topic: 'bind-scene-del', coreQuestion: 'q'}).project.id;
       generateVersion({
         projectId: pDel, stage: 'scenes', contentType: 'json', source: 'manual_edit',
-        content: JSON.stringify({chapterTiming: [{chapter: 1, title: 't', start: 0, end: 10}], scenes: [makeScene('x', 'S002-R01').id === 'S002' ? makeScene('x', 'S002-R01') : makeScene('x', 'S002-R01')]}),
+        content: JSON.stringify({chapterTiming: [{chapter: 1, title: 't', start: 0, end: 10}], scenes: [makeScene('x', 'S002-R01', 'S002')]}),
       });
+      // 先断言 active scenes：S001 不存在、S002 存在
+      const {loadActiveScenesSource} = await import('../src/lib/assets/requirements');
+      const src = loadActiveScenesSource(pDel);
+      ok(src !== null && src.plans.some((pl) => pl.sceneId === 'S002') && !src.plans.some((pl) => pl.sceneId === 'S001'),
+        '[B16k-pre] active scenes 含 S002 且不含 S001（fixture 前提）');
       const legacyId = insertAsset({
         projectId: pDel, sceneId: 'S001', mediaType: 'image', sourceType: 'generated',
         sourceProvider: 'apiyi', sourceUrl: null,

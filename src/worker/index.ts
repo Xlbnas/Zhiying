@@ -18,7 +18,7 @@ import {recoverStaleLlmJobs} from '@/lib/llm-jobs';
 import {recoverStaleDispatchJobs} from '@/lib/llm-generation/dispatch';
 import {buildStageDetail, detailFromRemotionProgress, round1} from '@/lib/render/progress-detail';
 import {classifyBundleExit} from '@/lib/render/bundle-classify';
-import {runBundlePhase} from './render-bundle-phase';
+import {runBundlePhase, runWithCleanup} from './render-bundle-phase';
 import {describeRenderPerfConfig, loadRenderPerfConfig} from '@/lib/render/render-config';
 import {probeNvencSupport} from '@/lib/render/nvenc';
 import {recoverStaleTtsJobs} from '@/lib/tts-jobs';
@@ -611,21 +611,25 @@ async function runRenderJob(
       },
     });
   }
-  try {
+  // M7.3A.3.3R2：live state reader（实时 closure）——bundle 执行期间发生的
+  // lease lost / shutdown / cancel 必须被 catch 与 post-bundle fence 看到。
+  const liveState = (): {leaseLost: boolean; shuttingDown: boolean; cancelRequested: boolean} => ({
+    leaseLost: renderLeaseLost,
+    shuttingDown,
+    cancelRequested: isCancelRequested(job.id),
+  });
+
+  // M7.3A.3.3R2：cleanup（heartbeat dispose）位于 runWithCleanup 的真正 finally——
+  // 单一 owner，reject/resolve/异常路径均恰好一次，无双重 dispose。
+  await runWithCleanup(async () => {
     let bundleLocation: string;
-    // M7.3A.3.3R1：bundle 阶段经 runBundlePhase 路由（lease lost > shutdown >
-    // cancel > bundle_error），生产路径真实调用；heartbeat 仍由本函数 finally 单一 dispose。
     const proceed = await runBundlePhase({
       bundle: async () => {
         // M5：bundle 阶段写入步骤明细（首次打包可能数分钟，用户可见而非黑窗）
         heartbeat(job.id, 0, JSON.stringify(buildStageDetail('bundle')));
         bundleLocation = await ensureBundleLazy();
       },
-      state: {
-        leaseLost: renderLeaseLost,
-        shuttingDown,
-        cancelRequested: isCancelRequested(job.id),
-      },
+      getState: liveState,
       callbacks: {
         onLeaseLost: () => {
           failJob(job.id, 'RESOURCE_LEASE_LOST', 'bundle 期间 production_gpu lease 丢失，不进入 renderMedia');
@@ -649,10 +653,9 @@ async function runRenderJob(
       return;
     }
     await runJob(job, bundleLocation!, controller, {lost: () => renderLeaseLost});
-  } finally {
-    // M7.3A.3.2：所有退出路径统一 dispose（不遗留 active interval）
+  }, () => {
     renderLeaseHeartbeat?.dispose();
-  }
+  });
 }
 
 function sleep(ms: number): Promise<void> {

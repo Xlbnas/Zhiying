@@ -598,85 +598,123 @@ async function main(): Promise<void> {
       '[L12f] shutdown 优先于 cancel');
   }
 
-  // ============ L13：runBundlePhase 集成测试（回调行为 + 优先级 + 不进入 render） ============
+  // ============ L13：runBundlePhase 真实异步时序测试（M7.3A.3.3R2） ============
+  // 必须真实模拟「执行期间状态改变」：bundle pending → mutate live state →
+  // reject/resolve → 断言路由。禁止预设 state 后调用。
   {
-    const {runBundlePhase, routeBundleExit} = await import('../src/worker/render-bundle-phase');
-    const {classifyBundleExit} = await import('../src/lib/render/bundle-classify');
+    const {runBundlePhase, runWithCleanup} = await import('../src/worker/render-bundle-phase');
+    const {classifyBundleExit, controlExitKind} = await import('../src/lib/render/bundle-classify');
+
+    interface ScenarioResult {
+      calls: {leaseLost: number; shutdown: number; cancelled: number; bundleError: number};
+      proceed: boolean;
+    }
 
     async function runScenario(input: {
-      state: {leaseLost: boolean; shuttingDown: boolean; cancelRequested: boolean};
-      bundleThrows?: boolean;
-    }) {
+      mutate: (st: {leaseLost: boolean; shuttingDown: boolean; cancelRequested: boolean}) => void;
+      settle: 'reject' | 'resolve';
+    }): Promise<ScenarioResult> {
+      const state = {leaseLost: false, shuttingDown: false, cancelRequested: false};
+      let resolveBundle!: () => void;
+      let rejectBundle!: (err: Error) => void;
+      const pending = new Promise<void>((resolve, reject) => {
+        resolveBundle = resolve;
+        rejectBundle = reject;
+      });
       const calls = {leaseLost: 0, shutdown: 0, cancelled: 0, bundleError: 0};
       let renderProceeded = false;
-      const proceed = await runBundlePhase({
-        bundle: async () => {
-          if (input.bundleThrows) throw new Error('bundle boom');
-        },
-        state: input.state,
-        callbacks: {
-          onLeaseLost: () => { calls.leaseLost++; },
-          onShutdown: () => { calls.shutdown++; },
-          onCancelled: () => { calls.cancelled++; },
-          onBundleError: () => { calls.bundleError++; },
-        },
-      });
-      if (proceed) renderProceeded = true;
-      return {calls, renderProceeded};
+
+      const running = (async () => {
+        const proceed = await runBundlePhase({
+          bundle: () => pending,
+          getState: () => ({...state}),
+          callbacks: {
+            onLeaseLost: () => { calls.leaseLost++; },
+            onShutdown: () => { calls.shutdown++; },
+            onCancelled: () => { calls.cancelled++; },
+            onBundleError: () => { calls.bundleError++; },
+          },
+        });
+        if (proceed) renderProceeded = true; // mock render-entry fence
+      })();
+
+      // bundle pending 期间外部改变状态
+      input.mutate(state);
+      if (input.settle === 'reject') {
+        rejectBundle(new Error('bundle boom'));
+      } else {
+        resolveBundle();
+      }
+      await running;
+      return {calls, proceed: renderProceeded};
     }
 
-    // lease lost（bundle 抛错）
+    // ---- Reject 路径（pending 期间状态改变） ----
     {
-      const r = await runScenario({state: {leaseLost: true, shuttingDown: false, cancelRequested: false}, bundleThrows: true});
-      ok(r.calls.leaseLost === 1 && r.calls.shutdown === 0 && r.calls.cancelled === 0 && r.calls.bundleError === 0 && !r.renderProceeded,
-        '[L13a] bundle 抛错 + lease lost → onLeaseLost 一次，不进入 render');
+      const r = await runScenario({mutate: (st) => { st.leaseLost = true; }, settle: 'reject'});
+      ok(r.calls.leaseLost === 1 && r.calls.bundleError === 0 && r.calls.shutdown === 0 && r.calls.cancelled === 0 && !r.proceed,
+        '[L13a] pending→leaseLost→reject → onLeaseLost 一次，不进入 render');
     }
-    // shutdown
     {
-      const r = await runScenario({state: {leaseLost: false, shuttingDown: true, cancelRequested: false}, bundleThrows: true});
-      ok(r.calls.shutdown === 1 && r.calls.leaseLost === 0 && r.calls.cancelled === 0 && r.calls.bundleError === 0 && !r.renderProceeded,
-        '[L13b] bundle 抛错 + shutdown → onShutdown 一次，不进入 render');
+      const r = await runScenario({mutate: (st) => { st.shuttingDown = true; }, settle: 'reject'});
+      ok(r.calls.shutdown === 1 && r.calls.bundleError === 0 && !r.proceed,
+        '[L13b] pending→shutdown→reject → onShutdown 一次，不进入 render');
     }
-    // cancel
     {
-      const r = await runScenario({state: {leaseLost: false, shuttingDown: false, cancelRequested: true}, bundleThrows: true});
-      ok(r.calls.cancelled === 1 && r.calls.leaseLost === 0 && r.calls.shutdown === 0 && r.calls.bundleError === 0 && !r.renderProceeded,
-        '[L13c] bundle 抛错 + cancel → onCancelled 一次，不进入 render');
+      const r = await runScenario({mutate: (st) => { st.cancelRequested = true; }, settle: 'reject'});
+      ok(r.calls.cancelled === 1 && r.calls.bundleError === 0 && !r.proceed,
+        '[L13c] pending→cancel→reject → onCancelled 一次，不进入 render');
     }
-    // ordinary bundle exception
     {
-      const r = await runScenario({state: {leaseLost: false, shuttingDown: false, cancelRequested: false}, bundleThrows: true});
-      ok(r.calls.bundleError === 1 && r.calls.leaseLost === 0 && r.calls.shutdown === 0 && r.calls.cancelled === 0 && !r.renderProceeded,
-        '[L13d] bundle 抛错（普通异常）→ onBundleError 一次，不进入 render');
+      const r = await runScenario({mutate: () => {}, settle: 'reject'});
+      ok(r.calls.bundleError === 1 && r.calls.leaseLost === 0 && r.calls.shutdown === 0 && r.calls.cancelled === 0 && !r.proceed,
+        '[L13d] pending→全 false→reject → onBundleError 一次，不进入 render');
     }
-    // 优先级：lease lost + shutdown + cancel → lease lost
     {
-      const r = await runScenario({state: {leaseLost: true, shuttingDown: true, cancelRequested: true}, bundleThrows: true});
-      ok(r.calls.leaseLost === 1 && r.calls.shutdown === 0 && r.calls.cancelled === 0, '[L13e] lease lost 优先于 shutdown/cancel');
+      const r = await runScenario({mutate: (st) => { st.leaseLost = true; st.shuttingDown = true; st.cancelRequested = true; }, settle: 'reject'});
+      ok(r.calls.leaseLost === 1 && r.calls.shutdown === 0 && r.calls.cancelled === 0, '[L13e] pending→三者全 true→reject → lease lost 优先');
     }
-    // 优先级：shutdown + cancel → shutdown
     {
-      const r = await runScenario({state: {leaseLost: false, shuttingDown: true, cancelRequested: true}, bundleThrows: true});
-      ok(r.calls.shutdown === 1 && r.calls.cancelled === 0, '[L13f] shutdown 优先于 cancel');
+      const r = await runScenario({mutate: (st) => { st.shuttingDown = true; st.cancelRequested = true; }, settle: 'reject'});
+      ok(r.calls.shutdown === 1 && r.calls.cancelled === 0, '[L13f] pending→shutdown+cancel→reject → shutdown 优先');
     }
-    // bundle 成功 → 继续 render
+
+    // ---- Resolve 路径（post-bundle fence：pending 期间状态改变） ----
     {
-      const r = await runScenario({state: {leaseLost: false, shuttingDown: false, cancelRequested: false}});
-      ok(r.renderProceeded && r.calls.bundleError === 0, '[L13g] bundle 成功 → 返回 true（进入 renderMedia）');
+      const r = await runScenario({mutate: (st) => { st.leaseLost = true; }, settle: 'resolve'});
+      ok(r.calls.leaseLost === 1 && !r.proceed, '[L13g] pending→leaseLost→resolve → onLeaseLost，不进入 render');
     }
-    // bundle 成功但期间 lease lost → 不进入 render
     {
-      const r = await runScenario({state: {leaseLost: true, shuttingDown: false, cancelRequested: false}});
-      ok(r.calls.leaseLost === 1 && !r.renderProceeded, '[L13h] bundle 成功但 lease lost → onLeaseLost，不进入 render');
+      const r = await runScenario({mutate: (st) => { st.shuttingDown = true; }, settle: 'resolve'});
+      ok(r.calls.shutdown === 1 && !r.proceed, '[L13h] pending→shutdown→resolve → onShutdown，不进入 render');
     }
-    // routeBundleExit 直接路由 + classifyBundleExit 一致性
     {
-      const calls = {leaseLost: 0, shutdown: 0, cancelled: 0, bundleError: 0};
-      routeBundleExit(classifyBundleExit({leaseLost: false, shuttingDown: true, cancelRequested: false}), {
-        onLeaseLost: () => calls.leaseLost++, onShutdown: () => calls.shutdown++,
-        onCancelled: () => calls.cancelled++, onBundleError: () => calls.bundleError++,
-      }, new Error('x'));
-      ok(calls.shutdown === 1, '[L13i] routeBundleExit 按分类路由');
+      const r = await runScenario({mutate: (st) => { st.cancelRequested = true; }, settle: 'resolve'});
+      ok(r.calls.cancelled === 1 && !r.proceed, '[L13i] pending→cancel→resolve → onCancelled，不进入 render');
+    }
+    {
+      const r = await runScenario({mutate: () => {}, settle: 'resolve'});
+      ok(r.proceed && r.calls.leaseLost === 0 && r.calls.shutdown === 0 && r.calls.cancelled === 0 && r.calls.bundleError === 0,
+        '[L13j] pending→全 false→resolve → proceed true（唯一进入 render 的场景）');
+    }
+
+    // ---- runWithCleanup：任何路径 cleanup 恰好一次 ----
+    {
+      const cleanup = () => { cleanupCount++; };
+      let cleanupCount = 0;
+      await runWithCleanup(async () => { throw new Error('boom'); }, cleanup).catch(() => {});
+      ok(cleanupCount === 1, '[L13k] reject → cleanup 恰好一次');
+      cleanupCount = 0;
+      await runWithCleanup(async () => 42, cleanup);
+      ok(cleanupCount === 1, '[L13l] resolve → cleanup 恰好一次');
+    }
+
+    // ---- classifyBundleExit / controlExitKind 一致性 ----
+    {
+      ok(classifyBundleExit({leaseLost: true, shuttingDown: true, cancelRequested: true}) === 'lease_lost', '[L13m] classify 优先级 lease lost');
+      ok(classifyBundleExit({leaseLost: false, shuttingDown: true, cancelRequested: true}) === 'shutdown', '[L13n] classify 优先级 shutdown');
+      ok(controlExitKind({leaseLost: false, shuttingDown: false, cancelRequested: false}) === null, '[L13o] controlExitKind 全 false → null（proceed）');
+      ok(controlExitKind({leaseLost: true, shuttingDown: false, cancelRequested: false}) === 'lease_lost', '[L13p] controlExitKind lease lost');
     }
   }
 

@@ -503,12 +503,13 @@ async function main(): Promise<void> {
       '[B10b] partial update 保留未更新 key 且同名 key 覆盖');
     // 3) 非 object incoming 明确替换
     ok(mergeUsageMetadata(prior, 'replacement') === 'replacement', '[B10c] 非 object incoming → 明确 replacement');
-    // 4) 危险 prototype keys 不生效
-    const dangerous = mergeUsageMetadata(prior, {__proto__: {polluted: true}, constructor: {x: 1}, prototype: {y: 2}, safe: 7}) as Record<string, unknown>;
+    // 4) 危险 prototype keys 不生效（JSON.parse 构造的真实威胁形态——含 own __proto__ key 的 plain object）
+    const dangerousJson = JSON.parse('{"__proto__": {"polluted": true}, "constructor": {"x": 1}, "prototype": {"y": 2}, "safe": 7}');
+    const dangerous = mergeUsageMetadata(prior, dangerousJson) as Record<string, unknown>;
     const hasOwn = (k: string): boolean => Object.prototype.hasOwnProperty.call(dangerous, k);
-    ok(dangerous.safe === 7 && (dangerous as Record<string, unknown>).polluted === undefined
-      && !hasOwn('constructor') && !hasOwn('prototype'),
+    ok(dangerous.safe === 7 && !hasOwn('__proto__') && !hasOwn('constructor') && !hasOwn('prototype'),
       '[B10d] 危险 key（__proto__/constructor/prototype）不进入合并结果', Object.keys(dangerous));
+    ok(({} as Record<string, unknown>).polluted === undefined, '[B10d2] 无 prototype pollution 副作用');
     ok(({} as Record<string, unknown>).polluted === undefined, '[B10e] 无 prototype pollution 副作用');
     // 5) 顶层 audit 字段不因 metadata 更新丢失（finalize 场景）
     const projectId = createProjectWithWorkflow({topic: 'billing-10', coreQuestion: 'q'}).project.id;
@@ -551,6 +552,31 @@ async function main(): Promise<void> {
     ok(meta.providerRequestId === 'prov-10', '[B10f] 顶层 providerRequestId 不丢失');
     ok(meta.actualProvider === 'apiyi' && meta.actualModel === 'gemini-3.1-flash-image', '[B10g] 顶层 actualProvider/actualModel 不丢失');
     ok(meta.usageMetadata?.tokens === 100 && meta.usageMetadata?.latencyMs === 500, '[B10h] usageMetadata 安全合并（prior 保留 + 新 key 追加）', meta.usageMetadata);
+  }
+
+  // ============ B11：isPlainObject 精确语义（M7.3A.3.3R2） ============
+  {
+    const {mergeUsageMetadata} = await import('../src/lib/usage-events');
+    const prior = {a: 1};
+    // 1) Date 不参与 object merge → 明确 replacement
+    ok(mergeUsageMetadata(prior, new Date(0)) instanceof Date, '[B11a] Date 不作 plain object（明确 replacement）');
+    // 2) Map 同上
+    ok(mergeUsageMetadata(prior, new Map()) instanceof Map, '[B11b] Map 不作 plain object');
+    // 3) class instance 同上
+    class Foo { x = 1; }
+    ok(mergeUsageMetadata(prior, new Foo()) instanceof Foo, '[B11c] class instance 不作 plain object');
+    // 4) Object.create(null) 作为 plain JSON-like 安全处理（可合并）
+    const nullProto = Object.create(null) as Record<string, unknown>;
+    nullProto.b = 2;
+    const m = mergeUsageMetadata(prior, nullProto) as Record<string, unknown>;
+    ok(m.a === 1 && m.b === 2, '[B11d] Object.create(null) 作为 plain object 安全合并');
+    // 5) 既有 plain-object merge 继续通过
+    const m2 = mergeUsageMetadata({a: 1, c: 3}, {b: 2}) as Record<string, unknown>;
+    ok(m2.a === 1 && m2.b === 2 && m2.c === 3, '[B11e] 既有 plain merge 语义保持');
+    // 6) 数组明确替换
+    ok(JSON.stringify(mergeUsageMetadata(prior, [1, 2])) === JSON.stringify([1, 2]), '[B11f] 数组明确 replacement');
+    // 7) null 明确替换
+    ok(mergeUsageMetadata(prior, null) === null, '[B11g] null 明确 replacement');
   }
 
   // 清理
