@@ -339,14 +339,13 @@ export function finalizeImageGenerationUsage(
   let costSource: ImageGenerationUsageResult['costSource'] = 'none';
   let pricingError: string | null = null;
 
-  // M7.3A.3.2 强化：prior 已 confirmed_charged 且已有 cost → 任何后续 finalize
-  // （含同级 charged→charged，如持久化失败重试）一律保留已有 cost，不重算覆盖。
-  const preserveChargedCost = existing !== undefined
-    && existing.cost_cny !== null
-    && priorStatus === 'confirmed_charged';
+  // M7.3A.3.2/3.3 强化：prior 已 confirmed_charged → 任何后续 finalize
+  // （含同级 charged→charged，如持久化失败重试）一律保留已有 cost，不重算覆盖；
+  // 既有 cost 为 null（例如价目表缺失）也保持 null，不得被 imageCount=0 重算成 0。
+  const preserveChargedCost = existing !== undefined && priorStatus === 'confirmed_charged';
   if (preserveChargedCost) {
-    costCny = existing.cost_cny;
-    costSource = 'preserved';
+    costCny = existing.cost_cny ?? null;
+    costSource = existing.cost_cny !== null ? 'preserved' : 'none';
   } else if (downgradeRejected) {
     // 单调：保留 prior 收费结论；cost 沿用已有值（charged 时已有 cost 不得清空）
     costCny = existing?.cost_cny ?? null;
@@ -404,7 +403,7 @@ export function finalizeImageGenerationUsage(
     attemptId: input.attemptId,
     sceneId: input.sceneId,
     requirementId: input.requirementId,
-    imageCount: input.imageCount,
+    imageCount: input.imageCount ?? priorMeta.imageCount ?? null,
     requestedSize: input.requestedSize,
     aspectRatio: input.aspectRatio,
     status: effectiveStatus,
@@ -412,9 +411,9 @@ export function finalizeImageGenerationUsage(
     unitPriceCny,
     pricingVersion: costSource === 'configured_estimate' ? IMAGE_PRICE_TABLE_VERSION : null,
     pricingError,
-    generationId: input.generationId ?? null,
-    providerRequestId: input.providerRequestId ?? null,
-    usageMetadata: input.usageMetadata ?? null,
+    generationId: input.generationId ?? priorMeta.generationId ?? null,
+    providerRequestId: input.providerRequestId ?? priorMeta.providerRequestId ?? null,
+    usageMetadata: input.usageMetadata ?? priorMeta.usageMetadata ?? null,
     failurePhase: input.failurePhase ?? priorMeta.failurePhase ?? null,
     prompt: input.prompt ?? priorMeta.prompt ?? null,
     elapsedMs: input.elapsedMs ?? priorMeta.elapsedMs ?? null,
@@ -423,6 +422,7 @@ export function finalizeImageGenerationUsage(
     requestedModel: input.model ?? priorMeta.requestedModel ?? null,
     providerConfigVersion: input.providerConfigVersion ?? priorMeta.providerConfigVersion ?? null,
     ...(downgradeRejected ? {rejectedFinalize: input.status} : {}),
+    ...(preserveChargedCost && existing?.cost_cny === null ? {pricingUnavailable: true} : {}),
   };
 
   if (existing) {

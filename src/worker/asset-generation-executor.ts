@@ -89,10 +89,13 @@ export async function runAssetGenerationJob(
   }, HEARTBEAT_INTERVAL_MS);
   const startAtMs = Date.now();
   const provider = getGeneratedImageProvider();
-  // M7.3A.3.2：provider 调用结果状态机（billing 单调依据）。
-  // provider 返回有效 candidates 后立即置 confirmed_charged；此后任何本地持久化
-  // 失败都不得把收费结论降级。
+  // M7.3A.3.2/3.3：provider 调用结果证据（函数级 hoist，catch 使用真实值，
+  // 禁止重声明同名空变量）。
   let providerOutcome: 'not_called' | 'unknown' | 'confirmed_zero' | 'confirmed_charged' = 'not_called';
+  let returnedImageCount = 0;
+  let providerRequestId: string | undefined;
+  let actualModel: string | undefined;
+  let actualProvider: string | undefined;
 
   const cleanup = (): void => {
     leaseHeartbeat?.dispose();
@@ -240,8 +243,21 @@ export async function runAssetGenerationJob(
     }
 
     const first = candidates[0]!;
+    const firstMeta = (first.metadata ?? {}) as Record<string, unknown>;
+    // M7.3A.3.3：provider 返回非空 candidate → 立即锁定 charged 证据
+    // （在 result contract validation 之前）。即使后续校验失败，billing 保持 charged。
+    providerOutcome = 'confirmed_charged';
+    returnedImageCount = candidates.length;
+    actualModel = first.model;
+    actualProvider = first.provider;
+    providerRequestId = typeof firstMeta.providerRequestId === 'string' ? firstMeta.providerRequestId : undefined;
+    recordImageGenerationUsageFinal(job, returnedImageCount, 'confirmed_charged', undefined, providerRequestId, undefined, actualModel);
+    const elapsedMs = Date.now() - startAtMs;
+
     // M7.3A.3.2：provider result snapshot 校验 —— candidate.provider 必须与
-    // job.provider 精确一致（不允许 provider 返回异源结果）。
+    // job.provider 精确一致（不允许 provider 返回异源结果）；校验失败时 billing
+    // 已锁定 charged（provider 已返回有效图片结果），job 按 PROVIDER_INVALID_RESPONSE
+    // 终态（不保存 current asset、不自动重试）。
     if (first.provider !== job.provider) {
       throw new ImageGenerationError(
         'PROVIDER_INVALID_RESPONSE',
@@ -250,14 +266,6 @@ export async function runAssetGenerationJob(
         {model: job.model, size: job.image_size ?? DEFAULT_IMAGE_SIZE, aspectRatio: job.aspect_ratio ?? DEFAULT_ASPECT_RATIO},
       );
     }
-    const firstMeta = (first.metadata ?? {}) as Record<string, unknown>;
-    const providerRequestId = typeof firstMeta.providerRequestId === 'string' ? firstMeta.providerRequestId : undefined;
-    const elapsedMs = Date.now() - startAtMs;
-
-    // M7.3A.3.2：provider 已返回有效 candidate → 费用真实发生，billing 单调置 charged；
-    // 之后任何本地持久化失败都保持 confirmed_charged。
-    providerOutcome = 'confirmed_charged';
-    recordImageGenerationUsageFinal(job, candidates.length, 'confirmed_charged', undefined, providerRequestId, undefined, first.model);
 
     // 写临时文件 → rename 到 append-only 最终路径（文件写入在事务外；
     // 事务失败时由本函数删除本轮新文件，不删除任何历史 asset）
@@ -328,7 +336,6 @@ export async function runAssetGenerationJob(
     }
 
     let failurePhase = 'PROVIDER_TERMINAL_FAILURE';
-    let providerRequestId: string | undefined;
     let billingStatus: 'confirmed_zero' | 'confirmed_charged' | 'unknown_billing' = 'unknown_billing';
 
     if (err instanceof ImageGenerationError) {
@@ -349,7 +356,7 @@ export async function runAssetGenerationJob(
     // M7.3A.3.2：commit 时 job 已被并发 requeue/recover（JOB_STATE_INVALID）→
     // 不覆盖原 job 终态；usage 保持 confirmed_charged；worker 主循环不崩溃。
     if (err instanceof CommitGeneratedAssetError && err.code === 'JOB_STATE_INVALID') {
-      recordImageGenerationUsageFinal(job, 1, 'confirmed_charged', 'RESULT_PERSIST_FAILED', providerRequestId, elapsedMs);
+      recordImageGenerationUsageFinal(job, returnedImageCount, 'confirmed_charged', 'RESULT_PERSIST_FAILED', providerRequestId, elapsedMs, actualModel);
       log(`asset job ${job.id}: commit 时 job 状态已变（RESULT_PERSIST_FAILED，不覆盖 job 终态）`);
       return;
     }
@@ -372,7 +379,7 @@ export async function runAssetGenerationJob(
       });
     }
 
-    recordImageGenerationUsageFinal(job, 0, billingStatus, failurePhase, providerRequestId, elapsedMs);
+    recordImageGenerationUsageFinal(job, returnedImageCount, billingStatus, failurePhase, providerRequestId, elapsedMs, actualModel);
 
     upsertResolutionState({
       projectId: job.project_id,

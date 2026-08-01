@@ -382,6 +382,113 @@ async function main(): Promise<void> {
     provider.health = {healthy: true, available: true, reason: 'healthy', checkedAt: Date.now()};
   }
 
+  // ============ B7：provider mismatch after returned image → PROVIDER_INVALID_RESPONSE + charged ============
+  {
+    const projectId = createProjectWithWorkflow({topic: 'billing-7', coreQuestion: 'q'}).project.id;
+    seedProject(projectId);
+    insertQueuedJob(projectId, 'bill-7');
+    // provider 返回 candidate.provider !== job.provider（'evil'）
+    provider.generate = async () => [{
+      candidateId: 'mock-b7',
+      mimeType: 'image/png',
+      data: Buffer.from('fake-png-data', 'utf8'),
+      width: 1920,
+      height: 1080,
+      provider: 'evil',
+      model: 'gemini-3.1-flash-image',
+      prompt: 'p',
+      metadata: {providerRequestId: 'prov-b7'},
+    }];
+    await runAssetJob('bill-7');
+    const job = getDb().prepare(`SELECT status, failure_phase, billing_status FROM asset_generation_jobs WHERE request_id='bill-7'`).get() as
+      {status: string; failure_phase: string | null; billing_status: string};
+    ok(job.status === 'failed' && job.failure_phase === 'PROVIDER_INVALID_RESPONSE', '[B7a] provider mismatch → failed + PROVIDER_INVALID_RESPONSE', job);
+    ok(job.billing_status === 'confirmed_charged', '[B7b] billing 保持 confirmed_charged（provider 已返回图片）', job.billing_status);
+    ok(usageStatus('bill-7') === 'confirmed_charged', '[B7c] usage confirmed_charged');
+    ok((usageRow('bill-7')?.cost_cny ?? 0) > 0, '[B7d] cost 保留（>0）');
+    const meta = JSON.parse(usageRow('bill-7')!.metadata) as {providerRequestId?: string; actualModel?: string; imageCount?: number};
+    ok(meta.providerRequestId === 'prov-b7', '[B7e] providerRequestId 保留', meta);
+    ok(meta.actualModel === 'gemini-3.1-flash-image' && meta.imageCount === 1, '[B7f] actualModel/imageCount 可审计', meta);
+    const assets = getDb().prepare(`SELECT count(*) AS c FROM assets WHERE project_id=?`).get(projectId) as {c: number};
+    ok(assets.c === 0, '[B7g] 不保存 current asset');
+    fs.rmSync(path.resolve(process.cwd(), 'public', 'assets', projectId), {recursive: true, force: true});
+  }
+
+  // ============ B8：charged 后 persistence failure finalize 无 providerRequestId → prior 保留 ============
+  {
+    const projectId = createProjectWithWorkflow({topic: 'billing-8', coreQuestion: 'q'}).project.id;
+    seedProject(projectId);
+    finalizeImageGenerationUsage({
+      attemptId: 'bill-8',
+      projectId,
+      sceneId: 'S001',
+      requirementId: 'S001-R01',
+      provider: 'apiyi',
+      model: 'gemini-3.1-flash-image',
+      requestedSize: '1K',
+      aspectRatio: '16:9',
+      imageCount: 1,
+      status: 'confirmed_charged',
+      providerRequestId: 'prov-8',
+    });
+    // 后续 persistence failure finalize（无 providerRequestId）→ prior 不丢失
+    finalizeImageGenerationUsage({
+      attemptId: 'bill-8',
+      projectId,
+      sceneId: 'S001',
+      requirementId: 'S001-R01',
+      provider: 'apiyi',
+      model: 'gemini-3.1-flash-image',
+      requestedSize: '1K',
+      aspectRatio: '16:9',
+      imageCount: 0,
+      status: 'confirmed_charged',
+      failurePhase: 'RESULT_PERSIST_FAILED',
+    });
+    const meta = JSON.parse(usageRow('bill-8')!.metadata) as {providerRequestId?: string; status?: string; failurePhase?: string};
+    ok(meta.providerRequestId === 'prov-8', '[B8a] prior providerRequestId 不丢失', meta);
+    ok(meta.status === 'confirmed_charged', '[B8b] status 保持 charged');
+  }
+
+  // ============ B9：charged + cost null + 后续 imageCount=0 → cost 仍 null（不变成 0） ============
+  {
+    const projectId = createProjectWithWorkflow({topic: 'billing-9', coreQuestion: 'q'}).project.id;
+    seedProject(projectId);
+    // 用价格表外的 model → 计价失败 → cost null（已收费但金额未知）
+    finalizeImageGenerationUsage({
+      attemptId: 'bill-9',
+      projectId,
+      sceneId: 'S001',
+      requirementId: 'S001-R01',
+      provider: 'apiyi',
+      model: 'unknown-model-no-price',
+      requestedSize: '1K',
+      aspectRatio: '16:9',
+      imageCount: 1,
+      status: 'confirmed_charged',
+      providerRequestId: 'prov-9',
+    });
+    ok(usageRow('bill-9')?.cost_cny === null, '[B9a] 价目表缺失 → charged + cost null');
+    // 后续 persistence-failure finalize（imageCount=0）→ cost 不得被重算成 0
+    finalizeImageGenerationUsage({
+      attemptId: 'bill-9',
+      projectId,
+      sceneId: 'S001',
+      requirementId: 'S001-R01',
+      provider: 'apiyi',
+      model: 'unknown-model-no-price',
+      requestedSize: '1K',
+      aspectRatio: '16:9',
+      imageCount: 0,
+      status: 'confirmed_charged',
+      failurePhase: 'RESULT_PERSIST_FAILED',
+    });
+    ok(usageRow('bill-9')?.cost_cny === null, '[B9b] cost 仍 null（未伪造成 0）');
+    const meta = JSON.parse(usageRow('bill-9')!.metadata) as {pricingUnavailable?: boolean; providerRequestId?: string};
+    ok(meta.pricingUnavailable === true, '[B9c] 标记 pricingUnavailable（只追加，不伪造费用）', meta);
+    ok(meta.providerRequestId === 'prov-9', '[B9d] providerRequestId 保留');
+  }
+
   // 清理
   const assetProjectIds = (getDb().prepare('SELECT DISTINCT project_id FROM assets').all() as Array<{project_id: string}>).map((r) => r.project_id);
   closeDb();
