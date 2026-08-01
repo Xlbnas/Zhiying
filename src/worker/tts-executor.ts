@@ -17,7 +17,8 @@ import {
   ttsJobResultSchema,
   type TtsJobRow,
 } from '@/lib/tts-jobs';
-import {releaseResourceLeaseForJob, heartbeatResourceLease, getResourceLeaseMs} from '@/lib/resources/leases';
+import {getResourceLeaseMs} from '@/lib/resources/leases';
+import {createResourceLeaseHeartbeat, type ResourceLeaseHeartbeatHandle} from '@/lib/resources/lease-heartbeat';
 import {describeLeakage, findDirectiveLeakage} from '@/lib/narration/leakage';
 
 /**
@@ -105,6 +106,9 @@ export async function runTtsJob(
   const {log} = ctx;
   const probe = deps.ffprobeImpl ?? probeAudio;
   let tmpPath: string | null = null;
+  // M7.3A.3：lease-lost 标志（提升到函数级，供 Commit Fence 与 catch 读取）
+  let leaseLost = false;
+  let leaseHeartbeat: ResourceLeaseHeartbeatHandle | null = null;
 
   const cleanupTmp = (): void => {
     if (tmpPath && fs.existsSync(tmpPath)) {
@@ -158,13 +162,24 @@ export async function runTtsJob(
     const controller = new AbortController();
     const onShutdownAbort = (): void => controller.abort();
     ctx.shutdownSignal?.addEventListener('abort', onShutdownAbort, {once: true});
+
+    // M7.3A.3：统一 lease heartbeat —— lease 丢失 → abort synthesize + fail-closed，
+    // 最终不得提交 WAV success（本地 TTS 无计费，可安全 requeue）。
+    if (ctx.resourceLease?.group === 'production_gpu') {
+      leaseHeartbeat = createResourceLeaseHeartbeat({
+        group: 'production_gpu',
+        ownerToken: ctx.resourceLease.ownerToken,
+        intervalMs: deps.heartbeatMs ?? HEARTBEAT_INTERVAL_MS,
+        leaseMs: getResourceLeaseMs(),
+        onLost: () => {
+          leaseLost = true;
+          controller.abort();
+        },
+      });
+    }
+
     const timer = setInterval(() => {
       heartbeatTtsJob(job.id);
-      // M7.3A.2：长时间 TTS 任务期间同步续约 production_gpu lease，
-      // 防止 lease 过期后其他 worker 抢占 GPU。
-      if (ctx.resourceLease?.group === 'production_gpu') {
-        heartbeatResourceLease('production_gpu', ctx.resourceLease.ownerToken, getResourceLeaseMs());
-      }
       if (isTtsCancelRequested(job.id)) {
         controller.abort();
       }
@@ -205,10 +220,16 @@ export async function runTtsJob(
         );
       }
 
-      // Commit Fence：写盘前最终 cancel/shutdown 检查（不提交已取消结果）
+      // Commit Fence：写盘前最终 cancel/shutdown/lease-lost 检查（不提交已取消结果）
       if (ctx.isShuttingDown()) {
         requeueTtsJob(job.id);
         log(`tts job ${job.id} requeued due to shutdown（fence，未写盘）`);
+        return;
+      }
+      if (leaseLost) {
+        // M7.3A.3：lease 丢失 → 不得提交成功；本地 GPU 无计费，requeue 安全。
+        requeueTtsJob(job.id);
+        log(`tts job ${job.id} requeued due to RESOURCE_LEASE_LOST（fence，未写盘）`);
         return;
       }
       if (isTtsCancelRequested(job.id)) {
@@ -289,6 +310,7 @@ export async function runTtsJob(
       throw err;
     } finally {
       clearInterval(timer);
+      leaseHeartbeat?.dispose();
       ctx.shutdownSignal?.removeEventListener('abort', onShutdownAbort);
     }
   } catch (err) {
@@ -296,6 +318,13 @@ export async function runTtsJob(
     if (ctx.isShuttingDown()) {
       requeueTtsJob(job.id);
       log(`tts job ${job.id} requeued due to shutdown`);
+      return;
+    }
+    if (leaseLost) {
+      // M7.3A.3：lease 丢失（onLost 已 abort controller）→ 不得提交成功；
+      // 本地 GPU 无计费，requeue 安全；不标记 cancelled（不是用户取消）。
+      requeueTtsJob(job.id);
+      log(`tts job ${job.id} requeued due to RESOURCE_LEASE_LOST`);
       return;
     }
     if ((err instanceof TtsError && err.code === 'CANCELLED') || isTtsCancelRequested(job.id)) {
@@ -314,10 +343,8 @@ export async function runTtsJob(
     log(`tts job ${job.id} failed (attempt ${job.attempt}/${job.max_attempts}): ${message}`);
   }
   } finally {
-    try {
-      releaseResourceLeaseForJob('production_gpu', 'tts', job.id);
-    } catch {
-      // lease 释放失败不阻断
-    }
+    // lease 生命周期已移交 job-runner（scheduler 唯一 claim，runner 唯一 normal release）；
+    // executor 不执行 normal lease release。直接调用 executor 的测试需自行模拟
+    // runner 生命周期（claim 后执行 + finally 释放）。
   }
 }

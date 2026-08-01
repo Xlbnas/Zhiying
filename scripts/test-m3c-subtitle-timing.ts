@@ -46,6 +46,7 @@ import {
 import {enqueueWorkflowStageJob, getLlmJob} from '../src/lib/llm-jobs';
 import {createProjectWithWorkflow} from '../src/lib/projects';
 import {claimNextAnyJob} from '../src/lib/scheduler';
+import {releaseResourceLeaseForJob} from '../src/lib/resources/leases';
 import {resetTtsProviderForTest} from '../src/lib/tts';
 import type {TtsJobRow} from '../src/lib/tts-jobs';
 import {runLlmJob} from '../src/worker/llm-executor';
@@ -124,7 +125,12 @@ async function runAllTtsJobs(pid: string): Promise<void> {
     if (!claimed) break;
     if (claimed.type !== 'tts') throw new Error(`意外 job 类型 ${claimed.type}`);
     if ((claimed.job as TtsJobRow).project_id !== pid) throw new Error('意外拿到其他项目 tts job');
-    await runTtsJob(claimed.job as TtsJobRow, CTX);
+    // M7.3A.3：模拟 job-runner 生命周期（executor 不再执行 normal lease release）
+    try {
+      await runTtsJob(claimed.job as TtsJobRow, CTX);
+    } finally {
+      releaseResourceLeaseForJob('production_gpu', 'tts', (claimed.job as TtsJobRow).id);
+    }
   }
 }
 

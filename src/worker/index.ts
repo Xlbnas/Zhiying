@@ -23,6 +23,7 @@ import {recoverStaleTtsJobs} from '@/lib/tts-jobs';
 import {recordJobComputeUsage, snapshotComputeStart} from '@/lib/usage/compute';
 import {recoverStaleAssetGenerationJobs} from '@/lib/assets/generation-jobs';
 import {releaseExpiredLeases} from '@/lib/resources/leases';
+import {createResourceLeaseHeartbeat, type ResourceLeaseHeartbeatHandle} from '@/lib/resources/lease-heartbeat';
 import {
   COMPOSITION_ID,
   COMPOSITION_ID_NO_SUBTITLES,
@@ -222,9 +223,25 @@ async function runJob(
   job: RenderJobRow,
   bundleLocation: string,
   controller: AbortController,
+  leaseMeta?: {group: 'production_gpu'; ownerToken: string},
 ): Promise<void> {
   // 每个 job 独立随机端口：失败后 retry / 下一个 job 不复用旧端口（见上文说明）
   const renderPort = randomRenderPort();
+  // M7.3A.3：统一 lease heartbeat —— 渲染期间 production_gpu lease 丢失 →
+  // abort renderMedia + 拒绝提交 final success（fail-closed）。
+  let renderLeaseLost = false;
+  let renderLeaseHeartbeat: ResourceLeaseHeartbeatHandle | null = null;
+  if (leaseMeta?.group === 'production_gpu') {
+    renderLeaseHeartbeat = createResourceLeaseHeartbeat({
+      group: 'production_gpu',
+      ownerToken: leaseMeta.ownerToken,
+      intervalMs: HEARTBEAT_INTERVAL_MS,
+      onLost: () => {
+        renderLeaseLost = true;
+        controller.abort();
+      },
+    });
+  }
   // M6.3.10：compute usage 采集（cgroup cpu delta 归属本 attempt；
   // 仅渲染主路径记录——payload/staging 等前置失败的 CPU 可忽略，不记）。
   const computeSnapshot = snapshotComputeStart();
@@ -502,6 +519,14 @@ async function runJob(
       fs.rmSync(outputAbsTmp, {force: true});
       finalTmp = loudTmp;
     }
+    // M7.3A.3：lease-lost fence —— 渲染期间 production_gpu lease 丢失
+    // （onLost 已 abort controller；若 renderMedia 仍返回则拒绝提交 final success）。
+    if (renderLeaseLost) {
+      failJob(job.id, 'RESOURCE_LEASE_LOST', '渲染期间 production_gpu lease 丢失，不提交 final success');
+      recordCompute('failed');
+      log(`job ${job.id} failed: RESOURCE_LEASE_LOST（不提交 final success）`);
+      return;
+    }
     // M6.3.11 succeeded gate：ffprobe 校验 + SHA256 + manifest 落库 + 原子改名，
     // 全部通过才允许 status=succeeded；任何一步失败 → failed，不展示「下载视频」。
     // M6.3.12 质量门扩展：Final 必须含音轨且时长与 composition 偏差 ≤1s。
@@ -548,6 +573,14 @@ async function runJob(
       log(`job ${job.id} requeued due to shutdown`);
       return;
     }
+    if (renderLeaseLost) {
+      // M7.3A.3：lease 丢失（onLost 已 abort controller）→ fail-closed，
+      // 不提交 final success，不标记 cancelled（不是用户取消）。
+      failJob(job.id, 'RESOURCE_LEASE_LOST', message || '渲染期间 production_gpu lease 丢失');
+      recordCompute('failed');
+      log(`job ${job.id} failed (attempt ${job.attempt}/${job.max_attempts}): RESOURCE_LEASE_LOST`);
+      return;
+    }
     if (isCancelRequested(job.id)) {
       markCancelled(job.id);
       recordCompute('cancelled');
@@ -557,6 +590,8 @@ async function runJob(
     failJob(job.id, 'RENDER_ERROR', message);
     recordCompute('failed');
     log(`job ${job.id} failed (attempt ${job.attempt}/${job.max_attempts}): ${message}`);
+  } finally {
+    renderLeaseHeartbeat?.dispose();
   }
 }
 
@@ -565,7 +600,11 @@ async function runJob(
  * bundle 阶段心跳 → lazy ensureBundle（失败 → BUNDLE_ERROR 终态）→ runJob。
  * controller 为调度循环为本任务创建的独立 AbortController。
  */
-async function runRenderJob(job: RenderJobRow, controller: AbortController): Promise<void> {
+async function runRenderJob(
+  job: RenderJobRow,
+  controller: AbortController,
+  leaseMeta?: {group: 'production_gpu'; ownerToken: string},
+): Promise<void> {
   let bundleLocation: string;
   try {
     // M5：bundle 阶段写入步骤明细（首次打包可能数分钟，用户可见而非黑窗）
@@ -577,7 +616,7 @@ async function runRenderJob(job: RenderJobRow, controller: AbortController): Pro
     log(`render job ${job.id} bundle init failed: ${message}`);
     return;
   }
-  await runJob(job, bundleLocation, controller);
+  await runJob(job, bundleLocation, controller, leaseMeta);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -651,7 +690,7 @@ async function main(): Promise<void> {
         shutdownSignal: controller.signal,
       };
       return executeClaimedJob(claimed, ctx, {
-        runRenderJob: (job) => runRenderJob(job, controller),
+        runRenderJob: (job, leaseMeta) => runRenderJob(job, controller, leaseMeta),
       });
     },
   });

@@ -36,6 +36,7 @@ import {buildMockWav, MockTtsProvider} from '../src/lib/tts/mock';
 import {IndexTts2Provider} from '../src/lib/tts/indextts2';
 import {resetTtsProviderForTest} from '../src/lib/tts';
 import {TtsError, type TtsProvider, type TtsRequest, type TtsResult} from '../src/lib/tts/types';
+import type {TtsExecutorContext} from '../src/worker/tts-executor';
 import {
   getTtsJob,
   recoverStaleTtsJobs,
@@ -50,7 +51,7 @@ import {createProjectWithWorkflow} from '../src/lib/projects';
 import {claimNextAnyJob} from '../src/lib/scheduler';
 import {zhiyingFullCutPropsSchema} from '../src/lib/scene-schema';
 import {runLlmJob} from '../src/worker/llm-executor';
-import {probeAudio, runTtsJob} from '../src/worker/tts-executor';
+import {probeAudio, runTtsJob, type AudioProbe} from '../src/worker/tts-executor';
 import {editVersion} from '../src/lib/workflow/operations';
 import {lockStage} from '../src/lib/workflow/stages';
 import {WORKFLOW_STAGES, type WorkflowStage} from '../src/lib/workflow/types';
@@ -138,7 +139,30 @@ async function runAllTtsJobs(pid: string, providers?: Record<string, TtsProvider
     const claimed = claimTts();
     if (!claimed) break;
     if (claimed.job.project_id !== pid) throw new Error('意外拿到其他项目 tts job');
-    await runTtsJob(claimed.job, CTX, providers ? {providers} : {});
+    await runTtsJobWithRunner(claimed, CTX, providers ? {providers} : {});
+  }
+}
+
+/**
+ * M7.3A.3：模拟 job-runner 生命周期（scheduler claim 后执行 + finally 释放 lease）。
+ * executor 自身不再执行 normal lease release；直接调用 executor 的测试必须经本 wrapper。
+ */
+async function runTtsJobWithRunner(
+  claimed: {job: TtsJobRow; resourceLease?: {group: 'production_gpu'; ownerToken: string}},
+  ctx: TtsExecutorContext = CTX,
+  deps?: {providers?: Record<string, TtsProvider>; heartbeatMs?: number; ffprobeImpl?: (filePath: string) => AudioProbe},
+): Promise<void> {
+  const lease = claimed.resourceLease;
+  try {
+    await runTtsJob(
+      claimed.job,
+      lease ? {...ctx, resourceLease: {group: lease.group, ownerToken: lease.ownerToken}} : ctx,
+      deps,
+    );
+  } finally {
+    if (lease) {
+      releaseResourceLeaseForJob('production_gpu', 'tts', claimed.job.id);
+    }
   }
 }
 
@@ -487,7 +511,7 @@ async function main(): Promise<void> {
     enqueueNarrationAudioJobs(pid);
     const claimed = claimTts();
     ok(claimed !== null && claimed.job.status === 'running', '[W19] scheduler 可 claim TTS job');
-    await runTtsJob(claimed!.job, CTX);
+    await runTtsJobWithRunner(claimed!);
     const job = getTtsJob(claimed!.job.id)!;
     ok(job.status === 'succeeded' && job.output_path !== null, '[W24] TTS job succeeded + output_path');
     const abs = path.join(getDataDir(), job.output_path!);
@@ -527,14 +551,14 @@ async function main(): Promise<void> {
     const claimed = claimTts()!;
     const errProvider = new MockTtsProvider();
     errProvider.synthesize = () => Promise.reject(new TtsError('PROVIDER_HTTP_ERROR', '模拟 500'));
-    await runTtsJob(claimed.job, CTX, {providers: {mock: errProvider}});
+    await runTtsJobWithRunner(claimed, CTX, {providers: {mock: errProvider}});
     const afterFirst = getTtsJob(claimed.job.id)!;
     ok(
       afterFirst.status === 'queued' && afterFirst.attempt === 1 && afterFirst.error_code === 'PROVIDER_HTTP_ERROR',
       '[W25] provider 错误 → queued retry（attempt=1）',
     );
     const claimed2 = claimTts()!;
-    await runTtsJob(claimed2.job, CTX);
+    await runTtsJobWithRunner(claimed2);
     ok(getTtsJob(claimed.job.id)!.status === 'succeeded', '[W25] retry 后 succeeded');
     await runAllTtsJobs(pid);
   }
@@ -547,7 +571,7 @@ async function main(): Promise<void> {
     enqueueNarrationAudioJobs(pid);
     const claimed = claimTts()!;
     const slow = new MockTtsProvider({delayMs: 300});
-    const running = runTtsJob(claimed.job, CTX, {providers: {mock: slow}, heartbeatMs: 30});
+    const running = runTtsJobWithRunner(claimed, CTX, {providers: {mock: slow}, heartbeatMs: 30});
     await sleep(60);
     requestCancelTtsJob(claimed.job.id);
     await running;
@@ -567,8 +591,8 @@ async function main(): Promise<void> {
     const slow = new MockTtsProvider({delayMs: 300});
     let shutting = false;
     const workerCtl = new AbortController();
-    const running = runTtsJob(
-      claimed.job,
+    const running = runTtsJobWithRunner(
+      claimed,
       {isShuttingDown: () => shutting, log: () => {}, shutdownSignal: workerCtl.signal},
       {providers: {mock: slow}},
     );
@@ -791,7 +815,7 @@ async function main(): Promise<void> {
     const claimed = claimTts()!;
     const errProvider = new MockTtsProvider();
     errProvider.synthesize = () => Promise.reject(new TtsError('INVALID_AUDIO', '坏音频'));
-    await runTtsJob(claimed.job, CTX, {providers: {mock: errProvider}});
+    await runTtsJobWithRunner(claimed, CTX, {providers: {mock: errProvider}});
     const after = getTtsJob(claimed.job.id)!;
     ok(after.status === 'failed' && after.error_code === 'INVALID_AUDIO', '[M35] INVALID_AUDIO 一次即 failed（不 retry）');
     ok(getNarrationAudioOverview(pid).status === 'failed', '[M35] overview = failed');
@@ -823,7 +847,7 @@ async function main(): Promise<void> {
     enqueueNarrationAudioJobs(pid);
     const fake = (): TtsProvider => fakeProvider({commit: 'commit-test-1', model: 'Model-X'});
     const claimed = claimTts()!;
-    await runTtsJob(claimed.job, CTX, {providers: {mock: fake()}});
+    await runTtsJobWithRunner(claimed, CTX, {providers: {mock: fake()}});
     const job = getTtsJob(claimed.job.id)!;
     ok(job.status === 'succeeded' && job.result_json !== null, '[H52] 成功 job 持久化 result_json');
     const r = JSON.parse(job.result_json!) as TtsJobResult;
@@ -878,7 +902,7 @@ async function main(): Promise<void> {
       resetTtsProviderForTest();
       const claimed = claimTts()!;
       ok(claimed.job.provider === 'mock', '[H55] 入队后改变 TTS_PROVIDER 不改写已入队 job.provider');
-      await runTtsJob(claimed.job, CTX); // 无注入 → Registry 按 job.provider=mock 解析
+      await runTtsJobWithRunner(claimed, CTX); // 无注入 → Registry 按 job.provider=mock 解析
       const job = getTtsJob(claimed.job.id)!;
       ok(
         job.status === 'succeeded' && (JSON.parse(job.result_json!) as TtsJobResult).provider === 'mock',
@@ -912,7 +936,7 @@ async function main(): Promise<void> {
     const claimed = claimTts()!;
     ok(claimed.job.provider === 'indextts2', '[H56] 入队快照 provider=indextts2');
     const fakeSidecar = fakeProvider({name: 'indextts2', resultProvider: 'indextts2', model: 'IndexTTS-2', commit: 'abc1234'});
-    await runTtsJob(claimed.job, CTX, {providers: {indextts2: fakeSidecar}});
+    await runTtsJobWithRunner(claimed, CTX, {providers: {indextts2: fakeSidecar}});
     const job = getTtsJob(claimed.job.id)!;
     const r = JSON.parse(job.result_json!) as TtsJobResult;
     ok(
@@ -944,7 +968,7 @@ async function main(): Promise<void> {
     db.prepare("UPDATE tts_jobs SET status = 'cancelled' WHERE project_id = ? AND status = 'queued' AND id != ?").run(pid, fakeId);
     const claimed = claimTts()!;
     ok(claimed.job.provider === 'unknown-tts', '[H57] claim 到 unknown provider job');
-    await runTtsJob(claimed.job, CTX);
+    await runTtsJobWithRunner(claimed, CTX);
     const job = getTtsJob(fakeId)!;
     ok(
       job.status === 'failed' && job.error_code === 'CONFIG_ERROR',
@@ -960,7 +984,7 @@ async function main(): Promise<void> {
     buildNarrationPlan(pid);
     enqueueNarrationAudioJobs(pid);
     const claimed = claimTts()!;
-    await runTtsJob(claimed.job, CTX, {providers: {mock: fakeProvider({resultProvider: 'evil'})}});
+    await runTtsJobWithRunner(claimed, CTX, {providers: {mock: fakeProvider({resultProvider: 'evil'})}});
     const job = getTtsJob(claimed.job.id)!;
     ok(
       job.status === 'failed' && job.error_code === 'PROVIDER_INVALID_RESPONSE',
@@ -977,7 +1001,7 @@ async function main(): Promise<void> {
     buildNarrationPlan(pid);
     enqueueNarrationAudioJobs(pid);
     const c1 = claimTts()!;
-    await runTtsJob(c1.job, CTX, {providers: {mock: fakeProvider({voiceId: 'other'})}});
+    await runTtsJobWithRunner(c1, CTX, {providers: {mock: fakeProvider({voiceId: 'other'})}});
     const j1 = getTtsJob(c1.job.id)!;
     ok(
       j1.status === 'failed' && j1.error_code === 'PROVIDER_INVALID_RESPONSE',
@@ -985,7 +1009,7 @@ async function main(): Promise<void> {
       {status: j1.status, error: j1.error_code},
     );
     const c2 = claimTts()!;
-    await runTtsJob(c2.job, CTX, {providers: {mock: fakeProvider({useRandom: true})}});
+    await runTtsJobWithRunner(c2, CTX, {providers: {mock: fakeProvider({useRandom: true})}});
     const j2 = getTtsJob(c2.job.id)!;
     ok(
       j2.status === 'failed' && j2.error_code === 'PROVIDER_INVALID_RESPONSE',
@@ -1004,7 +1028,7 @@ async function main(): Promise<void> {
     const claimed = claimTts()!;
     const jobId = claimed.job.id;
     const unitId = claimed.job.unit_id;
-    await runTtsJob(claimed.job, CTX, {
+    await runTtsJobWithRunner(claimed, CTX, {
       ffprobeImpl: (p) => {
         requestCancelTtsJob(jobId); // fence 已过、finalize 未至——精确落在 finish-line
         return probeAudio(p);
@@ -1031,7 +1055,7 @@ async function main(): Promise<void> {
     buildNarrationPlan(pid);
     enqueueNarrationAudioJobs(pid);
     const claimed = claimTts()!;
-    await runTtsJob(claimed.job, CTX);
+    await runTtsJobWithRunner(claimed, CTX);
     ok(getTtsJob(claimed.job.id)!.status === 'succeeded', '[H61] success 先提交 → succeeded');
     const cancelRes = requestCancelTtsJob(claimed.job.id);
     ok(
@@ -1050,7 +1074,7 @@ async function main(): Promise<void> {
     for (let i = 0; i < 4; i++) {
       const c = claimTts()!;
       const commit = c.job.unit_id === 'N003' ? 'commit-B' : 'commit-A';
-      await runTtsJob(c.job, CTX, {providers: {mock: fakeProvider({commit})}});
+      await runTtsJobWithRunner(c, CTX, {providers: {mock: fakeProvider({commit})}});
     }
     let threw: string | null = null;
     try {

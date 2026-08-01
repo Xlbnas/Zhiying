@@ -39,9 +39,14 @@ export interface JobRunnerContext {
 export interface JobRunnerHooks {
   /**
    * render 任务执行（index.ts 注入：bundle 心跳 + ensureBundleLazy + runJob）。
-   * 调用方闭包捕获本任务的 AbortController，保留 render 的 cancel/shutdown 语义。
+   * AbortController 由注入方闭包捕获（调度循环为任务创建），保持 render 的
+   * cancel/shutdown 语义。leaseMeta：scheduler claim 时取得的 production_gpu
+   * lease（render 期间心跳续约，lease 丢失 → abort + 不提交 final success）。
    */
-  runRenderJob: (job: RenderJobRow) => Promise<void>;
+  runRenderJob: (
+    job: RenderJobRow,
+    leaseMeta?: {group: 'production_gpu'; ownerToken: string},
+  ) => Promise<void>;
 }
 
 /** 执行单个已 claim 任务（status=running；controller 由调度循环统一创建）。 */
@@ -105,7 +110,10 @@ export async function executeClaimedJob(
     );
     return;
   }
-  await hooks.runRenderJob(claimed.job);
+  // render（默认分支）：M7.3A.3 透传 scheduler claim 的 production_gpu lease，
+  // 渲染期间心跳续约；lease 丢失 → abort + 不提交 final success。
+  const renderLeaseMeta = (claimed as unknown as {resourceLease?: {group: 'production_gpu'; ownerToken: string}}).resourceLease;
+  await hooks.runRenderJob(claimed.job, renderLeaseMeta);
 }
 
 // ---------- 并行调度循环 ----------

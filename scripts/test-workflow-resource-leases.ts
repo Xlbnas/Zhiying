@@ -315,6 +315,10 @@ async function main(): Promise<void> {
 
     await runningA;
     ok(jobStatus('tts_jobs', ttsId) === 'succeeded', '[L7f] 长 TTS 任务 succeeded');
+    // M7.3A.3：executor 不再执行 normal release —— 测试显式模拟 runner finally 释放
+    if (claimedA.resourceLease) {
+      releaseResourceLeaseForJob('production_gpu', 'tts', ttsId);
+    }
     ok(getActiveLease('production_gpu') === null, '[L7g] 长 TTS 结束后 lease 释放');
 
     const claimedB = claimNextAnyJob('worker-competitor');
@@ -377,6 +381,10 @@ async function main(): Promise<void> {
 
     await runningB;
     ok(jobStatus('asset_generation_jobs', localImgId2) === 'succeeded', '[L8e] 长 image 任务 succeeded');
+    // M7.3A.3：executor 不再执行 normal release —— 测试显式模拟 runner finally 释放
+    if (claimedImg.resourceLease) {
+      releaseResourceLeaseForJob('production_gpu', 'asset_generation', localImgId2);
+    }
     ok(getActiveLease('production_gpu') === null, '[L8f] 长 image 结束后 lease 释放');
 
     const claimedTts = claimNextAnyJob('worker-competitor');
@@ -386,6 +394,50 @@ async function main(): Promise<void> {
     }
     getDb().prepare(`UPDATE tts_jobs SET status='succeeded' WHERE id=?`).run(ttsId2);
     releaseResourceLeaseForJob('production_gpu', 'tts', ttsId2);
+  }
+
+  // ============ L9：lease lost → abort + fail-closed（不得提交 success） ============
+  {
+    const now = new Date().toISOString();
+    const ttsId = insertTtsJobV1(projectId, now);
+
+    const claimedA = claimNextAnyJob('worker-lease-lost');
+    ok(claimedA?.type === 'tts' && claimedA.job.id === ttsId, '[L9a] 长 TTS 任务 claim 成功', claimedA);
+    if (!claimedA || claimedA.type !== 'tts' || claimedA.job.id !== ttsId) {
+      throw new Error('L9a: 未能 claim TTS 任务');
+    }
+
+    const running = runTtsJob(
+      claimedA.job,
+      {
+        isShuttingDown: () => false,
+        log: () => {},
+        resourceLease: claimedA.resourceLease
+          ? {group: claimedA.resourceLease.group, ownerToken: claimedA.resourceLease.ownerToken}
+          : undefined,
+      },
+      {providers: {mock: new MockTtsProvider({delayMs: 1200})}, heartbeatMs: 100},
+    );
+
+    await sleep(150); // 任务已运行、lease 已心跳
+    ok(getActiveLease('production_gpu') !== null, '[L9b] 执行中持有 lease');
+    // 测试线程删除 lease row（模拟其他 worker 回收/抢占）→ 下一次 heartbeat 返回 false → lost → abort
+    getDb().prepare(`DELETE FROM resource_group_leases WHERE resource_group='production_gpu'`).run();
+    await running;
+
+    ok(jobStatus('tts_jobs', ttsId) === 'queued', '[L9c] lease lost → requeue（不提交 success、不标记 cancelled）', jobStatus('tts_jobs', ttsId));
+    ok(getActiveLease('production_gpu') === null, '[L9d] lease lost 后无有效 lease');
+    // 另一个 worker 可立即取得 lease 并 claim GPU 任务（无双 GPU 成功执行窗口）
+    const competitor = claimNextAnyJob('worker-competitor');
+    ok(
+      competitor?.type === 'tts' && competitor.job.id === ttsId && competitor.resourceLease !== undefined,
+      '[L9e] 竞争者可取得 lease 并 claim requeued TTS 任务',
+      competitor?.type,
+    );
+    if (competitor?.type === 'tts') {
+      getDb().prepare(`UPDATE tts_jobs SET status='succeeded' WHERE id=?`).run(ttsId);
+      releaseResourceLeaseForJob('production_gpu', 'tts', ttsId);
+    }
   }
 
   closeDb();
