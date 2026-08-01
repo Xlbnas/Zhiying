@@ -303,6 +303,10 @@ export async function runAssetGenerationJob(
     });
     committedFile = null; // 已落库，文件归资产所有
 
+    // M7.3A.3.2：成功 commit 后补充 usage assetId 关联（单调保护保留 charged/cost，
+    // 追加 assetId 使 requestId/jobId/assetId 可互相追溯）
+    recordImageGenerationUsageFinal(job, candidates.length, 'confirmed_charged', undefined, providerRequestId, undefined, first.model, result.assetId);
+
     if (result.relevance === 'current') {
       log(`asset job ${job.id} succeeded（relevance=current）→ asset ${result.assetId}`);
     } else {
@@ -423,6 +427,7 @@ function recordImageGenerationUsageFinal(
   providerRequestId?: string,
   elapsedMs?: number,
   actualModel?: string,
+  assetId?: string,
 ): void {
   finalizeImageGenerationUsage({
     attemptId: job.request_id,
@@ -441,5 +446,6 @@ function recordImageGenerationUsageFinal(
     elapsedMs,
     actualModel,
     providerConfigVersion: job.provider_config_version ?? CURRENT_PROVIDER_CONFIG_VERSION,
+    assetId,
   });
 }

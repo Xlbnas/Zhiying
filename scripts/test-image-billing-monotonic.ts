@@ -271,6 +271,22 @@ async function main(): Promise<void> {
     getDb().prepare(`UPDATE asset_generation_jobs SET status='cancelled' WHERE project_id=?`).run(projectId);
   }
 
+  // ============ B3b：成功 commit 后 usage.assetId 关联（requestId/jobId/assetId 可追溯） ============
+  {
+    const projectId = createProjectWithWorkflow({topic: 'billing-3b', coreQuestion: 'q'}).project.id;
+    seedProject(projectId);
+    insertQueuedJob(projectId, 'bill-3b');
+    installOkProvider();
+    await runAssetJob('bill-3b');
+    const job = getDb().prepare(`SELECT result_asset_id FROM asset_generation_jobs WHERE request_id='bill-3b'`).get() as {result_asset_id: string | null};
+    ok(job.result_asset_id !== null, '[B3b-a] 成功 commit 有 result asset');
+    const usage = usageRow('bill-3b');
+    const meta = usage ? (JSON.parse(usage.metadata) as {assetId?: string | null; status?: string}) : {};
+    ok(meta.assetId === job.result_asset_id, '[B3b-b] usage metadata.assetId 与 job.result_asset_id 一致', meta);
+    ok(meta.status === 'confirmed_charged' && (usage?.cost_cny ?? 0) > 0, '[B3b-c] usage charged + cost 保留');
+    fs.rmSync(path.resolve(process.cwd(), 'public', 'assets', projectId), {recursive: true, force: true});
+  }
+
   // ============ B4：confirmed_charged 后再 finalize unknown → 仍 charged（单调保护） ============
   {
     const projectId = createProjectWithWorkflow({topic: 'billing-4', coreQuestion: 'q'}).project.id;
