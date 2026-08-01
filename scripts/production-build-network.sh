@@ -87,7 +87,8 @@ tls_ok() {
   local out
   out=$(timeout 10 openssl s_client -connect "127.0.0.1:${LISTEN_PORT}" \
     -servername "$TARGET_HOST" -verify_hostname "$TARGET_HOST" </dev/null 2>/dev/null) || return 1
-  printf '%s' "$out" | grep -q "Verification: OK" && printf '%s' "$out" | grep -q "subject=CN=$TARGET_HOST"
+  # -verify_hostname 已校验 SNI 主机名（SAN/CN）；Verification: OK 即证书链有效
+  printf '%s' "$out" | grep -q "Verification: OK"
 }
 
 cmd_start() {
