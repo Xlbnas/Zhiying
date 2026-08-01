@@ -9,10 +9,10 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-01T03:50Z（M7.3A.3.1 部署 + smoke 完成） |
-| reviewedCodeSHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59`（本轮已 review/deploy 的代码 commit） |
-| productionRuntimeSHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59`（容器镜像实际代码 SHA） |
-| productionHostCheckoutSHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
+| statusUpdatedAt | 2026-08-01T04:40Z（M7.3A.3.2 部署 + smoke 完成） |
+| reviewedCodeSHA | `8eb23d097f10e79903108fb85d06b0b53601f606`（本轮已 review/deploy 的代码 commit） |
+| productionRuntimeSHA | `8eb23d097f10e79903108fb85d06b0b53601f606`（容器镜像实际代码 SHA） |
+| productionHostCheckoutSHA | `8eb23d097f10e79903108fb85d06b0b53601f606`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
 | 当前分支 | `m7` |
 | 实时 origin/m7 HEAD | 以 `git rev-parse origin/m7` 为准（不硬编码为「永远当前」） |
 
@@ -52,6 +52,7 @@
 | **M7.3A.2 Image Durability + Narration Watch + DAG Authoritative + GPU Leases** | **DONE** | `e62f5c2` | durable asset gen job、activity controller、DAG 权威化、production_gpu lease |
 | **M7.3A.3 Asset Commit Fence + Strict Idempotency + Lease-loss Fail-closed** | **DONE** | `7a0aeb7`/`ba90d98`/`67c6dba`/`07b39dc`（runtime `07b39dc`，docs `09c5b64`/`4bf4be6`） | request fingerprint、Fence A/B、lease lost fail-closed、构建网络 runbook |
 | **M7.3A.3.1 Atomic Candidate Commit + Server-side Bind Gate** | **DONE** | `df99384`/`32bc8b3`/`2131c6a`/`d7bc9e1`/`9dc3c6a`（runtime `9dc3c6a`，docs `2cd2b92`/`e337b61`，ops `6709882`） | 原子 commit、服务端 stale 绑定门禁、精确 source loader、完整请求快照、render bundle lease |
+| **M7.3A.3.2 Atomic Candidate Binding + Monotonic Image Billing + Render Heartbeat Cleanup** | **DONE** | `528f5c9`/`a8056b4`/`b243233`/`6ddf720`/`8eb23d0`（runtime `8eb23d0`） | 原子绑定、三态 provenance、billing 单调、provider result 审计、heartbeat dispose、SHA 元数据模型 |
 
 ## 4. 当前已实现功能详情
 
@@ -236,11 +237,11 @@
   两阶段以便 bundle 与 TTS 并行；该优化未实现，不得声称已完成）。
 - **构建网络硬化**：脚本幂等（自有容器 running 时二次 start 直接通过）、socat 仅绑
   loopback、check 验证 listener+TLS(SNI)、代理 host 可配置。
-- **deployed**：是（9dc3c6a）
+- **deployed**：是（8eb23d0）
 
 ## 5. 当前正在进行的工作
 
-- M7.3A.3.1 完成并部署（production `9dc3c6a`，备份 `m73a2-20260801T032213Z`），smoke 全项通过。
+- M7.3A.3.2 完成并部署（production `8eb23d0`，备份 `m73a2-20260801T041025Z`），smoke 全项通过。
 - 下一步：M7.3B（明确不在本次范围）。
 
 ## 6. 尚未完成 TODO
