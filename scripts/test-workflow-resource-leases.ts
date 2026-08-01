@@ -32,6 +32,7 @@ import {closeDb, getDb} from '../src/lib/db';
 import {createProjectWithWorkflow} from '../src/lib/projects';
 import {claimNextAnyJob} from '../src/lib/scheduler';
 import {MockTtsProvider} from '../src/lib/tts/mock';
+import {createResourceLeaseHeartbeat} from '../src/lib/resources/lease-heartbeat';
 import type {GeneratedImageProvider} from '../src/lib/assets/providers/generated';
 import {runTtsJob} from '../src/worker/tts-executor';
 import {
@@ -133,7 +134,7 @@ function insertLocalImageGenerationJob(projectId: string, queuedAt: string): str
     `INSERT INTO asset_generation_jobs (
        id, project_id, scene_id, requirement_id, request_id,
        prompt, provider, model, resource_class, resource_group, status, created_at, updated_at
-     ) VALUES (?, ?, 'S001', 'S001-R01', ?, 'prompt', 'comfyui', 'sd3', 'local_image_gpu', 'production_gpu', 'queued', ?, ?)`,
+     ) VALUES (?, ?, 'S001', 'S001-R01', ?, 'prompt', 'apiyi', 'sd3', 'local_image_gpu', 'production_gpu', 'queued', ?, ?)`,
   ).run(id, projectId, `req-${id}`, queuedAt, queuedAt);
   return id;
 }
@@ -146,6 +147,25 @@ function jobStatus(table: 'llm_jobs' | 'tts_jobs' | 'render_jobs' | 'asset_gener
 async function main(): Promise<void> {
   fs.rmSync(path.resolve(process.cwd(), 'data', 'test-workflow-resource-leases'), {recursive: true, force: true});
   const projectId = createProjectWithWorkflow({topic: 'resource-lease', coreQuestion: 'q'}).project.id;
+  // M7.3A.3.1：executor 的 Fence A / 原子 commit 需要 active scenes source
+  const {generateVersion} = await import('../src/lib/workflow/operations');
+  generateVersion({
+    projectId,
+    stage: 'scenes',
+    contentType: 'json',
+    source: 'manual_edit',
+    content: JSON.stringify({
+      chapterTiming: [{chapter: 1, title: '测试章', start: 0, end: 10}],
+      scenes: [{
+        id: 'S001', chapter: 1, chapterTitle: '测试章', start: 0, end: 10, duration: 10,
+        startFrame: 0, durationInFrames: 300, category: 'B-roll', visualType: 'Asset',
+        template: null, sourceTemplate: null, narrationSummary: '摘要', description: '测试画面',
+        notes: '', assetIds: [], licenseStatus: 'not-applicable', subtitlePosition: 'bottom',
+        transitionIn: 'none', transitionOut: 'none',
+        assetRequirements: [{kind: 'image', subject: '测试主体', query: 'test subject', usage: 'primary', policy: 'generated', authenticity: 'synthetic_allowed', requirementId: 'S001-R01'}],
+      }],
+    }),
+  });
 
   // ============ L1：直接 lease API —— claim / heartbeat / release ============
   {
@@ -438,6 +458,78 @@ async function main(): Promise<void> {
       getDb().prepare(`UPDATE tts_jobs SET status='succeeded' WHERE id=?`).run(ttsId);
       releaseResourceLeaseForJob('production_gpu', 'tts', ttsId);
     }
+  }
+
+  // ============ L10：render bundle 阶段 lease 保活（M7.3A.3.1） ============
+  // 模拟 runRenderJob 生命周期：claim → heartbeat 启动（bundle 前）→ bundle(400ms)
+  // → 释放。bundle 超过 lease TTL(100ms) 时靠 heartbeat(25ms) 保活；
+  // lease 被删 → lost 标志（bundle 后检查 → 不进 renderMedia）。
+  {
+    const now = new Date().toISOString();
+    const renderId = insertRenderJob(projectId, now);
+    const ttsId = insertTtsJob(projectId, new Date(Date.now() + 1000).toISOString());
+
+    const claimed = claimNextAnyJob('worker-render-bundle');
+    ok(claimed?.type === 'render' && claimed.job.id === renderId, '[L10a] render claim 成功（持有 lease）', claimed);
+    if (!claimed || claimed.type !== 'render' || !claimed.resourceLease) {
+      throw new Error('L10a: 未能 claim render');
+    }
+
+    // bundle 前启动 heartbeat（与 runRenderJob 一致）
+    let lost = false;
+    const hb = createResourceLeaseHeartbeat({
+      group: 'production_gpu',
+      ownerToken: claimed.resourceLease.ownerToken,
+      intervalMs: 25,
+      leaseMs: 100,
+      onLost: () => { lost = true; },
+    });
+
+    await sleep(150); // 150ms > 原始 TTL(100ms)
+    ok(getActiveLease('production_gpu')?.owner_job_id === renderId, '[L10b] 150ms：bundle 期间 lease 存活（heartbeat 保活）');
+    ok(claimNextAnyJob('worker-competitor') === null, '[L10c] 150ms：第二 Worker 不能 claim TTS');
+    ok(jobStatus('tts_jobs', ttsId) === 'queued', '[L10d] TTS 保持 queued');
+
+    await sleep(100); // 250ms
+    ok(!lost && getActiveLease('production_gpu') !== null, '[L10e] 250ms：仍存活');
+    ok(claimNextAnyJob('worker-competitor') === null, '[L10f] 250ms：第二 Worker 仍被挡');
+
+    await sleep(100); // 350ms
+    ok(getActiveLease('production_gpu') !== null && !lost, '[L10g] 350ms：仍存活');
+
+    await sleep(60); // 410ms：bundle 完成
+    ok(!lost, '[L10h] bundle 结束（>4×TTL）：lease 未丢失');
+    hb.dispose();
+    // 模拟 runner finally 释放
+    releaseResourceLeaseForJob('production_gpu', 'render', renderId);
+    const c2 = claimNextAnyJob('worker-competitor');
+    ok(c2?.type === 'tts' && c2.job.id === ttsId, '[L10i] 释放后第二 Worker 可 claim TTS');
+    if (c2?.type === 'tts') {
+      getDb().prepare(`UPDATE tts_jobs SET status='succeeded' WHERE id=?`).run(ttsId);
+      releaseResourceLeaseForJob('production_gpu', 'tts', ttsId);
+    }
+
+    // 场景 c：bundle 期间 lease 被删 → lost 标志 → 不得继续（模拟不进 renderMedia）
+    const now2 = new Date().toISOString();
+    const renderId2 = insertRenderJob(projectId, now2);
+    const claimed2 = claimNextAnyJob('worker-render-bundle-2');
+    if (!claimed2 || claimed2.type !== 'render' || !claimed2.resourceLease) {
+      throw new Error('L10j: 未能 claim render 2');
+    }
+    let lost2: boolean = false;
+    const hb2 = createResourceLeaseHeartbeat({
+      group: 'production_gpu',
+      ownerToken: claimed2.resourceLease.ownerToken,
+      intervalMs: 25,
+      leaseMs: 100,
+      onLost: () => { lost2 = true; },
+    });
+    await sleep(60);
+    getDb().prepare(`DELETE FROM resource_group_leases WHERE resource_group='production_gpu'`).run();
+    await sleep(60); // 下一次 heartbeat → false → lost
+    ok(lost2, '[L10j] bundle 期间 lease 被删 → lost 标志（bundle 后检查将拒绝进入 renderMedia）');
+    hb2.dispose();
+    releaseResourceLeaseForJob('production_gpu', 'render', renderId2);
   }
 
   closeDb();

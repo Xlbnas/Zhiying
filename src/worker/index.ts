@@ -223,25 +223,12 @@ async function runJob(
   job: RenderJobRow,
   bundleLocation: string,
   controller: AbortController,
-  leaseMeta?: {group: 'production_gpu'; ownerToken: string},
+  renderLease?: {lost: () => boolean},
 ): Promise<void> {
   // 每个 job 独立随机端口：失败后 retry / 下一个 job 不复用旧端口（见上文说明）
   const renderPort = randomRenderPort();
-  // M7.3A.3：统一 lease heartbeat —— 渲染期间 production_gpu lease 丢失 →
-  // abort renderMedia + 拒绝提交 final success（fail-closed）。
-  let renderLeaseLost = false;
-  let renderLeaseHeartbeat: ResourceLeaseHeartbeatHandle | null = null;
-  if (leaseMeta?.group === 'production_gpu') {
-    renderLeaseHeartbeat = createResourceLeaseHeartbeat({
-      group: 'production_gpu',
-      ownerToken: leaseMeta.ownerToken,
-      intervalMs: HEARTBEAT_INTERVAL_MS,
-      onLost: () => {
-        renderLeaseLost = true;
-        controller.abort();
-      },
-    });
-  }
+  // M7.3A.3.1：lease 生命周期由 runRenderJob 统一管理（claim 后、bundle 前启动，
+  // 覆盖 bundle + render 全程）；本函数只消费 lost 信号（fail-closed）。
   // M6.3.10：compute usage 采集（cgroup cpu delta 归属本 attempt；
   // 仅渲染主路径记录——payload/staging 等前置失败的 CPU 可忽略，不记）。
   const computeSnapshot = snapshotComputeStart();
@@ -521,7 +508,7 @@ async function runJob(
     }
     // M7.3A.3：lease-lost fence —— 渲染期间 production_gpu lease 丢失
     // （onLost 已 abort controller；若 renderMedia 仍返回则拒绝提交 final success）。
-    if (renderLeaseLost) {
+    if (renderLease?.lost() ?? false) {
       failJob(job.id, 'RESOURCE_LEASE_LOST', '渲染期间 production_gpu lease 丢失，不提交 final success');
       recordCompute('failed');
       log(`job ${job.id} failed: RESOURCE_LEASE_LOST（不提交 final success）`);
@@ -573,7 +560,7 @@ async function runJob(
       log(`job ${job.id} requeued due to shutdown`);
       return;
     }
-    if (renderLeaseLost) {
+    if (renderLease?.lost() ?? false) {
       // M7.3A.3：lease 丢失（onLost 已 abort controller）→ fail-closed，
       // 不提交 final success，不标记 cancelled（不是用户取消）。
       failJob(job.id, 'RESOURCE_LEASE_LOST', message || '渲染期间 production_gpu lease 丢失');
@@ -591,7 +578,7 @@ async function runJob(
     recordCompute('failed');
     log(`job ${job.id} failed (attempt ${job.attempt}/${job.max_attempts}): ${message}`);
   } finally {
-    renderLeaseHeartbeat?.dispose();
+    // lease heartbeat 由 runRenderJob 统一管理（dispose 在其 finally）
   }
 }
 
@@ -605,6 +592,21 @@ async function runRenderJob(
   controller: AbortController,
   leaseMeta?: {group: 'production_gpu'; ownerToken: string},
 ): Promise<void> {
+  // M7.3A.3.1：lease heartbeat 从 claim 后、bundle 开始前启动，覆盖 bundle + render
+  // 全程（bundle 超过 lease TTL 不得丢失 lease）；lost → abort + 停止后续 render。
+  let renderLeaseLost = false;
+  let renderLeaseHeartbeat: ResourceLeaseHeartbeatHandle | null = null;
+  if (leaseMeta?.group === 'production_gpu') {
+    renderLeaseHeartbeat = createResourceLeaseHeartbeat({
+      group: 'production_gpu',
+      ownerToken: leaseMeta.ownerToken,
+      intervalMs: HEARTBEAT_INTERVAL_MS,
+      onLost: () => {
+        renderLeaseLost = true;
+        controller.abort();
+      },
+    });
+  }
   let bundleLocation: string;
   try {
     // M5：bundle 阶段写入步骤明细（首次打包可能数分钟，用户可见而非黑窗）
@@ -613,10 +615,16 @@ async function runRenderJob(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     failJob(job.id, 'BUNDLE_ERROR', message);
-    log(`render job ${job.id} bundle init failed: ${message}`);
     return;
+  } finally {
+    if (renderLeaseLost) {
+      // bundle 期间 lease 丢失：不得继续进入 renderMedia
+      failJob(job.id, 'RESOURCE_LEASE_LOST', 'bundle 期间 production_gpu lease 丢失，不进入 renderMedia');
+      log(`render job ${job.id} failed: RESOURCE_LEASE_LOST（bundle 阶段）`);
+      return;
+    }
   }
-  await runJob(job, bundleLocation, controller, leaseMeta);
+  await runJob(job, bundleLocation, controller, {lost: () => renderLeaseLost});
 }
 
 function sleep(ms: number): Promise<void> {
