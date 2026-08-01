@@ -21,6 +21,7 @@ import {
   type RequirementAuthenticity,
   type Scene,
 } from '../scene-schema';
+import {createHash} from 'node:crypto';
 
 export interface SceneAssetPlan {
   sceneId: string;
@@ -154,4 +155,46 @@ export function findRequirementInPlans(
   if (!plan) return null;
   const requirement = plan.requirements.find((r) => r.requirementId === requirementId);
   return requirement ? {plan, requirement} : null;
+}
+
+/**
+ * M7.3A.3：requirement 的冻结 snapshot（enqueue / fence / resolver 共用同一构造，
+ * 保证 hash 可比）。字段顺序固定 → JSON.stringify 结果 deterministic。
+ */
+export interface AssetRequirementSnapshot {
+  requirementId: string;
+  kind: string;
+  subject: unknown;
+  query: string;
+  usage: string;
+  policy: string;
+  authenticity: string;
+}
+
+export function buildRequirementSnapshot(req: IdentifiedRequirement): AssetRequirementSnapshot {
+  return {
+    requirementId: req.requirementId,
+    kind: req.kind,
+    subject: req.subject,
+    query: req.query,
+    usage: req.usage,
+    policy: req.policy,
+    authenticity: req.authenticity ?? 'synthetic_allowed',
+  };
+}
+
+/** 当前 scenes artifact 中 exact requirement 的 snapshot hash（无则 null）。 */
+export function currentRequirementSnapshotHash(
+  plans: SceneAssetPlan[],
+  sceneId: string,
+  requirementId: string,
+): string | null {
+  const found = findRequirementInPlans(plans, sceneId, requirementId);
+  if (!found) return null;
+  return computeRequirementSnapshotHash(JSON.stringify(buildRequirementSnapshot(found.requirement)));
+}
+
+/** requirement snapshot JSON 的确定性 hash（enqueue / fence / resolver 共用）。 */
+export function computeRequirementSnapshotHash(requirementJson: string): string {
+  return createHash('sha256').update(requirementJson).digest('hex').slice(0, 16);
 }

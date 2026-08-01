@@ -490,6 +490,20 @@ export function getDb(): Db {
   if (!agCols.some((c) => c.name === 'requirement_json')) {
     db.exec('ALTER TABLE asset_generation_jobs ADD COLUMN requirement_json TEXT');
   }
+  // M7.3A.3 additive columns（strict request idempotency + commit fence）
+  if (!agCols.some((c) => c.name === 'request_fingerprint')) {
+    db.exec('ALTER TABLE asset_generation_jobs ADD COLUMN request_fingerprint TEXT');
+  }
+  if (!agCols.some((c) => c.name === 'result_relevance')) {
+    // 'current' | 'stale' | NULL（历史行）；stale = 结果保留但来源已漂移/lease lost，
+    // 不作为当前 resolver candidate，不冒充当前成功
+    db.exec("ALTER TABLE asset_generation_jobs ADD COLUMN result_relevance TEXT");
+  }
+  // M7.3A.3：generated asset 的严格 provenance（source version/hash/job/requestId/relevance）
+  const assetCols = db.prepare('PRAGMA table_info(assets)').all() as Array<{name: string}>;
+  if (!assetCols.some((c) => c.name === 'provenance_json')) {
+    db.exec('ALTER TABLE assets ADD COLUMN provenance_json TEXT');
+  }
   instance = db;
   return db;
 }

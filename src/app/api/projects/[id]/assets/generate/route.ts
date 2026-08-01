@@ -12,10 +12,9 @@ import {
   AssetGenerationJobError,
   enqueueAssetGenerationJob,
   getAssetGenerationJobByRequestId,
-  listAssetGenerationJobs,
 } from '@/lib/assets/generation-jobs';
 import {getGeneratedImageProvider} from '@/lib/assets/providers/generated';
-import {findRequirementInPlans, loadLatestScenesPlans} from '@/lib/assets/requirements';
+import {findRequirementInPlans, loadLatestScenesPlans, buildRequirementSnapshot} from '@/lib/assets/requirements';
 import {getProject, jsonError} from '../../../../_lib/shared';
 
 export const runtime = 'nodejs';
@@ -102,15 +101,7 @@ export async function POST(
   const resourceGroup = isRemoteApi ? null : 'production_gpu';
 
   // 冻结 requirement snapshot（含 requirementId 等，供 candidate provenance）
-  const requirementSnapshot = {
-    requirementId: body.requirementId,
-    kind: requirement.kind,
-    subject: requirement.subject,
-    query: requirement.query,
-    usage: requirement.usage,
-    policy: requirement.policy,
-    authenticity: requirement.authenticity ?? 'synthetic_allowed',
-  };
+  const requirementSnapshot = buildRequirementSnapshot(requirement);
 
   // source scenes version（enqueue 时冻结，执行期校验是否仍为预期）
   const db = (await import('@/lib/db')).getDb();
@@ -147,7 +138,10 @@ export async function POST(
   } catch (err) {
     if (err instanceof AssetGenerationJobError) {
       return jsonError(
-        err.code === 'SCENE_OVERRIDDEN' ? 409 : err.code === 'REQUIREMENT_NOT_FOUND' ? 400 : 409,
+        err.code === 'SCENE_OVERRIDDEN' ? 409
+          : err.code === 'REQUIREMENT_NOT_FOUND' ? 400
+          : err.code === 'REQUEST_ID_CONFLICT' ? 409
+          : 409,
         err.code,
         {message: err.message},
       );
