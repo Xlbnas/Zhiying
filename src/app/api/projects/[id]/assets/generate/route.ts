@@ -14,7 +14,7 @@ import {
   getAssetGenerationJobByRequestId,
 } from '@/lib/assets/generation-jobs';
 import {getGeneratedImageProvider} from '@/lib/assets/providers/generated';
-import {findRequirementInPlans, loadLatestScenesPlans, buildRequirementSnapshot} from '@/lib/assets/requirements';
+import {findRequirementInPlans, loadActiveScenesSource, buildRequirementSnapshot} from '@/lib/assets/requirements';
 import {getProject, jsonError} from '../../../../_lib/shared';
 
 export const runtime = 'nodejs';
@@ -82,10 +82,10 @@ export async function POST(
     return jsonError(400, 'missing_request_id', {message: '需要 requestId（客户端生成并保留）'});
   }
 
-  // 目标 requirement 必须真实存在于 active scenes artifact（exact 查找）
-  const plans = loadLatestScenesPlans(id);
-  if (!plans) return jsonError(404, 'scenes_not_found', {message: '项目缺少 scenes artifact'});
-  const found = findRequirementInPlans(plans, body.sceneId, body.requirementId);
+  // 目标 requirement 必须真实存在于 active/selected scenes artifact（exact，fail-closed）
+  const source = loadActiveScenesSource(id);
+  if (!source) return jsonError(404, 'scenes_not_found', {message: '项目缺少 active scenes artifact'});
+  const found = findRequirementInPlans(source.plans, body.sceneId, body.requirementId);
   if (!found) {
     return jsonError(400, 'requirement_not_found', {
       message: `需求 ${body.requirementId} 不存在于场景 ${body.sceneId}`,
@@ -103,13 +103,9 @@ export async function POST(
   // 冻结 requirement snapshot（含 requirementId 等，供 candidate provenance）
   const requirementSnapshot = buildRequirementSnapshot(requirement);
 
-  // source scenes version（enqueue 时冻结，执行期校验是否仍为预期）
-  const db = (await import('@/lib/db')).getDb();
-  const scenesVer = db.prepare(
-    `SELECT version FROM project_versions
-     WHERE project_id = ? AND stage = 'scenes' ORDER BY version DESC LIMIT 1`,
-  ).get(id) as {version: number} | undefined;
-  const sourceScenesVersionId = String(scenesVer?.version ?? '0');
+  // M7.3A.3.1：冻结完整 provider 请求快照（Worker 执行时禁止从 env 重新推导）；
+  // source version 取 active_version（与 Fence A/B 同口径）
+  const sourceScenesVersionId = String(source.activeVersion);
 
   try {
     const result = enqueueAssetGenerationJob({
@@ -124,6 +120,9 @@ export async function POST(
       resourceGroup,
       sourceScenesVersionId,
       requirementSnapshot,
+      imageSize: process.env.APIYI_IMAGE_SIZE || '1K',
+      aspectRatio: process.env.APIYI_IMAGE_ASPECT_RATIO || '16:9',
+      providerConfigVersion: 'apiyi:1',
     });
 
     return Response.json(

@@ -211,17 +211,18 @@ async function main(): Promise<void> {
 
   // ============ E1：生成成功 → candidate_waiting → bind → ready ============
   {
+    const jobIdE1 = insertJob({
+      projectId, sceneId: 'S001', requirementId: reqR01, requestId: 'req-e1',
+      status: 'succeeded', resultAssetId: '__PENDING__', resultRelevance: 'current', sourceScenesVersionId: '1',
+    });
     const assetId = insertGeneratedAsset({
       projectId, sceneId: 'S001', requirementId: reqR01, query: 'red apple',
       provenance: {
         sourceScenesVersionId: '1', sourceRequirementHash: snapshotHash(reqR01, 'red apple'),
-        assetGenerationJobId: 'job-e1', requestId: 'req-e1', relevance: 'current', staleReason: null,
+        assetGenerationJobId: jobIdE1, requestId: 'req-e1', relevance: 'current', staleReason: null,
       },
     });
-    insertJob({
-      projectId, sceneId: 'S001', requirementId: reqR01, requestId: 'req-e1',
-      status: 'succeeded', resultAssetId: assetId, resultRelevance: 'current', sourceScenesVersionId: '1',
-    });
+    getDb().prepare(`UPDATE asset_generation_jobs SET result_asset_id=? WHERE id=?`).run(assetId, jobIdE1);
     const res = resolutionOf(projectId, 'S001', reqR01)!;
     ok(res.status === 'candidate_waiting', '[E1a] 未绑定候选 → candidate_waiting', res.status);
     ok(res.generatedCandidates.length === 1 && res.generatedCandidates[0]!.assetId === assetId, '[E1b] generatedCandidates 精确命中 candidate');

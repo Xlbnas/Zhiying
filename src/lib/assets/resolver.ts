@@ -30,6 +30,7 @@ import {
   buildRequirementSnapshot,
   buildSceneAssetPlan,
   computeRequirementSnapshotHash,
+  loadActiveScenesSource,
 } from './requirements';
 import {
   applyVisualOverrides,
@@ -548,13 +549,7 @@ export function buildProjectResolution(
  * 同口径（Fence A 以 active_version 为准）。
  */
 function currentScenesVersionNumber(projectId: string): string | null {
-  const stage = getDb()
-    .prepare("SELECT active_version, locked_version FROM project_stages WHERE project_id = ? AND stage = 'scenes'")
-    .get(projectId) as {active_version: number | null; locked_version: number | null} | undefined;
-  if (stage?.active_version != null) return String(stage.active_version);
-  if (stage?.locked_version != null) return String(stage.locked_version);
-  const latest = getDb()
-    .prepare("SELECT version FROM project_versions WHERE project_id = ? AND stage = 'scenes' ORDER BY version DESC LIMIT 1")
-    .get(projectId) as {version: number} | undefined;
-  return latest ? String(latest.version) : null;
+  // M7.3A.3.1：active/selected scenes version（exact，fail-closed；不做 latest fallback）
+  const source = loadActiveScenesSource(projectId);
+  return source ? String(source.activeVersion) : null;
 }

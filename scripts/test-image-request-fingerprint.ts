@@ -27,6 +27,9 @@ process.env.APIYI_IMAGE_MODEL = 'gemini-3.1-flash-image';
 import {closeDb, getDb} from '../src/lib/db';
 import {createProjectWithWorkflow} from '../src/lib/projects';
 import {generateVersion} from '../src/lib/workflow/operations';
+import {claimNextAnyJob} from '../src/lib/scheduler';
+import {releaseResourceLeaseForJob} from '../src/lib/resources/leases';
+import {runAssetGenerationJob} from '../src/worker/asset-generation-executor';
 
 let pass = 0;
 let fail = 0;
@@ -140,6 +143,7 @@ async function main(): Promise<void> {
     ).get(projectId, requestId) as {c: number}).c;
     ok(count === 1, '[F1c] 只产生一个 job');
     ok(providerCalls === 0, '[F1d] enqueue 阶段零 provider call');
+    getDb().prepare(`UPDATE asset_generation_jobs SET status='cancelled' WHERE project_id=?`).run(projectId);
   }
 
   // ============ F2：相同 requestId + 改变 prompt → 409 ============
@@ -156,6 +160,7 @@ async function main(): Promise<void> {
       `SELECT prompt FROM asset_generation_jobs WHERE project_id = ? AND request_id = ?`,
     ).get(projectId, requestId) as {prompt: string};
     ok(row.prompt === 'prompt A', '[F2c] 旧 job 不被修改');
+    getDb().prepare(`UPDATE asset_generation_jobs SET status='cancelled' WHERE project_id=?`).run(projectId);
   }
 
   // ============ F3：相同 requestId + 改变 model → 409 ============
@@ -169,6 +174,7 @@ async function main(): Promise<void> {
     const body = (await r2.json()) as {error?: string; message?: string};
     ok(r2.status === 409 && body.error === 'REQUEST_ID_CONFLICT', '[F3a] 改变 model → 409', body.message);
     process.env.APIYI_IMAGE_MODEL = 'gemini-3.1-flash-image';
+    getDb().prepare(`UPDATE asset_generation_jobs SET status='cancelled' WHERE project_id=?`).run(projectId);
   }
 
   // ============ F4：相同 requestId + 改变 scenes version → 409 ============
@@ -183,6 +189,7 @@ async function main(): Promise<void> {
     const body = (await r2.json()) as {error?: string; message?: string};
     ok(r2.status === 409 && body.error === 'REQUEST_ID_CONFLICT', '[F4a] 改变 scenes version → 409', body.message);
     ok(JSON.stringify(body.message ?? '').includes('sourceScenesVersionId'), '[F4b] 差异字段列出 sourceScenesVersionId');
+    getDb().prepare(`UPDATE asset_generation_jobs SET status='cancelled' WHERE project_id=?`).run(projectId);
   }
 
   // ============ F5：相同 requestId + 改变 requirement hash → 409 ============
@@ -196,6 +203,7 @@ async function main(): Promise<void> {
     const r2 = await postGenerate(projectId, requestId);
     const body = (await r2.json()) as {error?: string; message?: string};
     ok(r2.status === 409 && body.error === 'REQUEST_ID_CONFLICT', '[F5a] 改变 requirement hash → 409', body.message);
+    getDb().prepare(`UPDATE asset_generation_jobs SET status='cancelled' WHERE project_id=?`).run(projectId);
   }
 
   // ============ F6：空白/换行规范化后相同 → reuse ============
@@ -213,6 +221,7 @@ async function main(): Promise<void> {
       `SELECT COUNT(*) AS c FROM asset_generation_jobs WHERE project_id = ? AND request_id = ?`,
     ).get(projectId, requestId) as {c: number}).c;
     ok(count === 1, '[F6c] 仍只有一个 job');
+    getDb().prepare(`UPDATE asset_generation_jobs SET status='cancelled' WHERE project_id=?`).run(projectId);
   }
 
   // ============ F7：历史 job（无 fingerprint 列值）字段一致 → 兼容 reuse ============
@@ -238,6 +247,127 @@ async function main(): Promise<void> {
     const r2 = await postGenerate(projectId, requestId, 'totally different');
     const j2 = (await r2.json()) as {error?: string};
     ok(r2.status === 409 && j2.error === 'REQUEST_ID_CONFLICT', '[F7d] 历史无 fingerprint 行 + 字段不一致 → 409', j2);
+    getDb().prepare(`UPDATE asset_generation_jobs SET status='cancelled' WHERE project_id=?`).run(projectId);
+  }
+
+  // ============ F8：相同 requestId + 改变 imageSize → 409 ============
+  {
+    const projectId = createProjectWithWorkflow({topic: 'fp-8', coreQuestion: 'q'}).project.id;
+    seedProject(projectId);
+    const requestId = 'fp-8-001';
+    await postGenerate(projectId, requestId);
+    process.env.APIYI_IMAGE_SIZE = '2K';
+    const r2 = await postGenerate(projectId, requestId);
+    const body = (await r2.json()) as {error?: string; message?: string};
+    ok(r2.status === 409 && body.error === 'REQUEST_ID_CONFLICT', '[F8a] 改变 imageSize → 409', body.message);
+    process.env.APIYI_IMAGE_SIZE = '1K';
+    // 终态化本块 job，避免污染后续 FIFO claim
+    getDb().prepare(`UPDATE asset_generation_jobs SET status='cancelled' WHERE project_id=?`).run(projectId);
+  }
+
+  // ============ F9：相同 requestId + 改变 aspectRatio → 409 ============
+  {
+    const projectId = createProjectWithWorkflow({topic: 'fp-9', coreQuestion: 'q'}).project.id;
+    seedProject(projectId);
+    const requestId = 'fp-9-001';
+    await postGenerate(projectId, requestId);
+    process.env.APIYI_IMAGE_ASPECT_RATIO = '4:3';
+    const r2 = await postGenerate(projectId, requestId);
+    const body = (await r2.json()) as {error?: string; message?: string};
+    ok(r2.status === 409 && body.error === 'REQUEST_ID_CONFLICT', '[F9a] 改变 aspectRatio → 409', body.message);
+    process.env.APIYI_IMAGE_ASPECT_RATIO = '16:9';
+    getDb().prepare(`UPDATE asset_generation_jobs SET status='cancelled' WHERE project_id=?`).run(projectId);
+  }
+
+  // ============ F10：enqueue 后修改 env，Worker 仍使用 job 冻结快照 ============
+  {
+    const projectId = createProjectWithWorkflow({topic: 'fp-10', coreQuestion: 'q'}).project.id;
+    seedProject(projectId);
+    const requestId = 'fp-10-001';
+    await postGenerate(projectId, requestId);
+    // 执行前修改 env（模拟运行时配置漂移）
+    process.env.APIYI_IMAGE_SIZE = '2K';
+    process.env.APIYI_IMAGE_ASPECT_RATIO = '4:3';
+
+    let capturedSize: string | undefined;
+    let capturedRatio: string | undefined;
+    provider.generate = async (input) => {
+      capturedSize = input.size;
+      capturedRatio = input.aspectRatio;
+      providerCalls++;
+      return [{
+        candidateId: 'mock-f10',
+        mimeType: 'image/png',
+        data: Buffer.from('fake-png-data', 'utf8'),
+        width: 1920,
+        height: 1080,
+        provider: provider.name,
+        model: 'mock',
+        prompt: 'x',
+        metadata: {providerRequestId: 'req-f10-provider'},
+      }];
+    };
+
+    const claimed = claimNextAnyJob('worker-f10');
+    if (!claimed || claimed.type !== 'asset_generation') throw new Error('F10: claim 失败');
+    try {
+      await runAssetGenerationJob(claimed.job, {
+        isShuttingDown: () => false,
+        log: () => {},
+        shutdownSignal: new AbortController().signal,
+      }, claimed.resourceLease
+        ? {group: claimed.resourceLease.group, ownerToken: claimed.resourceLease.ownerToken}
+        : undefined);
+    } finally {
+      if (claimed.resourceLease) {
+        releaseResourceLeaseForJob('production_gpu', 'asset_generation', claimed.job.id);
+      }
+    }
+    ok(capturedSize === '1K' && capturedRatio === '16:9', '[F10a] Worker 使用 job 冻结快照（1K/16:9），不读运行时 env', {capturedSize, capturedRatio});
+
+    const usage = getDb().prepare(`SELECT metadata FROM project_usage_events WHERE id = ?`).get(requestId) as {metadata: string} | undefined;
+    const meta = usage ? (JSON.parse(usage.metadata) as {requestedSize?: string; aspectRatio?: string}) : {};
+    ok(meta.requestedSize === '1K' && meta.aspectRatio === '16:9', '[F10b] usage metadata 与 job 快照一致', meta);
+    process.env.APIYI_IMAGE_SIZE = '1K';
+    process.env.APIYI_IMAGE_ASPECT_RATIO = '16:9';
+  }
+
+  // ============ F11：provider mismatch → CONFIG_ERROR，零 provider call ============
+  {
+    const projectId = createProjectWithWorkflow({topic: 'fp-11', coreQuestion: 'q'}).project.id;
+    seedProject(projectId);
+    // 直接插一个 provider='comfyui' 的 job（本地 provider 语义）
+    const jobId = crypto.randomUUID();
+    getDb().prepare(
+      `INSERT INTO asset_generation_jobs (
+         id, project_id, scene_id, requirement_id, request_id, prompt, provider, model,
+         resource_class, resource_group, source_scenes_version_id, source_requirement_hash,
+         requirement_json, request_fingerprint, status,
+         image_size, aspect_ratio, provider_config_version, created_at, updated_at
+       ) VALUES (?, ?, 'S001', 'S001-R01', 'req-f11-001', 'p', 'comfyui', 'sd3',
+         'local_image_gpu', 'production_gpu', '1', 'aaaa000000000001', '{}', 'fp',
+         'queued', '1K', '16:9', 'local:1', ?, ?)`,
+    ).run(jobId, projectId, new Date().toISOString(), new Date().toISOString());
+
+    const before = providerCalls;
+    const claimed = claimNextAnyJob('worker-f11');
+    if (!claimed || claimed.type !== 'asset_generation') throw new Error('F11: claim 失败');
+    try {
+      await runAssetGenerationJob(claimed.job, {
+        isShuttingDown: () => false,
+        log: () => {},
+        shutdownSignal: new AbortController().signal,
+      }, claimed.resourceLease
+        ? {group: claimed.resourceLease.group, ownerToken: claimed.resourceLease.ownerToken}
+        : undefined);
+    } finally {
+      if (claimed.resourceLease) {
+        releaseResourceLeaseForJob('production_gpu', 'asset_generation', claimed.job.id);
+      }
+    }
+    ok(providerCalls === before, '[F11a] provider mismatch → 零 provider call');
+    const job = getDb().prepare(`SELECT status, failure_phase FROM asset_generation_jobs WHERE id=?`).get(jobId) as {status: string; failure_phase: string | null};
+    ok(job.status === 'failed' && job.failure_phase === 'CONFIG_ERROR', '[F11b] provider mismatch → failed + CONFIG_ERROR', job);
   }
 
   // 清理

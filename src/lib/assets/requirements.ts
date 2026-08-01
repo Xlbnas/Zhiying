@@ -143,6 +143,44 @@ export function loadLatestScenesPlans(projectId: string): SceneAssetPlan[] | nul
 }
 
 /**
+ * M7.3A.3.1：加载 active/selected scenes source（exact，fail-closed）。
+ * 必须通过 project_stages.active_version JOIN project_versions 精确读取；
+ * 任何缺失（无 active_version / version 行缺失 / content 不可解析）→ null，
+ * 调用方必须拒绝，禁止自动 fallback 到 MAX(version)。
+ * 用于：generate enqueue、Fence A/B、bind gate、resolver current version。
+ */
+export interface ActiveScenesSource {
+  activeVersion: number;
+  versionRowId: string;
+  content: string;
+  plans: SceneAssetPlan[];
+}
+
+export function loadActiveScenesSource(projectId: string): ActiveScenesSource | null {
+  const stage = getDb()
+    .prepare("SELECT active_version FROM project_stages WHERE project_id = ? AND stage = 'scenes'")
+    .get(projectId) as {active_version: number | null} | undefined;
+  if (!stage || stage.active_version == null) return null;
+  const row = getDb()
+    .prepare(
+      `SELECT id, content FROM project_versions
+       WHERE project_id = ? AND stage = 'scenes' AND version = ?`,
+    )
+    .get(projectId, stage.active_version) as {id: string; content: string} | undefined;
+  if (!row?.content) return null;
+  try {
+    return {
+      activeVersion: stage.active_version,
+      versionRowId: row.id,
+      content: row.content,
+      plans: compileAssetPlans(row.content),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 在 scenes artifact 中精确定位一个 requirement（exact sceneId + requirementId）。
  * 找不到返回 null —— 调用方必须拒绝（禁止回退到位置/猜测匹配）。
  */

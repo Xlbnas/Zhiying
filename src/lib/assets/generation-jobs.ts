@@ -13,7 +13,7 @@ import {
   buildRequirementSnapshot,
   computeRequirementSnapshotHash,
   findRequirementInPlans,
-  loadLatestScenesPlans,
+  loadActiveScenesSource,
   type AssetRequirementSnapshot,
 } from './requirements';
 import {isSceneVisuallyOverridden} from '../scenes/visual-overrides';
@@ -51,6 +51,9 @@ export interface AssetGenerationJobRow {
   request_fingerprint: string | null;
   status: AssetGenerationJobStatus;
   result_relevance: 'current' | 'stale' | null;
+  image_size: string | null;
+  aspect_ratio: string | null;
+  provider_config_version: string | null;
   owner_token: string | null;
   lease_expires_at: string | null;
   provider_request_id: string | null;
@@ -77,6 +80,10 @@ export interface EnqueueAssetGenerationInput {
   resourceGroup: string | null;
   sourceScenesVersionId: string;
   requirementSnapshot: AssetRequirementSnapshot;
+  /** M7.3A.3.1：enqueue 时冻结的完整 provider 请求参数（Worker 不得从 env 重新推导）。 */
+  imageSize: string;
+  aspectRatio: string;
+  providerConfigVersion: string;
 }
 
 export interface EnqueueAssetGenerationResult {
@@ -93,6 +100,10 @@ export interface ClaimAssetGenerationResult {
 }
 
 const DEFAULT_LEASE_MS = 10 * 60 * 1000;
+
+/** 历史 job 缺失快照时的确定性默认值（Worker 不得从 env 重新推导已入队参数）。 */
+export const DEFAULT_IMAGE_SIZE = '1K';
+export const DEFAULT_ASPECT_RATIO = '16:9';
 
 function now(): string {
   return new Date().toISOString();
@@ -118,7 +129,8 @@ export function normalizeGenerationPrompt(prompt: string): string {
 /**
  * M7.3A.3：strict request fingerprint —— 相同 requestId 只代表完全相同的逻辑请求。
  * 覆盖 projectId/sceneId/requirementId/normalizedPrompt/provider/model/resourceClass/
- * sourceScenesVersionId/sourceRequirementHash；任一字段不同 → fingerprint 不同。
+ * sourceScenesVersionId/sourceRequirementHash/imageSize/aspectRatio/resourceGroup；
+ * 任一字段不同 → fingerprint 不同。
  */
 export function computeRequestFingerprint(input: {
   projectId: string;
@@ -130,6 +142,9 @@ export function computeRequestFingerprint(input: {
   resourceClass: string;
   sourceScenesVersionId: string;
   sourceRequirementHash: string;
+  imageSize: string;
+  aspectRatio: string;
+  resourceGroup: string | null;
 }): string {
   const payload = JSON.stringify({
     projectId: input.projectId,
@@ -141,8 +156,17 @@ export function computeRequestFingerprint(input: {
     resourceClass: input.resourceClass,
     sourceScenesVersionId: input.sourceScenesVersionId,
     sourceRequirementHash: input.sourceRequirementHash,
+    imageSize: input.imageSize,
+    aspectRatio: input.aspectRatio,
+    resourceGroup: input.resourceGroup ?? '',
   });
   return crypto.createHash('sha256').update(payload).digest('hex');
+}
+
+export function getAssetGenerationJobById(id: string): AssetGenerationJobRow | undefined {
+  return getDb()
+    .prepare('SELECT * FROM asset_generation_jobs WHERE id = ?')
+    .get(id) as AssetGenerationJobRow | undefined;
 }
 
 function getById(id: string): AssetGenerationJobRow | undefined {
@@ -221,12 +245,12 @@ export function enqueueAssetGenerationJob(
 ): EnqueueAssetGenerationResult {
   const db = getDb();
   const tx = db.transaction((): EnqueueAssetGenerationResult => {
-    // exact requirement 校验
-    const plans = loadLatestScenesPlans(input.projectId);
-    if (!plans) {
-      throw new AssetGenerationJobError('SCENES_NOT_FOUND', '项目缺少 scenes artifact');
+    // exact requirement 校验：active/selected scenes source（fail-closed，禁止 latest fallback）
+    const source = loadActiveScenesSource(input.projectId);
+    if (!source) {
+      throw new AssetGenerationJobError('SCENES_NOT_FOUND', '项目缺少 active scenes artifact');
     }
-    const found = findRequirementInPlans(plans, input.sceneId, input.requirementId);
+    const found = findRequirementInPlans(source.plans, input.sceneId, input.requirementId);
     if (!found) {
       throw new AssetGenerationJobError(
         'REQUIREMENT_NOT_FOUND',
@@ -244,7 +268,7 @@ export function enqueueAssetGenerationJob(
     const requirementJson = JSON.stringify(input.requirementSnapshot);
     const sourceHash = computeRequirementSnapshotHash(requirementJson);
 
-    // M7.3A.3：strict request fingerprint
+    // M7.3A.3：strict request fingerprint（M7.3A.3.1：含 imageSize/aspectRatio/resourceGroup）
     const normalizedPrompt = normalizeGenerationPrompt(input.prompt);
     const fingerprint = computeRequestFingerprint({
       projectId: input.projectId,
@@ -256,6 +280,9 @@ export function enqueueAssetGenerationJob(
       resourceClass: input.resourceClass,
       sourceScenesVersionId: input.sourceScenesVersionId,
       sourceRequirementHash: sourceHash,
+      imageSize: input.imageSize,
+      aspectRatio: input.aspectRatio,
+      resourceGroup: input.resourceGroup,
     });
 
     const id = crypto.randomUUID();
@@ -267,12 +294,15 @@ export function enqueueAssetGenerationJob(
          resource_class, resource_group,
          source_scenes_version_id, source_requirement_hash, requirement_json,
          request_fingerprint,
+         image_size, aspect_ratio, provider_config_version,
          status,
+         result_relevance,
          owner_token, lease_expires_at,
          provider_request_id, result_asset_id,
          error_code, error_message, failure_phase, billing_status,
          created_at, started_at, finished_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued',
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued',
+         NULL,
          NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
          ?, NULL, NULL, ?)
        ON CONFLICT(project_id, scene_id, requirement_id, request_id) DO NOTHING`,
@@ -291,6 +321,9 @@ export function enqueueAssetGenerationJob(
       sourceHash,
       requirementJson,
       fingerprint,
+      input.imageSize,
+      input.aspectRatio,
+      input.providerConfigVersion,
       at,
       at,
     );
@@ -317,6 +350,9 @@ export function enqueueAssetGenerationJob(
         resourceClass: row.resource_class,
         sourceScenesVersionId: row.source_scenes_version_id ?? '',
         sourceRequirementHash: row.source_requirement_hash ?? '',
+        imageSize: row.image_size ?? DEFAULT_IMAGE_SIZE,
+        aspectRatio: row.aspect_ratio ?? DEFAULT_ASPECT_RATIO,
+        resourceGroup: row.resource_group,
       });
       if (existingFingerprint === fingerprint) {
         // fingerprint 一致 → reused；旧行缺失 fingerprint 时确定性回填（幂等）
@@ -339,6 +375,9 @@ export function enqueueAssetGenerationJob(
         resourceClass: input.resourceClass,
         sourceScenesVersionId: input.sourceScenesVersionId,
         sourceRequirementHash: sourceHash,
+        imageSize: input.imageSize,
+        aspectRatio: input.aspectRatio,
+        resourceGroup: input.resourceGroup,
       });
       throw new AssetGenerationJobError(
         'REQUEST_ID_CONFLICT',
@@ -365,6 +404,9 @@ function describeRequestDiff(
     resourceClass: string;
     sourceScenesVersionId: string;
     sourceRequirementHash: string;
+    imageSize: string;
+    aspectRatio: string;
+    resourceGroup: string | null;
   },
 ): string[] {
   const diffs: string[] = [];
@@ -374,6 +416,9 @@ function describeRequestDiff(
   if (existing.resource_class !== input.resourceClass) diffs.push('resourceClass');
   if ((existing.source_scenes_version_id ?? '') !== input.sourceScenesVersionId) diffs.push('sourceScenesVersionId');
   if ((existing.source_requirement_hash ?? '') !== input.sourceRequirementHash) diffs.push('sourceRequirementHash');
+  if ((existing.image_size ?? DEFAULT_IMAGE_SIZE) !== input.imageSize) diffs.push('imageSize');
+  if ((existing.aspect_ratio ?? DEFAULT_ASPECT_RATIO) !== input.aspectRatio) diffs.push('aspectRatio');
+  if ((existing.resource_group ?? '') !== (input.resourceGroup ?? '')) diffs.push('resourceGroup');
   return diffs;
 }
 

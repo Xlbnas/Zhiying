@@ -1,19 +1,19 @@
 /**
- * Asset Generation Job Executor（M7.3A.2 + M7.3A.3）。
+ * Asset Generation Job Executor（M7.3A.2 + M7.3A.3 + M7.3A.3.1）。
  *
  * Worker 通过 scheduler 原子 claim asset_generation_job → 获取 resource lease →
- * Fence A（provider 前校验 source）→ 调用图像 provider → Fence B（provider 返回后
- * 再次校验 source + lease）→ 持久化 candidate（含 requirement provenance）→
+ * Fence A（provider 前校验 active source）→ 调用 provider（job 冻结快照参数，
+ * provider.name 必须匹配）→ 写临时文件 + rename append-only → 原子 commit
+ * （commitGeneratedAssetResultTx：Fence B 判定 + asset 落库 + job 终态同一事务）→
  * 记录 usage → 终态。任何终态或 shutdown 均由 job-runner finally 释放 lease。
  *
- * M7.3A.3 语义：
- * - Fence A：active/selected scenes version + exact requirement hash 与 job 冻结
- *   快照不一致 → SOURCE_STALE（confirmed_zero，provider calls=0）。
- * - Fence B：生成期间 source 漂移或 production_gpu lease 丢失 → 结果仍 append-only
- *   保存为 historical asset（relevance=stale，含完整 provenance），不冒充当前成功；
- *   不清除当前 requirement 的失败/readiness 状态；不自动重试；不自动重新计费调用。
- * - Executor 不执行 normal lease release（scheduler 唯一 claim，job-runner finally
- *   唯一 normal release）；只接收 lease-lost 信号并 fail-closed。
+ * M7.3A.3.1 语义：
+ * - Fence A 与 Fence B 使用 loadActiveScenesSource（exact active_version，fail-closed，
+ *   禁止 latest fallback）。
+ * - Fence B 判定在 commit 事务内完成（无 TOCTOU 窗口）；事务失败 → 删除本轮新文件，
+ *   不删除任何已落库历史 asset。
+ * - Worker 执行时从 job 快照读取 imageSize/aspectRatio（禁止从 env 重新推导）；
+ *   provider.name !== job.provider → CONFIG_ERROR（零 provider call）。
  */
 
 import crypto from 'node:crypto';
@@ -22,29 +22,29 @@ import path from 'node:path';
 import {
   completeAssetGenerationFailed,
   completeAssetGenerationIndeterminate,
-  completeAssetGenerationSucceeded,
+  DEFAULT_ASPECT_RATIO,
+  DEFAULT_IMAGE_SIZE,
   heartbeatAssetGenerationJob,
   requeueAssetGenerationJob,
   type AssetGenerationJobRow,
 } from '@/lib/assets/generation-jobs';
-import {insertAsset, type AssetProvenance} from '@/lib/assets/model';
+import {commitGeneratedAssetResultTx} from '@/lib/assets/commit';
 import {
   getGeneratedImageProvider,
   ImageGenerationError,
   type GeneratedImageCandidate,
 } from '@/lib/assets/providers/generated';
-import {clearResolutionState, upsertResolutionState} from '@/lib/assets/model';
+import {upsertResolutionState} from '@/lib/assets/model';
 import {
   buildRequirementSnapshot,
   computeRequirementSnapshotHash,
   findRequirementInPlans,
-  loadLatestScenesPlans,
+  loadActiveScenesSource,
 } from '@/lib/assets/requirements';
 import {createResourceLeaseHeartbeat, type ResourceLeaseHeartbeatHandle} from '@/lib/resources/lease-heartbeat';
 import {getResourceLeaseMs} from '@/lib/resources/leases';
 import {finalizeImageGenerationUsage, recordImageGenerationUsage} from '@/lib/usage-events';
 import type {JobRunnerContext} from './job-runner';
-import {getDb} from '@/lib/db';
 
 const HEARTBEAT_INTERVAL_MS = getAssetHeartbeatMs();
 
@@ -61,25 +61,6 @@ export interface AssetGenerationJobLease {
   ownerToken: string;
 }
 
-/** 当前 scenes artifact 中该 requirement 的冻结快照 hash（无 artifact/requirement 返回 null）。 */
-function currentSourceFingerprint(
-  job: AssetGenerationJobRow,
-): {versionId: string | null; requirementHash: string | null} {
-  const plans = loadLatestScenesPlans(job.project_id);
-  if (!plans) return {versionId: null, requirementHash: null};
-  const found = findRequirementInPlans(plans, job.scene_id, job.requirement_id);
-  if (!found) return {versionId: null, requirementHash: null};
-  const hash = computeRequirementSnapshotHash(JSON.stringify(buildRequirementSnapshot(found.requirement)));
-  const versionId = getDb().prepare(
-    `SELECT version FROM project_versions
-     WHERE project_id = ? AND stage = 'scenes' ORDER BY version DESC LIMIT 1`,
-  ).get(job.project_id) as {version: number} | undefined;
-  return {
-    versionId: versionId ? String(versionId.version) : null,
-    requirementHash: hash,
-  };
-}
-
 export async function runAssetGenerationJob(
   job: AssetGenerationJobRow,
   ctx: JobRunnerContext,
@@ -87,7 +68,7 @@ export async function runAssetGenerationJob(
 ): Promise<void> {
   const {log, isShuttingDown} = ctx;
 
-  // 统一 lease heartbeat：lease 丢失 → 标记 lost（Fence B 拒绝 current commit）。
+  // 统一 lease heartbeat：lease 丢失 → 标记 lost（commit 判定 stale(lease_lost)）。
   // job 级 heartbeat 单独维护（asset_generation_jobs 的 owner_token 租约）。
   let leaseHeartbeat: ResourceLeaseHeartbeatHandle | null = null;
   if (resourceLease?.group === 'production_gpu') {
@@ -113,52 +94,30 @@ export async function runAssetGenerationJob(
     clearInterval(jobHeartbeatTimer);
   };
 
-  // Fence A：provider 调用前 —— scenes version + exact requirement hash 必须与
-  // enqueue 冻结快照一致；不一致 → SOURCE_STALE（confirmed_zero，零 provider call）。
+  // Fence A：provider 调用前 —— active scenes version + exact requirement hash 必须
+  // 与 enqueue 冻结快照一致（loadActiveScenesSource，fail-closed）。
   const fenceA = (): {ok: boolean; reason?: string} => {
-    if (job.source_scenes_version_id) {
-      const current = getDb().prepare(
-        `SELECT s.active_version AS latest_version
-         FROM projects p
-         JOIN project_stages s ON s.project_id = p.id AND s.stage = 'scenes'
-         WHERE p.id = ?`,
-      ).get(job.project_id) as {latest_version: number | null} | undefined;
-      if (current?.latest_version != null) {
-        const expectedVersion = Number.parseInt(job.source_scenes_version_id, 10);
-        if (!Number.isNaN(expectedVersion) && current.latest_version !== expectedVersion) {
-          return {ok: false, reason: `scenes version 变为 ${current.latest_version}，预期 ${expectedVersion}`};
-        }
-      }
+    const source = loadActiveScenesSource(job.project_id);
+    if (!source) {
+      return {ok: false, reason: 'active scenes source 不可用'};
+    }
+    if (job.source_scenes_version_id && String(source.activeVersion) !== job.source_scenes_version_id) {
+      return {ok: false, reason: `scenes version 变为 ${source.activeVersion}，预期 ${job.source_scenes_version_id}`};
+    }
+    const found = findRequirementInPlans(source.plans, job.scene_id, job.requirement_id);
+    if (!found) {
+      return {ok: false, reason: `requirement ${job.requirement_id} 不在当前 scenes`};
     }
     if (job.source_requirement_hash) {
-      const {requirementHash} = currentSourceFingerprint(job);
-      if (requirementHash !== null && requirementHash !== job.source_requirement_hash) {
+      const hash = computeRequirementSnapshotHash(JSON.stringify(buildRequirementSnapshot(found.requirement)));
+      if (hash !== job.source_requirement_hash) {
         return {ok: false, reason: 'exact requirement hash 已变化'};
       }
     }
     return {ok: true};
   };
 
-  // Fence B：provider 返回后 —— source 漂移或 lease lost → relevance=stale。
-  const fenceB = (): {relevance: 'current' | 'stale'; reason: string | null} => {
-    if (leaseLost()) {
-      return {relevance: 'stale', reason: 'lease_lost'};
-    }
-    const {versionId, requirementHash} = currentSourceFingerprint(job);
-    if (job.source_scenes_version_id && versionId !== null && versionId !== job.source_scenes_version_id) {
-      return {relevance: 'stale', reason: 'source_drift'};
-    }
-    if (job.source_requirement_hash && requirementHash !== null && requirementHash !== job.source_requirement_hash) {
-      return {relevance: 'stale', reason: 'source_drift'};
-    }
-    return {relevance: 'current', reason: null};
-  };
-
-  const finishStale = (reason: string): void => {
-    // 结果有效但来源已漂移/lease lost：job 保持 succeeded + result_relevance=stale；
-    // 不写 failure state（不是失败），不清除当前 requirement 的失败/readiness 状态。
-    log(`asset job ${job.id}: 结果保留为历史（${reason}），不作为当前 candidate`);
-  };
+  let committedFile: string | null = null;
 
   try {
     if (isShuttingDown()) {
@@ -187,6 +146,29 @@ export async function runAssetGenerationJob(
       return;
     }
 
+    // M7.3A.3.1：provider 身份必须与 job 冻结快照一致（不允许 queued remote job
+    // 被 local provider 执行而绕过 GPU lease）；不匹配 → CONFIG_ERROR，零调用。
+    if (provider.name !== job.provider) {
+      completeAssetGenerationFailed(job.id, job.owner_token!, {
+        errorCode: 'CONFIG_ERROR',
+        errorMessage: `job.provider=${job.provider} 与当前 provider=${provider.name} 不匹配，拒绝执行`,
+        failurePhase: 'CONFIG_ERROR',
+        billingStatus: 'confirmed_zero',
+      });
+      upsertResolutionState({
+        projectId: job.project_id,
+        sceneId: job.scene_id,
+        requirementId: job.requirement_id,
+        status: 'generation_failed',
+        reason: `provider 不匹配（job=${job.provider}，当前=${provider.name}）`,
+        provider: provider.name,
+        metadata: {requestId: job.request_id, failurePhase: 'CONFIG_ERROR'},
+      });
+      log(`asset job ${job.id}: provider 不匹配，零 provider call`);
+      cleanup();
+      return;
+    }
+
     // Fence A（provider 前）
     const before = fenceA();
     if (!before.ok) {
@@ -210,13 +192,18 @@ export async function runAssetGenerationJob(
       return;
     }
 
-    // 记录 in-flight usage event（幂等键 = job.request_id）
+    // 记录 in-flight usage event（幂等键 = job.request_id；参数取 job 快照）
     recordImageGenerationUsageInFlight(job);
 
-    // 生成期间周期性心跳（lease + job），防止执行超过 lease TTL 时被其他 worker 抢占
+    // 调用 provider：参数全部来自 job 冻结快照（禁止从 env 重新推导）
     let candidates: GeneratedImageCandidate[];
     try {
-      candidates = await provider.generate({prompt: job.prompt, model: job.model});
+      candidates = await provider.generate({
+        prompt: job.prompt,
+        model: job.model,
+        size: job.image_size ?? DEFAULT_IMAGE_SIZE,
+        aspectRatio: job.aspect_ratio ?? DEFAULT_ASPECT_RATIO,
+      });
     } catch (err) {
       cleanup();
       throw err;
@@ -248,63 +235,64 @@ export async function runAssetGenerationJob(
     const providerRequestId = typeof firstMeta.providerRequestId === 'string' ? firstMeta.providerRequestId : undefined;
     const elapsedMs = Date.now() - startAtMs;
 
-    // 费用已真实发生：先 finalize usage event，再持久化 candidate
+    // 费用已真实发生：先 finalize usage event（job 快照参数）
     recordImageGenerationUsageFinal(job, candidates.length, 'confirmed_charged', undefined, providerRequestId);
 
-    // Fence B（provider 返回后、写 current candidate 前）
-    const after = fenceB();
-
+    // 写临时文件 → rename 到 append-only 最终路径（文件写入在事务外；
+    // 事务失败时由本函数删除本轮新文件，不删除任何历史 asset）
     const assetId = crypto.randomUUID();
     const ext = first.mimeType === 'image/png' ? 'png' : first.mimeType === 'image/webp' ? 'webp' : 'jpg';
     const relPath = path.posix.join('assets', job.project_id, `${assetId}.${ext}`);
     const publicDir = path.join(process.cwd(), 'public');
     const absPath = path.join(publicDir, relPath);
-
     fs.mkdirSync(path.dirname(absPath), {recursive: true});
     const tmpPath = absPath + '.tmp';
-    fs.writeFileSync(tmpPath, first.data);
-    fs.renameSync(tmpPath, absPath);
+    try {
+      fs.writeFileSync(tmpPath, first.data);
+      fs.renameSync(tmpPath, absPath);
+    } catch (err) {
+      fs.rmSync(tmpPath, {force: true});
+      throw err;
+    }
+    committedFile = absPath;
 
-    const requirement = job.requirement_json
-      ? (JSON.parse(job.requirement_json) as Record<string, unknown>) as Parameters<typeof insertAsset>[0]['requirement']
-      : undefined;
-    const provenance: AssetProvenance = {
-      sourceScenesVersionId: job.source_scenes_version_id,
-      sourceRequirementHash: job.source_requirement_hash,
-      assetGenerationJobId: job.id,
-      requestId: job.request_id,
-      relevance: after.relevance,
-      staleReason: after.reason,
-    };
-
-    const row = insertAsset({
+    // Fence B + current commit：单事务（无 TOCTOU 窗口）
+    const result = commitGeneratedAssetResultTx({
       projectId: job.project_id,
       sceneId: job.scene_id,
-      mediaType: 'image',
-      sourceType: 'generated',
-      sourceProvider: first.provider,
-      sourceUrl: null,
+      requirementId: job.requirement_id,
+      jobId: job.id,
+      ownerToken: job.owner_token!,
+      assetId,
       localPath: relPath,
+      providerRequestId,
+      provider: first.provider,
+      model: first.model,
       mimeType: first.mimeType,
       width: first.width ?? null,
       height: first.height ?? null,
-      licenseStatus: 'generated',
       licenseNote: `AI 生成 · ${first.model} (待确认)`,
       attribution: `API易 / ${first.model}`,
       description: first.prompt.slice(0, 200),
-      requirement,
-      provenance,
+      requirementJson: job.requirement_json,
+      sourceScenesVersionId: job.source_scenes_version_id,
+      sourceRequirementHash: job.source_requirement_hash,
+      requestId: job.request_id,
+      leaseLost: leaseLost(),
     });
+    committedFile = null; // 已落库，文件归资产所有
 
-    if (after.relevance === 'current') {
-      clearResolutionState(job.project_id, job.scene_id, job.requirement_id);
+    if (result.relevance === 'current') {
+      log(`asset job ${job.id} succeeded（relevance=current）→ asset ${result.assetId}`);
     } else {
-      finishStale(after.reason ?? 'stale');
+      log(`asset job ${job.id} succeeded（relevance=stale: ${result.staleReason}）→ 历史 asset ${result.assetId}`);
     }
-
-    completeAssetGenerationSucceeded(job.id, job.owner_token!, row.id, providerRequestId, after.relevance);
-    log(`asset job ${job.id} succeeded（relevance=${after.relevance}）→ asset ${row.id}`);
   } catch (err) {
+    // 本轮新文件尚未落库（commit 失败/中断）→ 删除；已落库历史 asset 绝不动
+    if (committedFile) {
+      fs.rmSync(committedFile, {force: true});
+      committedFile = null;
+    }
     const elapsedMs = Date.now() - startAtMs;
     const msg = err instanceof Error ? err.message : '图像生成失败';
 
@@ -382,8 +370,8 @@ function recordImageGenerationUsageInFlight(job: AssetGenerationJobRow): void {
     requirementId: job.requirement_id,
     provider: job.provider,
     model: job.model,
-    requestedSize: process.env.APIYI_IMAGE_SIZE || '1K',
-    aspectRatio: process.env.APIYI_IMAGE_ASPECT_RATIO || '16:9',
+    requestedSize: job.image_size ?? DEFAULT_IMAGE_SIZE,
+    aspectRatio: job.aspect_ratio ?? DEFAULT_ASPECT_RATIO,
     imageCount: 0,
     status: 'in_flight',
   });
@@ -404,8 +392,8 @@ function recordImageGenerationUsageFinal(
     requirementId: job.requirement_id,
     provider: job.provider,
     model: job.model,
-    requestedSize: process.env.APIYI_IMAGE_SIZE || '1K',
-    aspectRatio: process.env.APIYI_IMAGE_ASPECT_RATIO || '16:9',
+    requestedSize: job.image_size ?? DEFAULT_IMAGE_SIZE,
+    aspectRatio: job.aspect_ratio ?? DEFAULT_ASPECT_RATIO,
     imageCount,
     status,
     providerRequestId,

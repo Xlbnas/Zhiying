@@ -499,6 +499,16 @@ export function getDb(): Db {
     // 不作为当前 resolver candidate，不冒充当前成功
     db.exec("ALTER TABLE asset_generation_jobs ADD COLUMN result_relevance TEXT");
   }
+  // M7.3A.3.1：完整 provider 请求快照（Worker 执行时禁止从 env 重新推导）
+  if (!agCols.some((c) => c.name === 'image_size')) {
+    db.exec('ALTER TABLE asset_generation_jobs ADD COLUMN image_size TEXT');
+  }
+  if (!agCols.some((c) => c.name === 'aspect_ratio')) {
+    db.exec('ALTER TABLE asset_generation_jobs ADD COLUMN aspect_ratio TEXT');
+  }
+  if (!agCols.some((c) => c.name === 'provider_config_version')) {
+    db.exec('ALTER TABLE asset_generation_jobs ADD COLUMN provider_config_version TEXT');
+  }
   // M7.3A.3：generated asset 的严格 provenance（source version/hash/job/requestId/relevance）
   const assetCols = db.prepare('PRAGMA table_info(assets)').all() as Array<{name: string}>;
   if (!assetCols.some((c) => c.name === 'provenance_json')) {
