@@ -9,10 +9,10 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-01T04:40Z（M7.3A.3.2 部署 + smoke 完成） |
-| reviewedCodeSHA | `8eb23d097f10e79903108fb85d06b0b53601f606`（本轮已 review/deploy 的代码 commit） |
-| productionRuntimeSHA | `8eb23d097f10e79903108fb85d06b0b53601f606`（容器镜像实际代码 SHA） |
-| productionHostCheckoutSHA | `8eb23d097f10e79903108fb85d06b0b53601f606`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
+| statusUpdatedAt | 2026-08-01T05:20Z（M7.3A.3.3 部署 + smoke 完成，M7.3A frozen） |
+| reviewedCodeSHA | `c0b6f8a467421594e2e06b74028a9f5221a1948e`（本轮已 review/deploy 的代码 commit） |
+| productionRuntimeSHA | `c0b6f8a467421594e2e06b74028a9f5221a1948e`（容器镜像实际代码 SHA） |
+| productionHostCheckoutSHA | `c0b6f8a467421594e2e06b74028a9f5221a1948e`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
 | 当前分支 | `m7` |
 | 实时 origin/m7 HEAD | 以 `git rev-parse origin/m7` 为准（不硬编码为「永远当前」） |
 
@@ -53,7 +53,7 @@
 | **M7.3A.3 Asset Commit Fence + Strict Idempotency + Lease-loss Fail-closed** | **DONE** | `7a0aeb7`/`ba90d98`/`67c6dba`/`07b39dc`（runtime `07b39dc`，docs `09c5b64`/`4bf4be6`） | request fingerprint、Fence A/B、lease lost fail-closed、构建网络 runbook |
 | **M7.3A.3.1 Atomic Candidate Commit + Server-side Bind Gate** | **DONE** | `df99384`/`32bc8b3`/`2131c6a`/`d7bc9e1`/`9dc3c6a`（runtime `9dc3c6a`，docs `2cd2b92`/`e337b61`，ops `6709882`） | 原子 commit、服务端 stale 绑定门禁、精确 source loader、完整请求快照、render bundle lease |
 | **M7.3A.3.2 Atomic Candidate Binding + Monotonic Image Billing + Render Heartbeat Cleanup** | **DONE** | `528f5c9`/`a8056b4`/`b243233`/`6ddf720`/`8eb23d0`（runtime `8eb23d0`） | 原子绑定、三态 provenance、billing 单调、provider result 审计、heartbeat dispose、SHA 元数据模型 |
-| **M7.3A.3.3 Legacy Binding Safety + Charged Provider Result Audit + Render Bundle Exit Classification** | **DONE** | （本轮 commit，runtime 部署后回填） | legacy 目标可验证门禁、provider 返回即 charged、usage 证据只追加、bundle 退出分类、M7.3A frozen |
+| **M7.3A.3.3 Legacy Binding Safety + Charged Provider Result Audit + Render Bundle Exit Classification** | **DONE** | `e40de12`/`80f8d11`/`ead3a23`/`c0b6f8a`（runtime `c0b6f8a`） | legacy 目标可验证门禁、provider 返回即 charged、usage 证据只追加、bundle 退出分类、M7.3A frozen |
 
 ## 4. 当前已实现功能详情
 
@@ -259,11 +259,12 @@
 - **render bundle 退出分类**（`src/lib/render/bundle-classify.ts` classifyBundleExit）：
   优先级 lease lost > shutdown(requeue) > cancel(cancelled) > bundle_error；所有路径
   finally dispose heartbeat。
-- **deployed**：否（待本轮 deployment）
+- **deployed**：是（c0b6f8a）
 
 ## 5. 当前正在进行的工作
 
-- M7.3A.3.3 完成（部署后回填 runtime SHA），M7.3A 进入 frozen 状态。
+- M7.3A.3.3 完成并部署（production `c0b6f8a`，备份 `m73a2-20260801T050238Z`），smoke 全项通过；**M7.3A 进入 frozen 状态**。
+- **Production legacy 审计（只报告，不修改）**：generated assets 19；provenance NULL 19（全为历史 legacy）；NULL + requirement_json 缺失/损坏 1；active legacy bindings 17；active bindings 指向当前 active scenes 中缺失的 requirement 10（分布于 2 个项目，均为历史绑定；未删除/重绑）。
 - 下一步：M7.3B（明确不在本次范围）。
 
 ## 6. 尚未完成 TODO
