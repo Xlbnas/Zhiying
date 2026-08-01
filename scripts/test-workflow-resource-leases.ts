@@ -584,6 +584,20 @@ async function main(): Promise<void> {
     releaseResourceLeaseForJob('production_gpu', 'render', renderId);
   }
 
+  // ============ L12：bundle 退出分类（M7.3A.3.3 classifyBundleExit） ============
+  {
+    const {classifyBundleExit} = await import('../src/lib/render/bundle-classify');
+    const base = {leaseLost: false, shuttingDown: false, cancelRequested: false};
+    ok(classifyBundleExit({...base, leaseLost: true}) === 'lease_lost', '[L12a] lease lost → lease_lost（优先级最高）');
+    ok(classifyBundleExit({...base, shuttingDown: true}) === 'shutdown', '[L12b] shutdown → shutdown');
+    ok(classifyBundleExit({...base, cancelRequested: true}) === 'cancelled', '[L12c] cancel → cancelled');
+    ok(classifyBundleExit(base) === 'bundle_error', '[L12d] 其他异常 → bundle_error');
+    ok(classifyBundleExit({leaseLost: true, shuttingDown: true, cancelRequested: true}) === 'lease_lost',
+      '[L12e] lease lost 优先于 shutdown/cancel');
+    ok(classifyBundleExit({leaseLost: false, shuttingDown: true, cancelRequested: true}) === 'shutdown',
+      '[L12f] shutdown 优先于 cancel');
+  }
+
   closeDb();
   fs.rmSync(path.resolve(process.cwd(), 'data', 'test-workflow-resource-leases'), {recursive: true, force: true});
   fs.rmSync(path.resolve(process.cwd(), 'public', 'assets', projectId), {recursive: true, force: true});

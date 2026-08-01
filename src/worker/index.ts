@@ -17,6 +17,7 @@ import {
 import {recoverStaleLlmJobs} from '@/lib/llm-jobs';
 import {recoverStaleDispatchJobs} from '@/lib/llm-generation/dispatch';
 import {buildStageDetail, detailFromRemotionProgress, round1} from '@/lib/render/progress-detail';
+import {classifyBundleExit} from '@/lib/render/bundle-classify';
 import {describeRenderPerfConfig, loadRenderPerfConfig} from '@/lib/render/render-config';
 import {probeNvencSupport} from '@/lib/render/nvenc';
 import {recoverStaleTtsJobs} from '@/lib/tts-jobs';
@@ -616,12 +617,34 @@ async function runRenderJob(
       heartbeat(job.id, 0, JSON.stringify(buildStageDetail('bundle')));
       bundleLocation = await ensureBundleLazy();
     } catch (err) {
+      // M7.3A.3.3：bundle 退出分类（按优先级）——lease lost / shutdown / cancel
+      // 不得误报为 BUNDLE_ERROR。
+      const kind = classifyBundleExit({
+        leaseLost: renderLeaseLost,
+        shuttingDown,
+        cancelRequested: isCancelRequested(job.id),
+      });
+      if (kind === 'lease_lost') {
+        failJob(job.id, 'RESOURCE_LEASE_LOST', 'bundle 期间 production_gpu lease 丢失，不进入 renderMedia');
+        log(`render job ${job.id} failed: RESOURCE_LEASE_LOST（bundle 阶段）`);
+        return;
+      }
+      if (kind === 'shutdown') {
+        requeueJob(job.id);
+        log(`render job ${job.id} requeued due to shutdown（bundle 阶段）`);
+        return;
+      }
+      if (kind === 'cancelled') {
+        markCancelled(job.id);
+        log(`render job ${job.id} cancelled（bundle 阶段）`);
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       failJob(job.id, 'BUNDLE_ERROR', message);
       return;
     }
     if (renderLeaseLost) {
-      // bundle 期间 lease 丢失：不得继续进入 renderMedia
+      // bundle 完成后、renderMedia 前的 lost 检查（不进入 renderMedia）
       failJob(job.id, 'RESOURCE_LEASE_LOST', 'bundle 期间 production_gpu lease 丢失，不进入 renderMedia');
       log(`render job ${job.id} failed: RESOURCE_LEASE_LOST（bundle 阶段）`);
       return;
