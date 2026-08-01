@@ -7,12 +7,12 @@
 
 | 项 | 值 |
 |---|---|
-| 文档更新时间 | 2026-08-01T02:40Z（M7.3A.3 部署 + smoke 完成） |
+| 文档更新时间 | 2026-08-01T03:50Z（M7.3A.3.1 部署 + smoke 完成） |
 | 当前 SHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59` |
 | 当前分支 | `m7` |
 | origin/m7 SHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59` |
-| 当前 production SHA | `07b39dc2c3c7ebd10635a4d91d80a800495318f4` |
-| 上一轮确认 production SHA | `07b39dc2c3c7ebd10635a4d91d80a800495318f4` |
+| 当前 production SHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59` |
+| 上一轮确认 production SHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59` |
 
 ## 2. Production 拓扑
 
@@ -231,12 +231,11 @@
   两阶段以便 bundle 与 TTS 并行；该优化未实现，不得声称已完成）。
 - **构建网络硬化**：脚本幂等（自有容器 running 时二次 start 直接通过）、socat 仅绑
   loopback、check 验证 listener+TLS(SNI)、代理 host 可配置。
-- **deployed**：否（待本次 M7.3A.3.1 deployment）
+- **deployed**：是（9dc3c6a）
 
 ## 5. 当前正在进行的工作
 
-- M7.3A.3 收口完成（代码+测试+文档），全量验证绿。
-- 待完成：production 备份、部署、verification（本次执行）。
+- M7.3A.3.1 完成并部署（production `9dc3c6a`，备份 `m73a2-20260801T032213Z`），smoke 全项通过。
 - 下一步：M7.3B（明确不在本次范围）。
 
 ## 6. 尚未完成 TODO
