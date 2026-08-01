@@ -598,6 +598,88 @@ async function main(): Promise<void> {
       '[L12f] shutdown 优先于 cancel');
   }
 
+  // ============ L13：runBundlePhase 集成测试（回调行为 + 优先级 + 不进入 render） ============
+  {
+    const {runBundlePhase, routeBundleExit} = await import('../src/worker/render-bundle-phase');
+    const {classifyBundleExit} = await import('../src/lib/render/bundle-classify');
+
+    async function runScenario(input: {
+      state: {leaseLost: boolean; shuttingDown: boolean; cancelRequested: boolean};
+      bundleThrows?: boolean;
+    }) {
+      const calls = {leaseLost: 0, shutdown: 0, cancelled: 0, bundleError: 0};
+      let renderProceeded = false;
+      const proceed = await runBundlePhase({
+        bundle: async () => {
+          if (input.bundleThrows) throw new Error('bundle boom');
+        },
+        state: input.state,
+        callbacks: {
+          onLeaseLost: () => { calls.leaseLost++; },
+          onShutdown: () => { calls.shutdown++; },
+          onCancelled: () => { calls.cancelled++; },
+          onBundleError: () => { calls.bundleError++; },
+        },
+      });
+      if (proceed) renderProceeded = true;
+      return {calls, renderProceeded};
+    }
+
+    // lease lost（bundle 抛错）
+    {
+      const r = await runScenario({state: {leaseLost: true, shuttingDown: false, cancelRequested: false}, bundleThrows: true});
+      ok(r.calls.leaseLost === 1 && r.calls.shutdown === 0 && r.calls.cancelled === 0 && r.calls.bundleError === 0 && !r.renderProceeded,
+        '[L13a] bundle 抛错 + lease lost → onLeaseLost 一次，不进入 render');
+    }
+    // shutdown
+    {
+      const r = await runScenario({state: {leaseLost: false, shuttingDown: true, cancelRequested: false}, bundleThrows: true});
+      ok(r.calls.shutdown === 1 && r.calls.leaseLost === 0 && r.calls.cancelled === 0 && r.calls.bundleError === 0 && !r.renderProceeded,
+        '[L13b] bundle 抛错 + shutdown → onShutdown 一次，不进入 render');
+    }
+    // cancel
+    {
+      const r = await runScenario({state: {leaseLost: false, shuttingDown: false, cancelRequested: true}, bundleThrows: true});
+      ok(r.calls.cancelled === 1 && r.calls.leaseLost === 0 && r.calls.shutdown === 0 && r.calls.bundleError === 0 && !r.renderProceeded,
+        '[L13c] bundle 抛错 + cancel → onCancelled 一次，不进入 render');
+    }
+    // ordinary bundle exception
+    {
+      const r = await runScenario({state: {leaseLost: false, shuttingDown: false, cancelRequested: false}, bundleThrows: true});
+      ok(r.calls.bundleError === 1 && r.calls.leaseLost === 0 && r.calls.shutdown === 0 && r.calls.cancelled === 0 && !r.renderProceeded,
+        '[L13d] bundle 抛错（普通异常）→ onBundleError 一次，不进入 render');
+    }
+    // 优先级：lease lost + shutdown + cancel → lease lost
+    {
+      const r = await runScenario({state: {leaseLost: true, shuttingDown: true, cancelRequested: true}, bundleThrows: true});
+      ok(r.calls.leaseLost === 1 && r.calls.shutdown === 0 && r.calls.cancelled === 0, '[L13e] lease lost 优先于 shutdown/cancel');
+    }
+    // 优先级：shutdown + cancel → shutdown
+    {
+      const r = await runScenario({state: {leaseLost: false, shuttingDown: true, cancelRequested: true}, bundleThrows: true});
+      ok(r.calls.shutdown === 1 && r.calls.cancelled === 0, '[L13f] shutdown 优先于 cancel');
+    }
+    // bundle 成功 → 继续 render
+    {
+      const r = await runScenario({state: {leaseLost: false, shuttingDown: false, cancelRequested: false}});
+      ok(r.renderProceeded && r.calls.bundleError === 0, '[L13g] bundle 成功 → 返回 true（进入 renderMedia）');
+    }
+    // bundle 成功但期间 lease lost → 不进入 render
+    {
+      const r = await runScenario({state: {leaseLost: true, shuttingDown: false, cancelRequested: false}});
+      ok(r.calls.leaseLost === 1 && !r.renderProceeded, '[L13h] bundle 成功但 lease lost → onLeaseLost，不进入 render');
+    }
+    // routeBundleExit 直接路由 + classifyBundleExit 一致性
+    {
+      const calls = {leaseLost: 0, shutdown: 0, cancelled: 0, bundleError: 0};
+      routeBundleExit(classifyBundleExit({leaseLost: false, shuttingDown: true, cancelRequested: false}), {
+        onLeaseLost: () => calls.leaseLost++, onShutdown: () => calls.shutdown++,
+        onCancelled: () => calls.cancelled++, onBundleError: () => calls.bundleError++,
+      }, new Error('x'));
+      ok(calls.shutdown === 1, '[L13i] routeBundleExit 按分类路由');
+    }
+  }
+
   closeDb();
   fs.rmSync(path.resolve(process.cwd(), 'data', 'test-workflow-resource-leases'), {recursive: true, force: true});
   fs.rmSync(path.resolve(process.cwd(), 'public', 'assets', projectId), {recursive: true, force: true});

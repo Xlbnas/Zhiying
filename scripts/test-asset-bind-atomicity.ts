@@ -415,13 +415,14 @@ async function main(): Promise<void> {
       }),
       contentType: 'json', source: 'manual_edit',
     });
-    let rejected = false;
     try {
       bindGeneratedCandidate({projectId, candidateId: legacyId, sceneId: 'S001', requirementId: 'S001-R01'});
+      ok(false, '[B13a] legacy + requirement 已删除应 409');
     } catch (err) {
-      rejected = (err as {httpStatus?: number}).httpStatus === 409;
+      const e = err as {code?: string; httpStatus?: number};
+      ok(e.httpStatus === 409 && e.code === 'LEGACY_CANDIDATE_TARGET_UNVERIFIABLE',
+        '[B13a] legacy + requirement 已删除 → 409 + LEGACY_CANDIDATE_TARGET_UNVERIFIABLE', e);
     }
-    ok(rejected, '[B13a] legacy + requirement 已删除 → 409（active source 前置拒绝）');
     // 切回（后续测试需要 R01 存在）
     seedProject(projectId);
   }
@@ -500,6 +501,157 @@ async function main(): Promise<void> {
     ok(state.c === 1, '[B15d] resolution state 未被清除');
     const bindings = getDb().prepare(`SELECT count(*) AS c FROM asset_bindings WHERE project_id=? AND active=1`).get(p15) as {c: number};
     ok(bindings.c === 1, '[B15e] 失败后 active binding 总数不变（事务整体 rollback）');
+  }
+
+  // ============ B16：legacy 错误契约精确断言（code + httpStatus） ============
+  {
+    const p16 = createProjectWithWorkflow({topic: 'bind-legacy-contract', coreQuestion: 'q'}).project.id;
+    seedProject(p16);
+    const mkLegacy = (overrides: {sceneId?: string | null; requirementJson?: string | null} = {}): string => {
+      const id = insertAsset({
+        projectId: p16, sceneId: overrides.sceneId !== undefined ? overrides.sceneId : 'S001',
+        mediaType: 'image', sourceType: 'generated', sourceProvider: 'apiyi', sourceUrl: null,
+        localPath: `assets/${p16}/mock-legacy-${crypto.randomUUID()}.png`, mimeType: 'image/png',
+        width: 1, height: 1, licenseStatus: 'generated', licenseNote: 'AI 生成', attribution: 'x', description: 'd',
+        requirement: null, provenance: null,
+      }).id;
+      if (overrides.requirementJson !== undefined) {
+        getDb().prepare('UPDATE assets SET requirement_json = ? WHERE id = ?').run(overrides.requirementJson, id);
+      }
+      return id;
+    };
+    const expectLegacy = (assetId: string, label: string, sceneId = 'S001', requirementId = 'S001-R01', pid = p16): void => {
+      try {
+        bindGeneratedCandidate({projectId: pid, candidateId: assetId, sceneId, requirementId});
+        ok(false, `${label}（应抛 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE）`);
+      } catch (err) {
+        const e = err as {code?: string; httpStatus?: number};
+        ok(e.httpStatus === 409 && e.code === 'LEGACY_CANDIDATE_TARGET_UNVERIFIABLE', label, e);
+      }
+    };
+    const goodReq = JSON.stringify({requirementId: 'S001-R01', kind: 'image', subject: 's', query: 'q', usage: 'primary', policy: 'generated', authenticity: 'synthetic_allowed'});
+
+    // 1 scene_id NULL；2 scene_id 空字符串；3 scene mismatch
+    expectLegacy(mkLegacy({sceneId: null}), '[B16a] legacy scene_id NULL → 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE');
+    expectLegacy(mkLegacy({sceneId: ''}), '[B16b] legacy scene_id 空字符串 → 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE');
+    expectLegacy(mkLegacy({sceneId: 'S999'}), '[B16c] legacy scene mismatch → 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE');
+    // 4 requirement_json NULL；5 malformed
+    expectLegacy(mkLegacy({requirementJson: null}), '[B16d] legacy requirement_json NULL → 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE');
+    expectLegacy(mkLegacy({requirementJson: '{bad'}), '[B16e] legacy requirement_json malformed → 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE');
+    // 6 requirementId missing；7 empty；8 wrong type；9 mismatch
+    expectLegacy(mkLegacy({requirementJson: '{}'}), '[B16f] legacy requirementId missing → 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE');
+    expectLegacy(mkLegacy({requirementJson: JSON.stringify({requirementId: ''})}), '[B16g] legacy requirementId empty → 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE');
+    expectLegacy(mkLegacy({requirementJson: JSON.stringify({requirementId: 42})}), '[B16h] legacy requirementId wrong type → 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE');
+    expectLegacy(mkLegacy({requirementJson: JSON.stringify({requirementId: 'S001-R99'})}), '[B16i] legacy requirement mismatch → 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE');
+    // 10 active scenes artifact missing（project 无 scenes stage）
+    {
+      const pNoScenes = createProjectWithWorkflow({topic: 'bind-no-scenes', coreQuestion: 'q'}).project.id;
+      // 不 seed scenes → 无 active_version
+      const legacyId = insertAsset({
+        projectId: pNoScenes, sceneId: 'S001', mediaType: 'image', sourceType: 'generated',
+        sourceProvider: 'apiyi', sourceUrl: null,
+        localPath: `assets/${pNoScenes}/mock-legacy-noscenes.png`, mimeType: 'image/png',
+        width: 1, height: 1, licenseStatus: 'generated', licenseNote: 'AI 生成', attribution: 'x', description: 'd',
+        requirement: {requirementId: 'S001-R01', kind: 'image', subject: 's', query: 'q', usage: 'primary', policy: 'generated', authenticity: 'synthetic_allowed'},
+        provenance: null,
+      }).id;
+      expectLegacy(legacyId, '[B16j] legacy + active scenes 缺失 → 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE', 'S001', 'S001-R01', pNoScenes);
+    }
+    // 11 active scene 已删除（scenes 切到不含 S001）
+    {
+      const pDel = createProjectWithWorkflow({topic: 'bind-scene-del', coreQuestion: 'q'}).project.id;
+      generateVersion({
+        projectId: pDel, stage: 'scenes', contentType: 'json', source: 'manual_edit',
+        content: JSON.stringify({chapterTiming: [{chapter: 1, title: 't', start: 0, end: 10}], scenes: [makeScene('x', 'S002-R01').id === 'S002' ? makeScene('x', 'S002-R01') : makeScene('x', 'S002-R01')]}),
+      });
+      const legacyId = insertAsset({
+        projectId: pDel, sceneId: 'S001', mediaType: 'image', sourceType: 'generated',
+        sourceProvider: 'apiyi', sourceUrl: null,
+        localPath: `assets/${pDel}/mock-legacy-scene-del.png`, mimeType: 'image/png',
+        width: 1, height: 1, licenseStatus: 'generated', licenseNote: 'AI 生成', attribution: 'x', description: 'd',
+        requirement: {requirementId: 'S001-R01', kind: 'image', subject: 's', query: 'q', usage: 'primary', policy: 'generated', authenticity: 'synthetic_allowed'},
+        provenance: null,
+      }).id;
+      expectLegacy(legacyId, '[B16k] legacy + active scene 已删除 → 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE', 'S001', 'S001-R01', pDel);
+    }
+    // 12 active requirement 已删除（已有 B13 精确断言）——补一个独立 project 的精确版
+    {
+      const pDelReq = createProjectWithWorkflow({topic: 'bind-req-del', coreQuestion: 'q'}).project.id;
+      seedProject(pDelReq);
+      const legacyId = insertAsset({
+        projectId: pDelReq, sceneId: 'S001', mediaType: 'image', sourceType: 'generated',
+        sourceProvider: 'apiyi', sourceUrl: null,
+        localPath: `assets/${pDelReq}/mock-legacy-req-del.png`, mimeType: 'image/png',
+        width: 1, height: 1, licenseStatus: 'generated', licenseNote: 'AI 生成', attribution: 'x', description: 'd',
+        requirement: {requirementId: 'S001-R01', kind: 'image', subject: 's', query: 'q', usage: 'primary', policy: 'generated', authenticity: 'synthetic_allowed'},
+        provenance: null,
+      }).id;
+      generateVersion({
+        projectId: pDelReq, stage: 'scenes', contentType: 'json', source: 'manual_edit',
+        content: JSON.stringify({chapterTiming: [{chapter: 1, title: 't', start: 0, end: 10}], scenes: [makeScene('x', 'S001-R99')]}),
+      });
+      expectLegacy(legacyId, '[B16l] legacy + active requirement 已删除 → 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE', 'S001', 'S001-R01', pDelReq);
+    }
+    // 13 legacy exact success（独立 project）
+    {
+      const pOk = createProjectWithWorkflow({topic: 'bind-legacy-ok', coreQuestion: 'q'}).project.id;
+      seedProject(pOk);
+      const legacyId = insertAsset({
+        projectId: pOk, sceneId: 'S001', mediaType: 'image', sourceType: 'generated',
+        sourceProvider: 'apiyi', sourceUrl: null,
+        localPath: `assets/${pOk}/mock-legacy-ok.png`, mimeType: 'image/png',
+        width: 1, height: 1, licenseStatus: 'generated', licenseNote: 'AI 生成', attribution: 'x', description: 'd',
+        requirement: {requirementId: 'S001-R01', kind: 'image', subject: '测试主体', query: 'test subject', usage: 'primary', policy: 'generated', authenticity: 'synthetic_allowed'},
+        provenance: null,
+      }).id;
+      const r = bindGeneratedCandidate({projectId: pOk, candidateId: legacyId, sceneId: 'S001', requirementId: 'S001-R01'});
+      ok(r.binding.active === 1 && r.legacyProvenance === true, '[B16m] legacy exact target → bind success + legacyProvenance=true');
+    }
+    // 14 legacy 失败不修改状态（old binding/license/resolution state/binding count）
+    {
+      const pRb = createProjectWithWorkflow({topic: 'bind-legacy-rollback', coreQuestion: 'q'}).project.id;
+      seedProject(pRb);
+      // 旧 active binding
+      const oldAssetId = insertAsset({
+        projectId: pRb, sceneId: 'S001', mediaType: 'image', sourceType: 'generated',
+        sourceProvider: 'apiyi', sourceUrl: null,
+        localPath: `assets/${pRb}/mock-legacy-old.png`, mimeType: 'image/png',
+        width: 1, height: 1, licenseStatus: 'usable', licenseNote: 'AI 生成', attribution: 'x', description: 'd',
+        requirement: {requirementId: 'S001-R01', kind: 'image', subject: '测试主体', query: 'test subject', usage: 'primary', policy: 'generated', authenticity: 'synthetic_allowed'},
+        provenance: null,
+      }).id;
+      getDb().prepare(
+        `INSERT INTO asset_bindings (id, project_id, scene_id, requirement_id, asset_id, active, created_at)
+         VALUES (?, ?, 'S001', 'S001-R01', ?, 1, ?)`,
+      ).run(crypto.randomUUID(), pRb, oldAssetId, new Date().toISOString());
+      getDb().prepare(
+        `INSERT INTO asset_resolution_state (project_id, scene_id, requirement_id, status, reason, queries_tried, provider, metadata, updated_at)
+         VALUES (?, 'S001', 'S001-R01', 'no_result', '保留', '[]', 'apiyi', '{}', ?)`,
+      ).run(pRb, new Date().toISOString());
+      // 失败的 legacy candidate（requirement 不匹配）
+      const badLegacy = insertAsset({
+        projectId: pRb, sceneId: 'S001', mediaType: 'image', sourceType: 'generated',
+        sourceProvider: 'apiyi', sourceUrl: null,
+        localPath: `assets/${pRb}/mock-legacy-bad2.png`, mimeType: 'image/png',
+        width: 1, height: 1, licenseStatus: 'generated', licenseNote: 'AI 生成', attribution: 'x', description: 'd',
+        requirement: {requirementId: 'S001-R99', kind: 'image', subject: 's', query: 'q', usage: 'primary', policy: 'generated', authenticity: 'synthetic_allowed'},
+        provenance: null,
+      }).id;
+      try {
+        bindGeneratedCandidate({projectId: pRb, candidateId: badLegacy, sceneId: 'S001', requirementId: 'S001-R01'});
+        ok(false, '[B16n] legacy requirement mismatch 应失败');
+      } catch (err) {
+        ok((err as {code?: string}).code === 'LEGACY_CANDIDATE_TARGET_UNVERIFIABLE', '[B16n] legacy requirement mismatch → LEGACY_CANDIDATE_TARGET_UNVERIFIABLE');
+      }
+      const oldBinding = getDb().prepare(`SELECT active FROM asset_bindings WHERE asset_id=? AND active=1`).get(oldAssetId) as {active: number} | undefined;
+      ok(oldBinding?.active === 1, '[B16o] legacy 失败不修改 old active binding');
+      const license = getDb().prepare(`SELECT license_status FROM assets WHERE id=?`).get(oldAssetId) as {license_status: string};
+      ok(license.license_status === 'usable', '[B16p] legacy 失败不修改 candidate license');
+      const state = getDb().prepare(`SELECT count(*) AS c FROM asset_resolution_state WHERE project_id=? AND requirement_id=?`).get(pRb, 'S001-R01') as {c: number};
+      ok(state.c === 1, '[B16q] legacy 失败不清除 resolution state');
+      const bindings = getDb().prepare(`SELECT count(*) AS c FROM asset_bindings WHERE project_id=? AND active=1`).get(pRb) as {c: number};
+      ok(bindings.c === 1, '[B16r] legacy 失败 binding count 不变（事务 rollback）');
+    }
   }
 
   // 清理

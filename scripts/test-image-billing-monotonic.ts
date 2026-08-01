@@ -406,9 +406,11 @@ async function main(): Promise<void> {
     ok(job.billing_status === 'confirmed_charged', '[B7b] billing 保持 confirmed_charged（provider 已返回图片）', job.billing_status);
     ok(usageStatus('bill-7') === 'confirmed_charged', '[B7c] usage confirmed_charged');
     ok((usageRow('bill-7')?.cost_cny ?? 0) > 0, '[B7d] cost 保留（>0）');
-    const meta = JSON.parse(usageRow('bill-7')!.metadata) as {providerRequestId?: string; actualModel?: string; imageCount?: number};
+    const meta = JSON.parse(usageRow('bill-7')!.metadata) as {providerRequestId?: string; actualModel?: string; imageCount?: number; requestedProvider?: string; actualProvider?: string};
     ok(meta.providerRequestId === 'prov-b7', '[B7e] providerRequestId 保留', meta);
     ok(meta.actualModel === 'gemini-3.1-flash-image' && meta.imageCount === 1, '[B7f] actualModel/imageCount 可审计', meta);
+    ok(meta.requestedProvider === 'apiyi', '[B7g] requestedProvider=apiyi（job 冻结）', meta);
+    ok(meta.actualProvider === 'evil', '[B7h] actualProvider=evil（provider 实际返回值可审计）', meta);
     const assets = getDb().prepare(`SELECT count(*) AS c FROM assets WHERE project_id=?`).get(projectId) as {c: number};
     ok(assets.c === 0, '[B7g] 不保存 current asset');
     fs.rmSync(path.resolve(process.cwd(), 'public', 'assets', projectId), {recursive: true, force: true});
@@ -487,6 +489,68 @@ async function main(): Promise<void> {
     const meta = JSON.parse(usageRow('bill-9')!.metadata) as {pricingUnavailable?: boolean; providerRequestId?: string};
     ok(meta.pricingUnavailable === true, '[B9c] 标记 pricingUnavailable（只追加，不伪造费用）', meta);
     ok(meta.providerRequestId === 'prov-9', '[B9d] providerRequestId 保留');
+  }
+
+  // ============ B10：usageMetadata 安全合并 ============
+  {
+    const {mergeUsageMetadata} = await import('../src/lib/usage-events');
+    // 1) undefined 保留整个 prior
+    const prior = {a: 1, b: {c: 2}, arr: [1, 2]};
+    ok(JSON.stringify(mergeUsageMetadata(prior, undefined)) === JSON.stringify(prior), '[B10a] incoming undefined → 保留整个 prior');
+    // 2) partial plain-object 保留未更新 key
+    const merged = mergeUsageMetadata(prior, {b: {c: 3}}) as Record<string, unknown>;
+    ok(merged.a === 1 && JSON.stringify(merged.b) === JSON.stringify({c: 3}) && JSON.stringify(merged.arr) === JSON.stringify([1, 2]),
+      '[B10b] partial update 保留未更新 key 且同名 key 覆盖');
+    // 3) 非 object incoming 明确替换
+    ok(mergeUsageMetadata(prior, 'replacement') === 'replacement', '[B10c] 非 object incoming → 明确 replacement');
+    // 4) 危险 prototype keys 不生效
+    const dangerous = mergeUsageMetadata(prior, {__proto__: {polluted: true}, constructor: {x: 1}, prototype: {y: 2}, safe: 7}) as Record<string, unknown>;
+    const hasOwn = (k: string): boolean => Object.prototype.hasOwnProperty.call(dangerous, k);
+    ok(dangerous.safe === 7 && (dangerous as Record<string, unknown>).polluted === undefined
+      && !hasOwn('constructor') && !hasOwn('prototype'),
+      '[B10d] 危险 key（__proto__/constructor/prototype）不进入合并结果', Object.keys(dangerous));
+    ok(({} as Record<string, unknown>).polluted === undefined, '[B10e] 无 prototype pollution 副作用');
+    // 5) 顶层 audit 字段不因 metadata 更新丢失（finalize 场景）
+    const projectId = createProjectWithWorkflow({topic: 'billing-10', coreQuestion: 'q'}).project.id;
+    seedProject(projectId);
+    finalizeImageGenerationUsage({
+      attemptId: 'bill-10',
+      projectId,
+      sceneId: 'S001',
+      requirementId: 'S001-R01',
+      provider: 'apiyi',
+      model: 'gemini-3.1-flash-image',
+      requestedSize: '1K',
+      aspectRatio: '16:9',
+      imageCount: 1,
+      status: 'confirmed_charged',
+      providerRequestId: 'prov-10',
+      actualModel: 'gemini-3.1-flash-image',
+      actualProvider: 'apiyi',
+      usageMetadata: {tokens: 100},
+    });
+    // 后续 finalize 带部分 usageMetadata → 顶层 audit 字段保留 + metadata 合并
+    finalizeImageGenerationUsage({
+      attemptId: 'bill-10',
+      projectId,
+      sceneId: 'S001',
+      requirementId: 'S001-R01',
+      provider: 'apiyi',
+      model: 'gemini-3.1-flash-image',
+      requestedSize: '1K',
+      aspectRatio: '16:9',
+      imageCount: 1,
+      status: 'confirmed_charged',
+      failurePhase: 'RESULT_PERSIST_FAILED',
+      usageMetadata: {latencyMs: 500},
+    });
+    const meta = JSON.parse(usageRow('bill-10')!.metadata) as {
+      providerRequestId?: string; actualProvider?: string; actualModel?: string;
+      usageMetadata?: {tokens?: number; latencyMs?: number};
+    };
+    ok(meta.providerRequestId === 'prov-10', '[B10f] 顶层 providerRequestId 不丢失');
+    ok(meta.actualProvider === 'apiyi' && meta.actualModel === 'gemini-3.1-flash-image', '[B10g] 顶层 actualProvider/actualModel 不丢失');
+    ok(meta.usageMetadata?.tokens === 100 && meta.usageMetadata?.latencyMs === 500, '[B10h] usageMetadata 安全合并（prior 保留 + 新 key 追加）', meta.usageMetadata);
   }
 
   // 清理

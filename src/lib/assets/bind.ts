@@ -86,123 +86,129 @@ export function bindGeneratedCandidateTx(input: {
       throw new BindError('not_generated_candidate', '只能绑定 AI 生成的候选素材');
     }
 
-    // 3：intended 目标（优先于 provenance 门禁，cross 绑定保持明确语义）
-    const intended = intendedTargetOf(asset);
-    if (intended.sceneId !== null && intended.sceneId !== input.sceneId) {
-      throw new BindError(
-        'scene_mismatch',
-        `该候选素材的目标场景是 ${intended.sceneId}，不能绑定到 ${input.sceneId}`,
-      );
-    }
-    if (intended.requirementId !== null && intended.requirementId !== input.requirementId) {
-      throw new BindError(
-        'requirement_mismatch',
-        `该候选素材的目标需求是 ${intended.requirementId}，不能绑定到 ${input.requirementId}`,
-      );
-    }
-
-    // 4：active scenes source（exact，fail-closed）——对所有 candidate（含 legacy）前置，
-    //    当前 scene/requirement 必须真实存在。
-    const source = loadActiveScenesSource(input.projectId);
-    if (!source) {
-      throw new BindError('CANDIDATE_SOURCE_STALE', '项目缺少 active scenes artifact，无法验证候选素材来源', 409);
-    }
-    const found = findRequirementInPlans(source.plans, input.sceneId, input.requirementId);
-    if (!found) {
-      throw new BindError(
-        'CANDIDATE_SOURCE_STALE',
-        `需求 ${input.requirementId} 不存在于当前 scenes 版本`,
-        409,
-      );
-    }
-    const curHash = computeRequirementSnapshotHash(
-      JSON.stringify(buildRequirementSnapshot(found.requirement)),
-    );
-    const activeVersion = String(source.activeVersion);
-
-    // 5：provenance 三态解析
-    const parsed = parseAssetProvenanceStrict(asset);
+    // 3：先安全判定 provenance 形态（legacy = provenance_json IS NULL）。
+    //    legacy 走 legacy 专用目标验证（统一 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE）；
+    //    strict/invalid 保持现有错误顺序与语义（scene_mismatch/requirement_mismatch/
+    //    CANDIDATE_PROVENANCE_INVALID/CANDIDATE_STALE/CANDIDATE_SOURCE_STALE）。
+    const isLegacy = asset.provenance_json === null;
     let legacyProvenance = false;
-    if (parsed.kind === 'invalid') {
-      throw new BindError(
-        'CANDIDATE_PROVENANCE_INVALID',
-        `候选素材 provenance 不完整：${parsed.issues.join('；')}`,
-        409,
-      );
-    }
-    if (parsed.kind === 'valid') {
-      // 6：strict 候选全量校验
-      const prov = parsed.value;
-      if (prov.relevance !== 'current') {
-        throw new BindError(
-          'CANDIDATE_STALE',
-          `该候选素材已被标记为历史（relevance=${prov.relevance}），来源已变化，不能绑定到当前版本`,
-          409,
-        );
-      }
-      if (prov.sourceScenesVersionId !== activeVersion) {
-        throw new BindError(
-          'CANDIDATE_SOURCE_STALE',
-          `候选素材生成于 scenes v${prov.sourceScenesVersionId}，当前为 v${activeVersion}`,
-          409,
-        );
-      }
-      if (prov.sourceRequirementHash !== curHash) {
-        throw new BindError('CANDIDATE_SOURCE_STALE', '候选素材的 requirement 快照与当前版本不一致', 409);
-      }
-      const job = getAssetGenerationJobById(prov.assetGenerationJobId);
-      if (!job) {
-        throw new BindError('CANDIDATE_SOURCE_STALE', '候选素材的生成 job 不存在', 409);
-      }
-      if (
-        job.status !== 'succeeded' ||
-        job.result_asset_id !== input.candidateId ||
-        job.result_relevance !== 'current' ||
-        job.project_id !== input.projectId ||
-        job.scene_id !== input.sceneId ||
-        job.requirement_id !== input.requirementId ||
-        job.request_id !== prov.requestId
-      ) {
-        throw new BindError('CANDIDATE_SOURCE_STALE', '候选素材的生成 job 与绑定请求不一致', 409);
-      }
-    } else {
-      // 7：legacy（provenance_json IS NULL）——目标必须可验证：
-      //   - asset.scene_id 非空且与请求一致；
-      //   - requirement_json 是合法 JSON 且 requirementId 非空且与请求一致；
-      //   - 当前 active scenes 中确实存在该 exact requirement（前置步骤 4 已确认）。
-      // 任何不可验证 → LEGACY_CANDIDATE_TARGET_UNVERIFIABLE（fail-closed）。
+    if (isLegacy) {
+      // 3a：legacy 专用 intended target + active exact target 验证（fail-closed）。
+      // 以下任一情况统一 HTTP 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE：
+      // scene_id NULL/空/与请求不一致；requirement_json NULL/空/malformed；
+      // requirementId 缺失/非字符串/空/与请求不一致；active scenes artifact 缺失；
+      // 请求 scene 不存在于 active scenes；exact requirement 不存在/已删除。
       legacyProvenance = true;
-      if (typeof asset.scene_id !== 'string' || asset.scene_id.length === 0 || asset.scene_id !== input.sceneId) {
-        throw new BindError(
-          'LEGACY_CANDIDATE_TARGET_UNVERIFIABLE',
-          '历史候选素材的 scene 目标无法验证',
-          409,
-        );
+      const legacyFail = (reason: string): BindError =>
+        new BindError('LEGACY_CANDIDATE_TARGET_UNVERIFIABLE', `历史候选素材目标不可验证：${reason}`, 409);
+      if (typeof asset.scene_id !== 'string' || asset.scene_id.length === 0) {
+        throw legacyFail('scene_id 缺失');
       }
-      let reqId: unknown = null;
+      if (asset.scene_id !== input.sceneId) {
+        throw legacyFail(`scene 不一致（asset=${asset.scene_id}，请求=${input.sceneId}）`);
+      }
       if (typeof asset.requirement_json !== 'string' || asset.requirement_json.length === 0) {
-        throw new BindError(
-          'LEGACY_CANDIDATE_TARGET_UNVERIFIABLE',
-          '历史候选素材缺少 requirement_json，无法验证目标',
-          409,
-        );
+        throw legacyFail('requirement_json 缺失');
       }
+      const reqRaw: string = asset.requirement_json;
+      let reqId: unknown = null;
       try {
-        const req = JSON.parse(asset.requirement_json) as {requirementId?: unknown};
+        const req = JSON.parse(reqRaw) as {requirementId?: unknown};
         reqId = req.requirementId;
       } catch {
+        throw legacyFail('requirement_json 无法解析');
+      }
+      if (typeof reqId !== 'string' || reqId.length === 0) {
+        throw legacyFail('requirementId 缺失或非法');
+      }
+      if (reqId !== input.requirementId) {
+        throw legacyFail(`requirementId 不一致（asset=${String(reqId)}，请求=${input.requirementId}）`);
+      }
+      const legacySource = loadActiveScenesSource(input.projectId);
+      if (!legacySource) {
+        throw legacyFail('active scenes artifact 缺失');
+      }
+      if (!legacySource.plans.some((pl) => pl.sceneId === input.sceneId)) {
+        throw legacyFail(`场景 ${input.sceneId} 不存在于当前 active scenes`);
+      }
+      if (!findRequirementInPlans(legacySource.plans, input.sceneId, input.requirementId)) {
+        throw legacyFail(`需求 ${input.requirementId} 不存在于当前 active scenes（可能已删除）`);
+      }
+    } else {
+      // 3b：strict/invalid 路径 —— 保持现有错误顺序（intended mismatch → provenance 三态 → job 校验）
+      const intended = intendedTargetOf(asset);
+      if (intended.sceneId !== null && intended.sceneId !== input.sceneId) {
         throw new BindError(
-          'LEGACY_CANDIDATE_TARGET_UNVERIFIABLE',
-          '历史候选素材的 requirement_json 无法解析，目标不可验证',
+          'scene_mismatch',
+          `该候选素材的目标场景是 ${intended.sceneId}，不能绑定到 ${input.sceneId}`,
+        );
+      }
+      if (intended.requirementId !== null && intended.requirementId !== input.requirementId) {
+        throw new BindError(
+          'requirement_mismatch',
+          `该候选素材的目标需求是 ${intended.requirementId}，不能绑定到 ${input.requirementId}`,
+        );
+      }
+
+      const parsed = parseAssetProvenanceStrict(asset);
+      if (parsed.kind === 'invalid') {
+        throw new BindError(
+          'CANDIDATE_PROVENANCE_INVALID',
+          `候选素材 provenance 不完整：${parsed.issues.join('；')}`,
           409,
         );
       }
-      if (typeof reqId !== 'string' || reqId.length === 0 || reqId !== input.requirementId) {
-        throw new BindError(
-          'LEGACY_CANDIDATE_TARGET_UNVERIFIABLE',
-          '历史候选素材的 requirementId 缺失或不匹配，目标不可验证',
-          409,
+      if (parsed.kind === 'valid') {
+        const source = loadActiveScenesSource(input.projectId);
+        if (!source) {
+          throw new BindError('CANDIDATE_SOURCE_STALE', '项目缺少 active scenes artifact，无法验证候选素材来源', 409);
+        }
+        const found = findRequirementInPlans(source.plans, input.sceneId, input.requirementId);
+        if (!found) {
+          throw new BindError(
+            'CANDIDATE_SOURCE_STALE',
+            `需求 ${input.requirementId} 不存在于当前 scenes 版本`,
+            409,
+          );
+        }
+        const curHash = computeRequirementSnapshotHash(
+          JSON.stringify(buildRequirementSnapshot(found.requirement)),
         );
+        const activeVersion = String(source.activeVersion);
+        const prov = parsed.value;
+
+        if (prov.relevance !== 'current') {
+          throw new BindError(
+            'CANDIDATE_STALE',
+            `该候选素材已被标记为历史（relevance=${prov.relevance}），来源已变化，不能绑定到当前版本`,
+            409,
+          );
+        }
+        if (prov.sourceScenesVersionId !== activeVersion) {
+          throw new BindError(
+            'CANDIDATE_SOURCE_STALE',
+            `候选素材生成于 scenes v${prov.sourceScenesVersionId}，当前为 v${activeVersion}`,
+            409,
+          );
+        }
+        if (prov.sourceRequirementHash !== curHash) {
+          throw new BindError('CANDIDATE_SOURCE_STALE', '候选素材的 requirement 快照与当前版本不一致', 409);
+        }
+        const job = getAssetGenerationJobById(prov.assetGenerationJobId);
+        if (!job) {
+          throw new BindError('CANDIDATE_SOURCE_STALE', '候选素材的生成 job 不存在', 409);
+        }
+        if (
+          job.status !== 'succeeded' ||
+          job.result_asset_id !== input.candidateId ||
+          job.result_relevance !== 'current' ||
+          job.project_id !== input.projectId ||
+          job.scene_id !== input.sceneId ||
+          job.requirement_id !== input.requirementId ||
+          job.request_id !== prov.requestId
+        ) {
+          throw new BindError('CANDIDATE_SOURCE_STALE', '候选素材的生成 job 与绑定请求不一致', 409);
+        }
       }
     }
 

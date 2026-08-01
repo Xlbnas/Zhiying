@@ -297,8 +297,48 @@ export interface ImageGenerationFinalizeInput {
   assetId?: string;
   /** M7.3A.3.2：provider 实际返回的 model（与 requested model 分别记录）。 */
   actualModel?: string;
+  /** M7.3A.3.3R1：provider 实际返回的 provider 名（与 requested provider 分别记录）。 */
+  actualProvider?: string;
   /** M7.3A.3.2：enqueue 冻结的 provider 配置版本。 */
   providerConfigVersion?: string;
+}
+
+/** M7.3A.3.3R1：危险 prototype key 白名单过滤（合并时禁止进入结果）。 */
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/**
+ * M7.3A.3.3R1：usageMetadata 安全合并。
+ * - prior 与 incoming 都是 plain object → {...prior, ...incoming}（incoming 覆盖同名，
+ *   未提供 key 保留；危险 key 过滤）；
+ * - incoming undefined → 保留 prior；
+ * - 其余（数组/字符串/数字/null 等非 plain-object）→ 按明确 replacement 处理；
+ * - 不做递归 arbitrary merge（无 prototype pollution 面）。
+ */
+export function mergeUsageMetadata(prior: unknown, incoming: unknown): unknown {
+  if (incoming === undefined) return prior ?? null;
+  if (!isPlainObject(prior) || !isPlainObject(incoming)) {
+    return isPlainObject(incoming) ? sanitizeObject(incoming) : incoming;
+  }
+  const merged: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(prior)) {
+    if (!DANGEROUS_KEYS.has(k)) merged[k] = v;
+  }
+  for (const [k, v] of Object.entries(incoming)) {
+    if (!DANGEROUS_KEYS.has(k)) merged[k] = v;
+  }
+  return merged;
+}
+
+function sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (!DANGEROUS_KEYS.has(k)) out[k] = v;
+  }
+  return out;
 }
 
 /**
@@ -413,13 +453,15 @@ export function finalizeImageGenerationUsage(
     pricingError,
     generationId: input.generationId ?? priorMeta.generationId ?? null,
     providerRequestId: input.providerRequestId ?? priorMeta.providerRequestId ?? null,
-    usageMetadata: input.usageMetadata ?? priorMeta.usageMetadata ?? null,
+    usageMetadata: mergeUsageMetadata(priorMeta.usageMetadata, input.usageMetadata),
     failurePhase: input.failurePhase ?? priorMeta.failurePhase ?? null,
     prompt: input.prompt ?? priorMeta.prompt ?? null,
     elapsedMs: input.elapsedMs ?? priorMeta.elapsedMs ?? null,
     assetId: input.assetId ?? priorMeta.assetId ?? null,
     actualModel: input.actualModel ?? priorMeta.actualModel ?? null,
     requestedModel: input.model ?? priorMeta.requestedModel ?? null,
+    actualProvider: input.actualProvider ?? priorMeta.actualProvider ?? null,
+    requestedProvider: input.provider ?? priorMeta.requestedProvider ?? null,
     providerConfigVersion: input.providerConfigVersion ?? priorMeta.providerConfigVersion ?? null,
     ...(downgradeRejected ? {rejectedFinalize: input.status} : {}),
     ...(preserveChargedCost && existing?.cost_cny === null ? {pricingUnavailable: true} : {}),

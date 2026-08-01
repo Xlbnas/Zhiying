@@ -18,6 +18,7 @@ import {recoverStaleLlmJobs} from '@/lib/llm-jobs';
 import {recoverStaleDispatchJobs} from '@/lib/llm-generation/dispatch';
 import {buildStageDetail, detailFromRemotionProgress, round1} from '@/lib/render/progress-detail';
 import {classifyBundleExit} from '@/lib/render/bundle-classify';
+import {runBundlePhase} from './render-bundle-phase';
 import {describeRenderPerfConfig, loadRenderPerfConfig} from '@/lib/render/render-config';
 import {probeNvencSupport} from '@/lib/render/nvenc';
 import {recoverStaleTtsJobs} from '@/lib/tts-jobs';
@@ -612,44 +613,42 @@ async function runRenderJob(
   }
   try {
     let bundleLocation: string;
-    try {
-      // M5：bundle 阶段写入步骤明细（首次打包可能数分钟，用户可见而非黑窗）
-      heartbeat(job.id, 0, JSON.stringify(buildStageDetail('bundle')));
-      bundleLocation = await ensureBundleLazy();
-    } catch (err) {
-      // M7.3A.3.3：bundle 退出分类（按优先级）——lease lost / shutdown / cancel
-      // 不得误报为 BUNDLE_ERROR。
-      const kind = classifyBundleExit({
+    // M7.3A.3.3R1：bundle 阶段经 runBundlePhase 路由（lease lost > shutdown >
+    // cancel > bundle_error），生产路径真实调用；heartbeat 仍由本函数 finally 单一 dispose。
+    const proceed = await runBundlePhase({
+      bundle: async () => {
+        // M5：bundle 阶段写入步骤明细（首次打包可能数分钟，用户可见而非黑窗）
+        heartbeat(job.id, 0, JSON.stringify(buildStageDetail('bundle')));
+        bundleLocation = await ensureBundleLazy();
+      },
+      state: {
         leaseLost: renderLeaseLost,
         shuttingDown,
         cancelRequested: isCancelRequested(job.id),
-      });
-      if (kind === 'lease_lost') {
-        failJob(job.id, 'RESOURCE_LEASE_LOST', 'bundle 期间 production_gpu lease 丢失，不进入 renderMedia');
-        log(`render job ${job.id} failed: RESOURCE_LEASE_LOST（bundle 阶段）`);
-        return;
-      }
-      if (kind === 'shutdown') {
-        requeueJob(job.id);
-        log(`render job ${job.id} requeued due to shutdown（bundle 阶段）`);
-        return;
-      }
-      if (kind === 'cancelled') {
-        markCancelled(job.id);
-        log(`render job ${job.id} cancelled（bundle 阶段）`);
-        return;
-      }
-      const message = err instanceof Error ? err.message : String(err);
-      failJob(job.id, 'BUNDLE_ERROR', message);
+      },
+      callbacks: {
+        onLeaseLost: () => {
+          failJob(job.id, 'RESOURCE_LEASE_LOST', 'bundle 期间 production_gpu lease 丢失，不进入 renderMedia');
+          log(`render job ${job.id} failed: RESOURCE_LEASE_LOST（bundle 阶段）`);
+        },
+        onShutdown: () => {
+          requeueJob(job.id);
+          log(`render job ${job.id} requeued due to shutdown（bundle 阶段）`);
+        },
+        onCancelled: () => {
+          markCancelled(job.id);
+          log(`render job ${job.id} cancelled（bundle 阶段）`);
+        },
+        onBundleError: (err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          failJob(job.id, 'BUNDLE_ERROR', message);
+        },
+      },
+    });
+    if (!proceed) {
       return;
     }
-    if (renderLeaseLost) {
-      // bundle 完成后、renderMedia 前的 lost 检查（不进入 renderMedia）
-      failJob(job.id, 'RESOURCE_LEASE_LOST', 'bundle 期间 production_gpu lease 丢失，不进入 renderMedia');
-      log(`render job ${job.id} failed: RESOURCE_LEASE_LOST（bundle 阶段）`);
-      return;
-    }
-    await runJob(job, bundleLocation, controller, {lost: () => renderLeaseLost});
+    await runJob(job, bundleLocation!, controller, {lost: () => renderLeaseLost});
   } finally {
     // M7.3A.3.2：所有退出路径统一 dispose（不遗留 active interval）
     renderLeaseHeartbeat?.dispose();

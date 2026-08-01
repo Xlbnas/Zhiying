@@ -251,7 +251,7 @@ export async function runAssetGenerationJob(
     actualModel = first.model;
     actualProvider = first.provider;
     providerRequestId = typeof firstMeta.providerRequestId === 'string' ? firstMeta.providerRequestId : undefined;
-    recordImageGenerationUsageFinal(job, returnedImageCount, 'confirmed_charged', undefined, providerRequestId, undefined, actualModel);
+    recordImageGenerationUsageFinal(job, returnedImageCount, 'confirmed_charged', undefined, providerRequestId, undefined, actualModel, undefined, actualProvider);
     const elapsedMs = Date.now() - startAtMs;
 
     // M7.3A.3.2：provider result snapshot 校验 —— candidate.provider 必须与
@@ -313,7 +313,7 @@ export async function runAssetGenerationJob(
 
     // M7.3A.3.2：成功 commit 后补充 usage assetId 关联（单调保护保留 charged/cost，
     // 追加 assetId 使 requestId/jobId/assetId 可互相追溯）
-    recordImageGenerationUsageFinal(job, candidates.length, 'confirmed_charged', undefined, providerRequestId, undefined, first.model, result.assetId);
+    recordImageGenerationUsageFinal(job, returnedImageCount, 'confirmed_charged', undefined, providerRequestId, undefined, actualModel, result.assetId, actualProvider);
 
     if (result.relevance === 'current') {
       log(`asset job ${job.id} succeeded（relevance=current）→ asset ${result.assetId}`);
@@ -340,7 +340,8 @@ export async function runAssetGenerationJob(
 
     if (err instanceof ImageGenerationError) {
       failurePhase = err.code;
-      providerRequestId = err.context?.providerRequestId;
+      // M7.3A.3.3R1：不得用 undefined 覆盖已捕获的 providerRequestId 证据
+      providerRequestId = err.context?.providerRequestId ?? providerRequestId;
       billingStatus = errorCodeToBillingStatus(err.code);
     }
 
@@ -356,7 +357,7 @@ export async function runAssetGenerationJob(
     // M7.3A.3.2：commit 时 job 已被并发 requeue/recover（JOB_STATE_INVALID）→
     // 不覆盖原 job 终态；usage 保持 confirmed_charged；worker 主循环不崩溃。
     if (err instanceof CommitGeneratedAssetError && err.code === 'JOB_STATE_INVALID') {
-      recordImageGenerationUsageFinal(job, returnedImageCount, 'confirmed_charged', 'RESULT_PERSIST_FAILED', providerRequestId, elapsedMs, actualModel);
+      recordImageGenerationUsageFinal(job, returnedImageCount, 'confirmed_charged', 'RESULT_PERSIST_FAILED', providerRequestId, elapsedMs, actualModel, undefined, actualProvider);
       log(`asset job ${job.id}: commit 时 job 状态已变（RESULT_PERSIST_FAILED，不覆盖 job 终态）`);
       return;
     }
@@ -379,7 +380,7 @@ export async function runAssetGenerationJob(
       });
     }
 
-    recordImageGenerationUsageFinal(job, returnedImageCount, billingStatus, failurePhase, providerRequestId, elapsedMs, actualModel);
+    recordImageGenerationUsageFinal(job, returnedImageCount, billingStatus, failurePhase, providerRequestId, elapsedMs, actualModel, undefined, actualProvider);
 
     upsertResolutionState({
       projectId: job.project_id,
@@ -435,6 +436,7 @@ function recordImageGenerationUsageFinal(
   elapsedMs?: number,
   actualModel?: string,
   assetId?: string,
+  actualProvider?: string,
 ): void {
   finalizeImageGenerationUsage({
     attemptId: job.request_id,
@@ -454,5 +456,6 @@ function recordImageGenerationUsageFinal(
     actualModel,
     providerConfigVersion: job.provider_config_version ?? CURRENT_PROVIDER_CONFIG_VERSION,
     assetId,
+    actualProvider,
   });
 }
