@@ -7,12 +7,14 @@
 
 | 项 | 值 |
 |---|---|
-| 文档更新时间 | 2026-08-01T03:50Z（M7.3A.3.1 部署 + smoke 完成） |
-| 当前 SHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59` |
+| 字段 | 值 |
+|---|---|
+| statusUpdatedAt | 2026-08-01T03:50Z（M7.3A.3.1 部署 + smoke 完成） |
+| reviewedCodeSHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59`（本轮已 review/deploy 的代码 commit） |
+| productionRuntimeSHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59`（容器镜像实际代码 SHA） |
+| productionHostCheckoutSHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
 | 当前分支 | `m7` |
-| origin/m7 SHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59` |
-| 当前 production SHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59` |
-| 上一轮确认 production SHA | `9dc3c6af89802d598c1b7e318de36e15205b4c59` |
+| 实时 origin/m7 HEAD | 以 `git rev-parse origin/m7` 为准（不硬编码为「永远当前」） |
 
 ## 2. Production 拓扑
 
@@ -29,8 +31,10 @@
   - 宿主机使用独立 Git clone，通过 remote `github` fetch 精确 SHA。
   - 不得因为 VM 没有 Docker 而跳过 production 部署。
 - **Secret 边界**：
-  - `DEEPSEEK_API_KEY` / `LLM_PROVIDER` 只注入 `zhiying-worker`。
-  - `APIYI_API_KEY` 只注入 `zhiying-web`。
+  - `DEEPSEEK_API_KEY` / `LLM_PROVIDER`：仅注入 `zhiying-worker`（Web 不持有）。
+  - `APIYI_API_KEY`：当前 compose 注入 `zhiying-web` 与 `zhiying-worker`。
+    Web 仅用于 provider capability/health 检查与 enqueue（不执行生成）；Worker 执行真实 APIYi provider 调用。
+  - indextts2-adapter 不持有上述 secret。
   - Web route 不直接调用 LLM provider；Worker 持有凭据执行 `buildNarrativeBeats` / `buildVisualIntentPlan`。
 
 ## 3. 已完成里程碑
@@ -46,7 +50,8 @@
 | M7.3A Visual Intent | DONE | `196a49e` | provenance matrix / displayText / evidenceIds |
 | M7.3A.1 Worker LLM Dispatch + DAG/Resource Parallelism | DONE | `196a49e`, `311dd36`, `e961ea8`, `7d64713`, `6627f65`, `31a3efb`, `493c2e6`, `3916b3c`, `b200120`, `56a1f50`, `09ae38a` | Visual Intent 契约、Worker dispatch、DAG、超时修复、UI、自动刷新、文档 |
 | **M7.3A.2 Image Durability + Narration Watch + DAG Authoritative + GPU Leases** | **DONE** | `e62f5c2` | durable asset gen job、activity controller、DAG 权威化、production_gpu lease |
-| **M7.3A.3 Asset Commit Fence + Strict Idempotency + Lease-loss Fail-closed** | **DONE** | （本次 commit） | request fingerprint、Fence A/B、lease lost fail-closed、构建网络 runbook |
+| **M7.3A.3 Asset Commit Fence + Strict Idempotency + Lease-loss Fail-closed** | **DONE** | `7a0aeb7`/`ba90d98`/`67c6dba`/`07b39dc`（runtime `07b39dc`，docs `09c5b64`/`4bf4be6`） | request fingerprint、Fence A/B、lease lost fail-closed、构建网络 runbook |
+| **M7.3A.3.1 Atomic Candidate Commit + Server-side Bind Gate** | **DONE** | `df99384`/`32bc8b3`/`2131c6a`/`d7bc9e1`/`9dc3c6a`（runtime `9dc3c6a`，docs `2cd2b92`/`e337b61`，ops `6709882`） | 原子 commit、服务端 stale 绑定门禁、精确 source loader、完整请求快照、render bundle lease |
 
 ## 4. 当前已实现功能详情
 

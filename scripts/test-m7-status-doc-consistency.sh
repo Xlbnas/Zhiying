@@ -48,16 +48,27 @@ if [ "$deployed_yes" -gt 0 ] && [ "$illegal_no" -eq 0 ]; then
   ok "deployed 状态一致（是=${deployed_yes}，进行中 4.9 允许待部署）"
 fi
 
-# 3) runtime SHA 格式（当前 production SHA / 当前 SHA / origin/m7 SHA 行）
-bad_sha=0
-while IFS= read -r line; do
-  sha=$(printf '%s' "$line" | sed -E 's/.*`([0-9a-f]{40})`.*/\1/')
-  if ! printf '%s' "$sha" | grep -qE '^[0-9a-f]{40}$'; then
-    bad_sha=1
-    bad "SHA 格式非法: $line"
-  fi
-done < <(grep -E '^\| (当前 SHA|当前 production SHA|origin/m7 SHA) ' "$DOC")
-[ "$bad_sha" -eq 0 ] && ok "runtime SHA 格式合法（40 位 hex）"
+# 3) SHA 字段：reviewedCodeSHA / productionRuntimeSHA / productionHostCheckoutSHA
+#    格式 40 位 hex；且必须是当前 Git HEAD 的 ancestor（不要求等于 HEAD）。
+sha_lines=$(grep -E '^\| (reviewedCodeSHA|productionRuntimeSHA|productionHostCheckoutSHA) ' "$DOC" || true)
+if [ -z "$sha_lines" ]; then
+  bad "缺少 reviewedCodeSHA/productionRuntimeSHA/productionHostCheckoutSHA 字段"
+else
+  bad_sha=0
+  while IFS= read -r line; do
+    sha=$(printf '%s' "$line" | sed -E 's/.*`([0-9a-f]{40})`.*/\1/')
+    if ! printf '%s' "$sha" | grep -qE '^[0-9a-f]{40}$'; then
+      bad_sha=1
+      bad "SHA 格式非法: $line"
+      continue
+    fi
+    if ! git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then
+      bad_sha=1
+      bad "SHA 不是当前 Git HEAD 的 ancestor: $line"
+    fi
+  done <<< "$sha_lines"
+  [ "$bad_sha" -eq 0 ] && ok "SHA 字段格式合法且均为 HEAD ancestor（不要求等于 HEAD）"
+fi
 
 # 4) TODO 与 DONE 同一里程碑冲突（TODO 行与 DONE 行同里程碑名）
 conflict=0
