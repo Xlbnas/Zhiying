@@ -370,6 +370,42 @@ async function main(): Promise<void> {
     ok(job.status === 'failed' && job.failure_phase === 'CONFIG_ERROR', '[F11b] provider mismatch → failed + CONFIG_ERROR', job);
   }
 
+  // ============ F12：相同 requestId + changed providerConfigVersion → 409 ============
+  {
+    const projectId = createProjectWithWorkflow({topic: 'fp-12', coreQuestion: 'q'}).project.id;
+    seedProject(projectId);
+    const requestId = 'fp-12-001';
+    await postGenerate(projectId, requestId);
+    // 直接调 enqueue 传不同 providerConfigVersion（route 固定 'apiyi:1'）
+    const {enqueueAssetGenerationJob} = await import('../src/lib/assets/generation-jobs');
+    const {buildRequirementSnapshot} = await import('../src/lib/assets/requirements');
+    const source = (await import('../src/lib/assets/requirements')).loadActiveScenesSource(projectId)!;
+    const found = source.plans.find((p) => p.sceneId === 'S001')!.requirements[0]!;
+    let conflict = false;
+    try {
+      enqueueAssetGenerationJob({
+        projectId,
+        sceneId: 'S001',
+        requirementId: 'S001-R01',
+        requestId,
+        prompt: 'hello world',
+        provider: 'apiyi',
+        model: 'gemini-3.1-flash-image',
+        resourceClass: 'remote_image_api',
+        resourceGroup: null,
+        sourceScenesVersionId: String(source.activeVersion),
+        requirementSnapshot: buildRequirementSnapshot(found),
+        imageSize: '1K',
+        aspectRatio: '16:9',
+        providerConfigVersion: 'apiyi:999',
+      });
+    } catch (err) {
+      conflict = (err as {code?: string}).code === 'REQUEST_ID_CONFLICT';
+    }
+    ok(conflict, '[F12a] 改变 providerConfigVersion → REQUEST_ID_CONFLICT');
+    getDb().prepare(`UPDATE asset_generation_jobs SET status='cancelled' WHERE project_id=?`).run(projectId);
+  }
+
   // 清理
   const assetProjectIds = (getDb().prepare('SELECT DISTINCT project_id FROM assets').all() as Array<{project_id: string}>).map((r) => r.project_id);
   closeDb();

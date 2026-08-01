@@ -104,6 +104,8 @@ const DEFAULT_LEASE_MS = 10 * 60 * 1000;
 /** 历史 job 缺失快照时的确定性默认值（Worker 不得从 env 重新推导已入队参数）。 */
 export const DEFAULT_IMAGE_SIZE = '1K';
 export const DEFAULT_ASPECT_RATIO = '16:9';
+/** 当前 provider 配置版本（历史行指纹推导占位；版本升级后旧行与新 enqueue 将 409）。 */
+export const CURRENT_PROVIDER_CONFIG_VERSION = 'apiyi:1';
 
 function now(): string {
   return new Date().toISOString();
@@ -145,6 +147,7 @@ export function computeRequestFingerprint(input: {
   imageSize: string;
   aspectRatio: string;
   resourceGroup: string | null;
+  providerConfigVersion: string;
 }): string {
   const payload = JSON.stringify({
     projectId: input.projectId,
@@ -159,6 +162,7 @@ export function computeRequestFingerprint(input: {
     imageSize: input.imageSize,
     aspectRatio: input.aspectRatio,
     resourceGroup: input.resourceGroup ?? '',
+    providerConfigVersion: input.providerConfigVersion,
   });
   return crypto.createHash('sha256').update(payload).digest('hex');
 }
@@ -283,6 +287,7 @@ export function enqueueAssetGenerationJob(
       imageSize: input.imageSize,
       aspectRatio: input.aspectRatio,
       resourceGroup: input.resourceGroup,
+      providerConfigVersion: input.providerConfigVersion,
     });
 
     const id = crypto.randomUUID();
@@ -353,6 +358,7 @@ export function enqueueAssetGenerationJob(
         imageSize: row.image_size ?? DEFAULT_IMAGE_SIZE,
         aspectRatio: row.aspect_ratio ?? DEFAULT_ASPECT_RATIO,
         resourceGroup: row.resource_group,
+        providerConfigVersion: row.provider_config_version ?? CURRENT_PROVIDER_CONFIG_VERSION,
       });
       if (existingFingerprint === fingerprint) {
         // fingerprint 一致 → reused；旧行缺失 fingerprint 时确定性回填（幂等）
@@ -378,6 +384,7 @@ export function enqueueAssetGenerationJob(
         imageSize: input.imageSize,
         aspectRatio: input.aspectRatio,
         resourceGroup: input.resourceGroup,
+        providerConfigVersion: input.providerConfigVersion,
       });
       throw new AssetGenerationJobError(
         'REQUEST_ID_CONFLICT',
@@ -407,6 +414,7 @@ function describeRequestDiff(
     imageSize: string;
     aspectRatio: string;
     resourceGroup: string | null;
+    providerConfigVersion: string;
   },
 ): string[] {
   const diffs: string[] = [];
@@ -419,6 +427,7 @@ function describeRequestDiff(
   if ((existing.image_size ?? DEFAULT_IMAGE_SIZE) !== input.imageSize) diffs.push('imageSize');
   if ((existing.aspect_ratio ?? DEFAULT_ASPECT_RATIO) !== input.aspectRatio) diffs.push('aspectRatio');
   if ((existing.resource_group ?? '') !== (input.resourceGroup ?? '')) diffs.push('resourceGroup');
+  if ((existing.provider_config_version ?? CURRENT_PROVIDER_CONFIG_VERSION) !== input.providerConfigVersion) diffs.push('providerConfigVersion');
   return diffs;
 }
 

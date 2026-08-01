@@ -22,13 +22,14 @@ import path from 'node:path';
 import {
   completeAssetGenerationFailed,
   completeAssetGenerationIndeterminate,
+  CURRENT_PROVIDER_CONFIG_VERSION,
   DEFAULT_ASPECT_RATIO,
   DEFAULT_IMAGE_SIZE,
   heartbeatAssetGenerationJob,
   requeueAssetGenerationJob,
   type AssetGenerationJobRow,
 } from '@/lib/assets/generation-jobs';
-import {commitGeneratedAssetResultTx} from '@/lib/assets/commit';
+import {commitGeneratedAssetResultTx, CommitGeneratedAssetError} from '@/lib/assets/commit';
 import {
   getGeneratedImageProvider,
   ImageGenerationError,
@@ -88,6 +89,10 @@ export async function runAssetGenerationJob(
   }, HEARTBEAT_INTERVAL_MS);
   const startAtMs = Date.now();
   const provider = getGeneratedImageProvider();
+  // M7.3A.3.2：provider 调用结果状态机（billing 单调依据）。
+  // provider 返回有效 candidates 后立即置 confirmed_charged；此后任何本地持久化
+  // 失败都不得把收费结论降级。
+  let providerOutcome: 'not_called' | 'unknown' | 'confirmed_zero' | 'confirmed_charged' = 'not_called';
 
   const cleanup = (): void => {
     leaseHeartbeat?.dispose();
@@ -129,6 +134,7 @@ export async function runAssetGenerationJob(
 
     const providerUnavailable = !provider.configured || !provider.health.available;
     if (providerUnavailable) {
+      providerOutcome = 'confirmed_zero';
       completeAssetGenerationFailed(job.id, job.owner_token!, {
         errorCode: 'provider_unavailable',
         errorMessage: '图像生成服务未配置或不可用',
@@ -149,6 +155,7 @@ export async function runAssetGenerationJob(
     // M7.3A.3.1：provider 身份必须与 job 冻结快照一致（不允许 queued remote job
     // 被 local provider 执行而绕过 GPU lease）；不匹配 → CONFIG_ERROR，零调用。
     if (provider.name !== job.provider) {
+      providerOutcome = 'confirmed_zero';
       completeAssetGenerationFailed(job.id, job.owner_token!, {
         errorCode: 'CONFIG_ERROR',
         errorMessage: `job.provider=${job.provider} 与当前 provider=${provider.name} 不匹配，拒绝执行`,
@@ -172,6 +179,7 @@ export async function runAssetGenerationJob(
     // Fence A（provider 前）
     const before = fenceA();
     if (!before.ok) {
+      providerOutcome = 'confirmed_zero';
       completeAssetGenerationFailed(job.id, job.owner_token!, {
         errorCode: 'SOURCE_STALE',
         errorMessage: before.reason ?? 'source stale，不调用 provider',
@@ -205,6 +213,7 @@ export async function runAssetGenerationJob(
         aspectRatio: job.aspect_ratio ?? DEFAULT_ASPECT_RATIO,
       });
     } catch (err) {
+      providerOutcome = 'unknown';
       cleanup();
       throw err;
     }
@@ -231,12 +240,24 @@ export async function runAssetGenerationJob(
     }
 
     const first = candidates[0]!;
+    // M7.3A.3.2：provider result snapshot 校验 —— candidate.provider 必须与
+    // job.provider 精确一致（不允许 provider 返回异源结果）。
+    if (first.provider !== job.provider) {
+      throw new ImageGenerationError(
+        'PROVIDER_INVALID_RESPONSE',
+        `provider 返回 candidate.provider=${first.provider}，job.provider=${job.provider}，拒绝提交`,
+        undefined,
+        {model: job.model, size: job.image_size ?? DEFAULT_IMAGE_SIZE, aspectRatio: job.aspect_ratio ?? DEFAULT_ASPECT_RATIO},
+      );
+    }
     const firstMeta = (first.metadata ?? {}) as Record<string, unknown>;
     const providerRequestId = typeof firstMeta.providerRequestId === 'string' ? firstMeta.providerRequestId : undefined;
     const elapsedMs = Date.now() - startAtMs;
 
-    // 费用已真实发生：先 finalize usage event（job 快照参数）
-    recordImageGenerationUsageFinal(job, candidates.length, 'confirmed_charged', undefined, providerRequestId);
+    // M7.3A.3.2：provider 已返回有效 candidate → 费用真实发生，billing 单调置 charged；
+    // 之后任何本地持久化失败都保持 confirmed_charged。
+    providerOutcome = 'confirmed_charged';
+    recordImageGenerationUsageFinal(job, candidates.length, 'confirmed_charged', undefined, providerRequestId, undefined, first.model);
 
     // 写临时文件 → rename 到 append-only 最终路径（文件写入在事务外；
     // 事务失败时由本函数删除本轮新文件，不删除任何历史 asset）
@@ -312,6 +333,23 @@ export async function runAssetGenerationJob(
       billingStatus = errorCodeToBillingStatus(err.code);
     }
 
+    // M7.3A.3.2：provider 已确认收费后，本地持久化失败不得把收费结论降级；
+    // 使用明确错误 RESULT_PERSIST_FAILED 而非 PROVIDER_TERMINAL_FAILURE。
+    if (providerOutcome === 'confirmed_charged') {
+      billingStatus = 'confirmed_charged';
+      if (!(err instanceof ImageGenerationError)) {
+        failurePhase = 'RESULT_PERSIST_FAILED';
+      }
+    }
+
+    // M7.3A.3.2：commit 时 job 已被并发 requeue/recover（JOB_STATE_INVALID）→
+    // 不覆盖原 job 终态；usage 保持 confirmed_charged；worker 主循环不崩溃。
+    if (err instanceof CommitGeneratedAssetError && err.code === 'JOB_STATE_INVALID') {
+      recordImageGenerationUsageFinal(job, 1, 'confirmed_charged', 'RESULT_PERSIST_FAILED', providerRequestId, elapsedMs);
+      log(`asset job ${job.id}: commit 时 job 状态已变（RESULT_PERSIST_FAILED，不覆盖 job 终态）`);
+      return;
+    }
+
     // 请求已发出但结果未知 → indeterminate；否则 failed
     if (failurePhase === 'PROVIDER_RESPONSE_TIMEOUT') {
       completeAssetGenerationIndeterminate(job.id, job.owner_token!, {
@@ -384,6 +422,7 @@ function recordImageGenerationUsageFinal(
   failurePhase?: string,
   providerRequestId?: string,
   elapsedMs?: number,
+  actualModel?: string,
 ): void {
   finalizeImageGenerationUsage({
     attemptId: job.request_id,
@@ -400,5 +439,7 @@ function recordImageGenerationUsageFinal(
     failurePhase,
     prompt: job.prompt,
     elapsedMs,
+    actualModel,
+    providerConfigVersion: job.provider_config_version ?? CURRENT_PROVIDER_CONFIG_VERSION,
   });
 }

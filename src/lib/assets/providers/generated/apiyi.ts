@@ -39,6 +39,7 @@ export type ImageGenerationErrorCode =
   | 'IMAGE_DOWNLOAD_TIMEOUT'
   | 'IMAGE_DECODE_FAILED'
   | 'PROVIDER_TERMINAL_FAILURE'
+  | 'PROVIDER_INVALID_RESPONSE'
   | 'empty_result';
 
 export interface ImageGenerationErrorContext {

@@ -161,7 +161,7 @@ export interface ImageGenerationUsageResult {
   inserted: boolean;
   costCny: number | null;
   unitPriceCny: number | null;
-  costSource: 'provider_reported' | 'configured_estimate' | 'none';
+  costSource: 'provider_reported' | 'configured_estimate' | 'preserved' | 'none';
 }
 
 /**
@@ -295,26 +295,87 @@ export interface ImageGenerationFinalizeInput {
   prompt?: string;
   elapsedMs?: number;
   assetId?: string;
+  /** M7.3A.3.2：provider 实际返回的 model（与 requested model 分别记录）。 */
+  actualModel?: string;
+  /** M7.3A.3.2：enqueue 冻结的 provider 配置版本。 */
+  providerConfigVersion?: string;
 }
 
 /**
  * M7：将 in_flight usage event 更新为终态（succeeded/auth_failed/unknown_billing）。
  * 只更新 status/cost/metadata，不改动 id；若行不存在（异常）则创建新行兜底。
+ *
+ * M7.3A.3.2：billing 单调保护。
+ * - unknown_billing → confirmed_zero / confirmed_charged 可升级；
+ * - confirmed_zero / confirmed_charged → 不得降级为 unknown_billing；
+ * - 已 confirmed_charged 后任何后续 finalize（未知/失败/重试）保留 charged 结论，
+ *   不把 cost_cny 从非 null 覆盖成 null；metadata 可追加 rejectedFinalize /
+ *   persistenceFailure，但不覆盖收费结论。
  */
 export function finalizeImageGenerationUsage(
   input: ImageGenerationFinalizeInput,
 ): ImageGenerationUsageResult {
   const db = getDb();
-  const existing = db.prepare('SELECT metadata FROM project_usage_events WHERE id = ?').get(input.attemptId) as
-    | {metadata: string | null}
+  const existing = db.prepare('SELECT metadata, cost_cny FROM project_usage_events WHERE id = ?').get(input.attemptId) as
+    | {metadata: string | null; cost_cny: number | null}
     | undefined;
+
+  let priorMeta: Record<string, unknown> = {};
+  try {
+    priorMeta = existing?.metadata ? (JSON.parse(existing.metadata) as Record<string, unknown>) : {};
+  } catch {
+    priorMeta = {};
+  }
+
+  // 单调判定（状态确定性：unknown < zero < charged）
+  const priorStatus = typeof priorMeta.status === 'string' ? priorMeta.status : null;
+  const MONO_RANK: Record<string, number> = {unknown_billing: 1, confirmed_zero: 2, confirmed_charged: 3};
+  const priorRank = priorStatus ? (MONO_RANK[priorStatus] ?? 0) : 0;
+  const incomingRank = MONO_RANK[input.status] ?? 0;
+  const downgradeRejected = priorRank > 0 && incomingRank < priorRank;
 
   let costCny: number | null = null;
   let unitPriceCny: number | null = null;
   let costSource: ImageGenerationUsageResult['costSource'] = 'none';
   let pricingError: string | null = null;
 
-  if (input.status === 'succeeded' || input.status === 'confirmed_charged') {
+  // M7.3A.3.2 强化：prior 已 confirmed_charged 且已有 cost → 任何后续 finalize
+  // （含同级 charged→charged，如持久化失败重试）一律保留已有 cost，不重算覆盖。
+  const preserveChargedCost = existing !== undefined
+    && existing.cost_cny !== null
+    && priorStatus === 'confirmed_charged';
+  if (preserveChargedCost) {
+    costCny = existing.cost_cny;
+    costSource = 'preserved';
+  } else if (downgradeRejected) {
+    // 单调：保留 prior 收费结论；cost 沿用已有值（charged 时已有 cost 不得清空）
+    costCny = existing?.cost_cny ?? null;
+    if (priorStatus === 'confirmed_charged' && costCny === null) {
+      // 极端兜底：prior charged 但 cost 缺失 → 按当前输入重算（不覆盖已有非 null）
+      try {
+        const priced = computeImageCostCny({
+          provider: input.provider,
+          model: input.model,
+          size: input.requestedSize,
+          imageCount: input.imageCount,
+        });
+        costCny = priced.costCny;
+        unitPriceCny = priced.unitPriceCny;
+        costSource = 'configured_estimate';
+      } catch (err) {
+        if (err instanceof ImagePricingError) {
+          pricingError = err.message;
+        } else {
+          throw err;
+        }
+      }
+    } else if (priorStatus === 'confirmed_charged') {
+      costSource = 'preserved';
+    } else if (priorStatus === 'confirmed_zero') {
+      costCny = 0;
+      costSource = 'preserved';
+    }
+  } else if (input.status === 'succeeded' || input.status === 'confirmed_charged') {
     try {
       const priced = computeImageCostCny({
         provider: input.provider,
@@ -336,12 +397,7 @@ export function finalizeImageGenerationUsage(
     costCny = 0;
   }
 
-  let priorMeta: Record<string, unknown> = {};
-  try {
-    priorMeta = existing?.metadata ? (JSON.parse(existing.metadata) as Record<string, unknown>) : {};
-  } catch {
-    priorMeta = {};
-  }
+  const effectiveStatus = downgradeRejected && priorStatus ? priorStatus : input.status;
 
   const metadata = {
     ...priorMeta,
@@ -351,7 +407,7 @@ export function finalizeImageGenerationUsage(
     imageCount: input.imageCount,
     requestedSize: input.requestedSize,
     aspectRatio: input.aspectRatio,
-    status: input.status,
+    status: effectiveStatus,
     costSource,
     unitPriceCny,
     pricingVersion: costSource === 'configured_estimate' ? IMAGE_PRICE_TABLE_VERSION : null,
@@ -362,7 +418,11 @@ export function finalizeImageGenerationUsage(
     failurePhase: input.failurePhase ?? priorMeta.failurePhase ?? null,
     prompt: input.prompt ?? priorMeta.prompt ?? null,
     elapsedMs: input.elapsedMs ?? priorMeta.elapsedMs ?? null,
-    assetId: input.assetId ?? null,
+    assetId: input.assetId ?? priorMeta.assetId ?? null,
+    actualModel: input.actualModel ?? priorMeta.actualModel ?? null,
+    requestedModel: input.model ?? priorMeta.requestedModel ?? null,
+    providerConfigVersion: input.providerConfigVersion ?? priorMeta.providerConfigVersion ?? null,
+    ...(downgradeRejected ? {rejectedFinalize: input.status} : {}),
   };
 
   if (existing) {
