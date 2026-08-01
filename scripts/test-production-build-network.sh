@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # test-production-build-network.sh — production-build-network.sh 逻辑测试。
-# 只做脚本逻辑/本地检查验证（bash -n、dry-run、端口占用拒绝、退出码），
-# 不启动真实 docker 容器、不访问任何付费服务/外网。
+# 只做脚本逻辑/本地检查验证（bash -n、dry-run、mock 容器状态、端口占用拒绝、
+# 退出码），不启动真实 docker 容器、不访问任何付费服务/外网。
 # 用法：bash scripts/test-production-build-network.sh
 set -euo pipefail
 
@@ -28,7 +28,7 @@ fi
 kill "$PROXY_PID" 2>/dev/null || true
 wait "$PROXY_PID" 2>/dev/null || true
 
-# 3) 端口占用拒绝：起一个 65534 监听，start 必须拒绝
+# 3) 端口占用拒绝：起一个 65534 监听，start 必须拒绝（无自有容器时）
 python3 -c "import socket,time; s=socket.socket(); s.bind(('127.0.0.1',65534)); s.listen(1); time.sleep(20)" &
 PID=$!
 sleep 1
@@ -40,7 +40,43 @@ fi
 kill "$PID" 2>/dev/null || true
 wait "$PID" 2>/dev/null || true
 
-# 4) 用法错误 → exit 2
+# 4) 自有容器 running 时第二次 start 返回 0（幂等；mock 容器 + dry-run 跳过 TLS 验证）
+if ZHIYING_BUILD_NETWORK_MOCK=running ZHIYING_BUILD_TUNNEL_PORT=65532 \
+   ZHIYING_BUILD_PROXY=127.0.0.1:65533 ZHIYING_BUILD_NETWORK_DRY_RUN=1 \
+   bash "$SCRIPT" start >/dev/null 2>&1; then
+  ok "自有容器 running 时二次 start 幂等返回 0"
+else
+  bad "自有容器 running 时二次 start 应返回 0"
+fi
+
+# 5) check：无容器 → 非零退出 + STOPPED
+out=$(ZHIYING_BUILD_NETWORK_MOCK=absent ZHIYING_BUILD_NETWORK_DRY_RUN=1 bash "$SCRIPT" check 2>/dev/null || true)
+if [ "$out" = "STOPPED" ]; then ok "check 无容器输出 STOPPED"; else bad "check 输出=$out"; fi
+if ZHIYING_BUILD_NETWORK_MOCK=absent ZHIYING_BUILD_NETWORK_DRY_RUN=1 bash "$SCRIPT" check >/dev/null 2>&1; then
+  bad "check 无容器应非零退出"
+else
+  ok "check 无容器非零退出"
+fi
+
+# 6) check：mock running + dry-run → RUNNING（DRY_RUN 下 tls_ok 短路）
+out=$(ZHIYING_BUILD_NETWORK_MOCK=running ZHIYING_BUILD_NETWORK_DRY_RUN=1 bash "$SCRIPT" check 2>/dev/null || true)
+if [ "$out" = "RUNNING" ]; then ok "check running 容器输出 RUNNING"; else bad "check running 输出=$out"; fi
+
+# 7) listener 仅 loopback：检查 socat 命令包含 bind=127.0.0.1（脚本内容断言）
+if grep -q "TCP-LISTEN:\${LISTEN_PORT},bind=127.0.0.1,fork,reuseaddr" "$SCRIPT"; then
+  ok "socat 仅监听 loopback（bind=127.0.0.1）"
+else
+  bad "socat 未绑定 loopback"
+fi
+
+# 8) 代理 host 环境变量生效：脚本从 ZHIYING_BUILD_PROXY 解析 host/port（内容断言）
+if grep -q 'PROXY_HOST="${PROXY_ADDR%:\*}"' "$SCRIPT" && grep -q 'PROXY:${PROXY_HOST}:${TARGET_HOST}:443,proxyport=${PROXY_PORT}' "$SCRIPT"; then
+  ok "代理 host/port 从环境变量解析（不硬编码）"
+else
+  bad "代理 host/port 解析缺失"
+fi
+
+# 9) 用法错误 → exit 2
 if bash "$SCRIPT" >/dev/null 2>&1; then
   bad "无参数应 exit 2"
 else
@@ -48,16 +84,7 @@ else
   if [ "$rc" -eq 2 ]; then ok "无参数 exit 2"; else bad "无参数 exit=$rc（期望 2）"; fi
 fi
 
-# 5) check：无容器（dry-run 环境）→ 非零退出 + STOPPED
-out=$(ZHIYING_BUILD_NETWORK_DRY_RUN=1 bash "$SCRIPT" check 2>/dev/null || true)
-if [ "$out" = "STOPPED" ]; then ok "check 无容器输出 STOPPED"; else bad "check 输出=$out"; fi
-if ZHIYING_BUILD_NETWORK_DRY_RUN=1 bash "$SCRIPT" check >/dev/null 2>&1; then
-  bad "check 无容器应非零退出"
-else
-  ok "check 无容器非零退出"
-fi
-
-# 6) dry-run stop 幂等通过
+# 10) dry-run stop 幂等通过
 if ZHIYING_BUILD_NETWORK_DRY_RUN=1 bash "$SCRIPT" stop >/dev/null 2>&1; then
   ok "dry-run stop 通过"
 else
