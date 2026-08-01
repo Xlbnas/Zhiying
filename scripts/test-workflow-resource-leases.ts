@@ -532,6 +532,58 @@ async function main(): Promise<void> {
     releaseResourceLeaseForJob('production_gpu', 'render', renderId2);
   }
 
+  // ============ L11：heartbeat dispose 无泄漏（M7.3A.3.2） ============
+  {
+    // 1) 100 个 heartbeat 创建+dispose 后不得留下 active interval
+    const origSet = global.setInterval;
+    const origClear = global.clearInterval;
+    let activeIntervals = 0;
+    global.setInterval = ((cb: (...args: unknown[]) => void, ms: number) => {
+      activeIntervals++;
+      return origSet(cb, ms) as unknown as ReturnType<typeof setInterval>;
+    }) as typeof setInterval;
+    global.clearInterval = ((id: ReturnType<typeof setInterval> | undefined) => {
+      activeIntervals--;
+      return origClear(id as unknown as NodeJS.Timeout);
+    }) as typeof clearInterval;
+    try {
+      for (let i = 0; i < 100; i++) {
+        const h = createResourceLeaseHeartbeat({
+          group: 'production_gpu',
+          ownerToken: `t-lost-${i}`,
+          intervalMs: 1000,
+          leaseMs: 60000,
+        });
+        h.dispose();
+      }
+    } finally {
+      global.setInterval = origSet;
+      global.clearInterval = origClear;
+    }
+    ok(activeIntervals === 0, '[L11a] 100 个 heartbeat 创建+dispose 后无 active interval', {activeIntervals});
+
+    // 2) dispose 后不再 heartbeat（lease 行 updated_at 不再变化）
+    const now = new Date().toISOString();
+    const renderId = insertRenderJob(projectId, now);
+    const claimed = claimNextAnyJob('worker-hb-dispose');
+    if (!claimed || claimed.type !== 'render' || !claimed.resourceLease) {
+      throw new Error('L11b: 未能 claim render');
+    }
+    const hb = createResourceLeaseHeartbeat({
+      group: 'production_gpu',
+      ownerToken: claimed.resourceLease.ownerToken,
+      intervalMs: 20,
+      leaseMs: 60000,
+    });
+    await sleep(70);
+    const before = (getDb().prepare(`SELECT updated_at FROM resource_group_leases WHERE resource_group='production_gpu'`).get() as {updated_at: string}).updated_at;
+    hb.dispose();
+    await sleep(90); // 若 dispose 失败，20ms interval 会继续更新
+    const after = (getDb().prepare(`SELECT updated_at FROM resource_group_leases WHERE resource_group='production_gpu'`).get() as {updated_at: string}).updated_at;
+    ok(before === after, '[L11b] dispose 后 heartbeat 停止（updated_at 不变）', {before, after});
+    releaseResourceLeaseForJob('production_gpu', 'render', renderId);
+  }
+
   closeDb();
   fs.rmSync(path.resolve(process.cwd(), 'data', 'test-workflow-resource-leases'), {recursive: true, force: true});
   fs.rmSync(path.resolve(process.cwd(), 'public', 'assets', projectId), {recursive: true, force: true});
