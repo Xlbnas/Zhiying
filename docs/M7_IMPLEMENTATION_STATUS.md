@@ -9,10 +9,10 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-01T07:10Z（M7.3A.3.3R3 修复完成待部署，待独立 Review PASS 后 frozen） |
-| reviewedCodeSHA | `f7d786f172f0ab426c388904e60caa2aad016d52`（R3 code commit 部署后更新） |
-| productionRuntimeSHA | `f7d786f172f0ab426c388904e60caa2aad016d52`（容器镜像实际代码 SHA；R3 部署后更新） |
-| productionHostCheckoutSHA | `f7d786f172f0ab426c388904e60caa2aad016d52`（宿主机 checkout；R3 部署后更新） |
+| statusUpdatedAt | 2026-08-02T02:10Z（M7.3A.3.3R3 已部署，待独立 Review PASS 后 frozen） |
+| reviewedCodeSHA | `aa3f8145825f5a33542f54e90e661e0cccf3e692`（本轮已 review/deploy 的代码 commit） |
+| productionRuntimeSHA | `aa3f8145825f5a33542f54e90e661e0cccf3e692`（容器镜像实际代码 SHA） |
+| productionHostCheckoutSHA | `aa3f8145825f5a33542f54e90e661e0cccf3e692`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
 | 当前分支 | `m7` |
 | 实时 origin/m7 HEAD | 以 `git rev-parse origin/m7` 为准（不硬编码为「永远当前」） |
 
@@ -53,7 +53,7 @@
 | **M7.3A.3 Asset Commit Fence + Strict Idempotency + Lease-loss Fail-closed** | **DONE** | `7a0aeb7`/`ba90d98`/`67c6dba`/`07b39dc`（runtime `07b39dc`，docs `09c5b64`/`4bf4be6`） | request fingerprint、Fence A/B、lease lost fail-closed、构建网络 runbook |
 | **M7.3A.3.1 Atomic Candidate Commit + Server-side Bind Gate** | **DONE** | `df99384`/`32bc8b3`/`2131c6a`/`d7bc9e1`/`9dc3c6a`（runtime `9dc3c6a`，docs `2cd2b92`/`e337b61`，ops `6709882`） | 原子 commit、服务端 stale 绑定门禁、精确 source loader、完整请求快照、render bundle lease |
 | **M7.3A.3.2 Atomic Candidate Binding + Monotonic Image Billing + Render Heartbeat Cleanup** | **DONE** | `528f5c9`/`a8056b4`/`b243233`/`6ddf720`/`8eb23d0`（runtime `8eb23d0`） | 原子绑定、三态 provenance、billing 单调、provider result 审计、heartbeat dispose、SHA 元数据模型 |
-| **M7.3A.3.3 Legacy Binding Safety + Charged Provider Result Audit + Render Bundle Exit Classification** | **DONE（R2 已部署；R3 修复完成待部署）** | `e40de12`/`80f8d11`/`ead3a23`/`c0b6f8a` + R1 `695dc02` + R2 `f7d786f`（runtime `f7d786f`）+ R3 `（待部署）` | legacy 目标可验证门禁、provider 返回即 charged、usage 证据只追加、bundle 实时状态退出、首次写入 metadata 危险键过滤；**frozen 待 Review PASS** |
+| **M7.3A.3.3 Legacy Binding Safety + Charged Provider Result Audit + Render Bundle Exit Classification** | **DONE（R3 已部署，frozen 待 Review PASS）** | `e40de12`/`80f8d11`/`ead3a23`/`c0b6f8a` + R1 `695dc02` + R2 `f7d786f` + R3 `aa3f814`（runtime `aa3f814`） | legacy 目标可验证门禁、provider 返回即 charged、usage 证据只追加、bundle 实时状态退出、首次写入 metadata 危险键过滤；**frozen 待 Review PASS** |
 
 ## 4. 当前已实现功能详情
 
@@ -264,8 +264,8 @@
 
 ## 5. 当前正在进行的工作
 
-- **M7.3A.3.3R3 review closure（进行中）**：R2 部署后独立 Review 发现 1 项 blocker——`mergeUsageMetadata` 在 prior 非 plain（undefined/null/string/数组/Date/class）时直接返回 raw incoming，绕过危险键过滤。已修复（incoming 为 plain object 时无论 prior 形态一律先 `sanitizeObject`），新增 B12a-r 测试（首次写入/prior null/prior 非 plain×4/null-proto/两侧过滤/finalize DB 集成路径）。**实现完成，待部署。**
-- **M7.3A not frozen until deployment + independent review PASS**（R2 已部署；R3 部署未完成前不 frozen）。
+- **M7.3A.3.3R3 review closure 已部署（aa3f814）**：R2 部署后独立 Review 发现的唯一 blocker（`mergeUsageMetadata` 在 prior 非 plain 时绕过危险键过滤）已修复并部署；新增 B12a-r 18 条测试（首次写入/prior null/prior 非 plain×4/null-proto/两侧过滤/finalize DB 集成路径），billing-monotonic 68/0；镜像内 12 套件全绿；production 备份 `m73a2-20260802T010854Z`（DB SHA 与 R2 备份一致 `0d74155e`，部署前后 DB 零写入）。**仍等待独立 Review PASS。**
+- **M7.3A not frozen until independent review PASS**（R3 已部署；Review 未通过前不 frozen）。
 - **Production legacy 审计（只报告，不修改）**：generated assets 19；provenance NULL 19（全为历史 legacy）；NULL + requirement_json 缺失/损坏 1；active legacy bindings 17；active bindings 指向当前 active scenes 中缺失的 requirement 10（分布于 2 个项目，均为历史绑定；未删除/重绑）。
 - 下一步：M7.3B（明确不在本次范围）。
 
