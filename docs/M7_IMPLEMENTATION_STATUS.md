@@ -564,3 +564,14 @@ M7.3A.2 Review 全部阻断项已修复（第二轮 hardening）。接续复核�
 - **状态**：**M7.3B.R1 deployed；M7.3B pending independent Review PASS；TTS-A not started**。
 - **本轮未执行**：不对 Freud 或任何 production 项目调 visual-sequences/shots POST；不创建 production Sequence/Shot candidate；不调用真实 LLM/APIYi；不创建 M7 snapshot；不切换项目到 m7；不实现 timing-reconciliation@2.0；不迁移 bindings（M7.3B.R1 行为全部经临时 DB + Mock provider 验证）。
 
+### 15.3 M7.3B.R2 部署证据（e3bd60a，2026-08-02）
+
+- **部署链**：code SHA `e3bd60a879cb279c6bd19b1c2d5013073b7155d3` = production runtime SHA = host checkout SHA = origin/m7 HEAD（docs evidence commit 后 origin/m7 会高于 runtime——以现场 `git rev-parse` 为准）。
+- **pre-deployment backup**：`/vol1/1000/backups/zhiying/m73b-r2-20260802T091124Z`（DB SHA `0d74155e…` 与历轮一致=部署前零写入；integrity=ok；**SHA256SUMS 44 文件全 OK、0 FAILED**；`BACKUP_COMPLETED_AT=09:13:12Z` 先于 checkout）。
+- **构建网络 runbook**：`production-build-network.sh start/check` 一次通过 → `docker build --network=host --add-host remotion.media:127.0.0.1 --build-arg APT_MIRROR --build-arg NPM_REGISTRY -t zhiying:e3bd60a…`（BUILD_EXIT=0，trap 保证 stop）→ 443 无 listener、tunnel 容器 0 残留。
+- **镜像内测试**（`NODE_ENV=development`，scripts 只读挂载，image code SHA = mounted scripts SHA = e3bd60a）：M7.3B.R2 4 套件 92/96/114/71 全绿 + 权威 9 套件（m73a 184、m72 125、m721 99、m711 58、dag-parallelism 15、resource-leases 87、durability 53、m3b-tts 99、m3c 82）全绿。
+- **up 验证**：三容器 healthy @`zhiying:e3bd60a…`；local/LAN 3210 root 200、/api/projects 200；worker 日志无 migration/SQLite/dispatch/lease/provider error；resource leases 0；web env 无 DEEPSEEK_API_KEY/LLM_PROVIDER。
+- **Production 数据不变量（部署前后只读对比，21 项全过）**：projects 全 m6（3 个）；snapshot pointer 全 NULL；M7 snapshot 0；Freud 三 artifact ID 序列 hash 与备份全等（`1449aefb…`）；`793c80fa…` content hash 与备份全等（`784703a4…`）；`visual_sequence_plan`/`shot_plan`/`timing_reconciliation_v2` artifact 全 0；`m7_visual_sequences`/`m7_shots` generation runs 0；generation_dispatch_jobs 0=0；llm_usage 69=69；usage-events 610=610；asset_generation_jobs 0=0；tts_jobs 351=351；assets/bindings 40/40=40/40；render_jobs 14=14；resource leases 0；无项目切换 m7。
+- **状态**：**M7.3B.R2 deployed；M7.3B pending independent Review PASS；TTS-A not started**。
+- **本轮未执行**：不对 Freud 或任何 production 项目调 generation POST；不创建 production Sequence/Shot candidate；不调用真实 LLM/APIYi；不创建 M7 snapshot；不切换项目到 m7；不实现 timing-reconciliation@2.0；不迁移 bindings（M7.3B.R2 行为全部经临时 DB + Mock provider 验证）。
+
