@@ -9,7 +9,8 @@
  *     - staging 文件 O_NOFOLLOW、不执行 shell（spawn 参数数组，无 sh -c / shell 选项）——源码断言
  *     - 不读 .env.production（voice-library 源码 grep 断言）；序列化出口不含 canonical_audio_path
  *  G. file/DB consistency（故障注入）：
- *     - staging 目录只读 → 写入失败、无 DB 行、无 staging 残留
+ *     - staging 写入失败（.staging 预置为文件 → mkdir ENOTDIR；不用 chmod——rootless
+ *       docker/fuse-overlayfs 不强制 mode 位）→ 无 DB 行、无 staging 残留
  *     - commit 内 rename 失败（final 路径预置同名文件 → mkdir EEXIST → 事务回滚）→ 无 DB 行
  *     - ffprobe / ffmpeg 注入 fail → 无 DB 行无残留
  *     - crash-recovery：orphan reference.wav（无 DB 行）→ exact null、list 不含、再 ingest 不受影响
@@ -99,6 +100,7 @@ function revisionCount(profileId: string): number {
 function stagingEntries(): string[] {
   const staging = path.join(getDataDir(), 'voice-library', '.staging');
   if (!fs.existsSync(staging)) return [];
+  if (!fs.statSync(staging).isDirectory()) return []; // .staging 被故障注入为文件时视为无残留条目
   return fs.readdirSync(staging);
 }
 
@@ -214,11 +216,14 @@ async function main(): Promise<void> {
 
   // ---------- G. file/DB consistency ----------
 
-  // G1：staging 目录只读 → 写入失败、无 DB 行、无 staging 残留
-  const pG1 = createVoiceProfile({displayName: 'G1 只读 staging'});
-  const stagingDir = path.join(vlRoot, '.staging');
-  fs.mkdirSync(stagingDir, {recursive: true});
-  fs.chmodSync(stagingDir, 0o555);
+  // G1：staging 写入失败 → 写入失败、无 DB 行、无 staging 残留。
+  // 注入方式：把 `.staging` 预置为普通文件 → mkdirSync(recursive) 必抛 ENOTDIR。
+  // （不用 chmod 0555：production 宿主机 rootless docker + fuse-overlayfs 不强制
+  //   mode 位，chmod 注入在该环境失效；文件阻塞在所有环境确定性生效。）
+  const pG1 = createVoiceProfile({displayName: 'G1 staging 写入失败'});
+  fs.mkdirSync(vlRoot, {recursive: true});
+  const stagingBlocker = path.join(vlRoot, '.staging');
+  fs.writeFileSync(stagingBlocker, 'blocker'); // .staging 是文件而非目录
   let g1Err: unknown = null;
   try {
     await ingestVoiceProfileRevision({
@@ -229,10 +234,10 @@ async function main(): Promise<void> {
   } catch (err) {
     g1Err = err;
   }
-  fs.chmodSync(stagingDir, 0o755);
+  fs.rmSync(stagingBlocker, {force: true});
   ok(
     g1Err !== null && revisionCount(pG1.id) === 0 && stagingEntries().length === 0,
-    '[G1] staging 目录只读 → ingest 失败、无 DB 行、无 staging 残留',
+    '[G1] staging 写入失败（.staging 为文件）→ ingest 失败、无 DB 行、无 staging 残留',
     g1Err instanceof Error ? g1Err.message : '未抛错',
   );
 
