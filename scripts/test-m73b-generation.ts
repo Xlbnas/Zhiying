@@ -725,6 +725,204 @@ async function main(): Promise<void> {
   ok(seqProvider.requests.length === callsBeforeJ, 'J30 J 组全程 provider calls=0（无 worker 执行）', seqProvider.requests.length);
   void seqSourceKeyB;
 
+  // ═══════ K. dispatch-only running window（M7.3B.R2 P1） ═══════
+  console.log('── K. running window');
+  // 使用真实 scheduler claim（claimNextAnyJob），不手工 UPDATE。
+  // 先清理 J 组遗留的 queued dispatch（J 组断言已完成；全局 FIFO 否则会先捡到它们）。
+  getDb().prepare(`DELETE FROM generation_dispatch_jobs WHERE project_id = ? AND status = 'queued'`).run(projectId);
+  // K1-K8：sequences route
+  const k1 = await postJson(seqPOST, projectId, {
+    narrativeBeatsArtifactId: beatsArtifactId,
+    visualIntentPlanArtifactId: intentArtifactId,
+    requestId: 'req-seq-running-0001',
+  });
+  ok(k1.status === 202 && k1.json.status === 'queued', 'K1 POST → 202 queued', k1);
+  const kClaimed = claimNextAnyJob('worker-running-window');
+  ok(kClaimed !== null && kClaimed.type === 'dispatch', 'K2 scheduler claim 到 dispatch', kClaimed?.type);
+  if (kClaimed === null || kClaimed.type !== 'dispatch') throw new Error('fixture: K claim failed');
+  const kDispatchRow = getDb().prepare('SELECT * FROM generation_dispatch_jobs WHERE id = ?').get(kClaimed.job.id) as {status: string; owner_token: string | null; source_artifact_id: string};
+  ok(kDispatchRow.status === 'running', 'K3 dispatch.status=running（claim 后）', kDispatchRow.status);
+  ok(kDispatchRow.owner_token !== null && kDispatchRow.owner_token.length > 0, 'K4 owner_token 非空');
+  ok(runRow(projectId, 'm7_visual_sequences', 'req-seq-running-0001') === undefined, 'K5 generation_run 尚未创建（dispatch-only running）');
+  const callsBeforeK = seqProvider.requests.length;
+  const seqRowsBeforeK = listVisualSequencesRows(projectId).length;
+  const k6 = await postJson(seqPOST, projectId, {
+    narrativeBeatsArtifactId: beatsArtifactId,
+    visualIntentPlanArtifactId: intentArtifactId,
+    requestId: 'req-seq-running-0001',
+  });
+  ok(k6.status === 202 && k6.json.status === 'running', 'K6 同 source POST → 202 status=running（不再 queued）', k6);
+  ok(k6.json.dispatchId === kClaimed.job.id, 'K7 dispatchId 与 claimed dispatch 一致', k6.json.dispatchId);
+  ok(runRow(projectId, 'm7_visual_sequences', 'req-seq-running-0001') === undefined, 'K8a generation_runs 仍为 0');
+  ok(dispatchCountFor(projectId, 'm7_visual_sequences', 'req-seq-running-0001') === 1, 'K8b dispatch count=1（不新增）');
+  ok(dispatchSource(projectId, 'm7_visual_sequences', 'req-seq-running-0001') === composeSequencesSourceKey(beatsArtifactId, intentArtifactId), 'K8c source 不变');
+  ok(seqProvider.requests.length === callsBeforeK, 'K8d provider calls=0');
+  ok(listVisualSequencesRows(projectId).length === seqRowsBeforeK, 'K8e artifact count 不变');
+  // K 收尾：用 Mock provider 完成被 claim 的 dispatch（不留 running 残留）
+  const kFinishProvider = new ScriptableProvider();
+  kFinishProvider.push({text: JSON.stringify({sequences: makeValidSequences()})});
+  await runDispatchJob(
+    kClaimed.job,
+    {isShuttingDown: () => false, log: () => {}},
+    {provider: kFinishProvider, heartbeatMs: 60_000},
+  );
+  ok(runRow(projectId, 'm7_visual_sequences', 'req-seq-running-0001')?.status === 'succeeded', 'K9 被 claim 的 dispatch 正确收尾（run succeeded）');
+
+  // K10-K13：shots route dispatch-only running
+  const k10 = await postJson(shotPOST, projectId, {
+    visualSequencesArtifactId: seqArtifactId2,
+    requestId: 'req-shots-running-0001',
+  });
+  ok(k10.status === 202 && k10.json.status === 'queued', 'K10 shots POST → 202 queued', k10);
+  const kShotsClaimed = claimNextAnyJob('worker-running-window-2');
+  ok(kShotsClaimed !== null && kShotsClaimed.type === 'dispatch', 'K11 shots scheduler claim', kShotsClaimed?.type);
+  if (kShotsClaimed === null || kShotsClaimed.type !== 'dispatch') throw new Error('fixture: K shots claim failed');
+  ok(runRow(projectId, 'm7_shots', 'req-shots-running-0001') === undefined, 'K12 shots generation_run 尚未创建');
+  const k13 = await postJson(shotPOST, projectId, {
+    visualSequencesArtifactId: seqArtifactId2,
+    requestId: 'req-shots-running-0001',
+  });
+  ok(k13.status === 202 && k13.json.status === 'running' && k13.json.dispatchId === kShotsClaimed.job.id, 'K13 shots 同 source POST → 202 running（同 dispatchId）', k13);
+  const kShotsFinish = new ScriptableProvider();
+  kShotsFinish.push({text: JSON.stringify({shots: makeValidShots()})});
+  await runDispatchJob(
+    kShotsClaimed.job,
+    {isShuttingDown: () => false, log: () => {}},
+    {provider: kShotsFinish, heartbeatMs: 60_000},
+  );
+  ok(runRow(projectId, 'm7_shots', 'req-shots-running-0001')?.status === 'succeeded', 'K14 shots dispatch 收尾（run succeeded）');
+
+  // K15-K17：既有 stage（visual-intents route）dispatch-only running
+  const k15 = await postJson(visualPOST, projectId, {
+    narrativeBeatsArtifactId: beatsArtifactId,
+    requestId: 'req-intent-running-0001',
+  });
+  ok(k15.status === 202 && k15.json.status === 'queued', 'K15 visual-intents POST → 202 queued', k15);
+  const kIntentClaimed = claimNextAnyJob('worker-running-window-3');
+  ok(kIntentClaimed !== null && kIntentClaimed.type === 'dispatch', 'K16 visual-intents scheduler claim', kIntentClaimed?.type);
+  if (kIntentClaimed === null || kIntentClaimed.type !== 'dispatch') throw new Error('fixture: K intent claim failed');
+  const k17 = await postJson(visualPOST, projectId, {
+    narrativeBeatsArtifactId: beatsArtifactId,
+    requestId: 'req-intent-running-0001',
+  });
+  ok(k17.status === 202 && k17.json.status === 'running' && k17.json.dispatchId === kIntentClaimed.job.id, 'K17 visual-intents 同 source POST → 202 running（既有 stage 一致）', k17);
+  const kIntentFinish = new ScriptableProvider();
+  kIntentFinish.push({text: JSON.stringify({intents: makeValidIntents(plan)})});
+  await runDispatchJob(
+    kIntentClaimed.job,
+    {isShuttingDown: () => false, log: () => {}},
+    {provider: kIntentFinish, heartbeatMs: 60_000},
+  );
+  ok(runRow(projectId, 'm7_visual_intent', 'req-intent-running-0001')?.status === 'succeeded', 'K18 visual-intents dispatch 收尾（run succeeded）');
+
+  // K19-K22：dispatch-only running 时不同 source → 409、原 dispatch 仍 running、source 未覆盖
+  const k19 = await postJson(seqPOST, projectId, {
+    narrativeBeatsArtifactId: beatsArtifactId,
+    visualIntentPlanArtifactId: intentArtifactId,
+    requestId: 'req-seq-running-conflict-0001',
+  });
+  ok(k19.status === 202 && k19.json.status === 'queued', 'K19 conflict-window POST A → 202 queued', k19);
+  const kConflictClaimed = claimNextAnyJob('worker-running-window-4');
+  if (kConflictClaimed === null || kConflictClaimed.type !== 'dispatch') throw new Error('fixture: K conflict claim failed');
+  const k20 = await postJson(seqPOST, projectId, {
+    narrativeBeatsArtifactId: beatsArtifactId,
+    visualIntentPlanArtifactId: intentAltBuild.artifact.id,
+    requestId: 'req-seq-running-conflict-0001',
+  });
+  ok(k20.status === 409 && k20.json.error === 'REQUEST_ID_CONFLICT', 'K20 dispatch-only running 不同 source → 409', k20);
+  const kConflictRow = getDb().prepare('SELECT status, source_artifact_id FROM generation_dispatch_jobs WHERE id = ?').get(kConflictClaimed.job.id) as {status: string; source_artifact_id: string};
+  ok(kConflictRow.status === 'running', 'K21 原 dispatch 仍 running（未被修改）', kConflictRow.status);
+  ok(kConflictRow.source_artifact_id === composeSequencesSourceKey(beatsArtifactId, intentArtifactId), 'K22 source 未覆盖（仍为 A）');
+  ok(runRow(projectId, 'm7_visual_sequences', 'req-seq-running-conflict-0001') === undefined, 'K23 冲突后 generation_runs=0');
+  // 收尾
+  const kConflictFinish = new ScriptableProvider();
+  kConflictFinish.push({text: JSON.stringify({sequences: makeValidSequences()})});
+  await runDispatchJob(
+    kConflictClaimed.job,
+    {isShuttingDown: () => false, log: () => {}},
+    {provider: kConflictFinish, heartbeatMs: 60_000},
+  );
+
+  // ═══════ L. run/dispatch source 矛盾 fail-closed（M7.3B.R2 P1） ═══════
+  console.log('── L. source invariant');
+  function insertRunRow(projectId: string, stage: string, requestId: string, source: string, status: string): void {
+    getDb().prepare(
+      `INSERT INTO generation_runs (id, project_id, stage, request_id, source_artifact_id, status, owner_token, lease_expires_at, result_artifact_id, error_code, error_message, created_at, started_at, finished_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'tok', ?, NULL, NULL, NULL, ?, ?, NULL, ?)`,
+    ).run(crypto.randomUUID(), projectId, stage, requestId, source, status, new Date(Date.now() + 60000).toISOString(), new Date().toISOString(), new Date().toISOString(), new Date().toISOString());
+  }
+  function insertDispatchRow(projectId: string, stage: string, requestId: string, source: string, status: string): void {
+    getDb().prepare(
+      `INSERT INTO generation_dispatch_jobs (id, project_id, stage, request_id, source_artifact_id, status, owner_token, lease_expires_at, generation_run_id, result_artifact_id, error_code, error_message, created_at, started_at, finished_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, NULL, NULL, ?)`,
+    ).run(crypto.randomUUID(), projectId, stage, requestId, source, status, new Date().toISOString(), new Date().toISOString());
+  }
+  const expectConflictBothWays = undefined;
+  void expectConflictBothWays;
+
+  // L1：run succeeded (A) + dispatch succeeded (B) → 双向 fail-closed
+  {
+    insertRunRow(projectId, 'm7_visual_sequences', 'req-l1-0001', 'src-l1-a', 'succeeded');
+    insertDispatchRow(projectId, 'm7_visual_sequences', 'req-l1-0001', 'src-l1-b', 'succeeded');
+    let a = false;
+    let b = false;
+    try { enqueueGenerationDispatch(getDb(), {projectId, stage: 'm7_visual_sequences', requestId: 'req-l1-0001', sourceArtifactId: 'src-l1-a'}); } catch (err) { a = err instanceof RequestIdConflictError; }
+    try { enqueueGenerationDispatch(getDb(), {projectId, stage: 'm7_visual_sequences', requestId: 'req-l1-0001', sourceArtifactId: 'src-l1-b'}); } catch (err) { b = err instanceof RequestIdConflictError; }
+    ok(a && b, 'L1 run succeeded(A)+dispatch succeeded(B) → input=A 与 input=B 均 fail-closed', {a, b});
+    const l1Rows = getDb().prepare(`SELECT source_artifact_id, status FROM generation_runs WHERE request_id = 'req-l1-0001'`).all() as Array<{source_artifact_id: string; status: string}>;
+    const l1Disps = getDb().prepare(`SELECT source_artifact_id, status FROM generation_dispatch_jobs WHERE request_id = 'req-l1-0001'`).all() as Array<{source_artifact_id: string; status: string}>;
+    ok(l1Rows[0]!.source_artifact_id === 'src-l1-a' && l1Rows[0]!.status === 'succeeded', 'L1b run 行 source/status 完全不变');
+    ok(l1Disps[0]!.source_artifact_id === 'src-l1-b' && l1Disps[0]!.status === 'succeeded', 'L1c dispatch 行 source/status 完全不变');
+  }
+  // L2：run failed (A) + dispatch failed (B) → 双向 fail-closed
+  {
+    insertRunRow(projectId, 'm7_visual_sequences', 'req-l2-0001', 'src-l2-a', 'failed');
+    insertDispatchRow(projectId, 'm7_visual_sequences', 'req-l2-0001', 'src-l2-b', 'failed');
+    let a = false;
+    let b = false;
+    try { enqueueGenerationDispatch(getDb(), {projectId, stage: 'm7_visual_sequences', requestId: 'req-l2-0001', sourceArtifactId: 'src-l2-a'}); } catch (err) { a = err instanceof RequestIdConflictError; }
+    try { enqueueGenerationDispatch(getDb(), {projectId, stage: 'm7_visual_sequences', requestId: 'req-l2-0001', sourceArtifactId: 'src-l2-b'}); } catch (err) { b = err instanceof RequestIdConflictError; }
+    ok(a && b, 'L2 run failed(A)+dispatch failed(B) → 双向 fail-closed（不按先后返回 terminal）', {a, b});
+    // L2 错误 message 必须说明双持久 source
+    let msg = '';
+    try { enqueueGenerationDispatch(getDb(), {projectId, stage: 'm7_visual_sequences', requestId: 'req-l2-0001', sourceArtifactId: 'src-l2-a'}); } catch (err) { msg = err instanceof Error ? err.message : ''; }
+    ok(msg.includes('dispatch source=src-l2-b') && msg.includes('fail-closed'), 'L2b 错误 message 列出 persisted dispatch source 与 fail-closed 语义', msg);
+  }
+  // L3：run running (A) + dispatch running (B) → 双向 fail-closed
+  {
+    insertRunRow(projectId, 'm7_visual_sequences', 'req-l3-0001', 'src-l3-a', 'running');
+    insertDispatchRow(projectId, 'm7_visual_sequences', 'req-l3-0001', 'src-l3-b', 'running');
+    let a = false;
+    let b = false;
+    try { enqueueGenerationDispatch(getDb(), {projectId, stage: 'm7_visual_sequences', requestId: 'req-l3-0001', sourceArtifactId: 'src-l3-a'}); } catch (err) { a = err instanceof RequestIdConflictError; }
+    try { enqueueGenerationDispatch(getDb(), {projectId, stage: 'm7_visual_sequences', requestId: 'req-l3-0001', sourceArtifactId: 'src-l3-b'}); } catch (err) { b = err instanceof RequestIdConflictError; }
+    ok(a && b, 'L3 run running(A)+dispatch running(B) → 双向 fail-closed（不返回 running）', {a, b});
+  }
+  // L4：dispatch cancelled（无 run）→ input 匹配 → terminal；input 不同 → 抛
+  {
+    insertDispatchRow(projectId, 'm7_visual_sequences', 'req-l4-0001', 'src-l4-a', 'cancelled');
+    const l4a = enqueueGenerationDispatch(getDb(), {projectId, stage: 'm7_visual_sequences', requestId: 'req-l4-0001', sourceArtifactId: 'src-l4-a'});
+    ok(l4a.kind === 'terminal' && l4a.status === 'failed', 'L4a dispatch cancelled（同 source）→ terminal', l4a);
+    let bThrew = false;
+    try { enqueueGenerationDispatch(getDb(), {projectId, stage: 'm7_visual_sequences', requestId: 'req-l4-0001', sourceArtifactId: 'src-l4-b'}); } catch (err) { bThrew = err instanceof RequestIdConflictError; }
+    ok(bThrew, 'L4b dispatch cancelled 不同 source → fail-closed');
+  }
+  // L5：正常一致 run+dispatch source-A → succeeded reused / failed terminal / running running
+  {
+    insertRunRow(projectId, 'm7_visual_sequences', 'req-l5a-0001', 'src-l5-a', 'succeeded');
+    insertDispatchRow(projectId, 'm7_visual_sequences', 'req-l5a-0001', 'src-l5-a', 'succeeded');
+    const l5a = enqueueGenerationDispatch(getDb(), {projectId, stage: 'm7_visual_sequences', requestId: 'req-l5a-0001', sourceArtifactId: 'src-l5-a'});
+    ok(l5a.kind === 'reused', 'L5a 一致 succeeded → reused', l5a);
+    insertRunRow(projectId, 'm7_visual_sequences', 'req-l5b-0001', 'src-l5-a', 'failed');
+    insertDispatchRow(projectId, 'm7_visual_sequences', 'req-l5b-0001', 'src-l5-a', 'failed');
+    const l5b = enqueueGenerationDispatch(getDb(), {projectId, stage: 'm7_visual_sequences', requestId: 'req-l5b-0001', sourceArtifactId: 'src-l5-a'});
+    ok(l5b.kind === 'terminal' && l5b.status === 'failed', 'L5b 一致 failed → terminal', l5b);
+    insertRunRow(projectId, 'm7_visual_sequences', 'req-l5c-0001', 'src-l5-a', 'running');
+    insertDispatchRow(projectId, 'm7_visual_sequences', 'req-l5c-0001', 'src-l5-a', 'running');
+    const l5c = enqueueGenerationDispatch(getDb(), {projectId, stage: 'm7_visual_sequences', requestId: 'req-l5c-0001', sourceArtifactId: 'src-l5-a'});
+    ok(l5c.kind === 'running', 'L5c 一致 running → running', l5c);
+  }
+
   console.log(`\n==== test-m73b-generation: ${pass} PASS / ${fail} FAIL ====`);
   closeDb();
   fs.rmSync(path.resolve(process.cwd(), 'data', 'test-m73b-generation'), {recursive: true, force: true});

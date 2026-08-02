@@ -247,12 +247,13 @@ export async function POST(
         {status: 409},
       );
     }
-    // queued：Worker 持有凭据执行 build；Web 全程零 secret、零 provider。
+    // queued/running dispatch envelope（M7.3B.R2：dispatch-only running 时原样透出
+    // dispatchStatus='running'，不再一律 queued）；Worker 持有凭据执行 build。
     return Response.json(
       {
         dispatchId: result.dispatchId,
         requestId,
-        status: 'queued',
+        status: result.dispatchStatus,
         candidateOnly: true,
       },
       {status: 202},

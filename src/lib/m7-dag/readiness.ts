@@ -29,7 +29,7 @@ import {VISUAL_INTENT_USAGE_STAGE} from '../visual-intent/generate';
 import {listVisualIntentCandidates} from '../visual-intent/plan';
 import {SEQUENCES_USAGE_STAGE} from '../visual-sequences/generate';
 import {listVisualSequencesCandidates} from '../visual-sequences/classify';
-import {M7_DAG_NODES, M7_DAG_TOPOLOGICAL_ORDER, type M7DagNodeId} from './dag';
+import {M7_DAG_NODES, M7_DAG_TOPOLOGICAL_ORDER, m7DownstreamOf, type M7DagNodeId} from './dag';
 
 export type M7DagNodeStatus =
   | 'not_generated'
@@ -83,31 +83,42 @@ function normalizeStatus(status: string): 'current' | 'needs_review' | 'stale_or
 }
 
 /**
- * 某节点对指定下游的「可用 candidate 数」（M7.3B.R1 P1 usable-candidate 语义）。
- * - eligible_candidate/current_candidate → 可用；
+ * usable 纯判定（M7.3B.R2 导出，供测试 truth table 精确锁定；语义与 R1 一致）：
+ * - 先检查下游相关性：downstreamNode 必须位于 sourceNode 的真实下游
+ *   （DAG 边 reachability）；不相关 → false；
+ * - eligible_candidate/current_candidate → usable；
  * - needs_review：visual_intent_plan 可用于 visual_sequences 与 shots
- *   （VISUAL_UNRESOLVED 在 Sequence/Shot 层均为非阻断 NEEDS_REVIEW，允许
- *   保留并生成 needs_review candidate）；visual_sequences 可用于 shots；
- *   narration_plan_v2 needs_review 不可用于 downstream（其余一律不可用）；
+ *   （VISUAL_UNRESOLVED 在 Sequence/Shot 层均为非阻断 NEEDS_REVIEW）；
+ *   visual_sequences 可用于 shots；narration_plan_v2 needs_review 不可用；
  * - stale/invalid → 不可用。
+ */
+export function isCandidateUsableForDownstream(
+  sourceNode: M7DagNodeId,
+  candidateStatus: string,
+  downstreamNode: M7DagNodeId,
+): boolean {
+  if (!m7DownstreamOf(sourceNode).includes(downstreamNode)) return false;
+  const s = normalizeStatus(candidateStatus);
+  if (s === 'current') return true;
+  if (s === 'needs_review') {
+    if (sourceNode === 'visual_intent_plan' && (downstreamNode === 'visual_sequences' || downstreamNode === 'shots')) {
+      return true;
+    }
+    if (sourceNode === 'visual_sequences' && downstreamNode === 'shots') return true;
+    return false;
+  }
+  return false;
+}
+
+/**
+ * 某节点对指定下游的「可用 candidate 数」（M7.3B.R1 P1 usable-candidate 语义）。
  * 下游 dependency 缺失判定必须基于该计数（≠0 即可用），
  * 而非 dependency 节点自身的 status 字符串——上游 regenerate running/failed
  * 且同时存在旧合法 candidate 时，下游不得被误判 blocked。
  */
 function usableCandidateCount(projectId: string, node: M7DagNodeId, downstream: M7DagNodeId): number {
   const candidates = candidatesOf(projectId, node);
-  return candidates.filter((c) => {
-    const s = normalizeStatus(c.status);
-    if (s === 'current') return true;
-    if (s === 'needs_review') {
-      if (node === 'visual_intent_plan' && (downstream === 'visual_sequences' || downstream === 'shots')) {
-        return true;
-      }
-      if (node === 'visual_sequences' && downstream === 'shots') return true;
-      return false;
-    }
-    return false;
-  }).length;
+  return candidates.filter((c) => isCandidateUsableForDownstream(node, c.status, downstream)).length;
 }
 
 /** generation 活动：running（租约有效）/ failed 终态；只查本 stage，不影响其他 stage。 */

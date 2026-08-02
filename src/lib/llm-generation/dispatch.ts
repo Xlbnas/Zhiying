@@ -72,15 +72,38 @@ export type EnqueueDispatchResult =
     };
 
 /**
+ * source 双持久状态冲突（M7.3B.R2）：继承 RequestIdConflictError 保持
+ * route 层 instanceof 映射（409 REQUEST_ID_CONFLICT）不变，但 message
+ * 明确列出 persisted run source / persisted dispatch source 与 fail-closed
+ * 语义（只含 artifact ID/source key，无 prompt/content）。
+ */
+export class SourceInvariantConflictError extends RequestIdConflictError {
+  constructor(requestId: string, boundSourceArtifactId: string, message: string) {
+    super(requestId, boundSourceArtifactId);
+    this.message = message;
+    this.name = 'RequestIdConflictError';
+  }
+}
+
+/**
  * 入队 dispatch（单 BEGIN IMMEDIATE）：
- * 1. generation_runs 短路：succeeded → reused；failed/indeterminate → 同一终态；
- *    running 且租约有效 → running（附已有 dispatchId，若有）；
- *    running 但租约过期 → 不转移 run（claim 语义独有），落入入队——worker 执行
- *    时经 build 的 durable claim 将 run 转 indeterminate 后映射为 dispatch 终态。
- * 2. INSERT dispatch；UNIQUE 冲突 → 重读现有行返回其状态（幂等）。
- *    **P0（M7.3B.R1）：无论最终重读到的是哪一行（run 或 dispatch），
- *    source 不一致一律 throw RequestIdConflictError——即使 generation_run
- *    尚未创建、只有 queued dispatch，也必须在按 status 返回之前冲突。**
+ * 1. 统一读取 generation_run 与 generation_dispatch_jobs 两份持久状态；
+ * 2. **source 双持久状态 fail-closed（M7.3B.R2）**：在任何 status 返回之前，
+ *    input vs run、input vs dispatch、run vs dispatch（两者同时存在时）
+ *    三组 source 必须完全一致；任一组不一致 → RequestIdConflictError
+ *    （message 明确 requestId、persisted run source、persisted dispatch source；
+ *    只含 artifact ID/source key，无 prompt/content）。不修改/不删除/不覆盖
+ *    任一持久 source，不重新生成，不调用 provider。
+ * 3. 按状态短路（同 source 正常行为保持）：
+ *    - run succeeded → reused；run failed/indeterminate → terminal；
+ *    - run running 且租约有效 → running（附已有 dispatchId）；
+ *      run running 但租约过期 → 落入入队（worker 经 build 的 durable claim
+ *      将 run 转 indeterminate 后映射为 dispatch 终态）；
+ *    - dispatch succeeded → reused；dispatch failed/cancelled → terminal；
+ *    - dispatch queued/running（含 dispatch-only running：scheduler 已 claim、
+ *      generation_run 尚未创建）→ queued variant（dispatchStatus 原样返回，
+ *      由 route 直接透出，不再一律 queued）；
+ *    - 两者都不存在 → INSERT 新 dispatch → queued。
  * 已有 artifact 内容含该 requestId 的 legacy 复用由调用方先行处理，不在此层。
  */
 export function enqueueGenerationDispatch(
@@ -90,10 +113,33 @@ export function enqueueGenerationDispatch(
   const tx = db.transaction((): EnqueueDispatchResult => {
     const now = new Date();
     const run = findGenerationRun(db, input.projectId, input.stage, input.requestId);
+    const dispatch = getByKey(db, input.projectId, input.stage, input.requestId);
+
+    // ── source 双持久状态 fail-closed（任何 status 返回之前） ──
+    if (run && run.source_artifact_id !== input.sourceArtifactId) {
+      throw new SourceInvariantConflictError(
+        input.requestId,
+        run.source_artifact_id,
+        `requestId=${input.requestId}：persisted generation_run source=${run.source_artifact_id} 与 input source=${input.sourceArtifactId} 不一致（fail-closed，不选择任一继续）`,
+      );
+    }
+    if (dispatch && dispatch.source_artifact_id !== input.sourceArtifactId) {
+      throw new SourceInvariantConflictError(
+        input.requestId,
+        dispatch.source_artifact_id,
+        `requestId=${input.requestId}：persisted dispatch source=${dispatch.source_artifact_id} 与 input source=${input.sourceArtifactId} 不一致（fail-closed，不选择任一继续）`,
+      );
+    }
+    if (run && dispatch && run.source_artifact_id !== dispatch.source_artifact_id) {
+      throw new SourceInvariantConflictError(
+        input.requestId,
+        run.source_artifact_id,
+        `requestId=${input.requestId}：persisted generation_run source=${run.source_artifact_id} 与 persisted dispatch source=${dispatch.source_artifact_id} 互相矛盾（fail-closed，即使 input 恰好匹配其中之一也不继续）`,
+      );
+    }
+
+    // ── 状态短路（同 source 正常行为） ──
     if (run) {
-      if (run.source_artifact_id !== input.sourceArtifactId) {
-        throw new RequestIdConflictError(input.requestId, run.source_artifact_id);
-      }
       if (run.status === 'succeeded') {
         return {kind: 'reused', runId: run.id, resultArtifactId: run.result_artifact_id};
       }
@@ -109,12 +155,28 @@ export function enqueueGenerationDispatch(
       // running：租约有效 → in_progress；租约过期 → 落入入队（worker 经 claim 兜底）
       const leaseExpiresAt = run.lease_expires_at ? Date.parse(run.lease_expires_at) : 0;
       if (leaseExpiresAt > now.getTime()) {
-        const existing = getByKey(db, input.projectId, input.stage, input.requestId);
-        if (existing && existing.source_artifact_id !== input.sourceArtifactId) {
-          throw new RequestIdConflictError(input.requestId, existing.source_artifact_id);
-        }
-        return {kind: 'running', runId: run.id, dispatchId: existing?.id ?? null};
+        return {kind: 'running', runId: run.id, dispatchId: dispatch?.id ?? null};
       }
+    }
+    if (dispatch) {
+      if (dispatch.status === 'succeeded') {
+        return {
+          kind: 'reused',
+          runId: dispatch.generation_run_id ?? '',
+          resultArtifactId: dispatch.result_artifact_id,
+        };
+      }
+      if (dispatch.status === 'failed' || dispatch.status === 'cancelled') {
+        return {
+          kind: 'terminal',
+          runId: dispatch.generation_run_id,
+          status: 'failed',
+          errorCode: dispatch.error_code ?? 'UNKNOWN',
+          errorMessage: dispatch.error_message ?? '',
+        };
+      }
+      // queued / running（含 dispatch-only running）→ 原样透出信封状态。
+      return {kind: 'queued', dispatchId: dispatch.id, dispatchStatus: dispatch.status};
     }
 
     const id = crypto.randomUUID();
@@ -132,12 +194,14 @@ export function enqueueGenerationDispatch(
     if (!row) {
       throw new Error(`enqueueGenerationDispatch: dispatch 写入后不可读（内部错误）`);
     }
-    // P0：UNIQUE 冲突重读的现有行（queued/running/succeeded/failed/cancelled 一律适用）
-    // 必须在按 status 返回之前做 source 一致性检查——同 requestId 不同 source fail-closed。
+    // 刚插入的行必然与 input source 一致；防御性再查一次（幂等重读路径）。
     if (row.source_artifact_id !== input.sourceArtifactId) {
-      throw new RequestIdConflictError(input.requestId, row.source_artifact_id);
+      throw new SourceInvariantConflictError(
+        input.requestId,
+        row.source_artifact_id,
+        `requestId=${input.requestId}：persisted dispatch source=${row.source_artifact_id} 与 input source=${input.sourceArtifactId} 不一致（fail-closed）`,
+      );
     }
-    // 按现有行状态幂等返回
     if (row.status === 'queued' || row.status === 'running') {
       return {kind: 'queued', dispatchId: row.id, dispatchStatus: row.status};
     }

@@ -9,7 +9,7 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-02T09:10Z（M7.3B.R1 deployed；M7.3B pending independent Review PASS，TTS-A not started） |
+| statusUpdatedAt | 2026-08-02T10:20Z（M7.3B.R2 review closure in progress；M7.3B not frozen，TTS-A not started） |
 | reviewedCodeSHA | `a71f0fed1028da0f2a47305d22df120d8165f714`（M7.3B.R1 closure 代码 commit；M7.3A frozen code 为 `aa3f814…`） |
 | productionRuntimeSHA | `a71f0fed1028da0f2a47305d22df120d8165f714`（容器镜像实际代码 SHA） |
 | productionHostCheckoutSHA | `a71f0fed1028da0f2a47305d22df120d8165f714`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
@@ -284,10 +284,18 @@
 4. **DAG usable-candidate 语义（P1，`m7-dag/readiness.ts`）**：dependency 缺失判定从"节点状态 ∈ {blocked, not_generated}"改为**usableCandidateCount**——eligible/current → usable；needs_review：visual_intent_plan 可用于 visual_sequences 与 shots（unresolved 在两层均非阻断）、visual_sequences 可用于 shots、narration_plan_v2 needs_review 不可用；stale/invalid → 不可用。上游 running/failed 且无可用 candidate → 下游 blocked；上游有旧合法 candidate 同时 regenerate running → 下游不被误判 blocked。
 5. **reference ID schema（P1，`visual-sequences/schema.ts`、`shots/schema.ts`）**：`beatIds` 精确 `^B\d{3}$`、`visualIntentIds`/`visualIntentId` 精确 `^V\d{3}$`、`unitIds` 精确 `^N\d{3}$`（保留 Q/H 已有约束）；malformed reference 在 schema 层拒绝，exact-but-missing 合法格式 ID 仍由 semantic validator 报 NOT_FOUND。
 
+### 4.13 M7.3B.R2 Review Closure（Dispatch Running-State + DAG Proof）
+
+独立 Review 判定 M7.3B 仍 FAIL，修复 3 项（本小节为修复记录；M7.3B not frozen）：
+
+1. **dispatch-only running 状态（P1，`llm-generation/dispatch.ts` + 4 条 route）**：scheduler 已 claim dispatch（status=running）但 generation_run 尚未创建时，同 requestId+同 source 再 POST 此前错误返回 `status='queued'`。修复：`EnqueueDispatchResult` 的 queued variant 原样携带 `dispatchStatus: 'queued' | 'running'`，四条 route（narrative-beats / visual-intents / visual-sequences / shots）统一透出 `status: result.dispatchStatus`——不再硬编码 queued。不制造虚假 runId/retryAfterMs，不新建 run/dispatch，不调用 provider。
+2. **run/dispatch 双持久 source fail-closed（P1，`llm-generation/dispatch.ts`）**：单 BEGIN IMMEDIATE 内统一读取 generation_run 与 generation_dispatch_jobs，在任何 status 返回之前执行三组一致性检查：input vs run、input vs dispatch、run vs dispatch（两者同时存在时）——任一组不一致 throw `SourceInvariantConflictError`（继承 `RequestIdConflictError` 保持 409 映射；message 明确 requestId、persisted run source、persisted dispatch source 与 fail-closed 语义，只含 artifact ID/source key）。不修改/不删除/不覆盖任一持久 source，不重新生成，不调用 provider。正常同 source 行为保持：queued→queued、dispatch-only running→running、run running→running、succeeded→reused、failed/indeterminate→terminal。
+3. **DAG 测试 fixture 隔离（P1，`m7-dag/readiness.ts` + `test-m73b-dag.ts`）**：导出纯判定 `isCandidateUsableForDownstream(sourceNode, candidateStatus, downstreamNode)`（含下游相关性检查：downstream 必须是 sourceNode 的真实 DAG 下游）；G1-G4 fixture 重构为"每条只缺目标 dependency"（G1/G2 前置 eligible beats、G3/G4 前置 plan+beats+intent 可用；G4 独立新项目，不再被 G3 queued dispatch 污染；blocker detail 精确断言只含目标 dependency）；G5 精确断言 old valid candidate 仍 usable + shots 保持 ready；G8 truth table 用纯函数锁定 9 项判定（含 narration needs_review 不可用、不相关 downstream false）。
+
 ## 5. 当前正在进行的工作
 
 - **M7.3A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `aa3f8145825f5a33542f54e90e661e0cccf3e692`；deployment evidence docs = `36ff32e3301f51bf054efbee029fc1e6115ad3f5`；independent Review = PASS。冻结语义见 §7。
-- **M7.3B — Visual Sequences / Shots Contract + DAG Foundation**（已实现并部署 6f109d0；独立 Review **FAIL / not accepted**）→ **M7.3B.R1 review closure in progress**：修复 5 项 blocker（queued dispatch source conflict、Visual Sequence canonical beat order、Shot canonical sequence/unit order、DAG usable-candidate 语义、reference ID schema，见 §4.12）。**M7.3B pending independent Review PASS；TTS-A not started。**
+- **M7.3B — Visual Sequences / Shots Contract + DAG Foundation**（已实现并部署；独立 Review 连续 FAIL）→ **M7.3B.R1 closure 已部署**（queued source conflict / canonical order / usable-candidate / reference ID schema，见 §4.12）→ **M7.3B.R2 review closure in progress**：修复 3 项（dispatch-only running 状态、run/dispatch 双持久 source fail-closed、DAG 测试 fixture 隔离，见 §4.13）。**M7.3B not frozen；TTS-A not started。**
 - **Production legacy 审计（只报告，不修改）**：generated assets 19；provenance NULL 19（全为历史 legacy）；NULL + requirement_json 缺失/损坏 1；active legacy bindings 17；active bindings 指向当前 active scenes 中缺失的 requirement 10（分布于 2 个项目，均为历史绑定；未删除/重绑）。
 - 下一步：M7.3B.R1 部署 + 等待独立 Review PASS；随后按序 TTS-A → TTS-B → TTS-C → narration master → ffprobe → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
 
@@ -414,8 +422,8 @@
 
 - `scripts/test-m73b-visual-sequences.ts`（92 PASS，M7.3B.R1 更新）：sequences schema（含 reference ID 精确限制）/ 语义校验全矩阵 / **canonical beat order（SEQUENCE_BEAT_ORDER_MISMATCH：reversed blocks、三块交换、classify invalid_source、generation repair attemptCount=2 零自动排序）** / classify / 双源 chain precheck / 向后兼容
 - `scripts/test-m73b-shots.ts`（96 PASS，M7.3B.R1 更新）：shots schema（含 reference ID 精确限制）/ 语义校验全矩阵 / **canonical sequence/unit order（SHOT_SEQUENCE_ORDER_MISMATCH + SHOT_UNIT_ORDER_MISMATCH：block 前置、shot block 交换、classify invalid_source、generation repair attemptCount=2）** / classify / precheck / 向后兼容
-- `scripts/test-m73b-generation.ts`（76 PASS，M7.3B.R1 更新）：Web enqueue-only / Worker Mock 执行 / 幂等复用 / 409 冲突 / 并发 single-flight / repair attemptCount / 3 次失败终态 / source drift（before dispatch / during generation / before commit，commit-time fence 零 artifact）/ **queued dispatch source conflict（sequences+shots：409、dispatch count=1、原 source 未覆盖、runs=0、provider calls=0；同 source 重复同 dispatchId；并发不同 source 恰好一胜一 409；generic enqueue 与 visual-intents route 既有 stage 回归）** / production override 禁用
-- `scripts/test-m73b-dag.ts`（53 PASS，M7.3B.R1 更新）：图结构（无环/无反向边）/ 节点状态机（not_generated→running→ready/blocked/needs_review）/ TTS 并行边界 / Voice/Performance 概念源零影响 / narration 漂移传播 / **usable-candidate 语义（intent running/failed 无 candidate → sequences blocked；sequences running/failed 无 candidate → shots blocked；旧合法 candidate + regenerate running 不误 blocked；intent/sequences needs_review 可用；narration needs_review 不可用）** / 无 m7 激活
+- `scripts/test-m73b-generation.ts`（114 PASS，M7.3B.R2 更新）：Web enqueue-only / Worker Mock 执行 / 幂等复用 / 409 冲突 / 并发 single-flight / repair attemptCount / 3 次失败终态 / source drift（before dispatch / during generation / before commit，commit-time fence 零 artifact）/ **queued dispatch source conflict（sequences+shots：409、dispatch count=1、原 source 未覆盖、runs=0、provider calls=0；同 source 重复同 dispatchId；并发不同 source 恰好一胜一 409；generic enqueue 与 visual-intents route 既有 stage 回归）** / **dispatch-only running window（真实 scheduler claim：claim 后 dispatch=running、generation_run=0，同 source POST → 202 running 同 dispatchId、count=1、source 不变、provider calls=0、artifact 不变；不同 source → 409 且原 dispatch 仍 running；sequences/shots/visual-intents 三 route 一致；被 claim 的 dispatch 用 Mock provider 正确收尾）** / **run/dispatch 双持久 source 矛盾 fail-closed（run succeeded/failed/running + dispatch 异 source：input 任一匹配均 409，两行 source/status 完全不变，错误 message 列出双持久 source；dispatch cancelled 无 run → 同 source terminal / 异 source 409；一致 source 的 succeeded/failed/running 正常短路）** / production override 禁用
+- `scripts/test-m73b-dag.ts`（71 PASS，M7.3B.R2 更新）：图结构（无环/无反向边）/ 节点状态机（not_generated→running→ready/blocked/needs_review）/ TTS 并行边界 / Voice/Performance 概念源零影响 / narration 漂移传播 / **usable-candidate 语义（fixture 隔离：G1/G2 前置 eligible beats、G3/G4 前置全链可用、G4 独立项目不被 G3 信封污染、blocker detail 精确只含目标 dependency；旧合法 candidate + regenerate running 时 currentCandidateCount≥1 且 shots 保持 ready；intent/sequences needs_review 可用；narration needs_review 不可用）** / **usable truth table（isCandidateUsableForDownstream 纯函数 9 项：narration eligible→usable、narration needs_review→false、intent needs_review→sequences/shots、sequences needs_review→shots、stale/invalid→false、不相关 downstream→false）** / 无 m7 激活
 
 - `scripts/test-asset-generation-durability.ts`（53 PASS）：幂等/超时/indeterminate/billing/append-only + T7 provenance + T8 requestId 生命周期 + **T9 mid-flight source drift（Fence B）** + **T10 lease lost 降级 stale**
 - `scripts/test-workflow-dag-parallelism.ts`（15 PASS）：DAG 权威依赖/双分支 ready/并行不互 stale
