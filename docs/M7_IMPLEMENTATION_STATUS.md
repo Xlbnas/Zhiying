@@ -9,7 +9,7 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-02T03:45Z（M7.3A 独立 Review PASS，正式 FROZEN） |
+| statusUpdatedAt | 2026-08-02T06:20Z（M7.3B contract/DAG foundation 已实现，待部署与 Review） |
 | reviewedCodeSHA | `aa3f8145825f5a33542f54e90e661e0cccf3e692`（本轮已 review/deploy 的代码 commit） |
 | productionRuntimeSHA | `aa3f8145825f5a33542f54e90e661e0cccf3e692`（容器镜像实际代码 SHA） |
 | productionHostCheckoutSHA | `aa3f8145825f5a33542f54e90e661e0cccf3e692`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
@@ -54,6 +54,7 @@
 | **M7.3A.3.1 Atomic Candidate Commit + Server-side Bind Gate** | **DONE** | `df99384`/`32bc8b3`/`2131c6a`/`d7bc9e1`/`9dc3c6a`（runtime `9dc3c6a`，docs `2cd2b92`/`e337b61`，ops `6709882`） | 原子 commit、服务端 stale 绑定门禁、精确 source loader、完整请求快照、render bundle lease |
 | **M7.3A.3.2 Atomic Candidate Binding + Monotonic Image Billing + Render Heartbeat Cleanup** | **DONE** | `528f5c9`/`a8056b4`/`b243233`/`6ddf720`/`8eb23d0`（runtime `8eb23d0`） | 原子绑定、三态 provenance、billing 单调、provider result 审计、heartbeat dispose、SHA 元数据模型 |
 | **M7.3A.3.3 Legacy Binding Safety + Charged Provider Result Audit + Render Bundle Exit Classification** | **FROZEN** | `e40de12`/`80f8d11`/`ead3a23`/`c0b6f8a` + R1 `695dc02` + R2 `f7d786f` + R3 `aa3f814`（runtime `aa3f814`） | legacy 目标可验证门禁、provider 返回即 charged、usage 证据只追加、bundle 实时状态退出、首次写入 metadata 危险键过滤；**独立 Review PASS（final code/runtime `aa3f814…`，deployment evidence docs `36ff32e…`）** |
+| **M7.3B Visual Sequences / Shots Contract + DAG Foundation** | **IMPLEMENTED（待部署 + Review）** | `96ddcc8`/`c7cbba0`/`468d0c1`/`85e826c`（+ 后续部署证据 docs） | visual-sequences@1.0 / shots@1.0 契约、exact-source provenance、确定性语义校验、candidate generation（Worker LLM dispatch + commit-time source fence）、M7 candidate DAG 与 stale classification、API；**not yet production-piloted** |
 
 ## 4. 当前已实现功能详情
 
@@ -262,17 +263,28 @@
   proceed）+ `runWithCleanup` 单 owner finally dispose heartbeat（`src/worker/index.ts`）。
 - **deployed**：是（695dc02 R1 → f7d786f R2）
 
+### 4.11 M7.3B Visual Sequences / Shots Contract + DAG Foundation
+
+- **artifact kinds**：`visual_sequence_plan`（schemaVersion `visual-sequences@1.0`）/ `shot_plan`（schemaVersion `shots@1.0`）——kind 与冻结 snapshot ruleset（`m7-pipeline-snapshot.ts` `RULESET_V1_EXPECTED_KIND`）预声明一致；compilerVersion `1.0`；promptVersion `visual-sequences@1.0` / `shots@1.0`。
+- **契约**：Sequence 只含 `sequenceId(Q001…)/chapter/beatIds/visualIntentIds`（视觉语义一律经 visualIntentId 引用，禁止复制 intent/strategy/authenticity/objective/subject/displayText/evidenceIds）；Shot 只含 `shotId(H001…)/sequenceId/chapter/unitIds/visualIntentId/transitionFromPrevious`——unitIds 是语义切片锚点，不是最终时间。
+- **exact-source provenance**：Sequence source 记录 beats+intent+transitive narration/script 的精确 artifact ID + `sha256:` content hash（双源链必须完全一致，`SOURCE_CHAIN_MISMATCH` fail-closed）；Shots source 记录 sequences+beats+intent+narration/script 全链，且必须与 Sequence artifact 自身记录的 source 完全一致（`SHOT_SOURCE_MISMATCH`）。禁止 latest/current 猜来源。
+- **确定性语义校验**：Sequence 18 条规则 / Shot 23 条规则，稳定机器码（`SEQUENCE_BEAT_COVERAGE_GAP`…`SHOT_TRANSITION_INVALID` 等）；`VISUAL_UNRESOLVED` 允许保留（非阻断 `SEQUENCE_NEEDS_REVIEW`/`SHOT_NEEDS_REVIEW` → classify `needs_review`），validator 零改写（禁止自动转 MG）。
+- **candidate generation（Worker LLM dispatch）**：复用 `generation_runs/generation_attempts/generation_dispatch_jobs`（stage `m7_visual_sequences`/`m7_shots`）+ `llm_api` resourceClass；LLM proposal 只输出 `{sequences}`/`{shots}` body，wrapper/source/generation 由服务端确定性构造；`MAX_REPAIRS=2` attempt journal；**commit-time source fence**（落库事务内重读全部 source 行核对 hash，漂移 → `SOURCE_STALE` 终态、零 artifact 行）；sequences 的 dispatch `source_artifact_id` 为 `${beatsId}|${intentId}` 复合键。
+- **M7 candidate DAG（`src/lib/m7-dag/`）**：`narration_plan_v2`/`narrative_beats`/`visual_intent_plan` → `visual_sequences` → `shots`；无反向边、无环（测试断言）；节点状态 `not_generated / generation_running / generation_failed / ready / needs_review / blocked`（优先级 running > ready > needs_review > generation_failed > blocked > not_generated）；candidate 分类状态 `current_candidate / stale_source / invalid_source / needs_review`（`current_candidate` 仅表示相对 exact source 未漂移，不代表 project current/active/locked）；与 M6 `WORKFLOW_NODES` 完全无关。
+- **API**：`GET/POST /api/projects/[id]/visual-sequences`（POST body `{narrativeBeatsArtifactId, visualIntentPlanArtifactId, requestId}`）、`GET /api/projects/[id]/visual-sequences/[artifactId]`、`GET/POST /api/projects/[id]/shots`（POST body `{visualSequencesArtifactId, requestId}`）、`GET /api/projects/[id]/shots/[artifactId]`——202 queued/running、200 reused、409 terminal/conflict；Web 只 enqueue（零 secret），Worker 执行。
+- **deployed**：待部署（本轮部署后更新此节与 production 证据）。
+
 ## 5. 当前正在进行的工作
 
 - **M7.3A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `aa3f8145825f5a33542f54e90e661e0cccf3e692`；deployment evidence docs = `36ff32e3301f51bf054efbee029fc1e6115ad3f5`；independent Review = PASS。冻结语义见 §7。
-- **M7.3B — Visual Sequences / Shots Contract + DAG Foundation**（进行中）：只建立 Visual Sequence / Shot 数据契约、exact-source provenance、确定性语义校验、candidate generation、Worker LLM dispatch、DAG 与 stale classification、API 与完整测试。不建最终时间轴、不生成真实项目 artifact、不迁移 production binding。
+- **M7.3B — Visual Sequences / Shots Contract + DAG Foundation**（已实现，待部署与独立 Review）：契约/校验/生成/DAG/API 全部落地（见 §4.11）；**尚未 production-piloted**（本轮不对任何 production 项目生成 Sequence/Shot 候选，不调用真实 LLM）。
 - **Production legacy 审计（只报告，不修改）**：generated assets 19；provenance NULL 19（全为历史 legacy）；NULL + requirement_json 缺失/损坏 1；active legacy bindings 17；active bindings 指向当前 active scenes 中缺失的 requirement 10（分布于 2 个项目，均为历史绑定；未删除/重绑）。
-- 下一步：M7.3B 完成后等待独立 Review PASS。
+- 下一步：M7.3B 部署 + 等待独立 Review PASS；随后按序 TTS-A → TTS-B → TTS-C → narration master → ffprobe → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
 
 ## 6. 尚未完成 TODO
 
 - [x] Production 部署（M7.3A.2 e62f5c2 / M7.3A.3 07b39dc 已完成）
-- [ ] M7.3B — Visual Sequences / Shots（进行中，见 §5）
+- [ ] M7.3B — Visual Sequences / Shots（已实现待部署，见 §4.11；**not yet production-piloted**）
 - [ ] M7.4 — Timing Reconciliation v2
 - [ ] M7.5 — Asset Bindings 迁移
 - [ ] M7.6 — M7 Pipeline Snapshot
@@ -305,6 +317,14 @@
   6. heartbeat single-owner cleanup（scheduler 唯一 claim，runner finally 唯一 release，executor 不 normal release）；
   7. usage metadata sanitization（危险键过滤 + 只追加，首次写入/prior 非 plain 均过滤）；
   8. 后续阶段不得顺带重构以上语义。
+- **M7.3B 冻结边界（本轮生效，后续里程碑不得顺带重构）**：
+  1. Beat 只引用 Narration Plan V2 unit；Beat 不得新增 sequenceId/shotId、不得拥有最终时间区间、不得包含视觉语义；
+  2. Visual Intent 是视觉语义唯一所有者（intent/strategy/authenticity/objective/subject/continuationOfVisualIntentId/displayText/evidenceIds）；Visual Intent 不得新增 Sequence/Shot 字段；
+  3. Sequence/Shot 只能保存 visualIntentId 引用，禁止复制任何 Visual Intent 内容；
+  4. Sequence/Shot 都是 immutable candidate（kind `visual_sequence_plan`/`shot_plan`）；不 current/active/locked，不建 M7 snapshot，不切换项目到 m7；
+  5. Sequence/Shot 不含任何最终 timing（startMs/endMs/durationMs/frames）、素材/模板/渲染字段、语音/表演字段（voice/delivery/pace/energy/emotion）；
+  6. TTS 兼容边界：Voice Profile / Narration Performance Plan 变化只 stale 下游 timing artifact，不 stale Sequence/Shot；Narration Plan unit 身份或正文改变必须经 Beats/Visual Intent source drift 传播 stale；最终时间线只在 TTS-C 与 narration master 确认后生成；
+  7. `VISUAL_UNRESOLVED` 允许保留（candidate 分类 `needs_review`），禁止自动改写为 MG。
 
 ## 8. 已知事故和修复
 
@@ -358,6 +378,10 @@
 
 - `pnpm typecheck`
 - `pnpm build`
+- `scripts/test-m73b-visual-sequences.ts`（M7.3B 新增）
+- `scripts/test-m73b-shots.ts`（M7.3B 新增）
+- `scripts/test-m73b-generation.ts`（M7.3B 新增）
+- `scripts/test-m73b-dag.ts`（M7.3B 新增）
 - `scripts/test-m73a-visual-intent.ts`
 - `scripts/test-m72-narrative-beats.ts`
 - `scripts/test-m721-generation-singleflight.ts`
@@ -377,6 +401,11 @@
 - `scripts/test-m6310-usage.ts`
 
 ### 11.2 M7.3A.2/M7.3A.3 新增/扩展测试
+
+- `scripts/test-m73b-visual-sequences.ts`（71 PASS）：sequences schema / 语义校验全矩阵 / classify（current/stale/invalid/needs_review）/ 双源 chain precheck / 向后兼容
+- `scripts/test-m73b-shots.ts`（73 PASS）：shots schema / 语义校验全矩阵 / classify / precheck / 向后兼容
+- `scripts/test-m73b-generation.ts`（47 PASS）：Web enqueue-only / Worker Mock 执行 / 幂等复用 / 409 冲突 / 并发 single-flight / repair attemptCount / 3 次失败终态 / source drift（before dispatch / during generation / before commit，commit-time fence 零 artifact）/ production override 禁用
+- `scripts/test-m73b-dag.ts`（37 PASS）：图结构（无环/无反向边）/ 节点状态机（not_generated→running→ready/blocked/needs_review）/ TTS 并行边界 / Voice/Performance 概念源零影响 / narration 漂移传播 / 无 m7 激活
 
 - `scripts/test-asset-generation-durability.ts`（53 PASS）：幂等/超时/indeterminate/billing/append-only + T7 provenance + T8 requestId 生命周期 + **T9 mid-flight source drift（Fence B）** + **T10 lease lost 降级 stale**
 - `scripts/test-workflow-dag-parallelism.ts`（15 PASS）：DAG 权威依赖/双分支 ready/并行不互 stale
