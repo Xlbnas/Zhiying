@@ -9,10 +9,10 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-02T12:30Z（M7.3B FROZEN：独立 Review PASS；TTS-A starting；TTS-B/TTS-C not started） |
+| statusUpdatedAt | 2026-08-02T12:10Z（M7.3B FROZEN；TTS-A deployed @`fed3e3d`，pending independent Review PASS；TTS-B/TTS-C not started） |
 | reviewedCodeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（M7.3B final code/runtime；M7.3B deployment evidence docs HEAD 为 `044ac23e2524d53f41d223c37d16619425b21182`；M7.3A frozen code 为 `aa3f814…`） |
-| productionRuntimeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（容器镜像实际代码 SHA） |
-| productionHostCheckoutSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
+| productionRuntimeSHA | `fed3e3d19b4c1a0ef80e1b2822ff4e5ab8aaf798`（TTS-A 部署后容器镜像实际代码 SHA） |
+| productionHostCheckoutSHA | `fed3e3d19b4c1a0ef80e1b2822ff4e5ab8aaf798`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
 | 当前分支 | `m7` |
 | 实时 origin/m7 HEAD | 以 `git rev-parse origin/m7` 为准（不硬编码为「永远当前」） |
 
@@ -55,6 +55,7 @@
 | **M7.3A.3.2 Atomic Candidate Binding + Monotonic Image Billing + Render Heartbeat Cleanup** | **DONE** | `528f5c9`/`a8056b4`/`b243233`/`6ddf720`/`8eb23d0`（runtime `8eb23d0`） | 原子绑定、三态 provenance、billing 单调、provider result 审计、heartbeat dispose、SHA 元数据模型 |
 | **M7.3A.3.3 Legacy Binding Safety + Charged Provider Result Audit + Render Bundle Exit Classification** | **FROZEN** | `e40de12`/`80f8d11`/`ead3a23`/`c0b6f8a` + R1 `695dc02` + R2 `f7d786f` + R3 `aa3f814`（runtime `aa3f814`） | legacy 目标可验证门禁、provider 返回即 charged、usage 证据只追加、bundle 实时状态退出、首次写入 metadata 危险键过滤；**独立 Review PASS（final code/runtime `aa3f814…`，deployment evidence docs `36ff32e…`）** |
 | **M7.3B Visual Sequences / Shots Contract + DAG Foundation** | **FROZEN（独立 Review PASS）** | `96ddcc8`/`c7cbba0`/`468d0c1`/`85e826c` + R1 `a71f0fe` + R2 `e3bd60a`（final code/runtime `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`，deployment evidence docs HEAD `044ac23e2524d53f41d223c37d16619425b21182`） | visual-sequences@1.0 / shots@1.0 契约、exact-source provenance、确定性语义校验、candidate generation（Worker LLM dispatch + commit-time source fence）、dispatch 幂等/canonical timeline/usable-candidate DAG；冻结语义见 §7 |
+| **TTS-A Immutable Custom Voice Library Foundation** | **DEPLOYED（pending independent Review PASS）** | `41d108c`/`c8aec05`/`1940397`/`b68914c`/`f4752bc`/`192118c`/`fed3e3d`（runtime `fed3e3d19b4c1a0ef80e1b2822ff4e5ab8aaf798`） | voice-profile@1.0 / voice-profile-revision@1.0、immutable revision（DB trigger ABORT）、安全音频摄取（canonical WAV 48k/mono/pcm_s16le）、exact reader、Voice Library API + `/settings/voices` 最小 UI；设计文档 `docs/TTS_A_VOICE_LIBRARY_DESIGN.md`；**未绑定项目、未生成 TTS、TTS-B/C not started** |
 
 ## 4. 当前已实现功能详情
 
@@ -296,9 +297,9 @@
 
 - **M7.3A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `aa3f8145825f5a33542f54e90e661e0cccf3e692`；deployment evidence docs = `36ff32e3301f51bf054efbee029fc1e6115ad3f5`；independent Review = PASS。冻结语义见 §7。
 - **M7.3B 正式 FROZEN（独立 Review PASS）**：final code/runtime = `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`；deployment evidence docs HEAD = `044ac23e2524d53f41d223c37d16619425b21182`（§15.3）；independent Review = PASS。冻结语义见 §7「M7.3B 冻结语义」。
-- **TTS-A starting（Immutable Custom Voice Library Foundation）**：只建立 Voice Profile / immutable Voice Profile Revision 声音库基础设施（schema + 安全摄取 + exact reader + API + 最小 UI）；不做 Voice Selection / Project Assignment / Narration Performance Plan；不生成正式旁白；不重新合成 Freud TTS；TTS-B/TTS-C not started。
+- **TTS-A DEPLOYED（pending independent Review PASS）**：runtime `fed3e3d19b4c1a0ef80e1b2822ff4e5ab8aaf798`（部署证据见 §15.4）。只交付 Voice Profile / immutable Voice Profile Revision 声音库基础设施；**TTS-B/TTS-C not started**。
 - **Production legacy 审计（只报告，不修改）**：generated assets 19；provenance NULL 19（全为历史 legacy）；NULL + requirement_json 缺失/损坏 1；active legacy bindings 17；active bindings 指向当前 active scenes 中缺失的 requirement 10（分布于 2 个项目，均为历史绑定；未删除/重绑）。
-- 下一步：TTS-A 实施与部署 → 等待独立 Review PASS；随后按序 TTS-B → TTS-C → narration master → ffprobe → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
+- 下一步：等待 TTS-A 独立 Review PASS；随后按序 TTS-B → TTS-C → narration master → ffprobe → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
 
 ## 6. 尚未完成 TODO
 
@@ -427,6 +428,10 @@
 - `scripts/test-m3a-narration-plan.ts`
 - `scripts/test-m3b-tts.ts`
 - `scripts/test-m3c-subtitle-timing.ts`
+- `scripts/test-tts-a-voice-library-schema.ts`（TTS-A 新增）
+- `scripts/test-tts-a-voice-library-ingest.ts`（TTS-A 新增）
+- `scripts/test-tts-a-voice-library-api.ts`（TTS-A 新增）
+- `scripts/test-tts-a-voice-library-files.ts`（TTS-A 新增）
 - `scripts/test-llm-dispatch.ts`
 - `scripts/test-workflow-stages.ts`
 - `scripts/test-m6310-usage.ts`
@@ -588,3 +593,15 @@ M7.3A.2 Review 全部阻断项已修复（第二轮 hardening）。接续复核�
 - **状态**：**M7.3B.R2 deployed；M7.3B pending independent Review PASS；TTS-A not started**。
 - **本轮未执行**：不对 Freud 或任何 production 项目调 generation POST；不创建 production Sequence/Shot candidate；不调用真实 LLM/APIYi；不创建 M7 snapshot；不切换项目到 m7；不实现 timing-reconciliation@2.0；不迁移 bindings（M7.3B.R2 行为全部经临时 DB + Mock provider 验证）。
 
+### 15.4 TTS-A 部署证据（fed3e3d，2026-08-02）
+
+- **部署链**：code SHA `fed3e3d19b4c1a0ef80e1b2822ff4e5ab8aaf798` = production runtime SHA = host checkout SHA = origin/m7 HEAD（本 docs evidence commit 后 origin/m7 会高于 runtime——以现场 `git rev-parse` 为准）。
+- **pre-deployment backup**：`/vol1/1000/backups/zhiying/tts-a-20260802T113748Z`（DB SHA `0d74155e…` 与历轮一致=部署前零写入；integrity=ok；**SHA256SUMS 32 文件全 OK、0 FAILED**；`BACKUP_COMPLETED_AT=2026-08-02T11:37:55Z` 先于 checkout；含 tts_jobs 全表 dump、schema.sql、migration-state、Freud artifact dump、data audio 文件清单+hashes、compose×2、`.env.production`）。
+- **构建网络 runbook**：`production-build-network.sh start/check` 通过 → `docker build --network=host --add-host remotion.media:127.0.0.1 --build-arg APT_MIRROR --build-arg NPM_REGISTRY -t zhiying:fed3e3d…`（BUILD_EXIT=0，trap 保证 stop）→ 443 无 listener、tunnel 容器 0 残留；image digest `4d65a84d…`（与 192118c 相同——src 未变，仅测试脚本修订）。
+- **镜像内测试**（`NODE_ENV=development`，scripts 只读挂载，image code SHA = mounted scripts SHA = fed3e3d）：**TTS-A 4 套件 34/25/35/14 全绿** + frozen 11 套件全绿（m73b 92/96/114/71、m73a 184、billing 68、bind-atomicity 45、resource-leases 87 含 render bundle L10、m71-tts 25、m3b-tts 99、m3c 82）。
+- **migration 演练**（production DB 副本，应用标准入口 `getDb()`）：voice_profiles / voice_profile_revisions / 2 个 ABORT trigger 就位，初始行数 0/0；重跑幂等；**351 条 tts_jobs 全量 sha256 演练前后完全一致**（`02cfde74…`）；integrity_check=ok。未手工 sqlite3 ALTER production。
+- **up 验证**：三容器 healthy @`zhiying:fed3e3d…`（`ZHIYING_RELEASE_TAG=fed3e3d…`）；local 3210 与 LAN root 200、/api/projects 200、/settings/voices 200、/api/voice-profiles 200（`{"profiles":[]}`）；worker/web 日志无 migration/SQLite/dispatch/lease/provider error；web env 无 DEEPSEEK_API_KEY/LLM_PROVIDER；host worktree clean。
+- **Production 数据不变量（部署前后只读对比，24 项全过）**：projects 全 m6（3 个）；`m7_pipeline_snapshot_id` 全 NULL（3/3）；M7 snapshot 0；Freud narration_plan_v2/narrative_beats/visual_intent 全行 sha 与备份全等（`59d84eff…`/`727031a4…`/`078a882d…`）；旧 candidate `793c80fa…` 全行 sha 全等；`visual_sequence_plan`/`shot_plan`/`timing_reconciliation_v2` 全 0；`m7_visual_sequences`/`m7_shots` generation runs 0；artifacts 全表 sha 全等（`1bf0f861…`，覆盖 narration_audio_manifest 与 subtitle_timing）；tts_jobs 351=351 且全量 sha `02cfde74…` 与备份全等；llm_usage 69=69；project_usage_events 610=610；asset_generation_jobs 0=0；assets/bindings sha 全等；render_jobs 14=14；resource leases 0；**voice_profiles=0、voice_profile_revisions=0**；`/vol1/1000/docker/zhiying/data/voice-library` 不存在（未创建任何 production 声音数据）；无项目切换 m7；无真实 LLM/APIYi/IndexTTS2 调用。
+- **状态**：**M7.3B FROZEN；TTS-A deployed；TTS-A pending independent Review PASS；TTS-B not started；TTS-C not started**。
+- **本轮未执行**：不在 production 上传参考音频；不创建 production Voice Profile；不调用真实 IndexTTS2 adapter；不生成正式 TTS；不重新合成 Freud TTS；不绑定项目声音；不开始 TTS-B/C；不生成 narration master；不做 subtitle timing；不创建 timing-reconciliation@2.0；不创建 M7 snapshot；不切换任何项目到 m7；不改写历史 tts_jobs；不把 env-based voice 导入新库。
+- **证据边界**：OPS-AUDIT-BRIDGE 不可用（仓库无此设施）；以上 production 证据来自 Agent 现场命令，**不是** independently verified。
