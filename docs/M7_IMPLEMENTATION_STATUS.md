@@ -9,7 +9,7 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-02T02:10Z（M7.3A.3.3R3 已部署，待独立 Review PASS 后 frozen） |
+| statusUpdatedAt | 2026-08-02T03:45Z（M7.3A 独立 Review PASS，正式 FROZEN） |
 | reviewedCodeSHA | `aa3f8145825f5a33542f54e90e661e0cccf3e692`（本轮已 review/deploy 的代码 commit） |
 | productionRuntimeSHA | `aa3f8145825f5a33542f54e90e661e0cccf3e692`（容器镜像实际代码 SHA） |
 | productionHostCheckoutSHA | `aa3f8145825f5a33542f54e90e661e0cccf3e692`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
@@ -53,7 +53,7 @@
 | **M7.3A.3 Asset Commit Fence + Strict Idempotency + Lease-loss Fail-closed** | **DONE** | `7a0aeb7`/`ba90d98`/`67c6dba`/`07b39dc`（runtime `07b39dc`，docs `09c5b64`/`4bf4be6`） | request fingerprint、Fence A/B、lease lost fail-closed、构建网络 runbook |
 | **M7.3A.3.1 Atomic Candidate Commit + Server-side Bind Gate** | **DONE** | `df99384`/`32bc8b3`/`2131c6a`/`d7bc9e1`/`9dc3c6a`（runtime `9dc3c6a`，docs `2cd2b92`/`e337b61`，ops `6709882`） | 原子 commit、服务端 stale 绑定门禁、精确 source loader、完整请求快照、render bundle lease |
 | **M7.3A.3.2 Atomic Candidate Binding + Monotonic Image Billing + Render Heartbeat Cleanup** | **DONE** | `528f5c9`/`a8056b4`/`b243233`/`6ddf720`/`8eb23d0`（runtime `8eb23d0`） | 原子绑定、三态 provenance、billing 单调、provider result 审计、heartbeat dispose、SHA 元数据模型 |
-| **M7.3A.3.3 Legacy Binding Safety + Charged Provider Result Audit + Render Bundle Exit Classification** | **DONE（R3 已部署，frozen 待 Review PASS）** | `e40de12`/`80f8d11`/`ead3a23`/`c0b6f8a` + R1 `695dc02` + R2 `f7d786f` + R3 `aa3f814`（runtime `aa3f814`） | legacy 目标可验证门禁、provider 返回即 charged、usage 证据只追加、bundle 实时状态退出、首次写入 metadata 危险键过滤；**frozen 待 Review PASS** |
+| **M7.3A.3.3 Legacy Binding Safety + Charged Provider Result Audit + Render Bundle Exit Classification** | **FROZEN** | `e40de12`/`80f8d11`/`ead3a23`/`c0b6f8a` + R1 `695dc02` + R2 `f7d786f` + R3 `aa3f814`（runtime `aa3f814`） | legacy 目标可验证门禁、provider 返回即 charged、usage 证据只追加、bundle 实时状态退出、首次写入 metadata 危险键过滤；**独立 Review PASS（final code/runtime `aa3f814…`，deployment evidence docs `36ff32e…`）** |
 
 ## 4. 当前已实现功能详情
 
@@ -264,15 +264,15 @@
 
 ## 5. 当前正在进行的工作
 
-- **M7.3A.3.3R3 review closure 已部署（aa3f814）**：R2 部署后独立 Review 发现的唯一 blocker（`mergeUsageMetadata` 在 prior 非 plain 时绕过危险键过滤）已修复并部署；新增 B12a-r 18 条测试（首次写入/prior null/prior 非 plain×4/null-proto/两侧过滤/finalize DB 集成路径），billing-monotonic 68/0；镜像内 12 套件全绿；production 备份 `m73a2-20260802T010854Z`（DB SHA 与 R2 备份一致 `0d74155e`，部署前后 DB 零写入）。**仍等待独立 Review PASS。**
-- **M7.3A not frozen until independent review PASS**（R3 已部署；Review 未通过前不 frozen）。
+- **M7.3A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `aa3f8145825f5a33542f54e90e661e0cccf3e692`；deployment evidence docs = `36ff32e3301f51bf054efbee029fc1e6115ad3f5`；independent Review = PASS。冻结语义见 §7。
+- **M7.3B — Visual Sequences / Shots Contract + DAG Foundation**（进行中）：只建立 Visual Sequence / Shot 数据契约、exact-source provenance、确定性语义校验、candidate generation、Worker LLM dispatch、DAG 与 stale classification、API 与完整测试。不建最终时间轴、不生成真实项目 artifact、不迁移 production binding。
 - **Production legacy 审计（只报告，不修改）**：generated assets 19；provenance NULL 19（全为历史 legacy）；NULL + requirement_json 缺失/损坏 1；active legacy bindings 17；active bindings 指向当前 active scenes 中缺失的 requirement 10（分布于 2 个项目，均为历史绑定；未删除/重绑）。
-- 下一步：M7.3B（明确不在本次范围）。
+- 下一步：M7.3B 完成后等待独立 Review PASS。
 
 ## 6. 尚未完成 TODO
 
 - [x] Production 部署（M7.3A.2 e62f5c2 / M7.3A.3 07b39dc 已完成）
-- [ ] M7.3B — Visual Sequences / Shots（明确禁止在本次执行）
+- [ ] M7.3B — Visual Sequences / Shots（进行中，见 §5）
 - [ ] M7.4 — Timing Reconciliation v2
 - [ ] M7.5 — Asset Bindings 迁移
 - [ ] M7.6 — M7 Pipeline Snapshot
@@ -291,12 +291,20 @@
 - 图片生成：Web 只 enqueue（202），Worker claim + 执行；requestId 确保幂等。
 - 本地 timeout 后不自动重新计费调用；`billing_status` 区分 confirmed/unknown。
 - 不切换任何项目到 m7；`projects` 仍为 m6；snapshot pointer 仍为 NULL；无 M7 pipeline snapshot。
-- **M7.3A.3.3 冻结决策（待 Review PASS 后正式生效）**：
+- **M7.3A.3.3 冻结决策（独立 Review PASS 后正式生效）**：
   - legacy generated candidate 仅在 intended target 可验证（scene_id 非空且匹配、requirement_json 合法且 requirementId 匹配、active scenes 中 exact requirement 存在）时允许新绑定；否则 409 LEGACY_CANDIDATE_TARGET_UNVERIFIABLE（fail-closed）。
   - provider 返回非空图片结果即视为 confirmed_charged（无论后续 result validation / 本地持久化是否失败）；PROVIDER_INVALID_RESPONSE 时 job failed 但 billing 保持 charged，不保存 current asset，不自动重试。
   - billing evidence 单调，只能升级不能降级；usage metadata 只追加不丢失已知证据（providerRequestId/generationId/actualModel/requestedModel/imageCount 等）；charged 且 cost 未知保持 null（pricingUnavailable=true），不得伪造成 0。
   - render bundle 退出按优先级分类：lease lost > shutdown(requeue) > cancel(cancelled) > bundle_error。
-  - **M7.3A 完成后 frozen**：后续里程碑不得顺带重构 M7.3A 已冻结语义；改动需显式评审。
+- **M7.3A 冻结语义（正式生效，后续里程碑不得顺带重构；改动需显式评审）**：
+  1. Visual Intent 是视觉语义唯一所有者（intent/strategy/authenticity/objective/subject/continuationOfVisualIntentId/displayText/evidenceIds）；
+  2. legacy binding exact-target gate（LEGACY_CANDIDATE_TARGET_UNVERIFIABLE fail-closed）；
+  3. charged provider result audit（provider 返回即 charged，结果校验失败 billing 保持）；
+  4. billing evidence monotonic（只升级不降级，charged+cost 未知保持 null）；
+  5. live bundle exit state（lease lost > shutdown > cancel > bundle_error，实时读取 + 后置 fence）；
+  6. heartbeat single-owner cleanup（scheduler 唯一 claim，runner finally 唯一 release，executor 不 normal release）；
+  7. usage metadata sanitization（危险键过滤 + 只追加，首次写入/prior 非 plain 均过滤）；
+  8. 后续阶段不得顺带重构以上语义。
 
 ## 8. 已知事故和修复
 
@@ -332,16 +340,17 @@
 
 ## 10. 下一轮 agent 的安全边界
 
-- **不要** 启动 M7.3B / 生成 Visual Sequences / 生成 Shots。
-- **不要** 创建 `timing-reconciliation@2.0`。
-- **不要** 迁移 asset bindings。
-- **不要** 创建 M7 pipeline snapshot。
-- **不要** 切换任何项目到 m7。
-- **不要** 生成 Storyboard / Animatic / Editorial Gate / Final Render。
-- **不要** 自动重新生成污染项目 TTS。
-- **不要** 循环重试 S001-R01 图片生成。
-- 修改 Worker secret boundary 前必须经过 review。
-- 删除或覆盖旧 candidate `793c80fa-9229-4551-bc05-960c727afa2e` 是禁止的。
+- **M7.3B 已批准启动**（Visual Sequences / Shots Contract + DAG Foundation）。M7.3B 自身边界：
+  - **不要** 创建 `timing-reconciliation@2.0`、最终时间轴、startMs/endMs/durationMs/frames 字段。
+  - **不要** 重新生成 narration master / subtitle timing；**不要** 迁移 asset requirement 或 sceneId→shotId binding；**不要** 改造 asset resolver。
+  - **不要** 生成 Storyboard / Animatic / Editorial Gate / Final Render；不实现 MG runtime states、Remotion Sequence 映射。
+  - **不要** 创建 M7 pipeline snapshot；**不要** 切换任何项目到 m7。
+  - **不要** 实现 TTS-A/B/C、Voice Profile、Narration Performance Plan；不生成 production Sequence/Shot artifact；不对 production 项目调 visual-sequences/shots POST；不调用真实 LLM/APIYi（M7.3B 验证只走临时 DB + Mock）。
+  - **不要** 自动重新生成污染项目 TTS。
+  - **不要** 循环重试 S001-R01 图片生成。
+  - **不要** 回写/修改 "narrative-beats@1.0" 与 "visual-intent-plan@1.0"（Beat 不得新增 sequenceId/shotId；Visual Intent 不得新增 Sequence/Shot 字段；Sequence/Shot 不得复制 Visual Intent 内容）。
+  - 修改 Worker secret boundary 前必须经过 review。
+  - 删除或覆盖旧 candidate `793c80fa-9229-4551-bc05-960c727afa2e` 是禁止的。
 
 ## 11. 测试套件清单
 
