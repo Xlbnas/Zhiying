@@ -378,6 +378,64 @@ CREATE TABLE IF NOT EXISTS generation_dispatch_jobs (
   updated_at TEXT NOT NULL,
   UNIQUE(project_id, stage, request_id)
 );
+
+-- ============ TTS-A：Immutable Custom Voice Library 地基（仅新增，不修改以上表） ============
+-- Voice Profile：稳定库实体。archive 只影响可见性与是否可新增 revision；
+-- 不代表任何项目已选择；无 global default；不自动选择 latest revision。
+CREATE TABLE IF NOT EXISTS voice_profiles (
+  id TEXT PRIMARY KEY,
+  schema_version TEXT NOT NULL,         -- 'voice-profile@1.0'
+  display_name TEXT NOT NULL,
+  provider TEXT NOT NULL,               -- 当前仅 'indextts2'
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'archived')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+-- Voice Profile Revision：immutable 参考音频版本，append-only。
+-- 唯一性由 DB 强制；不可变性由下方 trigger（UPDATE/DELETE ABORT）强制。
+-- canonical_audio_path 为相对 dataDir 路径（voice-library/<pid>/<rid>/reference.wav）。
+-- metadata_json 严格 shape（仅 canonicalizationVersion/adapterCompatibilityKey/ingestedAt），
+-- 禁止任意 provider 参数袋与 performance/timing 字段。
+CREATE TABLE IF NOT EXISTS voice_profile_revisions (
+  id TEXT PRIMARY KEY,
+  schema_version TEXT NOT NULL,         -- 'voice-profile-revision@1.0'
+  voice_profile_id TEXT NOT NULL REFERENCES voice_profiles(id),
+  revision_number INTEGER NOT NULL,     -- 每 Profile 从 1 起，BEGIN IMMEDIATE 内 MAX+1
+  request_id TEXT NOT NULL,             -- 幂等键（同 Profile 内唯一）
+  provider TEXT NOT NULL,
+  adapter_compatibility_key TEXT NOT NULL,
+  original_audio_sha256 TEXT NOT NULL,
+  canonical_audio_sha256 TEXT NOT NULL,
+  original_filename_display TEXT,       -- 清洗后仅展示用途
+  canonical_audio_path TEXT NOT NULL,
+  codec TEXT NOT NULL,
+  sample_rate INTEGER NOT NULL,
+  channels INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  transcript TEXT,
+  language TEXT,
+  metadata_json TEXT NOT NULL,
+  request_fingerprint TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(voice_profile_id, revision_number),
+  UNIQUE(voice_profile_id, request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_voice_profile_revisions_profile
+  ON voice_profile_revisions (voice_profile_id);
+-- revision 表数据库层不可变（CREATE TRIGGER IF NOT EXISTS 幂等重跑安全）；
+-- 后续如需对该表做结构迁移，需先 DROP TRIGGER 再 ALTER，再重建。
+CREATE TRIGGER IF NOT EXISTS voice_profile_revisions_update_abort
+BEFORE UPDATE ON voice_profile_revisions
+BEGIN
+  SELECT RAISE(ABORT, 'voice_profile_revisions is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS voice_profile_revisions_delete_abort
+BEFORE DELETE ON voice_profile_revisions
+BEGIN
+  SELECT RAISE(ABORT, 'voice_profile_revisions is immutable');
+END;
 `;
 
 // M2-A Hardening：版本号数据库级唯一约束（幂等）。
