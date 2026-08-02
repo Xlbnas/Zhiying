@@ -408,6 +408,137 @@ async function main(): Promise<void> {
   const snapshotCount = (getDb().prepare(`SELECT COUNT(*) AS c FROM artifacts WHERE kind = 'm7_pipeline_snapshot'`).get() as {c: number}).c;
   ok(snapshotCount === 0, 'F2 无 M7 pipeline snapshot');
 
+  // ═══════ G. DAG usable-candidate 语义（M7.3B.R1 P1） ═══════
+  console.log('── G. usable-candidate');
+  function insertFailedRun(projectId: string, stage: string, requestId: string): void {
+    getDb().prepare(
+      `INSERT INTO generation_runs (id, project_id, stage, request_id, source_artifact_id, status, owner_token, lease_expires_at, error_code, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'src', 'failed', 'tok', ?, 'TEST_FAILED', ?, ?)`,
+    ).run(crypto.randomUUID(), projectId, stage, requestId, new Date(Date.now() + 60000).toISOString(), new Date().toISOString(), new Date().toISOString());
+  }
+
+  // G1：intent dispatch queued、无 intent candidate → intent=running、sequences=blocked
+  {
+    const p = newProjectWithScript(STRICT_MD, 'script-v2@2.0');
+    const planP = buildNarrationPlanV2(p);
+    enqueueGenerationDispatch(getDb(), {projectId: p, stage: 'm7_visual_intent', requestId: 'req-g1-intent-0001', sourceArtifactId: 'dummy-beats'});
+    const st = computeM7DagNodeStates(p);
+    ok(st.visual_intent_plan!.status === 'generation_running', 'G1a intent dispatch queued → intent=generation_running', st.visual_intent_plan);
+    ok(st.visual_sequences!.status === 'blocked', 'G1b intent 无可用 candidate → sequences=blocked', st.visual_sequences);
+    void planP;
+  }
+
+  // G2：intent generation_failed、无 intent candidate → sequences=blocked
+  {
+    const p = newProjectWithScript(STRICT_MD, 'script-v2@2.0');
+    const planP = buildNarrationPlanV2(p);
+    insertFailedRun(p, 'm7_visual_intent', 'req-g2-intent-0001');
+    const st = computeM7DagNodeStates(p);
+    ok(st.visual_intent_plan!.status === 'generation_failed', 'G2a intent generation_failed', st.visual_intent_plan);
+    ok(st.visual_sequences!.status === 'blocked', 'G2b intent failed 且无 candidate → sequences=blocked', st.visual_sequences);
+    void planP;
+  }
+
+  // G3：sequences dispatch queued、无 sequence candidate → shots=blocked
+  // G4：sequences generation_failed、无 sequence candidate → shots=blocked
+  {
+    const p = newProjectWithScript(STRICT_MD, 'script-v2@2.0');
+    const planP = buildNarrationPlanV2(p);
+    const beatsP = makeValidBeats(planP.plan);
+    const bp = new ScriptableProvider();
+    bp.push({text: JSON.stringify({beats: beatsP})});
+    const bb = await buildNarrativeBeats({projectId: p, narrationPlanV2ArtifactId: planP.artifact.id, requestId: 'req-g3-beats-0001', provider: bp});
+    if (bb.kind !== 'succeeded') throw new Error('fixture: g3 beats build failed');
+    const ip = new ScriptableProvider();
+    ip.push({text: JSON.stringify({intents: makeValidIntents(beatsP)})});
+    const ib = await buildVisualIntentPlan({projectId: p, narrativeBeatsArtifactId: bb.artifact.id, requestId: 'req-g3-intent-0001', provider: ip});
+    if (ib.kind !== 'succeeded') throw new Error('fixture: g3 intent build failed');
+    enqueueGenerationDispatch(getDb(), {projectId: p, stage: 'm7_visual_sequences', requestId: 'req-g3-seq-0001', sourceArtifactId: `${bb.artifact.id}|${ib.artifact.id}`});
+    let st = computeM7DagNodeStates(p);
+    ok(st.visual_sequences!.status === 'generation_running', 'G3a sequences dispatch queued → running', st.visual_sequences);
+    ok(st.shots!.status === 'blocked', 'G3b sequences 无可用 candidate → shots=blocked', st.shots);
+    // G4：转 failed（同项目再造 failed run）
+    insertFailedRun(p, 'm7_visual_sequences', 'req-g4-seq-0001');
+    st = computeM7DagNodeStates(p);
+    ok(st.shots!.status === 'blocked', 'G4 sequences generation_failed 且无 candidate → shots=blocked', st.shots);
+  }
+
+  // G5：上游有旧合法 candidate，同时 regenerate running → 下游不因 running 被错误 blocked
+  {
+    const p = projectId; // 主项目已有完整合法链（shots ready）
+    enqueueGenerationDispatch(getDb(), {projectId: p, stage: 'm7_visual_sequences', requestId: 'req-g5-regenerate-0001', sourceArtifactId: `${beatsArtifactId}|${intentArtifactId}`});
+    const st = computeM7DagNodeStates(p);
+    ok(st.visual_sequences!.status === 'generation_running', 'G5a regenerate running（旧 candidate 仍存在）', st.visual_sequences);
+    ok(st.shots!.status !== 'blocked', 'G5b 上游 running 但有可用旧 candidate → 下游不被错误 blocked', st.shots);
+  }
+
+  // G6：Visual Intent needs_review → sequences 允许 not_generated（不误判不可用）
+  {
+    const p = newProjectWithScript(STRICT_MD, 'script-v2@2.0');
+    const planP = buildNarrationPlanV2(p);
+    const beatsP = makeValidBeats(planP.plan);
+    const bp = new ScriptableProvider();
+    bp.push({text: JSON.stringify({beats: beatsP})});
+    const bb = await buildNarrativeBeats({projectId: p, narrationPlanV2ArtifactId: planP.artifact.id, requestId: 'req-g6-beats-0001', provider: bp});
+    if (bb.kind !== 'succeeded') throw new Error('fixture: g6 beats build failed');
+    const unresolvedIntentsG6: VisualIntentV1[] = makeValidIntents(beatsP).map((i, idx) =>
+      idx === 2
+        ? {...i, intent: 'VISUAL_UNRESOLVED' as const, strategy: 'unresolved' as const, authenticity: 'not_applicable' as const, subject: {kind: 'none' as const, label: null, evidenceIds: []}}
+        : i,
+    );
+    const ip = new ScriptableProvider();
+    ip.push({text: JSON.stringify({intents: unresolvedIntentsG6})});
+    const ib = await buildVisualIntentPlan({projectId: p, narrativeBeatsArtifactId: bb.artifact.id, requestId: 'req-g6-intent-0001', provider: ip});
+    if (ib.kind !== 'succeeded') throw new Error('fixture: g6 intent build failed');
+    const st = computeM7DagNodeStates(p);
+    ok(st.visual_intent_plan!.status === 'needs_review', 'G6a intent needs_review', st.visual_intent_plan);
+    ok(st.visual_sequences!.status === 'not_generated', 'G6b intent needs_review 对 sequences 可用 → not_generated（可生成，不误判 blocked）', st.visual_sequences);
+  }
+
+  // G7：Visual Sequences needs_review → shots 允许 not_generated
+  {
+    const p = newProjectWithScript(STRICT_MD, 'script-v2@2.0');
+    const planP = buildNarrationPlanV2(p);
+    const beatsP = makeValidBeats(planP.plan);
+    const bp = new ScriptableProvider();
+    bp.push({text: JSON.stringify({beats: beatsP})});
+    const bb = await buildNarrativeBeats({projectId: p, narrationPlanV2ArtifactId: planP.artifact.id, requestId: 'req-g7-beats-0001', provider: bp});
+    if (bb.kind !== 'succeeded') throw new Error('fixture: g7 beats build failed');
+    const unresolvedIntentsG7: VisualIntentV1[] = makeValidIntents(beatsP).map((i, idx) =>
+      idx === 2
+        ? {...i, intent: 'VISUAL_UNRESOLVED' as const, strategy: 'unresolved' as const, authenticity: 'not_applicable' as const, subject: {kind: 'none' as const, label: null, evidenceIds: []}}
+        : i,
+    );
+    const ip = new ScriptableProvider();
+    ip.push({text: JSON.stringify({intents: unresolvedIntentsG7})});
+    const ib = await buildVisualIntentPlan({projectId: p, narrativeBeatsArtifactId: bb.artifact.id, requestId: 'req-g7-intent-0001', provider: ip});
+    if (ib.kind !== 'succeeded') throw new Error('fixture: g7 intent build failed');
+    const sp = new ScriptableProvider();
+    sp.push({text: JSON.stringify({sequences: makeValidSequences(beatsP)})});
+    const sb = await buildVisualSequences({projectId: p, narrativeBeatsArtifactId: bb.artifact.id, visualIntentPlanArtifactId: ib.artifact.id, requestId: 'req-g7-seq-0001', provider: sp});
+    if (sb.kind !== 'succeeded') throw new Error('fixture: g7 sequences build failed');
+    const st = computeM7DagNodeStates(p);
+    ok(st.visual_sequences!.status === 'needs_review', 'G7a sequences needs_review', st.visual_sequences);
+    ok(st.shots!.status === 'not_generated', 'G7b sequences needs_review 对 shots 可用 → not_generated（可生成，不误判 blocked）', st.shots);
+  }
+
+  // G8：Narration Plan needs_review → 不可用于 downstream（shots blocked）
+  {
+    const p = projectId;
+    const narrationRowG8 = getDb().prepare('SELECT content_json FROM artifacts WHERE id = ?').get(narrationArtifactId) as {content_json: string};
+    const originalNarrationG8 = narrationRowG8.content_json;
+    getDb().prepare('UPDATE artifacts SET content_json = ? WHERE id = ?').run(
+      JSON.stringify({...JSON.parse(originalNarrationG8), needsReview: [{id: 'R001', kind: 'pause_without_duration', chapter: 1, raw: 'g8-injected', context: 'c', reason: 'test'}]}),
+      narrationArtifactId,
+    );
+    const st = computeM7DagNodeStates(p);
+    ok(st.narration_plan_v2!.status === 'needs_review', 'G8a narration plan needs_review', st.narration_plan_v2);
+    ok(st.shots!.status === 'blocked', 'G8b narration needs_review 不可用于 downstream → shots=blocked（旧实现会误判 not_generated）', st.shots);
+    getDb().prepare('UPDATE artifacts SET content_json = ? WHERE id = ?').run(originalNarrationG8, narrationArtifactId);
+    const stRestored = computeM7DagNodeStates(p);
+    ok(stRestored.shots!.status === 'ready', 'G8c 恢复后 shots 回到 ready');
+  }
+
   console.log(`\n==== test-m73b-dag: ${pass} PASS / ${fail} FAIL ====`);
   closeDb();
   fs.rmSync(path.resolve(process.cwd(), 'data', 'test-m73b-dag'), {recursive: true, force: true});

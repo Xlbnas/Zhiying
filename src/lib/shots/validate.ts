@@ -129,15 +129,17 @@ export function validateShots(
       });
     }
   }
+  // 规则 4（M7.3B.R1 P0）：shot 顺序必须与 exact Visual Sequence artifact 一致。
+  // - 交错（同一 sequence 的 shots 与其他 sequence 交错）→ SHOT_SEQUENCE_CROSSING；
+  // - 全局 sequence block 顺序（shots 首次出现顺序，去重、只统计 exact source 中存在者）
+  //   必须与 sequencesArtifact.sequences 逐项相同 → SHOT_SEQUENCE_ORDER_MISMATCH。
   {
-    const seenSeqOrder: string[] = [];
-    const posInShots = new Map<string, number>();
+    const firstSeen = new Map<string, number>();
     shots.forEach((shot, i) => {
       if (!seqIndex.has(shot.sequenceId)) return;
-      const prev = posInShots.get(shot.sequenceId);
+      const prev = firstSeen.get(shot.sequenceId);
       if (prev === undefined) {
-        posInShots.set(shot.sequenceId, i);
-        seenSeqOrder.push(shot.sequenceId);
+        firstSeen.set(shot.sequenceId, i);
       } else {
         // 同一 sequence 的 shot 再次出现：检查其间没有其他 sequence 的 shot
         for (let j = prev + 1; j < i; j++) {
@@ -149,9 +151,24 @@ export function validateShots(
             break;
           }
         }
-        posInShots.set(shot.sequenceId, i);
+        firstSeen.set(shot.sequenceId, i);
       }
     });
+    const expectedSequenceOrder = sequences.map((seq) => seq.sequenceId);
+    const actualSequenceOrder = shots
+      .map((shot) => shot.sequenceId)
+      .filter((seqId) => seqIndex.has(seqId))
+      .filter((seqId, i, arr) => arr.indexOf(seqId) === i); // 首次出现去重
+    const seqOrderOk =
+      actualSequenceOrder.length === expectedSequenceOrder.length &&
+      actualSequenceOrder.every((seqId, i) => seqId === expectedSequenceOrder[i]);
+    if (!seqOrderOk) {
+      issues.push({
+        code: 'SHOT_SEQUENCE_ORDER_MISMATCH',
+        message:
+          'shots 的 sequence block 顺序与 exact Visual Sequence artifact 不一致（时间线顺序必须逐项相同，不得排序比较）',
+      });
+    }
   }
 
   // 每个 sequence 至少一个 shot
@@ -318,6 +335,25 @@ export function validateShots(
       issues.push({
         code: 'SHOT_UNIT_COVERAGE_MISMATCH',
         message: `sequence ${seq.sequenceId} 的 shots unit 并集与其 beats 引用 unit 并集不一致`,
+      });
+    }
+  }
+
+  // 规则 14 增强（M7.3B.R1 P0）：全局 canonical unit 时间线顺序。
+  // expected：按 exact Visual Sequence artifact 的 sequence 顺序，展开每个
+  // sequence 的 beats，再按 exact Narrative Beats unitIds，得到有序 unit 列表；
+  // actual：shots.flatMap(unitIds)。两者必须逐项相同（时间线顺序，不得排序比较）。
+  {
+    const expectedUnitIds = sequences.flatMap((seq) => unitsOfSequence(seq.sequenceId));
+    const actualUnitIds = shots.flatMap((shot) => shot.unitIds);
+    const unitOrderOk =
+      actualUnitIds.length === expectedUnitIds.length &&
+      actualUnitIds.every((id, i) => id === expectedUnitIds[i]);
+    if (!unitOrderOk) {
+      issues.push({
+        code: 'SHOT_UNIT_ORDER_MISMATCH',
+        message:
+          'shots 的全局 unit 顺序与 canonical 时间线（sequences→beats→units）不一致（逐项比较，不得排序）',
       });
     }
   }

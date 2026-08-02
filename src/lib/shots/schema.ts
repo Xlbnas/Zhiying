@@ -34,17 +34,19 @@ export type ShotTransition = z.infer<typeof shotTransitionSchema>;
  * Shot 最小结构（M7.3B §6.1）：
  * 语义切片锚点（unitIds）+ 唯一 Visual Intent 引用 + 与前一镜头的转场决策。
  * 只允许这些结构性字段。
+ * reference ID 在 schema 层精确限制（M7.3B.R1 P1）：unitIds 必须 N\d{3}、
+ * visualIntentId 必须 V\d{3}——malformed reference 在 schema 层拒绝。
  */
 export const shotV1Schema = z
   .object({
     shotId: z.string().regex(/^H\d{3}$/),
-    /** 精确 parent sequence（exact Visual Sequence artifact 的 sequenceId）。 */
+    /** 精确 parent sequence（exact Visual Sequence artifact 的 sequenceId，Q\d{3}）。 */
     sequenceId: z.string().regex(/^Q\d{3}$/),
     chapter: z.number().int().positive(),
-    /** 引用 Narration Plan V2 unit 边界，连续非空；speech 与 silence 都必须被覆盖。 */
-    unitIds: z.array(z.string().min(1)).min(1),
-    /** 只引用 Visual Intent，不复制 intent 内容。 */
-    visualIntentId: z.string().min(1),
+    /** 引用 Narration Plan V2 unit 边界（N\d{3}），连续非空；speech 与 silence 都必须被覆盖。 */
+    unitIds: z.array(z.string().regex(/^N\d{3}$/)).min(1),
+    /** 只引用 Visual Intent（V\d{3}），不复制 intent 内容。 */
+    visualIntentId: z.string().regex(/^V\d{3}$/),
     transitionFromPrevious: shotTransitionSchema,
   })
   .strict();

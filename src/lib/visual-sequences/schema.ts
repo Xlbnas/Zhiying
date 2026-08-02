@@ -31,15 +31,18 @@ const sha256HashSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
  * Visual Sequence 最小结构（M7.3B §五）：
  * 一个连续视觉体，跨 1..n 个连续 Narrative Beats，包含 1..n 个 Visual Intent 引用。
  * 只允许这些结构性字段；视觉语义一律经 visualIntentId 引用，不复制内容。
+ * reference ID 在 schema 层精确限制（M7.3B.R1 P1）：beatIds 必须 B\d{3}、
+ * visualIntentIds 必须 V\d{3}——malformed reference 在 schema 层拒绝，
+ * 不得只依靠 semantic NOT_FOUND。
  */
 export const visualSequenceV1Schema = z
   .object({
     sequenceId: z.string().regex(/^Q\d{3}$/),
     chapter: z.number().int().positive(),
-    /** 引用 Narrative Beats artifact 的 beatId，连续、非空、全局恰好覆盖一次。 */
-    beatIds: z.array(z.string().min(1)).min(1),
-    /** 顺序引用 Visual Intent Plan artifact 的 visualIntentId；不复制 intent 内容。 */
-    visualIntentIds: z.array(z.string().min(1)).min(1),
+    /** 引用 Narrative Beats artifact 的 beatId（B\d{3}），连续、非空、全局恰好覆盖一次。 */
+    beatIds: z.array(z.string().regex(/^B\d{3}$/)).min(1),
+    /** 顺序引用 Visual Intent Plan artifact 的 visualIntentId（V\d{3}）；不复制 intent 内容。 */
+    visualIntentIds: z.array(z.string().regex(/^V\d{3}$/)).min(1),
   })
   .strict();
 export type VisualSequenceV1 = z.infer<typeof visualSequenceV1Schema>;

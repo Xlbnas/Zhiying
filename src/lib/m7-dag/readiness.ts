@@ -82,6 +82,34 @@ function normalizeStatus(status: string): 'current' | 'needs_review' | 'stale_or
   return 'stale_or_invalid';
 }
 
+/**
+ * 某节点对指定下游的「可用 candidate 数」（M7.3B.R1 P1 usable-candidate 语义）。
+ * - eligible_candidate/current_candidate → 可用；
+ * - needs_review：visual_intent_plan 可用于 visual_sequences 与 shots
+ *   （VISUAL_UNRESOLVED 在 Sequence/Shot 层均为非阻断 NEEDS_REVIEW，允许
+ *   保留并生成 needs_review candidate）；visual_sequences 可用于 shots；
+ *   narration_plan_v2 needs_review 不可用于 downstream（其余一律不可用）；
+ * - stale/invalid → 不可用。
+ * 下游 dependency 缺失判定必须基于该计数（≠0 即可用），
+ * 而非 dependency 节点自身的 status 字符串——上游 regenerate running/failed
+ * 且同时存在旧合法 candidate 时，下游不得被误判 blocked。
+ */
+function usableCandidateCount(projectId: string, node: M7DagNodeId, downstream: M7DagNodeId): number {
+  const candidates = candidatesOf(projectId, node);
+  return candidates.filter((c) => {
+    const s = normalizeStatus(c.status);
+    if (s === 'current') return true;
+    if (s === 'needs_review') {
+      if (node === 'visual_intent_plan' && (downstream === 'visual_sequences' || downstream === 'shots')) {
+        return true;
+      }
+      if (node === 'visual_sequences' && downstream === 'shots') return true;
+      return false;
+    }
+    return false;
+  }).length;
+}
+
 /** generation 活动：running（租约有效）/ failed 终态；只查本 stage，不影响其他 stage。 */
 function activityOf(projectId: string, node: M7DagNodeId): {running: boolean; failed: boolean} {
   const stage = STAGE_BY_NODE[node];
@@ -152,13 +180,13 @@ export function computeM7DagNodeStates(projectId: string): Record<M7DagNodeId, M
     } else if (activity.failed) {
       state = make('generation_failed', 'generation run 终态 failed/indeterminate 或 dispatch failed');
     } else {
-      // 依赖缺源 → blocked（source artifact 缺失/失效）
-      const missingDeps = def.dependencies.filter((dep) => {
-        const depState = states[dep];
-        return depState.status === 'blocked' || depState.status === 'not_generated';
-      });
+      // 依赖缺源 → blocked。判定基于 usable candidate 数（对当前下游），
+      // 而非 dependency 节点状态字符串：generation_running/generation_failed
+      // 且无可用 candidate 同样视为缺失（spec：source artifact 缺失即 blocked；
+      // source invalid/stale 即 blocked；needs_review 按 usable 语义处理）。
+      const missingDeps = def.dependencies.filter((dep) => usableCandidateCount(projectId, dep, node) === 0);
       if (missingDeps.length > 0) {
-        state = make('blocked', `依赖缺失/不可用：${missingDeps.join(', ')}`);
+        state = make('blocked', `依赖缺失/不可用（无可用于本节点的 candidate）：${missingDeps.join(', ')}`);
       } else if (candidates.length > 0) {
         state = make(
           'blocked',

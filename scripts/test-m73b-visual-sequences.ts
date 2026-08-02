@@ -54,8 +54,10 @@ import {
 import {
   classifyVisualSequencesCandidate,
   getVisualSequencesArtifact,
+  listVisualSequencesRows,
 } from '../src/lib/visual-sequences/classify';
 import {
+  buildVisualSequences,
   composeSequencesSourceKey,
   parseSequencesSourceKey,
   precheckVisualSequencesSource,
@@ -333,6 +335,16 @@ async function main(): Promise<void> {
   ok(scanForbiddenSequenceKeys(makeValidSequences()).length === 0, 'A33 合法序列 forbidden scan 通过');
   ok(scanForbiddenSequenceKeys([{...validSeq, transition: 'cut', startMs: 1}]).includes('transition'), 'A34 forbidden scan 命中 transition');
   ok(scanForbiddenSequenceKeys([{...validSeq, intent: 'SHOW_PERSON'}]).includes('intent'), 'A35 forbidden scan 命中 intent 副本');
+  // reference ID schema（M7.3B.R1 P1）：malformed reference 在 schema 层拒绝
+  ok(!visualSequenceV1Schema.safeParse({...validSeq, beatIds: ['B01']}).success, 'A36 beatIds B01 拒绝');
+  ok(!visualSequenceV1Schema.safeParse({...validSeq, beatIds: ['B0001']}).success, 'A37 beatIds B0001 拒绝');
+  ok(!visualSequenceV1Schema.safeParse({...validSeq, beatIds: ['b001']}).success, 'A38 beatIds b001（小写）拒绝');
+  ok(!visualSequenceV1Schema.safeParse({...validSeq, visualIntentIds: ['V01']}).success, 'A39 visualIntentIds V01 拒绝');
+  ok(!visualSequenceV1Schema.safeParse({...validSeq, visualIntentIds: ['V0001']}).success, 'A40 visualIntentIds V0001 拒绝');
+  ok(!visualSequenceV1Schema.safeParse({...validSeq, visualIntentIds: ['x']}).success, 'A41 visualIntentIds x 拒绝');
+  ok(visualSequenceV1Schema.safeParse(validSeq).success, 'A42 合法 B001/V001 通过');
+  ok(!visualSequenceV1Schema.safeParse({...validSeq, beatIds: []}).success, 'A43 空 beatIds 继续拒绝');
+  ok(!visualSequenceV1Schema.safeParse({...validSeq, visualIntentIds: []}).success, 'A44 空 visualIntentIds 继续拒绝');
 
   // ═══════ B. 语义校验（11.2） ═══════
   console.log('── B. validate 矩阵');
@@ -412,6 +424,33 @@ async function main(): Promise<void> {
   ok(hasCode(validateVisualSequences(beats, intents, [
     {sequenceId: 'Q001', chapter: 1, beatIds: ['B999'], visualIntentIds: ['V001']},
   ]), 'SEQUENCE_BEAT_NOT_FOUND'), 'B19 引用不存在 beat → SEQUENCE_BEAT_NOT_FOUND');
+  // exact-but-missing 合法格式 ID → semantic NOT_FOUND（schema 层放行，语义层拒绝）
+  ok(hasCode(validateVisualSequences(beats, intents, [
+    {sequenceId: 'Q001', chapter: 1, beatIds: ['B001', 'B002'], visualIntentIds: ['V001', 'V002']},
+    {sequenceId: 'Q002', chapter: 2, beatIds: ['B004', 'B005', 'B006'], visualIntentIds: ['V004', 'V005', 'V006']},
+  ]), 'SEQUENCE_BEAT_COVERAGE_GAP'), 'B20 exact-but-missing（B003 合法格式但缺失）→ semantic GAP');
+
+  // ── 全局 canonical beat 顺序（M7.3B.R1 P0）──
+  // reversed blocks：Q001→后半、Q002→前半；每个 sequence 内仍连续、chapter 正确、
+  // intent coverage 正确——旧实现（只查 within-sequence 连续）会放过。
+  const reversed = [
+    {sequenceId: 'Q001', chapter: 2, beatIds: ['B004', 'B005', 'B006'], visualIntentIds: ['V004', 'V005', 'V006']},
+    {sequenceId: 'Q002', chapter: 1, beatIds: ['B001', 'B002', 'B003'], visualIntentIds: ['V001', 'V002', 'V003']},
+  ];
+  const revIssues = validateVisualSequences(beats, intents, reversed);
+  ok(hasCode(revIssues, 'SEQUENCE_BEAT_ORDER_MISMATCH'), 'B21 reversed blocks → SEQUENCE_BEAT_ORDER_MISMATCH', revIssues);
+  ok(!hasCode(revIssues, 'SEQUENCE_BEAT_NON_CONTIGUOUS'), 'B22 reversed blocks 内每个 sequence 仍连续（仅全局顺序错）');
+  ok(!hasCode(revIssues, 'SEQUENCE_INTENT_COVERAGE_MISMATCH'), 'B23 reversed blocks intent coverage 正确（不误报）');
+  ok(!hasCode(revIssues, 'SEQUENCE_CHAPTER_CROSSING'), 'B24 reversed blocks chapter 正确（不误报）');
+  // 三个 sequence block 交换
+  const swapped = [
+    {sequenceId: 'Q001', chapter: 1, beatIds: ['B001', 'B002'], visualIntentIds: ['V001', 'V002']},
+    {sequenceId: 'Q002', chapter: 2, beatIds: ['B005', 'B006'], visualIntentIds: ['V005', 'V006']},
+    {sequenceId: 'Q003', chapter: 2, beatIds: ['B003', 'B004'], visualIntentIds: ['V003', 'V004']},
+  ];
+  const swapIssues = validateVisualSequences(beats, intents, swapped);
+  ok(hasCode(swapIssues, 'SEQUENCE_BEAT_ORDER_MISMATCH'), 'B25 三 sequence block 交换 → SEQUENCE_BEAT_ORDER_MISMATCH', swapIssues);
+  ok(!hasCode(swapIssues, 'SEQUENCE_BEAT_NON_CONTIGUOUS') && !hasCode(swapIssues, 'SEQUENCE_BEAT_COVERAGE_GAP'), 'B26 交换后内部连续且无 gap（仅顺序错）');
 
   // ═══════ C. classify（11.2 source 部分 + 9） ═══════
   console.log('── C. classify');
@@ -493,6 +532,56 @@ async function main(): Promise<void> {
   const unresolvedSeqId = insertSequencesArtifact(projectId, unresolvedSeqContent);
   const unresolvedSeqClass = classifyVisualSequencesCandidate(projectId, getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(unresolvedSeqId) as never);
   ok(unresolvedSeqClass.status === 'needs_review', 'C8 unresolved source → needs_review（不转 MG）', unresolvedSeqClass);
+
+  // M7.3B.R1 P0：reversed blocks artifact → classify invalid_source（canonical order 是阻断规则）
+  const reversedContent = fillHashes(
+    makeSequencesContent(beatsArtifactId, intentArtifactId, narrationArtifactId, scriptV2VersionId, scriptV2ContentHash, [
+      {sequenceId: 'Q001', chapter: 2, beatIds: ['B004', 'B005', 'B006'], visualIntentIds: ['V004', 'V005', 'V006']},
+      {sequenceId: 'Q002', chapter: 1, beatIds: ['B001', 'B002', 'B003'], visualIntentIds: ['V001', 'V002', 'V003']},
+    ]),
+  );
+  const reversedId = insertSequencesArtifact(projectId, reversedContent);
+  const reversedClass = classifyVisualSequencesCandidate(projectId, getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(reversedId) as never);
+  ok(reversedClass.status === 'invalid_source', 'C9 reversed blocks classify → invalid_source', reversedClass);
+
+  // M7.3B.R1 P0：generation repair（首次 reversed → validator 拒绝 → repair 返回 canonical）
+  const genProvider = new ScriptableProvider();
+  genProvider.push({text: JSON.stringify({sequences: [
+    {sequenceId: 'Q001', chapter: 2, beatIds: ['B004', 'B005', 'B006'], visualIntentIds: ['V004', 'V005', 'V006']},
+    {sequenceId: 'Q002', chapter: 1, beatIds: ['B001', 'B002', 'B003'], visualIntentIds: ['V001', 'V002', 'V003']},
+  ]})});
+  genProvider.push({text: JSON.stringify({sequences: makeValidSequences()})});
+  const genBuild = await buildVisualSequences({
+    projectId,
+    narrativeBeatsArtifactId: beatsArtifactId,
+    visualIntentPlanArtifactId: intentArtifactId,
+    requestId: 'req-seq-gen-order-repair-0001',
+    provider: genProvider,
+  });
+  ok(genBuild.kind === 'succeeded', 'C10 repair 后 build succeeded', genBuild);
+  if (genBuild.kind === 'succeeded') {
+    ok(genBuild.generation?.attemptCount === 2, 'C11 repair attemptCount=2（首次 reversed 拒绝 + repair canonical）', genBuild.generation);
+    // 服务端未自动排序：generation 内容必须与 LLM 第二次输出一致（无服务端重排）
+    const artifactContent = genBuild.visualSequences.sequences;
+    ok(
+      artifactContent.length === 2 &&
+        artifactContent[0]!.sequenceId === 'Q001' &&
+        artifactContent[0]!.beatIds.join(',') === 'B001,B002,B003' &&
+        artifactContent[1]!.sequenceId === 'Q002' &&
+        artifactContent[1]!.beatIds.join(',') === 'B004,B005,B006',
+      'C12 落库 artifact 为 canonical 顺序（服务端未自动排序，内容来自 repair 输出）',
+      artifactContent,
+    );
+    const genArtifactCount = listVisualSequencesRows(projectId).filter((r) => {
+      try {
+        const parsed = JSON.parse(r.content_json) as {generation?: {requestId?: string}};
+        return parsed.generation?.requestId === 'req-seq-gen-order-repair-0001';
+      } catch {
+        return false;
+      }
+    }).length;
+    ok(genArtifactCount === 1, 'C13 repair 后只产生一个合法 artifact', genArtifactCount);
+  }
 
   // ═══════ D. precheck 双源 chain（11.2 source 部分） ═══════
   console.log('── D. precheck / source chain');

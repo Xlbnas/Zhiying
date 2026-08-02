@@ -38,7 +38,7 @@ import {buildNarrativeBeats} from '../src/lib/narrative-beats/plan';
 import type {NarrativeBeatV1} from '../src/lib/narrative-beats/schema';
 import {buildVisualIntentPlan} from '../src/lib/visual-intent/plan';
 import type {VisualIntentV1} from '../src/lib/visual-intent/schema';
-import {buildVisualSequences, setVisualSequencesProviderForTest} from '../src/lib/visual-sequences/plan';
+import {buildVisualSequences, composeSequencesSourceKey, setVisualSequencesProviderForTest} from '../src/lib/visual-sequences/plan';
 import type {VisualSequenceV1} from '../src/lib/visual-sequences/schema';
 import {
   classifyVisualSequencesCandidate,
@@ -50,8 +50,11 @@ import type {ShotV1} from '../src/lib/shots/schema';
 import {classifyShotsCandidate, getShotsArtifact, listShotsRows} from '../src/lib/shots/classify';
 import {claimNextAnyJob} from '../src/lib/scheduler';
 import {runDispatchJob} from '../src/lib/../worker/dispatch-executor';
+import {enqueueGenerationDispatch} from '../src/lib/llm-generation/dispatch';
+import {RequestIdConflictError} from '../src/lib/llm-generation/runs';
 import {GET as seqGET, POST as seqPOST} from '../src/app/api/projects/[id]/visual-sequences/route';
 import {GET as shotGET, POST as shotPOST} from '../src/app/api/projects/[id]/shots/route';
+import {POST as visualPOST} from '../src/app/api/projects/[id]/visual-intents/route';
 
 function sha256(text: string): string {
   return `sha256:${crypto.createHash('sha256').update(text, 'utf8').digest('hex')}`;
@@ -581,6 +584,146 @@ async function main(): Promise<void> {
   const seqCandidates = seqGet.json.candidates as Array<{status: string}>;
   ok(seqCandidates.every((c) => ['current_candidate', 'stale_source', 'invalid_source', 'needs_review'].includes(c.status)), 'I6 sequences GET status 全为 M7.3B 分类枚举');
   ok(getVisualSequencesArtifact(projectId, 'no-such') === null && getShotsArtifact(projectId, 'no-such') === null, 'I7 exact 读取 fail-closed null');
+
+  // ═══════ J. queued dispatch source conflict（M7.3B.R1 P0） ═══════
+  console.log('── J. queued dispatch conflict');
+  function dispatchCountFor(projectId: string, stage: string, requestId: string): number {
+    return (getDb()
+      .prepare('SELECT COUNT(*) AS c FROM generation_dispatch_jobs WHERE project_id = ? AND stage = ? AND request_id = ?')
+      .get(projectId, stage, requestId) as {c: number}).c;
+  }
+  function dispatchSource(projectId: string, stage: string, requestId: string): string | null {
+    const row = getDb()
+      .prepare('SELECT source_artifact_id FROM generation_dispatch_jobs WHERE project_id = ? AND stage = ? AND request_id = ?')
+      .get(projectId, stage, requestId) as {source_artifact_id: string} | undefined;
+    return row?.source_artifact_id ?? null;
+  }
+  const seqSourceKeyA = composeSequencesSourceKey(beatsArtifactId, intentArtifactId);
+  const seqSourceKeyB = composeSequencesSourceKey(beatsArtifactId, intentAltBuild.artifact.id);
+  const callsBeforeJ = seqProvider.requests.length;
+  const seqRowsAtJStart = listVisualSequencesRows(projectId).length;
+
+  // A 组：sequences queued conflict
+  // 1. POST source A → 202 queued（不执行 worker）
+  const j1 = await postJson(seqPOST, projectId, {
+    narrativeBeatsArtifactId: beatsArtifactId,
+    visualIntentPlanArtifactId: intentArtifactId,
+    requestId: 'req-seq-queued-0001',
+  });
+  ok(j1.status === 202 && j1.json.status === 'queued', 'J1 POST source A → 202 queued（worker 未执行）', j1);
+  // 2. 确认只有 queued dispatch、无 generation_run
+  ok(runRow(projectId, 'm7_visual_sequences', 'req-seq-queued-0001') === undefined, 'J2 无 generation_run（仅 queued dispatch）');
+  ok(dispatchCountFor(projectId, 'm7_visual_sequences', 'req-seq-queued-0001') === 1, 'J3 dispatch count=1');
+  // 3. POST source B / 同 requestId → 409 REQUEST_ID_CONFLICT
+  const j4 = await postJson(seqPOST, projectId, {
+    narrativeBeatsArtifactId: beatsArtifactId,
+    visualIntentPlanArtifactId: intentAltBuild.artifact.id,
+    requestId: 'req-seq-queued-0001',
+  });
+  ok(j4.status === 409 && j4.json.error === 'REQUEST_ID_CONFLICT', 'J4 POST source B 同 requestId → 409 REQUEST_ID_CONFLICT', j4);
+  ok(dispatchCountFor(projectId, 'm7_visual_sequences', 'req-seq-queued-0001') === 1, 'J5 冲突后 dispatch count 仍为 1（不新增）');
+  ok(dispatchSource(projectId, 'm7_visual_sequences', 'req-seq-queued-0001') === seqSourceKeyA, 'J6 原 dispatch source 未被覆盖（仍为 source A）', dispatchSource(projectId, 'm7_visual_sequences', 'req-seq-queued-0001'));
+  ok(runRow(projectId, 'm7_visual_sequences', 'req-seq-queued-0001') === undefined, 'J7 冲突后 generation_runs 仍为 0');
+  ok(listVisualSequencesRows(projectId).length === seqRowsAtJStart, 'J8 冲突后无新增 artifacts（无 partial）');
+
+  // C 组：同 source 重复（worker claim 前）→ 202 同 dispatchId、count 仍 1
+  const j10 = await postJson(seqPOST, projectId, {
+    narrativeBeatsArtifactId: beatsArtifactId,
+    visualIntentPlanArtifactId: intentArtifactId,
+    requestId: 'req-seq-queued-0001',
+  });
+  ok(j10.status === 202 && j10.json.status === 'queued', 'J10 同 source 重复 → 202 queued', j10);
+  ok(j10.json.dispatchId === j1.json.dispatchId, 'J11 同 source 重复返回同一 dispatchId', j10.json.dispatchId);
+  ok(dispatchCountFor(projectId, 'm7_visual_sequences', 'req-seq-queued-0001') === 1, 'J12 同 source 重复 dispatch count 仍 1');
+
+  // D 组：并发不同 source、同 requestId → 恰好一个 queued、一个 409、最终一个 immutable source
+  const [d1, d2] = await Promise.all([
+    postJson(seqPOST, projectId, {
+      narrativeBeatsArtifactId: beatsArtifactId,
+      visualIntentPlanArtifactId: intentArtifactId,
+      requestId: 'req-seq-race-0001',
+    }),
+    postJson(seqPOST, projectId, {
+      narrativeBeatsArtifactId: beatsArtifactId,
+      visualIntentPlanArtifactId: intentAltBuild.artifact.id,
+      requestId: 'req-seq-race-0001',
+    }),
+  ]);
+  const raceStatuses = [d1.status, d2.status].sort((a, b) => a - b);
+  ok(raceStatuses.join(',') === '202,409', 'J13 并发不同 source → 恰好一个 202 一个 409', raceStatuses);
+  ok(dispatchCountFor(projectId, 'm7_visual_sequences', 'req-seq-race-0001') === 1, 'J14 并发后 dispatch count=1（单一 immutable source）');
+  const raceSource = dispatchSource(projectId, 'm7_visual_sequences', 'req-seq-race-0001');
+  ok(raceSource === seqSourceKeyA || raceSource === seqSourceKeyB, 'J15 最终 source 为 A 或 B（由事务顺序决定，不可变）', raceSource);
+  ok(runRow(projectId, 'm7_visual_sequences', 'req-seq-race-0001') === undefined, 'J16 并发后 generation_runs=0');
+
+  // B 组：shots queued conflict（source 为两个不同 visualSequencesArtifactId）
+  const j17 = await postJson(shotPOST, projectId, {
+    visualSequencesArtifactId: seqArtifactId2,
+    requestId: 'req-shots-queued-0001',
+  });
+  ok(j17.status === 202 && j17.json.status === 'queued', 'J17 shots POST source A → 202 queued', j17);
+  ok(runRow(projectId, 'm7_shots', 'req-shots-queued-0001') === undefined, 'J18 shots 无 generation_run（仅 queued dispatch）');
+  const j19 = await postJson(shotPOST, projectId, {
+    visualSequencesArtifactId: seq2Build.artifact.id,
+    requestId: 'req-shots-queued-0001',
+  });
+  ok(j19.status === 409 && j19.json.error === 'REQUEST_ID_CONFLICT', 'J19 shots source B 同 requestId → 409 REQUEST_ID_CONFLICT', j19);
+  ok(dispatchCountFor(projectId, 'm7_shots', 'req-shots-queued-0001') === 1, 'J20 shots 冲突后 dispatch count 仍 1');
+  ok(dispatchSource(projectId, 'm7_shots', 'req-shots-queued-0001') === seqArtifactId2, 'J21 shots 原 dispatch source 未被覆盖', dispatchSource(projectId, 'm7_shots', 'req-shots-queued-0001'));
+  ok(runRow(projectId, 'm7_shots', 'req-shots-queued-0001') === undefined, 'J22 shots 冲突后 generation_runs 仍 0');
+
+  // E 组：既有 stage 回归（generic enqueue + visual-intents route queued conflict fail-closed）
+  const e1 = enqueueGenerationDispatch(getDb(), {
+    projectId,
+    stage: 'm7_narrative_beats',
+    requestId: 'req-beats-e-0001',
+    sourceArtifactId: 'src-e-a',
+  });
+  ok(e1.kind === 'queued', 'J23 generic enqueue queued');
+  let eThrew = false;
+  try {
+    enqueueGenerationDispatch(getDb(), {
+      projectId,
+      stage: 'm7_narrative_beats',
+      requestId: 'req-beats-e-0001',
+      sourceArtifactId: 'src-e-b',
+    });
+  } catch (err) {
+    eThrew = err instanceof RequestIdConflictError;
+  }
+  ok(eThrew, 'J24 generic enqueue queued 不同 source → RequestIdConflictError（fail-closed）');
+  const e2 = enqueueGenerationDispatch(getDb(), {
+    projectId,
+    stage: 'm7_narrative_beats',
+    requestId: 'req-beats-e-0001',
+    sourceArtifactId: 'src-e-a',
+  });
+  const e1Queued = e1 as Extract<typeof e1, {kind: 'queued'}>;
+  const e2Queued = e2 as Extract<typeof e2, {kind: 'queued'}>;
+  ok(e2Queued.kind === 'queued' && e2Queued.dispatchId === e1Queued.dispatchId, 'J25 generic enqueue 同 source 幂等（同 dispatchId）');
+  // visual-intents route：第二个 beats artifact（新 requestId 生成）
+  const beats2Provider = new ScriptableProvider();
+  beats2Provider.push({text: JSON.stringify({beats})});
+  const beats2Build = await buildNarrativeBeats({projectId, narrationPlanV2ArtifactId: buildA.artifact.id, requestId: 'req-beats-alt-0001', provider: beats2Provider});
+  if (beats2Build.kind !== 'succeeded') throw new Error('fixture: second beats build failed');
+  const j26 = await postJson(visualPOST, projectId, {
+    narrativeBeatsArtifactId: beatsArtifactId,
+    requestId: 'req-intent-queued-0001',
+  });
+  ok(j26.status === 202 && j26.json.status === 'queued', 'J26 visual-intents route queued');
+  const j27 = await postJson(visualPOST, projectId, {
+    narrativeBeatsArtifactId: beats2Build.artifact.id,
+    requestId: 'req-intent-queued-0001',
+  });
+  ok(j27.status === 409 && j27.json.error === 'REQUEST_ID_CONFLICT', 'J27 visual-intents route queued 不同 source → 409（既有 stage 同样 fail-closed）', j27);
+  ok(dispatchCountFor(projectId, 'm7_visual_intent', 'req-intent-queued-0001') === 1, 'J28 visual-intents 冲突后 dispatch count 仍 1');
+  const j29 = await postJson(visualPOST, projectId, {
+    narrativeBeatsArtifactId: beatsArtifactId,
+    requestId: 'req-intent-queued-0001',
+  });
+  ok(j29.status === 202 && j29.json.dispatchId === j26.json.dispatchId, 'J29 visual-intents 同 source 幂等（同 dispatchId）', j29.json.dispatchId);
+  ok(seqProvider.requests.length === callsBeforeJ, 'J30 J 组全程 provider calls=0（无 worker 执行）', seqProvider.requests.length);
+  void seqSourceKeyB;
 
   console.log(`\n==== test-m73b-generation: ${pass} PASS / ${fail} FAIL ====`);
   closeDb();

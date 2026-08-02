@@ -78,6 +78,9 @@ export type EnqueueDispatchResult =
  *    running 但租约过期 → 不转移 run（claim 语义独有），落入入队——worker 执行
  *    时经 build 的 durable claim 将 run 转 indeterminate 后映射为 dispatch 终态。
  * 2. INSERT dispatch；UNIQUE 冲突 → 重读现有行返回其状态（幂等）。
+ *    **P0（M7.3B.R1）：无论最终重读到的是哪一行（run 或 dispatch），
+ *    source 不一致一律 throw RequestIdConflictError——即使 generation_run
+ *    尚未创建、只有 queued dispatch，也必须在按 status 返回之前冲突。**
  * 已有 artifact 内容含该 requestId 的 legacy 复用由调用方先行处理，不在此层。
  */
 export function enqueueGenerationDispatch(
@@ -107,6 +110,9 @@ export function enqueueGenerationDispatch(
       const leaseExpiresAt = run.lease_expires_at ? Date.parse(run.lease_expires_at) : 0;
       if (leaseExpiresAt > now.getTime()) {
         const existing = getByKey(db, input.projectId, input.stage, input.requestId);
+        if (existing && existing.source_artifact_id !== input.sourceArtifactId) {
+          throw new RequestIdConflictError(input.requestId, existing.source_artifact_id);
+        }
         return {kind: 'running', runId: run.id, dispatchId: existing?.id ?? null};
       }
     }
@@ -126,7 +132,12 @@ export function enqueueGenerationDispatch(
     if (!row) {
       throw new Error(`enqueueGenerationDispatch: dispatch 写入后不可读（内部错误）`);
     }
-    // UNIQUE 冲突重读：按现有行状态幂等返回
+    // P0：UNIQUE 冲突重读的现有行（queued/running/succeeded/failed/cancelled 一律适用）
+    // 必须在按 status 返回之前做 source 一致性检查——同 requestId 不同 source fail-closed。
+    if (row.source_artifact_id !== input.sourceArtifactId) {
+      throw new RequestIdConflictError(input.requestId, row.source_artifact_id);
+    }
+    // 按现有行状态幂等返回
     if (row.status === 'queued' || row.status === 'running') {
       return {kind: 'queued', dispatchId: row.id, dispatchStatus: row.status};
     }

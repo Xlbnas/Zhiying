@@ -58,7 +58,7 @@ import {
   classifyShotsCandidate,
   getShotsArtifact,
 } from '../src/lib/shots/classify';
-import {precheckShotsSource, ShotsError} from '../src/lib/shots/plan';
+import {buildShots, precheckShotsSource, ShotsError} from '../src/lib/shots/plan';
 
 function sha256(text: string): string {
   return `sha256:${crypto.createHash('sha256').update(text, 'utf8').digest('hex')}`;
@@ -326,6 +326,16 @@ async function main(): Promise<void> {
   ok(scanForbiddenShotKeys(makeValidShots()).length === 0, 'A39 合法 shots forbidden scan 通过');
   ok(scanForbiddenShotKeys([{...validShot, startMs: 1, assetId: 'a'}]).includes('startMs'), 'A40 forbidden scan 命中 startMs');
   ok(scanForbiddenShotKeys([{...validShot, emotion: 'calm'}]).includes('emotion'), 'A41 forbidden scan 命中 emotion');
+  // reference ID schema（M7.3B.R1 P1）：malformed reference 在 schema 层拒绝
+  ok(!shotV1Schema.safeParse({...validShot, unitIds: ['N01']}).success, 'A42 unitIds N01 拒绝');
+  ok(!shotV1Schema.safeParse({...validShot, unitIds: ['N0001']}).success, 'A43 unitIds N0001 拒绝');
+  ok(!shotV1Schema.safeParse({...validShot, unitIds: ['n001']}).success, 'A44 unitIds n001（小写）拒绝');
+  ok(!shotV1Schema.safeParse({...validShot, unitIds: ['x']}).success, 'A45 unitIds x 拒绝');
+  ok(!shotV1Schema.safeParse({...validShot, visualIntentId: 'V01'}).success, 'A46 visualIntentId V01 拒绝');
+  ok(!shotV1Schema.safeParse({...validShot, visualIntentId: 'V0001'}).success, 'A47 visualIntentId V0001 拒绝');
+  ok(!shotV1Schema.safeParse({...validShot, visualIntentId: 'x'}).success, 'A48 visualIntentId x 拒绝');
+  ok(shotV1Schema.safeParse(validShot).success, 'A49 合法 N001/V001 通过');
+  ok(!shotV1Schema.safeParse({...validShot, unitIds: []}).success, 'A50 空 unitIds 继续拒绝');
 
   // ═══════ B. validate 矩阵（11.3） ═══════
   console.log('── B. validate 矩阵');
@@ -422,6 +432,44 @@ async function main(): Promise<void> {
     {...valid[0]!, visualIntentId: 'V999'},
     ...valid.slice(1),
   ]), 'SHOT_INTENT_NOT_FOUND'), 'B19 引用不存在 intent → SHOT_INTENT_NOT_FOUND');
+  // exact-but-missing 合法格式 unit → semantic NOT_FOUND（schema 层放行）
+  ok(hasCode(validateShots(seqContent, beatsArtifact, intents, plan, [
+    {...valid[0]!, unitIds: ['N999']},
+    ...valid.slice(1),
+  ]), 'SHOT_UNIT_NOT_FOUND'), 'B20 exact-but-missing unit（N999 合法格式）→ semantic NOT_FOUND');
+
+  // ── 全局 canonical 顺序（M7.3B.R1 P0）──
+  // Q002 shot block 完整放在 Q001 前面：shotId 重新 H001…Hnnn、每 sequence 内
+  // unit 仍连续、chapter/intent/transition 都合法——旧实现（只查交错与
+  // within-sequence 连续）会放过。
+  const seqSwapped: ShotV1[] = [
+    {shotId: 'H001', sequenceId: 'Q002', chapter: 2, unitIds: ['N004'], visualIntentId: 'V004', transitionFromPrevious: 'cut'},
+    {shotId: 'H002', sequenceId: 'Q002', chapter: 2, unitIds: ['N005'], visualIntentId: 'V005', transitionFromPrevious: 'state_morph'},
+    {shotId: 'H003', sequenceId: 'Q002', chapter: 2, unitIds: ['N006'], visualIntentId: 'V006', transitionFromPrevious: 'hold'},
+    {shotId: 'H004', sequenceId: 'Q001', chapter: 1, unitIds: ['N001'], visualIntentId: 'V001', transitionFromPrevious: 'cut'},
+    {shotId: 'H005', sequenceId: 'Q001', chapter: 1, unitIds: ['N002'], visualIntentId: 'V002', transitionFromPrevious: 'hold'},
+    {shotId: 'H006', sequenceId: 'Q001', chapter: 1, unitIds: ['N003'], visualIntentId: 'V003', transitionFromPrevious: 'state_morph'},
+  ];
+  const seqSwapIssues = validateShots(seqContent, beatsArtifact, intents, plan, seqSwapped);
+  ok(hasCode(seqSwapIssues, 'SHOT_SEQUENCE_ORDER_MISMATCH'), 'B21 Q002 block 前置 → SHOT_SEQUENCE_ORDER_MISMATCH', seqSwapIssues);
+  ok(hasCode(seqSwapIssues, 'SHOT_UNIT_ORDER_MISMATCH'), 'B22 同时命中 SHOT_UNIT_ORDER_MISMATCH（全局 unit 时间线错）');
+  ok(!hasCode(seqSwapIssues, 'SHOT_SEQUENCE_CROSSING'), 'B23 无交错（block 完整）→ 不误报 CROSSING');
+  ok(!hasCode(seqSwapIssues, 'SHOT_UNIT_COVERAGE_GAP') && !hasCode(seqSwapIssues, 'SHOT_UNIT_COVERAGE_MISMATCH'), 'B24 覆盖完整（仅顺序错）');
+  ok(!hasCode(seqSwapIssues, 'SHOT_CHAPTER_MISMATCH') && !hasCode(seqSwapIssues, 'SHOT_TRANSITION_INVALID'), 'B25 chapter/transition 合法（不误报）');
+
+  // 同一 sequence 内两个合法 shot block 交换（Q001 内 H2=[N002] 与 H3=[N003] 互换；
+  // transition 统一改 cut 保持合法；intent 随 unit 匹配）
+  const unitSwapped: ShotV1[] = [
+    valid[0]!,
+    {...valid[2]!, shotId: 'H002', transitionFromPrevious: 'cut'},
+    {...valid[1]!, shotId: 'H003', transitionFromPrevious: 'cut'},
+    ...valid.slice(3),
+  ];
+  const unitSwapIssues = validateShots(seqContent, beatsArtifact, intents, plan, unitSwapped);
+  ok(hasCode(unitSwapIssues, 'SHOT_UNIT_ORDER_MISMATCH'), 'B26 sequence 内 shot block 交换 → SHOT_UNIT_ORDER_MISMATCH', unitSwapIssues);
+  ok(!hasCode(unitSwapIssues, 'SHOT_SEQUENCE_ORDER_MISMATCH'), 'B27 sequence block 顺序未变 → 不误报 SEQUENCE_ORDER');
+  ok(!hasCode(unitSwapIssues, 'SHOT_INTENT_BOUNDARY_CROSSING'), 'B28 intent 边界合法（不误报）');
+  ok(!hasCode(unitSwapIssues, 'SHOT_TRANSITION_INVALID'), 'B29 transition 合法（不误报）');
 
   // ═══════ C. classify ═══════
   console.log('── C. classify');
@@ -497,6 +545,54 @@ async function main(): Promise<void> {
   ok(shotsArtifactV1Schema.safeParse(goodContent).success, 'E2 wrapper 契约可解析');
   const projectRow = getDb().prepare('SELECT pipeline_version, m7_pipeline_snapshot_id FROM projects WHERE id = ?').get(projectId) as {pipeline_version: string; m7_pipeline_snapshot_id: string | null};
   ok(projectRow.pipeline_version === 'm6' && projectRow.m7_pipeline_snapshot_id === null, 'E3 项目仍 m6 / snapshot NULL（无激活）');
+
+  // ═══════ F. canonical order：classify + generation repair（M7.3B.R1 P0） ═══════
+  console.log('── F. canonical order');
+  // F1：乱序 shots artifact（Q002 block 前置）→ classify invalid_source
+  const seqSwappedContent = makeShotsContent(sequencesArtifactId, seqSource, [
+    {shotId: 'H001', sequenceId: 'Q002', chapter: 2, unitIds: ['N004'], visualIntentId: 'V004', transitionFromPrevious: 'cut' as const},
+    {shotId: 'H002', sequenceId: 'Q002', chapter: 2, unitIds: ['N005'], visualIntentId: 'V005', transitionFromPrevious: 'cut' as const},
+    {shotId: 'H003', sequenceId: 'Q002', chapter: 2, unitIds: ['N006'], visualIntentId: 'V006', transitionFromPrevious: 'cut' as const},
+    {shotId: 'H004', sequenceId: 'Q001', chapter: 1, unitIds: ['N001'], visualIntentId: 'V001', transitionFromPrevious: 'cut' as const},
+    {shotId: 'H005', sequenceId: 'Q001', chapter: 1, unitIds: ['N002'], visualIntentId: 'V002', transitionFromPrevious: 'cut' as const},
+    {shotId: 'H006', sequenceId: 'Q001', chapter: 1, unitIds: ['N003'], visualIntentId: 'V003', transitionFromPrevious: 'cut' as const},
+  ]);
+  seqSwappedContent.source.visualSequencesContentHash = sequencesHash;
+  const seqSwappedId = insertShotsArtifact(projectId, seqSwappedContent);
+  const seqSwappedClass = classifyShotsCandidate(projectId, getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(seqSwappedId) as never);
+  ok(seqSwappedClass.status === 'invalid_source', 'F1 乱序 shots classify → invalid_source', seqSwappedClass);
+
+  // F2：generation repair（首次乱序 → validator 拒绝 → repair 返回 canonical）
+  const genShotsProvider = new ScriptableProvider();
+  const disorderShots: ShotV1[] = [
+    {shotId: 'H001', sequenceId: 'Q002', chapter: 2, unitIds: ['N004'], visualIntentId: 'V004', transitionFromPrevious: 'cut'},
+    {shotId: 'H002', sequenceId: 'Q002', chapter: 2, unitIds: ['N005'], visualIntentId: 'V005', transitionFromPrevious: 'cut'},
+    {shotId: 'H003', sequenceId: 'Q002', chapter: 2, unitIds: ['N006'], visualIntentId: 'V006', transitionFromPrevious: 'cut'},
+    {shotId: 'H004', sequenceId: 'Q001', chapter: 1, unitIds: ['N001'], visualIntentId: 'V001', transitionFromPrevious: 'cut'},
+    {shotId: 'H005', sequenceId: 'Q001', chapter: 1, unitIds: ['N002'], visualIntentId: 'V002', transitionFromPrevious: 'cut'},
+    {shotId: 'H006', sequenceId: 'Q001', chapter: 1, unitIds: ['N003'], visualIntentId: 'V003', transitionFromPrevious: 'cut'},
+  ];
+  genShotsProvider.push({text: JSON.stringify({shots: disorderShots})});
+  genShotsProvider.push({text: JSON.stringify({shots: makeValidShots()})});
+  const genShotsBuild = await buildShots({
+    projectId,
+    visualSequencesArtifactId: sequencesArtifactId,
+    requestId: 'req-shots-order-repair-0001',
+    provider: genShotsProvider,
+  });
+  ok(genShotsBuild.kind === 'succeeded', 'F2a repair 后 build succeeded', genShotsBuild);
+  if (genShotsBuild.kind === 'succeeded') {
+    ok(genShotsBuild.generation?.attemptCount === 2, 'F2b repair attemptCount=2（首次乱序拒绝 + repair canonical）', genShotsBuild.generation);
+    const artifactShots = genShotsBuild.shots.shots;
+    ok(
+      artifactShots.length === 6 &&
+        artifactShots[0]!.sequenceId === 'Q001' &&
+        artifactShots[3]!.sequenceId === 'Q002' &&
+        artifactShots.every((s, i) => s.shotId === `H${String(i + 1).padStart(3, '0')}`),
+      'F2c 落库 artifact 为 canonical 顺序（服务端未自动排序，内容来自 repair 输出）',
+      artifactShots.map((s) => `${s.shotId}:${s.sequenceId}`),
+    );
+  }
 
   console.log(`\n==== test-m73b-shots: ${pass} PASS / ${fail} FAIL ====`);
   closeDb();

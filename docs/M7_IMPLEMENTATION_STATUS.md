@@ -9,7 +9,7 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-02T07:10Z（M7.3B contract/DAG foundation 已部署，待独立 Review） |
+| statusUpdatedAt | 2026-08-02T08:20Z（M7.3B.R1 review closure in progress；M7.3B not accepted，TTS-A not started） |
 | reviewedCodeSHA | `6f109d01fca62e200be88a8369eadd37d35b981d`（本轮 review 前的代码 commit；M7.3A frozen code 为 `aa3f814…`） |
 | productionRuntimeSHA | `6f109d01fca62e200be88a8369eadd37d35b981d`（容器镜像实际代码 SHA） |
 | productionHostCheckoutSHA | `6f109d01fca62e200be88a8369eadd37d35b981d`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
@@ -274,12 +274,22 @@
 - **API**：`GET/POST /api/projects/[id]/visual-sequences`（POST body `{narrativeBeatsArtifactId, visualIntentPlanArtifactId, requestId}`）、`GET /api/projects/[id]/visual-sequences/[artifactId]`、`GET/POST /api/projects/[id]/shots`（POST body `{visualSequencesArtifactId, requestId}`）、`GET /api/projects/[id]/shots/[artifactId]`——202 queued/running、200 reused、409 terminal/conflict；Web 只 enqueue（零 secret），Worker 执行。
 - **deployed**：是（6f109d0，2026-08-02；见 §15 本轮部署证据）。
 
+### 4.12 M7.3B.R1 Review Closure（Dispatch Idempotency + Canonical Timeline）
+
+独立 Review 判定 M7.3B FAIL，修复 5 项 blocker（本小节为修复记录；M7.3B pending Review PASS）：
+
+1. **queued dispatch source conflict（P0，`src/lib/llm-generation/dispatch.ts`）**：`enqueueGenerationDispatch` 此前只在 generation_run 存在时比较 source；worker 未 claim 前只有 queued dispatch 时，同 requestId 不同 source 被错误返回 queued/running 而非 409。修复：单 BEGIN IMMEDIATE 内，对最终重读到的 dispatch row 在按 status 返回**之前**强制 `source_artifact_id` 一致性检查（queued/running/succeeded/failed/cancelled 一律适用）→ `RequestIdConflictError`。保持：same-source 幂等（同一 dispatchId）、run-level conflict、不新增 dispatch、不修改原 source、不调用 provider。
+2. **Visual Sequence 全局 beat 顺序（P0，`visual-sequences/validate.ts`）**：新增 `SEQUENCE_BEAT_ORDER_MISMATCH`——`sequences.flatMap(beatIds)` 必须与 beats 顺序**逐项相同**（时间线顺序，不得排序比较）；与 gap/overlap/duplicate/within-sequence non-contiguous 并存（多 issue 允许）。
+3. **Shot 全局 sequence/unit 顺序（P0，`shots/validate.ts`）**：新增 `SHOT_SEQUENCE_ORDER_MISMATCH`（shots 首次出现去重后的 sequence 顺序必须与 exact Visual Sequence artifact 逐项相同）与 `SHOT_UNIT_ORDER_MISMATCH`（`shots.flatMap(unitIds)` 必须与 canonical 时间线 sequences→beats→units 逐项相同）；删除无效的 `seenSeqOrder` 死变量。
+4. **DAG usable-candidate 语义（P1，`m7-dag/readiness.ts`）**：dependency 缺失判定从"节点状态 ∈ {blocked, not_generated}"改为**usableCandidateCount**——eligible/current → usable；needs_review：visual_intent_plan 可用于 visual_sequences 与 shots（unresolved 在两层均非阻断）、visual_sequences 可用于 shots、narration_plan_v2 needs_review 不可用；stale/invalid → 不可用。上游 running/failed 且无可用 candidate → 下游 blocked；上游有旧合法 candidate 同时 regenerate running → 下游不被误判 blocked。
+5. **reference ID schema（P1，`visual-sequences/schema.ts`、`shots/schema.ts`）**：`beatIds` 精确 `^B\d{3}$`、`visualIntentIds`/`visualIntentId` 精确 `^V\d{3}$`、`unitIds` 精确 `^N\d{3}$`（保留 Q/H 已有约束）；malformed reference 在 schema 层拒绝，exact-but-missing 合法格式 ID 仍由 semantic validator 报 NOT_FOUND。
+
 ## 5. 当前正在进行的工作
 
 - **M7.3A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `aa3f8145825f5a33542f54e90e661e0cccf3e692`；deployment evidence docs = `36ff32e3301f51bf054efbee029fc1e6115ad3f5`；independent Review = PASS。冻结语义见 §7。
-- **M7.3B — Visual Sequences / Shots Contract + DAG Foundation**（已实现，待部署与独立 Review）：契约/校验/生成/DAG/API 全部落地（见 §4.11）；**尚未 production-piloted**（本轮不对任何 production 项目生成 Sequence/Shot 候选，不调用真实 LLM）。
+- **M7.3B — Visual Sequences / Shots Contract + DAG Foundation**（已实现并部署 6f109d0；独立 Review **FAIL / not accepted**）→ **M7.3B.R1 review closure in progress**：修复 5 项 blocker（queued dispatch source conflict、Visual Sequence canonical beat order、Shot canonical sequence/unit order、DAG usable-candidate 语义、reference ID schema，见 §4.12）。**M7.3B pending independent Review PASS；TTS-A not started。**
 - **Production legacy 审计（只报告，不修改）**：generated assets 19；provenance NULL 19（全为历史 legacy）；NULL + requirement_json 缺失/损坏 1；active legacy bindings 17；active bindings 指向当前 active scenes 中缺失的 requirement 10（分布于 2 个项目，均为历史绑定；未删除/重绑）。
-- 下一步：M7.3B 部署 + 等待独立 Review PASS；随后按序 TTS-A → TTS-B → TTS-C → narration master → ffprobe → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
+- 下一步：M7.3B.R1 部署 + 等待独立 Review PASS；随后按序 TTS-A → TTS-B → TTS-C → narration master → ffprobe → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
 
 ## 6. 尚未完成 TODO
 
@@ -402,10 +412,10 @@
 
 ### 11.2 M7.3A.2/M7.3A.3 新增/扩展测试
 
-- `scripts/test-m73b-visual-sequences.ts`（71 PASS）：sequences schema / 语义校验全矩阵 / classify（current/stale/invalid/needs_review）/ 双源 chain precheck / 向后兼容
-- `scripts/test-m73b-shots.ts`（73 PASS）：shots schema / 语义校验全矩阵 / classify / precheck / 向后兼容
-- `scripts/test-m73b-generation.ts`（47 PASS）：Web enqueue-only / Worker Mock 执行 / 幂等复用 / 409 冲突 / 并发 single-flight / repair attemptCount / 3 次失败终态 / source drift（before dispatch / during generation / before commit，commit-time fence 零 artifact）/ production override 禁用
-- `scripts/test-m73b-dag.ts`（37 PASS）：图结构（无环/无反向边）/ 节点状态机（not_generated→running→ready/blocked/needs_review）/ TTS 并行边界 / Voice/Performance 概念源零影响 / narration 漂移传播 / 无 m7 激活
+- `scripts/test-m73b-visual-sequences.ts`（92 PASS，M7.3B.R1 更新）：sequences schema（含 reference ID 精确限制）/ 语义校验全矩阵 / **canonical beat order（SEQUENCE_BEAT_ORDER_MISMATCH：reversed blocks、三块交换、classify invalid_source、generation repair attemptCount=2 零自动排序）** / classify / 双源 chain precheck / 向后兼容
+- `scripts/test-m73b-shots.ts`（96 PASS，M7.3B.R1 更新）：shots schema（含 reference ID 精确限制）/ 语义校验全矩阵 / **canonical sequence/unit order（SHOT_SEQUENCE_ORDER_MISMATCH + SHOT_UNIT_ORDER_MISMATCH：block 前置、shot block 交换、classify invalid_source、generation repair attemptCount=2）** / classify / precheck / 向后兼容
+- `scripts/test-m73b-generation.ts`（76 PASS，M7.3B.R1 更新）：Web enqueue-only / Worker Mock 执行 / 幂等复用 / 409 冲突 / 并发 single-flight / repair attemptCount / 3 次失败终态 / source drift（before dispatch / during generation / before commit，commit-time fence 零 artifact）/ **queued dispatch source conflict（sequences+shots：409、dispatch count=1、原 source 未覆盖、runs=0、provider calls=0；同 source 重复同 dispatchId；并发不同 source 恰好一胜一 409；generic enqueue 与 visual-intents route 既有 stage 回归）** / production override 禁用
+- `scripts/test-m73b-dag.ts`（53 PASS，M7.3B.R1 更新）：图结构（无环/无反向边）/ 节点状态机（not_generated→running→ready/blocked/needs_review）/ TTS 并行边界 / Voice/Performance 概念源零影响 / narration 漂移传播 / **usable-candidate 语义（intent running/failed 无 candidate → sequences blocked；sequences running/failed 无 candidate → shots blocked；旧合法 candidate + regenerate running 不误 blocked；intent/sequences needs_review 可用；narration needs_review 不可用）** / 无 m7 激活
 
 - `scripts/test-asset-generation-durability.ts`（53 PASS）：幂等/超时/indeterminate/billing/append-only + T7 provenance + T8 requestId 生命周期 + **T9 mid-flight source drift（Fence B）** + **T10 lease lost 降级 stale**
 - `scripts/test-workflow-dag-parallelism.ts`（15 PASS）：DAG 权威依赖/双分支 ready/并行不互 stale

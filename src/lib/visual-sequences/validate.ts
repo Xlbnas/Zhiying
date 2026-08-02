@@ -119,6 +119,25 @@ export function validateVisualSequences(
     }
   }
 
+  // 全局 canonical beat 顺序（M7.3B.R1 P0）：
+  // sequences.flatMap(beatIds) 必须与 beats 顺序逐项相同（时间线顺序，不是集合）。
+  // 排序后比较只证明集合相等；reversed blocks 等坏输入必须在此被拒绝。
+  // 与 gap/overlap/duplicate/within-sequence non-contiguous 并存（同一坏输入可多 issue）。
+  {
+    const expectedBeatIds = beats.map((beat) => beat.beatId);
+    const actualBeatIds = sequences.flatMap((seq) => seq.beatIds);
+    const orderOk =
+      actualBeatIds.length === expectedBeatIds.length &&
+      actualBeatIds.every((id, i) => id === expectedBeatIds[i]);
+    if (!orderOk) {
+      issues.push({
+        code: 'SEQUENCE_BEAT_ORDER_MISMATCH',
+        message:
+          'sequence blocks 的全局 beat 顺序与 canonical Narrative Beats 顺序不一致（时间线顺序必须逐项相同，不得排序比较）',
+      });
+    }
+  }
+
   for (const seq of sequences) {
     // beatIds 在 Narrative Beats 中连续（含顺序正确性）
     for (let i = 1; i < seq.beatIds.length; i++) {
