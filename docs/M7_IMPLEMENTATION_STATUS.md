@@ -9,10 +9,10 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-02T06:20Z（M7.3B contract/DAG foundation 已实现，待部署与 Review） |
-| reviewedCodeSHA | `aa3f8145825f5a33542f54e90e661e0cccf3e692`（本轮已 review/deploy 的代码 commit） |
-| productionRuntimeSHA | `aa3f8145825f5a33542f54e90e661e0cccf3e692`（容器镜像实际代码 SHA） |
-| productionHostCheckoutSHA | `aa3f8145825f5a33542f54e90e661e0cccf3e692`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
+| statusUpdatedAt | 2026-08-02T07:10Z（M7.3B contract/DAG foundation 已部署，待独立 Review） |
+| reviewedCodeSHA | `6f109d01fca62e200be88a8369eadd37d35b981d`（本轮 review 前的代码 commit；M7.3A frozen code 为 `aa3f814…`） |
+| productionRuntimeSHA | `6f109d01fca62e200be88a8369eadd37d35b981d`（容器镜像实际代码 SHA） |
+| productionHostCheckoutSHA | `6f109d01fca62e200be88a8369eadd37d35b981d`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
 | 当前分支 | `m7` |
 | 实时 origin/m7 HEAD | 以 `git rev-parse origin/m7` 为准（不硬编码为「永远当前」） |
 
@@ -272,7 +272,7 @@
 - **candidate generation（Worker LLM dispatch）**：复用 `generation_runs/generation_attempts/generation_dispatch_jobs`（stage `m7_visual_sequences`/`m7_shots`）+ `llm_api` resourceClass；LLM proposal 只输出 `{sequences}`/`{shots}` body，wrapper/source/generation 由服务端确定性构造；`MAX_REPAIRS=2` attempt journal；**commit-time source fence**（落库事务内重读全部 source 行核对 hash，漂移 → `SOURCE_STALE` 终态、零 artifact 行）；sequences 的 dispatch `source_artifact_id` 为 `${beatsId}|${intentId}` 复合键。
 - **M7 candidate DAG（`src/lib/m7-dag/`）**：`narration_plan_v2`/`narrative_beats`/`visual_intent_plan` → `visual_sequences` → `shots`；无反向边、无环（测试断言）；节点状态 `not_generated / generation_running / generation_failed / ready / needs_review / blocked`（优先级 running > ready > needs_review > generation_failed > blocked > not_generated）；candidate 分类状态 `current_candidate / stale_source / invalid_source / needs_review`（`current_candidate` 仅表示相对 exact source 未漂移，不代表 project current/active/locked）；与 M6 `WORKFLOW_NODES` 完全无关。
 - **API**：`GET/POST /api/projects/[id]/visual-sequences`（POST body `{narrativeBeatsArtifactId, visualIntentPlanArtifactId, requestId}`）、`GET /api/projects/[id]/visual-sequences/[artifactId]`、`GET/POST /api/projects/[id]/shots`（POST body `{visualSequencesArtifactId, requestId}`）、`GET /api/projects/[id]/shots/[artifactId]`——202 queued/running、200 reused、409 terminal/conflict；Web 只 enqueue（零 secret），Worker 执行。
-- **deployed**：待部署（本轮部署后更新此节与 production 证据）。
+- **deployed**：是（6f109d0，2026-08-02；见 §15 本轮部署证据）。
 
 ## 5. 当前正在进行的工作
 
@@ -524,4 +524,14 @@ M7.3A.2 Review 全部阻断项已修复（第二轮 hardening）。接续复核�
 | 新镜像测试 | ✅ | 容器内 15 套件全绿（image code SHA = mounted scripts SHA = 07b39dc）；M3-B 99/0、M3-C 82/0 |
 | 部署后临时 DB + Mock provider 验证（不调用真实 APIYi） | ✅ | fingerprint 18、resolver-e2e 25、durability 53、leases 53（覆盖：fingerprint conflict / latest selection / candidate_waiting / exact bind / mid-flight drift / lease loss abort / remote+tts 并行 / local+tts 互斥） |
 | 构建网络 runbook 实测 | ✅ | `production-build-network.sh start/check/stop` 一次通过；本次 browser 层缓存命中未触发下载；隧道清理完成 |
+
+### 15.1 M7.3B 部署证据（6f109d0，2026-08-02）
+
+- **部署链**：code SHA `6f109d01fca62e200be88a8369eadd37d35b981d` = production runtime SHA = host checkout SHA = origin/m7 HEAD（docs evidence commit 后 origin/m7 会高于 runtime——以现场 `git rev-parse` 为准）。
+- **pre-deployment backup**：`/vol1/1000/backups/zhiying/m73b-20260802T041205Z`（DB SHA `0d74155e…` 与 R3 一致=部署前零写入；integrity=ok；SHA256SUMS 全过；`BACKUP_COMPLETED_AT=04:14:25Z` 先于 checkout）。
+- **构建网络 runbook**：`production-build-network.sh start/check` 一次通过 → `docker build --network=host --add-host remotion.media:127.0.0.1 --build-arg APT_MIRROR --build-arg NPM_REGISTRY -t zhiying:6f109d0…`（BUILD_EXIT=0，trap 保证 stop）→ 443 无 listener、tunnel 容器 0 残留。
+- **镜像内测试**（`NODE_ENV=development`，scripts 只读挂载，image code SHA = mounted scripts SHA = 6f109d0）：M7.3B 4 套件 71/73/47/37 全绿 + 权威 8 套件（m73a 184、m72 125、m721 99、m711 58、dag-parallelism 15、resource-leases 87、m3b-tts 99、m3c 82）全绿。
+- **up 验证**：三容器 healthy @`zhiying:6f109d0…`；local/LAN 3210 root 200、/api/projects 200；worker 日志无 migration/SQLite/lease/provider error；resource leases 0；web env 无 DEEPSEEK_API_KEY/LLM_PROVIDER。
+- **Production 数据不变量（部署前后只读对比，20 项全过）**：projects 全 m6；snapshot pointer 全 NULL；M7 snapshot 0；Freud narration_plan_v2/narrative_beats/visual_intent artifact ID 序列 hash 与备份全等；`793c80fa…` content hash 与备份全等（`784703a4…`）；污染项目（`31d45df7…`）S001-R01 证据行与备份 diff=空；tts_jobs 351=351、asset_generation_jobs 0=0、asset_bindings 40=40、assets 40=40、usage-events 610=610、render_jobs 14=14；`visual_sequence_plan`/`shot_plan`/`timing_reconciliation_v2` artifact 全 0；`m7_visual_sequences`/`m7_shots` generation runs 0；resource leases 0。
+- **本轮未执行**：不对 Freud 或任何 production 项目调 visual-sequences/shots POST；不创建 production Sequence/Shot candidate；不调用真实 LLM/APIYi；不创建 M7 snapshot；不切换项目到 m7（M7.3B 行为全部经临时 DB + Mock provider 验证）。
 
