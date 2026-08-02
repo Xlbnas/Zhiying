@@ -317,29 +317,35 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * M7.3A.3.3R1：usageMetadata 安全合并。
- * - prior 与 incoming 都是 plain object → {...prior, ...incoming}（incoming 覆盖同名，
- *   未提供 key 保留；危险 key 过滤）；
+ * M7.3A.3.3R3：usageMetadata 安全合并。
  * - incoming undefined → 保留 prior；
- * - 其余（数组/字符串/数字/null 等非 plain-object）→ 按明确 replacement 处理；
- * - 不做递归 arbitrary merge（无 prototype pollution 面）。
+ * - incoming 为 plain object → 无论 prior 形态（undefined/null/string/数组/Date/class 等），
+ *   incoming 必须先经危险键（__proto__/constructor/prototype）过滤；
+ *   prior 也为 plain object → {...sanitize(prior), ...sanitize(incoming)} 浅合并
+ *   （incoming 覆盖同名、未提供 key 保留、两侧危险键都过滤）；
+ * - incoming 非 plain-object（数组/字符串/数字/布尔/null/Date/Map/RegExp/class 实例等）
+ *   → 按明确 replacement 处理，不写入 merged 对象（无 prototype pollution 面）；
+ * - 不做递归 arbitrary merge。
  */
 export function mergeUsageMetadata(prior: unknown, incoming: unknown): unknown {
   if (incoming === undefined) return prior ?? null;
-  if (!isPlainObject(prior) || !isPlainObject(incoming)) {
-    // 非 plain-object incoming（Date/Map/class 实例/数组/字符串/数字/null 等）
-    // 按明确 replacement 处理；不写入 merged 对象，因此无 prototype pollution 面。
-    // JSON.parse 产生的含危险 own-key 对象是 plain object，会走下方 merge 过滤。
-    return incoming;
+  if (isPlainObject(incoming)) {
+    // incoming 无论 prior 形态如何，都必须先过滤危险键
+    // （首次 finalize 时 prior 常为 undefined/null——此前该路径直接返回 raw incoming，
+    //   绕过 sanitizeObject，导致 __proto__/constructor/prototype 进入返回对象）。
+    const safeIncoming = sanitizeObject(incoming);
+    if (!isPlainObject(prior)) {
+      return safeIncoming;
+    }
+    // prior 与 incoming 都为 plain object：两侧都过滤，浅合并（不递归）。
+    return {
+      ...sanitizeObject(prior),
+      ...safeIncoming,
+    };
   }
-  const merged: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(prior)) {
-    if (!DANGEROUS_KEYS.has(k)) merged[k] = v;
-  }
-  for (const [k, v] of Object.entries(incoming)) {
-    if (!DANGEROUS_KEYS.has(k)) merged[k] = v;
-  }
-  return merged;
+  // 非 plain-object incoming（数组/字符串/数字/布尔/null/Date/Map/RegExp/class 实例等）
+  // 按明确 replacement 处理；不写入 merged 对象，因此无 prototype pollution 面。
+  return incoming;
 }
 
 function sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {

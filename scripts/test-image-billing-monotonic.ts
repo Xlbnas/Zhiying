@@ -579,6 +579,118 @@ async function main(): Promise<void> {
     ok(mergeUsageMetadata(prior, null) === null, '[B11g] null 明确 replacement');
   }
 
+  // ============ B12：首次写入/prior 非 plain 时的危险键过滤（M7.3A.3.3R3） ============
+  {
+    const {mergeUsageMetadata} = await import('../src/lib/usage-events');
+    const dangerousJson = JSON.parse(
+      '{"__proto__":{"polluted":true},"constructor":{"x":1},"prototype":{"y":2},"safe":7}',
+    ) as Record<string, unknown>;
+    const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
+
+    // A. 首次写入（prior = undefined）+ 危险 incoming plain object
+    {
+      const out = mergeUsageMetadata(undefined, dangerousJson) as Record<string, unknown>;
+      ok(out.safe === 7, '[B12a] prior=undefined 首次写入保留 safe 字段', out);
+      ok(!hasOwn(out, '__proto__') && !hasOwn(out, 'constructor') && !hasOwn(out, 'prototype'),
+        '[B12b] prior=undefined 时危险键仍被过滤', Object.keys(out));
+      ok(({} as Record<string, unknown>).polluted === undefined, '[B12c] 无 prototype pollution 副作用');
+    }
+
+    // B. prior = null + 危险 incoming
+    {
+      const out = mergeUsageMetadata(null, dangerousJson) as Record<string, unknown>;
+      ok(out.safe === 7, '[B12d] prior=null 保留 safe 字段');
+      ok(!hasOwn(out, '__proto__') && !hasOwn(out, 'constructor') && !hasOwn(out, 'prototype'),
+        '[B12e] prior=null 时危险键仍被过滤', Object.keys(out));
+    }
+
+    // C. prior 非 plain（string/array/Date/class）+ 危险 incoming
+    {
+      const s = mergeUsageMetadata('prior-string', dangerousJson) as Record<string, unknown>;
+      ok(s.safe === 7 && !hasOwn(s, '__proto__') && !hasOwn(s, 'constructor') && !hasOwn(s, 'prototype'),
+        '[B12f] prior=string 时危险键仍被过滤', Object.keys(s));
+      const a = mergeUsageMetadata([1, 2], dangerousJson) as Record<string, unknown>;
+      ok(a.safe === 7 && !hasOwn(a, '__proto__'), '[B12g] prior=array 时危险键仍被过滤', Object.keys(a));
+      const d = mergeUsageMetadata(new Date(0), dangerousJson) as Record<string, unknown>;
+      ok(d.safe === 7 && !hasOwn(d, '__proto__') && !hasOwn(d, 'constructor') && !hasOwn(d, 'prototype'),
+        '[B12h] prior=Date 时危险键仍被过滤', Object.keys(d));
+      class Foo { x = 1; }
+      const c = mergeUsageMetadata(new Foo(), dangerousJson) as Record<string, unknown>;
+      ok(c.safe === 7 && !hasOwn(c, '__proto__'), '[B12i] prior=class instance 时危险键仍被过滤', Object.keys(c));
+    }
+
+    // D. null-prototype incoming + 危险 own key（defineProperty 可靠构造）
+    {
+      const nullProto = Object.create(null) as Record<string, unknown>;
+      nullProto.safeField = 'kept';
+      Object.defineProperty(nullProto, '__proto__', {value: {polluted: true}, enumerable: true});
+      Object.defineProperty(nullProto, 'constructor', {value: {x: 1}, enumerable: true});
+      Object.defineProperty(nullProto, 'prototype', {value: {y: 2}, enumerable: true});
+      const out = mergeUsageMetadata(undefined, nullProto) as Record<string, unknown>;
+      ok(out.safeField === 'kept', '[B12j] null-proto incoming 安全字段保留');
+      ok(!hasOwn(out, '__proto__') && !hasOwn(out, 'constructor') && !hasOwn(out, 'prototype'),
+        '[B12k] null-proto incoming 危险 own key 被过滤', Object.keys(out));
+      let serialized = '';
+      try {
+        serialized = JSON.stringify(out);
+      } catch (err) {
+        serialized = `THROW:${String(err)}`;
+      }
+      ok(serialized === '{"safeField":"kept"}', '[B12l] 返回对象可正常 JSON.stringify', serialized);
+    }
+
+    // E. prior 与 incoming 两侧都含危险 key
+    {
+      const priorDanger = JSON.parse(
+        '{"__proto__":{"p":1},"constructor":{"p":2},"prototype":{"p":3},"keepA":1,"same":1}',
+      ) as Record<string, unknown>;
+      const inDanger = JSON.parse(
+        '{"__proto__":{"p":4},"constructor":{"p":5},"same":2,"newB":3}',
+      ) as Record<string, unknown>;
+      const out = mergeUsageMetadata(priorDanger, inDanger) as Record<string, unknown>;
+      ok(out.keepA === 1 && out.same === 2 && out.newB === 3, '[B12m] 两侧过滤 + prior 安全字段保留 + incoming 覆盖同名', out);
+      ok(!hasOwn(out, '__proto__') && !hasOwn(out, 'constructor') && !hasOwn(out, 'prototype'),
+        '[B12n] 两侧危险键全部过滤', Object.keys(out));
+      ok(({} as Record<string, unknown>).polluted === undefined && ({} as Record<string, unknown>).p === undefined,
+        '[B12o] 无 prototype pollution 副作用');
+    }
+
+    // F. finalize 集成路径（真实 DB）：首次 finalize 无 prior usageMetadata
+    {
+      const projectId = createProjectWithWorkflow({topic: 'billing-12', coreQuestion: 'q'}).project.id;
+      seedProject(projectId);
+      finalizeImageGenerationUsage({
+        attemptId: 'bill-12f',
+        projectId,
+        sceneId: 'S001',
+        requirementId: 'S001-R01',
+        provider: 'apiyi',
+        model: 'gemini-3.1-flash-image',
+        requestedSize: '1K',
+        aspectRatio: '16:9',
+        imageCount: 1,
+        status: 'confirmed_charged',
+        providerRequestId: 'prov-12f',
+        actualModel: 'gemini-3.1-flash-image',
+        actualProvider: 'apiyi',
+        usageMetadata: dangerousJson,
+      });
+      const meta = JSON.parse(usageRow('bill-12f')!.metadata) as {
+        status?: string; providerRequestId?: string; actualProvider?: string; actualModel?: string;
+        usageMetadata?: Record<string, unknown>;
+      };
+      ok(meta.usageMetadata?.safe === 7, '[B12p] 首次 finalize 持久化保留 safe 字段', meta.usageMetadata);
+      ok(meta.usageMetadata !== undefined &&
+        !hasOwn(meta.usageMetadata, '__proto__') &&
+        !hasOwn(meta.usageMetadata, 'constructor') &&
+        !hasOwn(meta.usageMetadata, 'prototype'),
+        '[B12q] 首次 finalize 持久化后无三个危险键', meta.usageMetadata ? Object.keys(meta.usageMetadata) : null);
+      ok(meta.status === 'confirmed_charged' && meta.providerRequestId === 'prov-12f' &&
+        meta.actualProvider === 'apiyi' && meta.actualModel === 'gemini-3.1-flash-image',
+        '[B12r] 顶层 audit 字段正常', {status: meta.status, providerRequestId: meta.providerRequestId});
+    }
+  }
+
   // 清理
   const assetProjectIds = (getDb().prepare('SELECT DISTINCT project_id FROM assets').all() as Array<{project_id: string}>).map((r) => r.project_id);
   closeDb();
