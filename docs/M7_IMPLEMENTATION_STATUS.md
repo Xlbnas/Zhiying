@@ -9,8 +9,8 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-02T11:05Z（M7.3B.R2 deployed；M7.3B pending independent Review PASS，TTS-A not started） |
-| reviewedCodeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（M7.3B.R2 closure 代码 commit；M7.3A frozen code 为 `aa3f814…`） |
+| statusUpdatedAt | 2026-08-02T12:30Z（M7.3B FROZEN：独立 Review PASS；TTS-A starting；TTS-B/TTS-C not started） |
+| reviewedCodeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（M7.3B final code/runtime；M7.3B deployment evidence docs HEAD 为 `044ac23e2524d53f41d223c37d16619425b21182`；M7.3A frozen code 为 `aa3f814…`） |
 | productionRuntimeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（容器镜像实际代码 SHA） |
 | productionHostCheckoutSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
 | 当前分支 | `m7` |
@@ -54,7 +54,7 @@
 | **M7.3A.3.1 Atomic Candidate Commit + Server-side Bind Gate** | **DONE** | `df99384`/`32bc8b3`/`2131c6a`/`d7bc9e1`/`9dc3c6a`（runtime `9dc3c6a`，docs `2cd2b92`/`e337b61`，ops `6709882`） | 原子 commit、服务端 stale 绑定门禁、精确 source loader、完整请求快照、render bundle lease |
 | **M7.3A.3.2 Atomic Candidate Binding + Monotonic Image Billing + Render Heartbeat Cleanup** | **DONE** | `528f5c9`/`a8056b4`/`b243233`/`6ddf720`/`8eb23d0`（runtime `8eb23d0`） | 原子绑定、三态 provenance、billing 单调、provider result 审计、heartbeat dispose、SHA 元数据模型 |
 | **M7.3A.3.3 Legacy Binding Safety + Charged Provider Result Audit + Render Bundle Exit Classification** | **FROZEN** | `e40de12`/`80f8d11`/`ead3a23`/`c0b6f8a` + R1 `695dc02` + R2 `f7d786f` + R3 `aa3f814`（runtime `aa3f814`） | legacy 目标可验证门禁、provider 返回即 charged、usage 证据只追加、bundle 实时状态退出、首次写入 metadata 危险键过滤；**独立 Review PASS（final code/runtime `aa3f814…`，deployment evidence docs `36ff32e…`）** |
-| **M7.3B Visual Sequences / Shots Contract + DAG Foundation** | **IMPLEMENTED（待部署 + Review）** | `96ddcc8`/`c7cbba0`/`468d0c1`/`85e826c`（+ 后续部署证据 docs） | visual-sequences@1.0 / shots@1.0 契约、exact-source provenance、确定性语义校验、candidate generation（Worker LLM dispatch + commit-time source fence）、M7 candidate DAG 与 stale classification、API；**not yet production-piloted** |
+| **M7.3B Visual Sequences / Shots Contract + DAG Foundation** | **FROZEN（独立 Review PASS）** | `96ddcc8`/`c7cbba0`/`468d0c1`/`85e826c` + R1 `a71f0fe` + R2 `e3bd60a`（final code/runtime `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`，deployment evidence docs HEAD `044ac23e2524d53f41d223c37d16619425b21182`） | visual-sequences@1.0 / shots@1.0 契约、exact-source provenance、确定性语义校验、candidate generation（Worker LLM dispatch + commit-time source fence）、dispatch 幂等/canonical timeline/usable-candidate DAG；冻结语义见 §7 |
 
 ## 4. 当前已实现功能详情
 
@@ -276,7 +276,7 @@
 
 ### 4.12 M7.3B.R1 Review Closure（Dispatch Idempotency + Canonical Timeline）
 
-独立 Review 判定 M7.3B FAIL，修复 5 项 blocker（本小节为修复记录；M7.3B pending Review PASS）：
+独立 Review 判定 M7.3B FAIL，修复 5 项 blocker（本小节为修复记录；M7.3B 后续在 §4.13 修复后 Review PASS 冻结）：
 
 1. **queued dispatch source conflict（P0，`src/lib/llm-generation/dispatch.ts`）**：`enqueueGenerationDispatch` 此前只在 generation_run 存在时比较 source；worker 未 claim 前只有 queued dispatch 时，同 requestId 不同 source 被错误返回 queued/running 而非 409。修复：单 BEGIN IMMEDIATE 内，对最终重读到的 dispatch row 在按 status 返回**之前**强制 `source_artifact_id` 一致性检查（queued/running/succeeded/failed/cancelled 一律适用）→ `RequestIdConflictError`。保持：same-source 幂等（同一 dispatchId）、run-level conflict、不新增 dispatch、不修改原 source、不调用 provider。
 2. **Visual Sequence 全局 beat 顺序（P0，`visual-sequences/validate.ts`）**：新增 `SEQUENCE_BEAT_ORDER_MISMATCH`——`sequences.flatMap(beatIds)` 必须与 beats 顺序**逐项相同**（时间线顺序，不得排序比较）；与 gap/overlap/duplicate/within-sequence non-contiguous 并存（多 issue 允许）。
@@ -286,23 +286,24 @@
 
 ### 4.13 M7.3B.R2 Review Closure（Dispatch Running-State + DAG Proof）
 
-独立 Review 判定 M7.3B 仍 FAIL，修复 3 项（本小节为修复记录；M7.3B not frozen）：
+独立 Review 判定 M7.3B 仍 FAIL，修复 3 项（本小节为修复记录；修复后独立 Review PASS，M7.3B FROZEN）：
 
 1. **dispatch-only running 状态（P1，`llm-generation/dispatch.ts` + 4 条 route）**：scheduler 已 claim dispatch（status=running）但 generation_run 尚未创建时，同 requestId+同 source 再 POST 此前错误返回 `status='queued'`。修复：`EnqueueDispatchResult` 的 queued variant 原样携带 `dispatchStatus: 'queued' | 'running'`，四条 route（narrative-beats / visual-intents / visual-sequences / shots）统一透出 `status: result.dispatchStatus`——不再硬编码 queued。不制造虚假 runId/retryAfterMs，不新建 run/dispatch，不调用 provider。
-2. **run/dispatch 双持久 source fail-closed（P1，`llm-generation/dispatch.ts`）**：单 BEGIN IMMEDIATE 内统一读取 generation_run 与 generation_dispatch_jobs，在任何 status 返回之前执行三组一致性检查：input vs run、input vs dispatch、run vs dispatch（两者同时存在时）——任一组不一致 throw `SourceInvariantConflictError`（继承 `RequestIdConflictError` 保持 409 映射；message 明确 requestId、persisted run source、persisted dispatch source 与 fail-closed 语义，只含 artifact ID/source key）。不修改/不删除/不覆盖任一持久 source，不重新生成，不调用 provider。正常同 source 行为保持：queued→queued、dispatch-only running→running、run running→running、succeeded→reused、failed/indeterminate→terminal。
+2. **run/dispatch 双持久 source fail-closed（P1，`llm-generation/dispatch.ts`）**：单 BEGIN IMMEDIATE 内统一读取 generation_run 与 generation_dispatch_jobs，在任何 status 返回之前执行三组一致性检查：input vs run、input vs dispatch、run vs dispatch（两者同时存在时）——任一组不一致 throw `SourceInvariantConflictError`（继承 `RequestIdConflictError` 保持 409 映射；错误明确标识发生冲突的持久 source，并 fail-closed；不选择任一 source 继续）。不修改/不删除/不覆盖任一持久 source，不重新生成，不调用 provider。正常同 source 行为保持：queued→queued、dispatch-only running→running、run running→running、succeeded→reused、failed/indeterminate→terminal。
 3. **DAG 测试 fixture 隔离（P1，`m7-dag/readiness.ts` + `test-m73b-dag.ts`）**：导出纯判定 `isCandidateUsableForDownstream(sourceNode, candidateStatus, downstreamNode)`（含下游相关性检查：downstream 必须是 sourceNode 的真实 DAG 下游）；G1-G4 fixture 重构为"每条只缺目标 dependency"（G1/G2 前置 eligible beats、G3/G4 前置 plan+beats+intent 可用；G4 独立新项目，不再被 G3 queued dispatch 污染；blocker detail 精确断言只含目标 dependency）；G5 精确断言 old valid candidate 仍 usable + shots 保持 ready；G8 truth table 用纯函数锁定 9 项判定（含 narration needs_review 不可用、不相关 downstream false）。
 
 ## 5. 当前正在进行的工作
 
 - **M7.3A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `aa3f8145825f5a33542f54e90e661e0cccf3e692`；deployment evidence docs = `36ff32e3301f51bf054efbee029fc1e6115ad3f5`；independent Review = PASS。冻结语义见 §7。
-- **M7.3B — Visual Sequences / Shots Contract + DAG Foundation**（已实现并部署；独立 Review 连续 FAIL）→ **M7.3B.R1 closure 已部署**（queued source conflict / canonical order / usable-candidate / reference ID schema，见 §4.12）→ **M7.3B.R2 review closure in progress**：修复 3 项（dispatch-only running 状态、run/dispatch 双持久 source fail-closed、DAG 测试 fixture 隔离，见 §4.13）。**M7.3B not frozen；TTS-A not started。**
+- **M7.3B 正式 FROZEN（独立 Review PASS）**：final code/runtime = `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`；deployment evidence docs HEAD = `044ac23e2524d53f41d223c37d16619425b21182`（§15.3）；independent Review = PASS。冻结语义见 §7「M7.3B 冻结语义」。
+- **TTS-A starting（Immutable Custom Voice Library Foundation）**：只建立 Voice Profile / immutable Voice Profile Revision 声音库基础设施（schema + 安全摄取 + exact reader + API + 最小 UI）；不做 Voice Selection / Project Assignment / Narration Performance Plan；不生成正式旁白；不重新合成 Freud TTS；TTS-B/TTS-C not started。
 - **Production legacy 审计（只报告，不修改）**：generated assets 19；provenance NULL 19（全为历史 legacy）；NULL + requirement_json 缺失/损坏 1；active legacy bindings 17；active bindings 指向当前 active scenes 中缺失的 requirement 10（分布于 2 个项目，均为历史绑定；未删除/重绑）。
-- 下一步：M7.3B.R1 部署 + 等待独立 Review PASS；随后按序 TTS-A → TTS-B → TTS-C → narration master → ffprobe → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
+- 下一步：TTS-A 实施与部署 → 等待独立 Review PASS；随后按序 TTS-B → TTS-C → narration master → ffprobe → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
 
 ## 6. 尚未完成 TODO
 
 - [x] Production 部署（M7.3A.2 e62f5c2 / M7.3A.3 07b39dc 已完成）
-- [ ] M7.3B — Visual Sequences / Shots（已实现待部署，见 §4.11；**not yet production-piloted**）
+- [x] M7.3B — Visual Sequences / Shots（**FROZEN**，独立 Review PASS，final code/runtime `e3bd60a…`）
 - [ ] M7.4 — Timing Reconciliation v2
 - [ ] M7.5 — Asset Bindings 迁移
 - [ ] M7.6 — M7 Pipeline Snapshot
@@ -343,6 +344,17 @@
   5. Sequence/Shot 不含任何最终 timing（startMs/endMs/durationMs/frames）、素材/模板/渲染字段、语音/表演字段（voice/delivery/pace/energy/emotion）；
   6. TTS 兼容边界：Voice Profile / Narration Performance Plan 变化只 stale 下游 timing artifact，不 stale Sequence/Shot；Narration Plan unit 身份或正文改变必须经 Beats/Visual Intent source drift 传播 stale；最终时间线只在 TTS-C 与 narration master 确认后生成；
   7. `VISUAL_UNRESOLVED` 允许保留（candidate 分类 `needs_review`），禁止自动改写为 MG。
+- **M7.3B 冻结语义（正式生效，independent Review = PASS；后续 TTS、timing、asset、render 阶段不得顺带重构；改动需显式评审）**：
+  1. artifact kind：`visual_sequence_plan` / `shot_plan`；
+  2. schema：`visual-sequences@1.0` / `shots@1.0`；
+  3. Sequence/Shot 都是 immutable candidate：不 current、不 active、不 locked、不隐式 latest、不创建 snapshot；
+  4. Visual Intent 是视觉语义唯一所有者；Sequence/Shot 只保存 `visualIntentId` 引用；
+  5. Sequence/Shot 禁止：最终 timing、asset/layout/render 字段、voice/performance 字段、Visual Intent 内容副本；
+  6. exact-source provenance + commit-time source fence；
+  7. canonical timeline：Sequence beat 顺序逐项一致；Shot sequence/unit 顺序逐项一致；validator 不自动排序；
+  8. durable idempotency：queued/running dispatch source immutable；同 requestId 不同 source 409；dispatch-only running 原样返回 running；run/dispatch source 矛盾 fail-closed（错误明确标识发生冲突的持久 source，不选择任一 source 继续）；
+  9. DAG usable-candidate：current/eligible 可用；Visual Intent `needs_review` 可用于 Sequence/Shot；Visual Sequence `needs_review` 可用于 Shot；Narration Plan `needs_review` 不可用于 downstream；stale/invalid 不可用；
+  10. 后续 TTS、timing、asset、render 阶段不得顺带重构以上语义。
 
 ## 8. 已知事故和修复
 
@@ -378,14 +390,15 @@
 
 ## 10. 下一轮 agent 的安全边界
 
-- **M7.3B 已批准启动**（Visual Sequences / Shots Contract + DAG Foundation）。M7.3B 自身边界：
-  - **不要** 创建 `timing-reconciliation@2.0`、最终时间轴、startMs/endMs/durationMs/frames 字段。
-  - **不要** 重新生成 narration master / subtitle timing；**不要** 迁移 asset requirement 或 sceneId→shotId binding；**不要** 改造 asset resolver。
-  - **不要** 生成 Storyboard / Animatic / Editorial Gate / Final Render；不实现 MG runtime states、Remotion Sequence 映射。
+- **M7.3B FROZEN（独立 Review PASS）**。冻结语义见 §7；后续阶段不得顺带重构。
+- **TTS-A 已批准启动**（Immutable Custom Voice Library Foundation）。TTS-A 自身边界：
+  - **只做** Voice Profile / immutable Voice Profile Revision 声音库基础设施（schema + 安全摄取 + exact reader + API + 最小 `/settings/voices` UI）。
+  - **不要** 实现 TTS-B（Voice Selection / Project Voice Assignment）/ TTS-C（增量合成）/ Narration Performance Plan；不做 pace/energy/emotion/delivery 规划。
+  - **不要** 在 production 上传参考音频、创建 Voice Profile、调用真实 IndexTTS2 adapter、生成正式 TTS；不重新合成 Freud TTS；不生成 narration master；不做 subtitle timing；不创建 `timing-reconciliation@2.0`。
+  - **不要** 改写历史 tts_jobs 行、重算 fingerprint、改变旧 job dedupe / manifest 选择 / TTS worker provider / adapter 请求；不自动把现有 env-based voice 映射到新库；不自动读取 latest revision。
+  - **不要** 把声音绑定到项目；不设置 global default；不提供业务自动调用的 getLatestVoiceRevision。
   - **不要** 创建 M7 pipeline snapshot；**不要** 切换任何项目到 m7。
-  - **不要** 实现 TTS-A/B/C、Voice Profile、Narration Performance Plan；不生成 production Sequence/Shot artifact；不对 production 项目调 visual-sequences/shots POST；不调用真实 LLM/APIYi（M7.3B 验证只走临时 DB + Mock）。
-  - **不要** 自动重新生成污染项目 TTS。
-  - **不要** 循环重试 S001-R01 图片生成。
+  - **不要** 自动重新生成污染项目 TTS；**不要** 循环重试 S001-R01 图片生成。
   - **不要** 回写/修改 "narrative-beats@1.0" 与 "visual-intent-plan@1.0"（Beat 不得新增 sequenceId/shotId；Visual Intent 不得新增 Sequence/Shot 字段；Sequence/Shot 不得复制 Visual Intent 内容）。
   - 修改 Worker secret boundary 前必须经过 review。
   - 删除或覆盖旧 candidate `793c80fa-9229-4551-bc05-960c727afa2e` 是禁止的。
@@ -422,7 +435,7 @@
 
 - `scripts/test-m73b-visual-sequences.ts`（92 PASS，M7.3B.R1 更新）：sequences schema（含 reference ID 精确限制）/ 语义校验全矩阵 / **canonical beat order（SEQUENCE_BEAT_ORDER_MISMATCH：reversed blocks、三块交换、classify invalid_source、generation repair attemptCount=2 零自动排序）** / classify / 双源 chain precheck / 向后兼容
 - `scripts/test-m73b-shots.ts`（96 PASS，M7.3B.R1 更新）：shots schema（含 reference ID 精确限制）/ 语义校验全矩阵 / **canonical sequence/unit order（SHOT_SEQUENCE_ORDER_MISMATCH + SHOT_UNIT_ORDER_MISMATCH：block 前置、shot block 交换、classify invalid_source、generation repair attemptCount=2）** / classify / precheck / 向后兼容
-- `scripts/test-m73b-generation.ts`（114 PASS，M7.3B.R2 更新）：Web enqueue-only / Worker Mock 执行 / 幂等复用 / 409 冲突 / 并发 single-flight / repair attemptCount / 3 次失败终态 / source drift（before dispatch / during generation / before commit，commit-time fence 零 artifact）/ **queued dispatch source conflict（sequences+shots：409、dispatch count=1、原 source 未覆盖、runs=0、provider calls=0；同 source 重复同 dispatchId；并发不同 source 恰好一胜一 409；generic enqueue 与 visual-intents route 既有 stage 回归）** / **dispatch-only running window（真实 scheduler claim：claim 后 dispatch=running、generation_run=0，同 source POST → 202 running 同 dispatchId、count=1、source 不变、provider calls=0、artifact 不变；不同 source → 409 且原 dispatch 仍 running；sequences/shots/visual-intents 三 route 一致；被 claim 的 dispatch 用 Mock provider 正确收尾）** / **run/dispatch 双持久 source 矛盾 fail-closed（run succeeded/failed/running + dispatch 异 source：input 任一匹配均 409，两行 source/status 完全不变，错误 message 列出双持久 source；dispatch cancelled 无 run → 同 source terminal / 异 source 409；一致 source 的 succeeded/failed/running 正常短路）** / production override 禁用
+- `scripts/test-m73b-generation.ts`（114 PASS，M7.3B.R2 更新）：Web enqueue-only / Worker Mock 执行 / 幂等复用 / 409 冲突 / 并发 single-flight / repair attemptCount / 3 次失败终态 / source drift（before dispatch / during generation / before commit，commit-time fence 零 artifact）/ **queued dispatch source conflict（sequences+shots：409、dispatch count=1、原 source 未覆盖、runs=0、provider calls=0；同 source 重复同 dispatchId；并发不同 source 恰好一胜一 409；generic enqueue 与 visual-intents route 既有 stage 回归）** / **dispatch-only running window（真实 scheduler claim：claim 后 dispatch=running、generation_run=0，同 source POST → 202 running 同 dispatchId、count=1、source 不变、provider calls=0、artifact 不变；不同 source → 409 且原 dispatch 仍 running；sequences/shots/visual-intents 三 route 一致；被 claim 的 dispatch 用 Mock provider 正确收尾）** / **run/dispatch 双持久 source 矛盾 fail-closed（run succeeded/failed/running + dispatch 异 source：input 任一匹配均 409，两行 source/status 完全不变，错误明确标识发生冲突的持久 source 并 fail-closed；dispatch cancelled 无 run → 同 source terminal / 异 source 409；一致 source 的 succeeded/failed/running 正常短路）** / production override 禁用
 - `scripts/test-m73b-dag.ts`（71 PASS，M7.3B.R2 更新）：图结构（无环/无反向边）/ 节点状态机（not_generated→running→ready/blocked/needs_review）/ TTS 并行边界 / Voice/Performance 概念源零影响 / narration 漂移传播 / **usable-candidate 语义（fixture 隔离：G1/G2 前置 eligible beats、G3/G4 前置全链可用、G4 独立项目不被 G3 信封污染、blocker detail 精确只含目标 dependency；旧合法 candidate + regenerate running 时 currentCandidateCount≥1 且 shots 保持 ready；intent/sequences needs_review 可用；narration needs_review 不可用）** / **usable truth table（isCandidateUsableForDownstream 纯函数 9 项：narration eligible→usable、narration needs_review→false、intent needs_review→sequences/shots、sequences needs_review→shots、stale/invalid→false、不相关 downstream→false）** / 无 m7 激活
 
 - `scripts/test-asset-generation-durability.ts`（53 PASS）：幂等/超时/indeterminate/billing/append-only + T7 provenance + T8 requestId 生命周期 + **T9 mid-flight source drift（Fence B）** + **T10 lease lost 降级 stale**
