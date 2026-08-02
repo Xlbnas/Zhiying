@@ -6,12 +6,21 @@ import {
   NarrativeBeatsError,
   type BuildNarrativeBeatsResult,
 } from '@/lib/narrative-beats/plan';
+import {SHOTS_USAGE_STAGE} from '@/lib/shots/generate';
+import {buildShots, ShotsError, type BuildShotsResult} from '@/lib/shots/plan';
 import {VISUAL_INTENT_USAGE_STAGE} from '@/lib/visual-intent/generate';
 import {
   buildVisualIntentPlan,
   VisualIntentError,
   type BuildVisualIntentResult,
 } from '@/lib/visual-intent/plan';
+import {SEQUENCES_USAGE_STAGE} from '@/lib/visual-sequences/generate';
+import {
+  buildVisualSequences,
+  parseSequencesSourceKey,
+  VisualSequencesError,
+  type BuildVisualSequencesResult,
+} from '@/lib/visual-sequences/plan';
 import {
   completeDispatchFailed,
   completeDispatchSucceeded,
@@ -23,8 +32,10 @@ import {
 /**
  * Generation Dispatch 执行器（Worker-side LLM Dispatch）。
  *
- * 按 dispatch.stage 调 buildNarrativeBeats / buildVisualIntentPlan（同
- * requestId/sourceArtifactId）。durable single-flight 在 generation_runs：
+ * 按 dispatch.stage 调 buildNarrativeBeats / buildVisualIntentPlan /
+ * buildVisualSequences / buildShots（同 requestId/sourceArtifactId；
+ * sequences 的 source_artifact_id 是 `${beatsId}|${intentId}` 复合键）。
+ * durable single-flight 在 generation_runs：
  * 即使 worker 重复执行同一 dispatch，build 内部的 BEGIN IMMEDIATE claim
  * 保证绝不重复调用 provider。
  *
@@ -80,7 +91,7 @@ export async function runDispatchJob(
       `dispatch job ${job.id} start: project=${job.project_id} stage=${job.stage} ` +
         `requestId=${job.request_id} source=${job.source_artifact_id.slice(0, 8)}`,
     );
-    let result: BuildNarrativeBeatsResult | BuildVisualIntentResult;
+    let result: BuildNarrativeBeatsResult | BuildVisualIntentResult | BuildVisualSequencesResult | BuildShotsResult;
     if (job.stage === BEATS_USAGE_STAGE) {
       result = await buildNarrativeBeats({
         projectId: job.project_id,
@@ -93,6 +104,38 @@ export async function runDispatchJob(
       result = await buildVisualIntentPlan({
         projectId: job.project_id,
         narrativeBeatsArtifactId: job.source_artifact_id,
+        requestId: job.request_id,
+        provider: deps.provider,
+        signal: ctx.shutdownSignal,
+      });
+    } else if (job.stage === SEQUENCES_USAGE_STAGE) {
+      // source_artifact_id 为 `${beatsId}|${intentId}` 复合键（UUID 不含 '|'）。
+      let source: {narrativeBeatsArtifactId: string; visualIntentPlanArtifactId: string};
+      try {
+        source = parseSequencesSourceKey(job.source_artifact_id);
+      } catch {
+        completeDispatchFailed(db, {
+          dispatchId: job.id,
+          ownerToken,
+          runId: null,
+          errorCode: 'SOURCE_ARTIFACT_MALFORMED',
+          errorMessage: `sequences dispatch source_artifact_id 复合键格式非法: ${job.source_artifact_id}`,
+        });
+        log(`dispatch job ${job.id} failed: SOURCE_ARTIFACT_MALFORMED`);
+        return;
+      }
+      result = await buildVisualSequences({
+        projectId: job.project_id,
+        narrativeBeatsArtifactId: source.narrativeBeatsArtifactId,
+        visualIntentPlanArtifactId: source.visualIntentPlanArtifactId,
+        requestId: job.request_id,
+        provider: deps.provider,
+        signal: ctx.shutdownSignal,
+      });
+    } else if (job.stage === SHOTS_USAGE_STAGE) {
+      result = await buildShots({
+        projectId: job.project_id,
+        visualSequencesArtifactId: job.source_artifact_id,
         requestId: job.request_id,
         provider: deps.provider,
         signal: ctx.shutdownSignal,
@@ -149,10 +192,13 @@ export async function runDispatchJob(
       log(`dispatch job ${job.id} requeued due to shutdown`);
       return;
     }
-    // precheck throw（NarrativeBeatsError/VisualIntentError）：source 失效/请求非法，
-    // 发生在 run claim 之前——零 run、零 provider 调用，直接终态。
+    // precheck throw（NarrativeBeatsError/VisualIntentError/VisualSequencesError/ShotsError）：
+    // source 失效/请求非法，发生在 run claim 之前——零 run、零 provider 调用，直接终态。
     const errorCode =
-      err instanceof NarrativeBeatsError || err instanceof VisualIntentError
+      err instanceof NarrativeBeatsError ||
+      err instanceof VisualIntentError ||
+      err instanceof VisualSequencesError ||
+      err instanceof ShotsError
         ? err.code
         : 'INTERNAL_ERROR';
     const errorMessage = err instanceof Error ? err.message : String(err);
