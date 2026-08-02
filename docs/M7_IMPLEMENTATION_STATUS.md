@@ -9,10 +9,10 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-02T10:20Z（M7.3B.R2 review closure in progress；M7.3B not frozen，TTS-A not started） |
-| reviewedCodeSHA | `a71f0fed1028da0f2a47305d22df120d8165f714`（M7.3B.R1 closure 代码 commit；M7.3A frozen code 为 `aa3f814…`） |
-| productionRuntimeSHA | `a71f0fed1028da0f2a47305d22df120d8165f714`（容器镜像实际代码 SHA） |
-| productionHostCheckoutSHA | `a71f0fed1028da0f2a47305d22df120d8165f714`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
+| statusUpdatedAt | 2026-08-02T11:05Z（M7.3B.R2 deployed；M7.3B pending independent Review PASS，TTS-A not started） |
+| reviewedCodeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（M7.3B.R2 closure 代码 commit；M7.3A frozen code 为 `aa3f814…`） |
+| productionRuntimeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（容器镜像实际代码 SHA） |
+| productionHostCheckoutSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
 | 当前分支 | `m7` |
 | 实时 origin/m7 HEAD | 以 `git rev-parse origin/m7` 为准（不硬编码为「永远当前」） |
 
