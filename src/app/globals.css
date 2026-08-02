@@ -1266,3 +1266,218 @@ h1, h2, h3, h4, p {
   font-family: var(--font-mono);
   font-size: 12px;
 }
+
+/* ==========================================================================
+   TTS-A：Voice Library（/settings/voices）
+   ========================================================================== */
+
+/* Profile 状态徽标（沿用 badge 体系，非任务状态故用 data-profile-status） */
+.badge[data-profile-status='active'] {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+}
+
+.badge[data-profile-status='archived'] {
+  color: var(--archive);
+  background: color-mix(in srgb, var(--archive) 14%, transparent);
+  border-color: color-mix(in srgb, var(--archive) 32%, transparent);
+}
+
+/* 成功 / 幂等复用提示条（与 error-banner 同构） */
+.notice-banner {
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  border: 1px solid color-mix(in srgb, var(--success) 36%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success);
+  font-size: 13px;
+}
+
+/* Profile 列表 */
+.voice-list {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.voice-row + .voice-row {
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.voice-row-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  transition: background-color var(--motion-fast) var(--ease);
+}
+
+.voice-row-head:hover {
+  background: var(--elevated);
+}
+
+.voice-row.expanded .voice-row-head {
+  background: var(--elevated);
+}
+
+.voice-expand {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.voice-expand::before {
+  content: '▸';
+  color: var(--muted);
+  transition: transform var(--motion-fast) var(--ease);
+}
+
+.voice-row.expanded .voice-expand::before {
+  transform: rotate(90deg);
+}
+
+.voice-name {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.voice-desc {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.voice-row-meta .mono {
+  color: var(--text-2);
+}
+
+/* 展开详情 */
+.voice-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 18px 18px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.voice-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.08em;
+}
+
+.voice-suggest {
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--research) 30%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--research) 8%, transparent);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+/* Revision 列表 */
+.revision-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.revision-row {
+  padding: 12px 16px;
+  background: var(--bg);
+}
+
+.revision-row + .revision-row {
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.revision-top {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.revision-num {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.revision-meta {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.revision-meta .mono {
+  color: var(--text-2);
+}
+
+.revision-transcript {
+  margin-top: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.voice-audio {
+  display: block;
+  width: 100%;
+  height: 32px;
+  margin-top: 8px;
+}
+
+/* 上传参考音频表单 */
+.voice-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+@media (max-width: 900px) {
+  .voice-row-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .voice-row-meta {
+    justify-content: flex-end;
+  }
+}

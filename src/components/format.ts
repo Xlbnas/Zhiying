@@ -15,6 +15,14 @@ export function formatDurationSec(sec: number | null | undefined): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+/** 毫秒 → "mm:ss.s"（voice revision 时长），无效输入显示占位符 */
+export function formatDurationMs(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return '—';
+  const m = Math.floor(ms / 60000);
+  const s = (ms - m * 60000) / 1000;
+  return `${String(m).padStart(2, '0')}:${s.toFixed(1).padStart(4, '0')}`;
+}
+
 /** ISO 字符串 → "YYYY-MM-DD HH:mm"（本地时区），无效输入显示占位符 */
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '—';
