@@ -159,12 +159,21 @@ CREATE TABLE IF NOT EXISTS voice_assignment_requests (
 );
 ```
 
-- POST `{requestId, voiceProfileId, voiceProfileRevisionId}`：
-  单 BEGIN IMMEDIATE 事务：SELECT envelope → 存在且 (profile, revision) 相同 →
-  复用同一 artifact（200 reused）；存在但不同 → 409 REQUEST_ID_CONFLICT；
-  不存在 → INSERT envelope + INSERT artifact（201 created）。
+- POST `{requestId, voiceProfileId, voiceProfileRevisionId}`（TTS-B.R1 两阶段 commit fence）：
+  1. **envelope-first 优先裁决**（单 BEGIN IMMEDIATE 只读）：既有 envelope →
+     同 source → 校验既有 artifact 自洽 + exact voice usable（**archived Profile
+     允许 historical reuse → 200 reused，不 PROFILE_ARCHIVED**）→ 复用，不新增；
+     异 source → 409 REQUEST_ID_CONFLICT；artifact 丢失/非法/source 不一致 →
+     fail-closed（REQUEST_STATE_INCONSISTENT / ASSIGNMENT_UNUSABLE，不重建）；
+  2. **新请求 commit fence**：初始 exact validator → Profile 必须 active（archived →
+     409，只禁止新 requestId）→ 构造 content → commit 前再次 exact validator →
+     BEGIN IMMEDIATE → 事务内重读（envelope 仍不存在——同 source 已插入 → reuse、
+     异 → 409；Profile 仍 active；revision row exact 属于该 profile 且
+     schema/provider/hash/adapter 与最终 descriptor 完全一致）→ INSERT artifact +
+     envelope。
   `UNIQUE(project_id, request_id)` + 单事务 = 原子唯一性，**无 check-then-insert 竞态**；
-  **禁止仅 JSON 搜索 requestId 后声称幂等**。
+  **禁止仅 JSON 搜索 requestId 后声称幂等**。archive 只禁止新 requestId 创建；
+  archive 后同 requestId 同 revision 仍可 200 reused。
 - 并发相同 requestId → 恰好一个 artifact，其余 reused。
 - 已有 artifact 内容含该 requestId 的 legacy 复用不做（新表首建）。
 
@@ -278,11 +287,24 @@ stale；exact reference 文件/hash 损坏 → invalid_source；unresolved provi
     分类非 current_candidate → `stale_source`；assignment invalid（voice unusable）→
     `invalid_source`；semantic validation 重新运行有 blocking issue → `invalid_source`；
     否则 `current_candidate`。
-- TTS-B 节点状态（新模块 `src/lib/tts-b/dag.ts`，**不修改** M7.3B frozen `m7-dag/dag.ts`）：
-  节点 `project_voice_assignment`、`narration_performance_plan`；状态
+- TTS-B 节点状态（新模块 `src/lib/tts-b/dag.ts`，**不修改** M7.3B frozen `m7-dag/dag.ts`；
+  TTS-B.R1 双依赖）：
+  节点 `narration_plan_v2`、`project_voice_assignment`、`narration_performance_plan`；
+  边：`narration_plan_v2 → narration_performance_plan`、
+  `project_voice_assignment → narration_performance_plan`（无反向边、无 cycle，
+  `detectTtsBDagCycles` / `detectTtsBDagReverseEdges` 独立检测）。状态
   `not_generated | generation_running | generation_failed | ready | needs_review |
   blocked | stale_source | invalid_source`。
+  Performance 依赖 usable 规则：Narration Plan `eligible_candidate` 才 usable
+  （needs_review/stale/invalid/missing/script_not_locked 均不可用）；Assignment
+  `current_candidate` 才 usable。blocked detail 精确列出缺失依赖（narration_plan_v2 /
+  project_voice_assignment）。generation activity 存在但依赖失效时 detail 标明
+  dependency invalid。
   - 无 usable exact revision → Assignment invalid/blocked；
+  - Narration Plan stale 使用 **locked Script V2 candidate 语义**（classifyNarrationPlanV2Candidate）：
+    lock 新 Script V2（不改旧 plan artifact content_json）→ 旧 Plan candidate stale →
+    旧 Performance stale_source（NARRATION_PLAN_STALE）；needs_review →
+    NARRATION_PLAN_NOT_ELIGIBLE_NEEDS_REVIEW（不可 current）；invalid → invalid_source；
   - archived Profile：不能新建 Assignment；已有 exact Assignment 仍可用；
   - 新 revision 上传：不 stale 旧 Assignment；
   - Narration Plan 漂移 → Performance stale；Assignment artifact/hash 漂移 →
@@ -318,7 +340,17 @@ stale；exact reference 文件/hash 损坏 → invalid_source；unresolved provi
 - 最终 fingerprint 留给 TTS-C，且满足冻结公式（§1.2）——禁止仅按文本、unitId 或
   voiceProfileId 复用。
 
-## 11. UI（项目 Workspace 独立区域）
+## 11. ID schema（TTS-B.R1）
+
+- Voice Profile / Revision 是服务端 UUID：`voiceProfileId` / `voiceProfileRevisionId`
+  必须为 UUID（zod regex + lib 层校验）。malformed（空/abc/路径/换行）→
+  **422 invalid_request**（INVALID_PROFILE_ID / INVALID_REVISION_ID 或 zod）；
+  well-formed 但不存在 → **404 PROFILE_NOT_FOUND / REVISION_NOT_FOUND**。
+- Assignment `projectId` 保留 min(1)：历史项目存在非 UUID 的 project id
+  （如 legacy `'legacy-p1'`，见 schema 测试 A2），收紧为 UUID 会破坏旧项目兼容，
+  因此兼容保留并在此解释。
+
+## 12. UI（项目 Workspace 独立区域）
 
 - `WorkflowWorkspace` 挂载 `VoiceAssignmentPanel` + `PerformancePlanPanel`。
 - VoiceAssignmentPanel：浏览 active Voice Profiles（GET /api/voice-profiles）、
@@ -335,7 +367,7 @@ stale；exact reference 文件/hash 损坏 → invalid_source；unresolved provi
 - 禁止按钮：立即重生成全片 / 替换所有项目 / 设为全局默认 / 生成 narration master /
   Final Render。
 
-## 12. 明确不做（TTS-C 边界）
+## 13. 明确不做（TTS-C 边界）
 
 TTS-C 才负责：exact assignment + performance plan → TTS payload compile（含 provider
 capability gate）、逐 unit tts_jobs、试听、增量重生成、narration audio manifest。

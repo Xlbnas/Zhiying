@@ -9,7 +9,7 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-03T05:53Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B deployed @`0b70e81`**，pending independent Review PASS；TTS-C not started） |
+| statusUpdatedAt | 2026-08-03T06:56Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B.R1 review closure in progress（TTS-B not frozen）**；TTS-C not started） |
 | reviewedCodeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（M7.3B final code/runtime；M7.3B deployment evidence docs HEAD 为 `044ac23e2524d53f41d223c37d16619425b21182`；M7.3A frozen code 为 `aa3f814…`） |
 | productionRuntimeSHA | `0b70e8117277a76e776b6f22494a48142aa460e9`（TTS-B 部署后容器镜像实际代码 SHA） |
 | productionHostCheckoutSHA | `0b70e8117277a76e776b6f22494a48142aa460e9`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
@@ -298,7 +298,7 @@
 - **M7.3A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `aa3f8145825f5a33542f54e90e661e0cccf3e692`；deployment evidence docs = `36ff32e3301f51bf054efbee029fc1e6115ad3f5`；independent Review = PASS。冻结语义见 §7。
 - **M7.3B 正式 FROZEN（独立 Review PASS）**：final code/runtime = `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`；deployment evidence docs HEAD = `044ac23e2524d53f41d223c37d16619425b21182`（§15.3）；independent Review = PASS。冻结语义见 §7「M7.3B 冻结语义」。
 - **TTS-A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `1460efd12c9f4bbb3fa4188757deeff3c8566c99`；deployment evidence docs = `2fc7ffb460dc36cd44fdcb3c5b98e9e09e9e392f`。冻结语义见 §7「TTS-A 冻结语义」；非阻断 hardening note 见 §7 末。
-- **TTS-B deployed（pending independent Review PASS；TTS-C not started）**：Project Voice Assignment + Narration Performance Plan 已实施并部署（部署证据见 §15.7）。设计文档 `docs/TTS_B_ASSIGNMENT_PERFORMANCE_DESIGN.md`。
+- **TTS-B.R1 review closure in progress（TTS-B not frozen；TTS-C not started）**：独立 Review 结论下修复——① Performance 传播 Narration candidate 状态（classifyNarrationPlanV2Candidate，locked Script V2 漂移 → stale）；② TTS-B DAG 双依赖（narration_plan_v2 + project_voice_assignment）；③ Assignment atomic commit fence（envelope-first + 两阶段）；④ archived 历史 requestId 幂等复用（200 reused）；⑤ Assignment/Performance source 自洽（ASSIGNMENT_SOURCE_MISMATCH / PERFORMANCE_SOURCE_MISMATCH）；⑥ ID schema（UUID，malformed 422 / missing 404）；⑦ succeeded 重放 fail-closed（RESULT_ARTIFACT_STALE/INVALID）。设计文档 `docs/TTS_B_ASSIGNMENT_PERFORMANCE_DESIGN.md`。
 - **Production legacy 审计（只报告，不修改）**：generated assets 19；provenance NULL 19（全为历史 legacy）；NULL + requirement_json 缺失/损坏 1；active legacy bindings 17；active bindings 指向当前 active scenes 中缺失的 requirement 10（分布于 2 个项目，均为历史绑定；未删除/重绑）。
 - 下一步：TTS-A.R1 部署后等待独立 Review PASS；随后按序 TTS-B → TTS-C → narration master → ffprobe → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
 
