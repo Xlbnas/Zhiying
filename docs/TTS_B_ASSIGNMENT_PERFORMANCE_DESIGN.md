@@ -273,9 +273,24 @@ stale；exact reference 文件/hash 损坏 → invalid_source；unresolved provi
   artifact commit。
 - repair：只传机器可读 validator issues；attemptCount 真实；有限次数；达上限 failed；
   不删除坏 item；不把 invalid artifact 标 ready。
-- commit-time fence（单 BEGIN IMMEDIATE）：重读 Narration Plan + Assignment artifact
-  行核对 hash + 重新调用 exact voice validator；任一 ID/hash/usability 漂移 →
+- commit-time fence（**final BEGIN IMMEDIATE 事务内、INSERT 前**；TTS-B.R3 P0）：
+  重新读取 exact Narration Plan（`getNarrationPlanV2Artifact`）+ 内容 hash + 重新运行
+  `classifyNarrationPlanV2Candidate`（同步纯 DB 读：plan 行 + `project_stages`
+  locked_version + exact Script V2 version）——仅 `eligible_candidate` 才允许提交；
+  `needs_review / stale / invalid / missing` → `SOURCE_STALE`。`lockStage` 同样使用
+  BEGIN IMMEDIATE，因此本事务取得写锁后，其他连接不能在 candidate check 与 INSERT
+  之间提交新的 locked Script V2（locked drift 不改旧 plan content_json，hash fence
+  覆盖不了）。事务内同时核对 Assignment artifact 行 hash；INSERT Performance artifact
+  与 `completeGenerationRunSuccess`（owner_token + status='running' 守卫）同事务原子，
+  run 被并发转移 → 抛错 → 整事务回滚（零 partial artifact）。事务外重新调用 exact
+  voice validator（异步文件 SHA）与 Assignment classifier 只是 **early rejection /
+  optimization**，不是最终 authoritative fence。任一 ID/hash/candidate/usability 漂移 →
   `SOURCE_STALE` 或 `VOICE_SOURCE_INVALID`；零 partial artifact。
+- 测试注入 hook `setPerformanceBeforeCommitTransactionForTest`（NODE_ENV=production
+  抛错；默认 null）：位于所有事务外异步校验完成之后、BEGIN IMMEDIATE 之前，用于
+  复现「outer candidate check 已通过 → 此处 lock 新 Script V2 → 事务内重新
+  classify 拒绝」的真实竞态（E20；E19 为生成期间 outer check 之前 drift，两者
+  独立覆盖不同窗口）。
 
 ## 8. 分类与 DAG（独立于 M7.3B frozen DAG）
 
