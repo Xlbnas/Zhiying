@@ -80,8 +80,9 @@ fi
 # 2. typecheck
 run_suite "typecheck" pnpm typecheck
 
-# 3. build
-run_suite "next-build" pnpm build
+# 3. build（剥离 NODE_ENV：next build 在 NODE_ENV=development 下 prerender 异常；
+#    CI/agentvm/镜像内共用本入口，build 统一以无 NODE_ENV 运行）
+run_suite "next-build" env -u NODE_ENV pnpm build
 
 # 4. TTS-B 5 套
 run_suite "tts-b-voice-assignment" npx tsx scripts/test-tts-b-voice-assignment.ts
