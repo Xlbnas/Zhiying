@@ -34,6 +34,7 @@ import {
   classifyNarrationPerformancePlan,
   getNarrationPerformancePlan,
   listNarrationPerformancePlanCandidates,
+  setPerformanceBeforeCommitTransactionForTest,
   PerformanceError,
 } from '../src/lib/tts-b/performance';
 import {createVoiceProfile} from '../src/lib/voice-library/profiles';
@@ -569,6 +570,100 @@ async function main(): Promise<void> {
       '[E19b] commit 前 classifyNarrationPlanV2Candidate=stale → SOURCE_STALE、run failed、零 artifact、provider 恰好一次',
       {kind: r.kind, errorCode: r.kind === 'terminal' ? r.errorCode : null, providerCalls: provider.requests.length, runStatus: runRow.status},
     );
+  }
+
+  // ---------- E20: P0 R3——outer candidate check 通过后、BEGIN IMMEDIATE 前 drift ----------
+  // E19 的 before() 在 LLM 生成期间（outer check 之前）就 lock 了 Script V2 B，
+  // outer check 本身即可发现。R3 要关的洞是：outer check 通过后、final
+  // transaction 之前 lock 新 Script V2 → 事务内必须重新 classify 并拒绝。
+  // 用独立项目 + setPerformanceBeforeCommitTransactionForTest 复现精确窗口。
+  {
+    const e20Project = createProjectWithWorkflow({topic: 'e20', coreQuestion: 'q'}).project.id;
+    for (const stage of (['project_definition', 'research', 'evidence', 'argument_tree', 'script_v1'] as WorkflowStage[])) {
+      generateVersion({projectId: e20Project, stage, content: `# ${stage}`, contentType: 'markdown', source: 'manual_edit'});
+      lockStage(e20Project, stage);
+    }
+    generateVersion({projectId: e20Project, stage: 'script_v2', content: `# Script V2\n\n## 第 1 章 开场（00:00–01:00）\n\n第一句。第二句。\n`, contentType: 'markdown', source: 'manual_edit', promptVersion: 'script-v2@2.0'});
+    lockStage(e20Project, 'script_v2');
+    const e20Plan = buildNarrationPlanV2(e20Project);
+    const eProfile = createVoiceProfile({displayName: 'e20 voice'});
+    const eRev = await ingestVoiceProfileRevision(
+      {voiceProfileId: eProfile.id, requestId: `e20-rev-${crypto.randomUUID()}`, audioBuffer: (() => {
+        const sr = 48000;
+        const frames = Math.floor((sr * 1500) / 1000);
+        const data = Buffer.alloc(frames * 2);
+        for (let i = 0; i < frames; i++) data.writeInt16LE(Math.round(10000 * Math.sin((2 * Math.PI * 580 * i) / sr)), i * 2);
+        const h = Buffer.alloc(44);
+        h.write('RIFF', 0); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8);
+        h.write('fmt ', 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
+        h.writeUInt32LE(sr, 24); h.writeUInt32LE(sr * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34);
+        h.write('data', 36); h.writeUInt32LE(data.length, 40);
+        return Buffer.concat([h, data]);
+      })()},
+      MOCK_DEPS,
+    );
+    const eAssign = await buildProjectVoiceAssignment({
+      projectId: e20Project,
+      voiceProfileId: eProfile.id,
+      voiceProfileRevisionId: eRev.revision.id,
+      requestId: `e20-assign-${crypto.randomUUID()}`,
+    });
+    const planContentBefore = (getDb()
+      .prepare('SELECT content_json FROM artifacts WHERE id = ?')
+      .get(e20Plan.artifact.id) as {content_json: string}).content_json;
+    const beforeCount = performanceCount(e20Project);
+    const provider = new ScriptableProvider();
+    provider.push({text: JSON.stringify({items: itemsFor(e20Plan.plan)})});
+
+    // hook：所有事务外异步校验完成之后、BEGIN IMMEDIATE 之前执行真实 drift。
+    // 此刻 outer check 仍 eligible（窗口真实存在）→ lock Script V2 B（真实
+    // generateVersion + lockStage，绝不用 UPDATE 伪造旧 plan）。
+    const hookProbe: {eligibleAtHook: boolean} = {eligibleAtHook: false};
+    setPerformanceBeforeCommitTransactionForTest(() => {
+      const ref = getNarrationPlanV2Artifact(e20Project, e20Plan.artifact.id);
+      const cand = ref ? classifyNarrationPlanV2Candidate(e20Project, ref.artifact) : null;
+      hookProbe.eligibleAtHook = cand?.status === 'eligible_candidate';
+      generateVersion({projectId: e20Project, stage: 'script_v2', content: `# Script V2\n\n## 第 1 章 新章（00:00–01:00）\n\n新第一句。\n`, contentType: 'markdown', source: 'manual_edit', promptVersion: 'script-v2@2.0'});
+      lockStage(e20Project, 'script_v2');
+    });
+    let r20: Awaited<ReturnType<typeof buildNarrationPerformancePlan>>;
+    try {
+      r20 = await buildNarrationPerformancePlan({
+        projectId: e20Project,
+        narrationPlanArtifactId: e20Plan.artifact.id,
+        projectVoiceAssignmentArtifactId: eAssign.artifact.id,
+        requestId: 'req-perf-e20-0001',
+        provider,
+      });
+    } finally {
+      setPerformanceBeforeCommitTransactionForTest(null);
+    }
+    const planContentAfter = (getDb()
+      .prepare('SELECT content_json FROM artifacts WHERE id = ?')
+      .get(e20Plan.artifact.id) as {content_json: string}).content_json;
+    const runRow20 = getDb()
+      .prepare("SELECT status, error_code FROM generation_runs WHERE stage = 'm7_narration_performance_plan' AND request_id = 'req-perf-e20-0001'")
+      .get() as {status: string; error_code: string | null};
+    const dispatchRow20 = getDb()
+      .prepare("SELECT status FROM generation_dispatch_jobs WHERE request_id = 'req-perf-e20-0001'")
+      .get() as {status: string} | undefined;
+    const ttsJobs20 = (getDb().prepare('SELECT COUNT(*) AS c FROM tts_jobs').get() as {c: number}).c;
+    ok(planContentBefore === planContentAfter, '[E20a] 旧 plan artifact content_json 前后一致（真实 drift，非伪造）');
+    ok(hookProbe.eligibleAtHook === true, '[E20b] 事务外 outer check 时 candidate 仍 eligible（竞态窗口真实存在）');
+    ok(
+      r20.kind === 'terminal' && r20.status === 'failed' && r20.errorCode === 'SOURCE_STALE' &&
+        performanceCount(e20Project) === beforeCount &&
+        runRow20.status === 'failed' && runRow20.error_code === 'SOURCE_STALE' &&
+        provider.requests.length === 1,
+      '[E20c] outer check 后、事务前 lock Script V2 B → 事务内重新 classify=stale → SOURCE_STALE、run failed、零 artifact、provider 恰好一次',
+      {kind: r20.kind, errorCode: r20.kind === 'terminal' ? r20.errorCode : null, providerCalls: provider.requests.length, runStatus: runRow20.status},
+    );
+    ok(
+      dispatchRow20 === undefined || dispatchRow20.status === 'failed',
+      '[E20d] dispatch 可稳定映射 failed（library 路径无 dispatch 或 dispatch=failed）',
+      {dispatch: dispatchRow20?.status ?? '(none)'},
+    );
+    ok(ttsJobs20 === 0, '[E20e] 全程未创建 TTS job（tts_jobs=0）', {ttsJobs: ttsJobs20});
   }
 
   // ---------- E10: buildPerformanceInputIdentity ----------
