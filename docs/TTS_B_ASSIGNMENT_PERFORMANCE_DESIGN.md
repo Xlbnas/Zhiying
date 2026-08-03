@@ -197,6 +197,7 @@ CREATE TABLE IF NOT EXISTS voice_assignment_requests (
   projectVoiceAssignmentContentHash, // sha256Text(content_json)
   voiceProfileId,
   voiceProfileRevisionId,
+  provider: 'indextts2',
   canonicalAudioSha256,
   adapterCompatibilityKey,
 }
