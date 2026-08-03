@@ -1,28 +1,115 @@
 /**
- * TTS-B DAG node states（设计文档 §8）——独立于 M7.3B frozen `m7-dag/dag.ts`。
+ * TTS-B DAG node states（设计文档 §8；TTS-B.R1：narration_plan_v2 双依赖）。
  *
- * 节点：project_voice_assignment、narration_performance_plan。
+ * TTS-B graph（独立于 M7.3B frozen `m7-dag/dag.ts`）：
+ *
+ *   narration_plan_v2 ──────────┐
+ *                              ├→ narration_performance_plan
+ *   project_voice_assignment ──┘
+ *
+ * 节点：narration_plan_v2、project_voice_assignment、narration_performance_plan。
  * 状态：not_generated | generation_running | generation_failed | ready |
  *       needs_review | blocked | stale_source | invalid_source。
  *
- * 兼容边界（M7.3B §7.6）：Voice Assignment / Performance Plan 变化**不** stale
- * Narrative Beats / Visual Intent / Sequence / Shot；本模块只读，不写任何指针，
- * 不形成反向边、不形成 cycle。
+ * Performance 依赖 usable 规则：
+ * - Narration Plan：eligible_candidate → usable；needs_review/stale/invalid/
+ *   missing/script_not_locked → unusable；
+ * - Assignment：current_candidate → usable；stale/invalid/missing → unusable。
+ *
+ * 兼容边界（M7.3B §7.6）：TTS-B 变化**不** stale Narrative Beats / Visual Intent /
+ * Sequence / Shot；本模块只读，不写任何指针，不形成反向边、不形成 cycle。
  */
 import {getDb} from '../db';
-import {
-  PERFORMANCE_USAGE_STAGE,
-} from './constants';
-import {
-  classifyProjectVoiceAssignment,
-  listProjectVoiceAssignmentCandidates,
-} from './assignment';
-import {
-  classifyNarrationPerformancePlan,
-  listNarrationPerformancePlanCandidates,
-} from './performance';
+import {listNarrationPlanV2Candidates} from '../narration/plan-v2';
+import {PERFORMANCE_USAGE_STAGE} from './constants';
+import {listProjectVoiceAssignmentCandidates} from './assignment';
+import {listNarrationPerformancePlanCandidates} from './performance';
 
-export type TtsBDagNodeId = 'project_voice_assignment' | 'narration_performance_plan';
+export type TtsBDagNodeId =
+  | 'narration_plan_v2'
+  | 'project_voice_assignment'
+  | 'narration_performance_plan';
+
+export interface TtsBDagNodeDef {
+  id: TtsBDagNodeId;
+  label: string;
+  dependencies: TtsBDagNodeId[];
+}
+
+/** TTS-B graph 定义（narration + assignment 双依赖，无反向边）。 */
+export const TTS_B_DAG_NODES: readonly TtsBDagNodeDef[] = [
+  {id: 'narration_plan_v2', label: '旁白计划 V2', dependencies: []},
+  {id: 'project_voice_assignment', label: '项目声音指定', dependencies: []},
+  {
+    id: 'narration_performance_plan',
+    label: '旁白表演计划',
+    dependencies: ['narration_plan_v2', 'project_voice_assignment'],
+  },
+];
+
+export const TTS_B_DAG_EDGES: ReadonlyArray<{from: TtsBDagNodeId; to: TtsBDagNodeId}> = [
+  {from: 'narration_plan_v2', to: 'narration_performance_plan'},
+  {from: 'project_voice_assignment', to: 'narration_performance_plan'},
+];
+
+export const TTS_B_DAG_TOPOLOGICAL_ORDER: readonly TtsBDagNodeId[] = [
+  'narration_plan_v2',
+  'project_voice_assignment',
+  'narration_performance_plan',
+];
+
+/** DFS 三色环检测；返回构成环的节点序列（无环 → null）。 */
+export function detectTtsBDagCycles(): TtsBDagNodeId[] | null {
+  const WHITE = 0;
+  const GRAY = 1;
+  const BLACK = 2;
+  const color = new Map<TtsBDagNodeId, number>();
+  const adj = new Map<TtsBDagNodeId, TtsBDagNodeId[]>();
+  for (const n of TTS_B_DAG_NODES) {
+    color.set(n.id, WHITE);
+    adj.set(n.id, n.dependencies);
+  }
+  const stack: TtsBDagNodeId[] = [];
+  const dfs = (node: TtsBDagNodeId): TtsBDagNodeId[] | null => {
+    color.set(node, GRAY);
+    stack.push(node);
+    for (const dep of adj.get(node) ?? []) {
+      const c = color.get(dep) ?? WHITE;
+      if (c === GRAY) {
+        const start = stack.indexOf(dep);
+        return [...stack.slice(start), dep];
+      }
+      if (c === WHITE) {
+        const cycle = dfs(dep);
+        if (cycle) return cycle;
+      }
+    }
+    stack.pop();
+    color.set(node, BLACK);
+    return null;
+  };
+  for (const n of TTS_B_DAG_NODES) {
+    if ((color.get(n.id) ?? WHITE) === WHITE) {
+      const cycle = dfs(n.id);
+      if (cycle) return cycle;
+    }
+  }
+  return null;
+}
+
+/** 反向边检测：任何节点出现在其依赖的 dependencies 中 → 反向边。 */
+export function detectTtsBDagReverseEdges(): Array<{from: TtsBDagNodeId; to: TtsBDagNodeId}> {
+  const out: Array<{from: TtsBDagNodeId; to: TtsBDagNodeId}> = [];
+  for (const n of TTS_B_DAG_NODES) {
+    for (const dep of n.dependencies) {
+      const depDef = TTS_B_DAG_NODES.find((d) => d.id === dep);
+      if (depDef?.dependencies.includes(n.id)) {
+        out.push({from: n.id, to: dep});
+      }
+    }
+  }
+  return out;
+}
 
 export type TtsBDagNodeStatus =
   | 'not_generated'
@@ -74,17 +161,88 @@ function activityOf(projectId: string): {running: boolean; failed: boolean} {
   return {running, failed};
 }
 
-function normalizeStatus(status: string): 'current' | 'stale' | 'invalid' {
-  if (status === 'current_candidate') return 'current';
-  if (status === 'invalid_source') return 'invalid';
-  return 'stale';
+/** Narration Plan usable：仅 eligible_candidate（needs_review/stale/invalid/missing 均不可用）。 */
+export function isNarrationPlanUsableForPerformance(projectId: string): boolean {
+  const candidates = listNarrationPlanV2Candidates(projectId);
+  return candidates.some((c) => c.status === 'eligible_candidate');
+}
+
+export function isNarrationPlanInNeedsReview(projectId: string): boolean {
+  return listNarrationPlanV2Candidates(projectId).some((c) => c.status === 'needs_review');
+}
+
+export function isNarrationPlanStale(projectId: string): boolean {
+  return listNarrationPlanV2Candidates(projectId).some((c) => c.status === 'stale');
+}
+
+export function isNarrationPlanInvalid(projectId: string): boolean {
+  return listNarrationPlanV2Candidates(projectId).some((c) => c.status === 'invalid');
 }
 
 /**
- * 计算 TTS-B 两节点状态（纯读，不写 DB）。assignment 无 generation 机制
- * （deterministic 同步 build），因此其 activity 恒为 false。
+ * 计算 TTS-B 三节点状态（纯读，不写 DB）。assignment 无 generation 机制
+ * （deterministic 同步 build），activity 恒为 false。
  */
 export async function computeTtsBDagNodeStates(projectId: string): Promise<Record<TtsBDagNodeId, TtsBDagNodeState>> {
+  // narration_plan_v2 节点
+  const planCandidates = listNarrationPlanV2Candidates(projectId);
+  const planEligible = planCandidates.filter((c) => c.status === 'eligible_candidate');
+  const planNeedsReview = planCandidates.filter((c) => c.status === 'needs_review');
+  const planStale = planCandidates.filter((c) => c.status === 'stale');
+  const planInvalid = planCandidates.filter((c) => c.status === 'invalid');
+
+  let narrationState: TtsBDagNodeState;
+  if (planEligible.length > 0) {
+    narrationState = {
+      node: 'narration_plan_v2',
+      status: 'ready',
+      detail: null,
+      candidateCount: planCandidates.length,
+      currentCandidateCount: planEligible.length,
+    };
+  } else if (planNeedsReview.length > 0) {
+    narrationState = {
+      node: 'narration_plan_v2',
+      status: 'needs_review',
+      detail: `narration plan 存在 needsReview：${planNeedsReview[0]!.statusReason ?? ''}`,
+      candidateCount: planCandidates.length,
+      currentCandidateCount: 0,
+    };
+  } else if (planInvalid.length > 0) {
+    narrationState = {
+      node: 'narration_plan_v2',
+      status: 'invalid_source',
+      detail: `narration plan 已 invalid：${planInvalid[0]!.statusReason ?? ''}`,
+      candidateCount: planCandidates.length,
+      currentCandidateCount: 0,
+    };
+  } else if (planStale.length > 0) {
+    narrationState = {
+      node: 'narration_plan_v2',
+      status: 'stale_source',
+      detail: `narration plan 已 stale（locked Script V2 漂移）：${planStale[0]!.statusReason ?? ''}`,
+      candidateCount: planCandidates.length,
+      currentCandidateCount: 0,
+    };
+  } else if (planCandidates.length > 0) {
+    narrationState = {
+      node: 'narration_plan_v2',
+      status: 'blocked',
+      detail: 'narration plan candidate 存在但分类异常',
+      candidateCount: planCandidates.length,
+      currentCandidateCount: 0,
+    };
+  } else {
+    narrationState = {
+      node: 'narration_plan_v2',
+      status: 'not_generated',
+      detail: null,
+      candidateCount: 0,
+      currentCandidateCount: 0,
+    };
+  }
+
+  // project_voice_assignment 节点
   const assignmentCandidates = await listProjectVoiceAssignmentCandidates(projectId);
   const assignmentCurrent = assignmentCandidates.filter((c) => c.status === 'current_candidate');
   const assignmentStale = assignmentCandidates.filter((c) => c.status === 'stale_source');
@@ -103,7 +261,7 @@ export async function computeTtsBDagNodeStates(projectId: string): Promise<Recor
     assignmentState = {
       node: 'project_voice_assignment',
       status: 'invalid_source',
-      detail: `全部 assignment 为 invalid（exact voice 不可用）：${assignmentInvalid[0]!.statusReason ?? ''}`,
+      detail: `全部 assignment 为 invalid（exact voice 不可用/source 不一致）：${assignmentInvalid[0]!.statusReason ?? ''}`,
       candidateCount: assignmentCandidates.length,
       currentCandidateCount: 0,
     };
@@ -119,7 +277,7 @@ export async function computeTtsBDagNodeStates(projectId: string): Promise<Recor
     assignmentState = {
       node: 'project_voice_assignment',
       status: 'blocked',
-      detail: 'assignment candidate 存在但分类异常（无 current/stale/invalid）',
+      detail: 'assignment candidate 存在但分类异常',
       candidateCount: assignmentCandidates.length,
       currentCandidateCount: 0,
     };
@@ -133,21 +291,28 @@ export async function computeTtsBDagNodeStates(projectId: string): Promise<Recor
     };
   }
 
-  // performance 节点：依赖 = 有 current assignment（无 usable exact revision →
-  // assignment invalid → performance blocked/invalid）。优先级：
-  // running > ready > invalid > stale > generation_failed > not_generated > blocked。
+  // narration_performance_plan 节点（双依赖）
   const activity = activityOf(projectId);
   const performanceCandidates = await listNarrationPerformancePlanCandidates(projectId);
   const perfCurrent = performanceCandidates.filter((c) => c.status === 'current_candidate');
   const perfInvalid = performanceCandidates.filter((c) => c.status === 'invalid_source');
   const perfStale = performanceCandidates.filter((c) => c.status === 'stale_source');
 
+  // 依赖可用性（精确列出缺失依赖，blocked detail 不写笼统文案）
+  const planUsable = narrationState.status === 'ready';
+  const assignUsable = assignmentState.status === 'ready';
+  const missingDeps: TtsBDagNodeId[] = [];
+  if (!planUsable) missingDeps.push('narration_plan_v2');
+  if (!assignUsable) missingDeps.push('project_voice_assignment');
+
   let performanceState: TtsBDagNodeState;
   if (activity.running) {
+    // generation activity：若 exact source 已失效，detail 标明 dependency invalid
+    const depNote = missingDeps.length > 0 ? `（dependency invalid: ${missingDeps.join(', ')}）` : '';
     performanceState = {
       node: 'narration_performance_plan',
       status: 'generation_running',
-      detail: 'generation run/dispatch 进行中',
+      detail: `generation run/dispatch 进行中${depNote}`,
       candidateCount: performanceCandidates.length,
       currentCandidateCount: perfCurrent.length,
     };
@@ -163,7 +328,7 @@ export async function computeTtsBDagNodeStates(projectId: string): Promise<Recor
     performanceState = {
       node: 'narration_performance_plan',
       status: 'invalid_source',
-      detail: `全部 performance 为 invalid（voice 不可用/语义不通过）：${perfInvalid[0]!.statusReason ?? ''}`,
+      detail: `全部 performance 为 invalid（voice 不可用/语义不通过/source 不一致）：${perfInvalid[0]!.statusReason ?? ''}`,
       candidateCount: performanceCandidates.length,
       currentCandidateCount: 0,
     };
@@ -175,6 +340,14 @@ export async function computeTtsBDagNodeStates(projectId: string): Promise<Recor
       candidateCount: performanceCandidates.length,
       currentCandidateCount: 0,
     };
+  } else if (missingDeps.length > 0) {
+    performanceState = {
+      node: 'narration_performance_plan',
+      status: 'blocked',
+      detail: `依赖缺失/不可用：${missingDeps.join(', ')}`,
+      candidateCount: 0,
+      currentCandidateCount: 0,
+    };
   } else if (activity.failed) {
     performanceState = {
       node: 'narration_performance_plan',
@@ -183,7 +356,7 @@ export async function computeTtsBDagNodeStates(projectId: string): Promise<Recor
       candidateCount: 0,
       currentCandidateCount: 0,
     };
-  } else if (assignmentState.status === 'ready') {
+  } else {
     performanceState = {
       node: 'narration_performance_plan',
       status: 'not_generated',
@@ -191,22 +364,16 @@ export async function computeTtsBDagNodeStates(projectId: string): Promise<Recor
       candidateCount: 0,
       currentCandidateCount: 0,
     };
-  } else {
-    performanceState = {
-      node: 'narration_performance_plan',
-      status: 'blocked',
-      detail: `依赖 voice assignment 状态=${assignmentState.status}（无可用 exact voice candidate）`,
-      candidateCount: 0,
-      currentCandidateCount: 0,
-    };
   }
 
-  return {project_voice_assignment: assignmentState, narration_performance_plan: performanceState};
+  return {
+    narration_plan_v2: narrationState,
+    project_voice_assignment: assignmentState,
+    narration_performance_plan: performanceState,
+  };
 }
 
 /** 供测试/UI 读取单个节点状态。 */
 export async function computeTtsBDagNodeState(projectId: string, node: TtsBDagNodeId): Promise<TtsBDagNodeState> {
   return (await computeTtsBDagNodeStates(projectId))[node]!;
 }
-
-export {classifyProjectVoiceAssignment, classifyNarrationPerformancePlan, normalizeStatus};
