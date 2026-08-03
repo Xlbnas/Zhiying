@@ -23,7 +23,7 @@ process.env.ZHIYING_DATA_DIR = DATA_DIR;
 
 import {closeDb, getDb} from '../src/lib/db';
 import {createProjectWithWorkflow} from '../src/lib/projects';
-import {createVoiceProfile} from '../src/lib/voice-library/profiles';
+import {createVoiceProfile, setVoiceProfileStatus} from '../src/lib/voice-library/profiles';
 import {ingestVoiceProfileRevision, type VoiceLibraryExecDeps} from '../src/lib/voice-library/revisions';
 import {
   buildProjectVoiceAssignment,
@@ -33,6 +33,8 @@ import {
 } from '../src/lib/tts-b/assignment';
 import {projectVoiceAssignmentArtifactV1Schema as assignmentSchema} from '../src/lib/tts-b/assignment-schema';
 import {PROJECT_VOICE_ASSIGNMENT_KIND} from '../src/lib/tts-b/constants';
+import {setAssignmentBeforeCommitFenceForTest} from '../src/lib/tts-b/assignment';
+import {parseProjectVoiceAssignment} from '../src/lib/tts-b/assignment';
 
 let pass = 0;
 let fail = 0;
@@ -173,15 +175,35 @@ async function main(): Promise<void> {
       !assignmentSchema.safeParse({...base, source: {...base.source, canonicalAudioSha256: 'zz'}}).success,
       '[A5] hash 格式非法拒绝',
     );
-    // malformed profile/revision（schema 层 min(1) 通过；precheck 层拒绝不存在）
+    // ID schema（TTS-B.R1 §八）：malformed → INVALID_PROFILE_ID/INVALID_REVISION_ID（400/422）；
+    // well-formed UUID 但不存在 → PROFILE_NOT_FOUND/REVISION_NOT_FOUND（404）
+    const missingUuid = '00000000-0000-4000-8000-000000000000';
+    for (const [label, badId] of [
+      ['空字符串', ''],
+      ['no-such-profile', 'no-such-profile'],
+      ['abc', 'abc'],
+      ['路径字符串', '../etc/passwd'],
+      ['含换行', 'abc\ndef'],
+    ] as const) {
+      await expectAssignmentError(
+        `[A6-${label}] malformed profile ID → INVALID_PROFILE_ID`,
+        () => buildProjectVoiceAssignment({projectId, voiceProfileId: badId, voiceProfileRevisionId: revisionId, requestId: 'req-a6-0001'}),
+        'INVALID_PROFILE_ID',
+      );
+    }
     await expectAssignmentError(
-      '[A6] 不存在的 profile → PROFILE_NOT_FOUND',
-      () => buildProjectVoiceAssignment({projectId, voiceProfileId: 'no-such-profile', voiceProfileRevisionId: revisionId, requestId: 'req-a6-0001'}),
+      '[A6b] well-formed 但不存在 profile UUID → PROFILE_NOT_FOUND',
+      () => buildProjectVoiceAssignment({projectId, voiceProfileId: missingUuid, voiceProfileRevisionId: revisionId, requestId: 'req-a6-0001'}),
       'PROFILE_NOT_FOUND',
     );
     await expectAssignmentError(
-      '[A7] 不存在的 revision → REVISION_NOT_FOUND',
+      '[A6c] malformed revision ID → INVALID_REVISION_ID',
       () => buildProjectVoiceAssignment({projectId, voiceProfileId: profileId, voiceProfileRevisionId: 'no-such-rev', requestId: 'req-a7-0001'}),
+      'INVALID_REVISION_ID',
+    );
+    await expectAssignmentError(
+      '[A7] well-formed 但不存在 revision UUID → REVISION_NOT_FOUND',
+      () => buildProjectVoiceAssignment({projectId, voiceProfileId: profileId, voiceProfileRevisionId: missingUuid, requestId: 'req-a7-0001'}),
       'REVISION_NOT_FOUND',
     );
     await expectAssignmentError(
@@ -383,6 +405,171 @@ BEGIN SELECT RAISE(ABORT, 'voice_profile_revisions is immutable'); END;`);
     ok(
       projRow.m7_pipeline_snapshot_id === null && projRow.pipeline_version === 'm6',
       '[C6] assignment 不更新 projects 指针（m7_pipeline_snapshot_id NULL、pipeline m6）',
+    );
+  }
+
+  // ---------- C-ext：archived replay / commit fence / source 自洽 ----------
+  {
+    // C7：archive 后同 requestId 同 revision → 200 reused（historical replay，不 PROFILE_ARCHIVED）
+    const {profileId: arPid, revisionId: arRid} = await makeVoiceRevision(1510);
+    const ar = await buildProjectVoiceAssignment({
+      projectId,
+      voiceProfileId: arPid,
+      voiceProfileRevisionId: arRid,
+      requestId: 'req-ar-replay-0001',
+    });
+    setVoiceProfileStatus(arPid, 'archived');
+    const arReplay = await buildProjectVoiceAssignment({
+      projectId,
+      voiceProfileId: arPid,
+      voiceProfileRevisionId: arRid,
+      requestId: 'req-ar-replay-0001',
+    });
+    ok(
+      arReplay.kind === 'reused' && arReplay.artifact.id === ar.artifact.id,
+      '[C7] archive 后同 requestId 同 revision → 200 reused（historical replay）',
+    );
+    // archive 后新 requestId → PROFILE_ARCHIVED
+    await expectAssignmentError(
+      '[C8] archive 后新 requestId → PROFILE_ARCHIVED',
+      () => buildProjectVoiceAssignment({projectId, voiceProfileId: arPid, voiceProfileRevisionId: arRid, requestId: 'req-ar-new-0001'}),
+      'PROFILE_ARCHIVED',
+    );
+    setVoiceProfileStatus(arPid, 'active');
+  }
+
+  // C9：commit fence —— initial precheck 后、事务前 archive Profile → 创建失败、0/0
+  {
+    const {profileId: cfPid, revisionId: cfRid} = await makeVoiceRevision(1610);
+    const beforeCount = assignmentCount(projectId);
+    setAssignmentBeforeCommitFenceForTest(() => setVoiceProfileStatus(cfPid, 'archived'));
+    let err: unknown = null;
+    try {
+      await buildProjectVoiceAssignment({projectId, voiceProfileId: cfPid, voiceProfileRevisionId: cfRid, requestId: 'req-cf-0001'});
+    } catch (e) {
+      err = e;
+    }
+    setAssignmentBeforeCommitFenceForTest(null);
+    ok(
+      err instanceof AssignmentError && err.code === 'PROFILE_ARCHIVED' &&
+        assignmentCount(projectId) === beforeCount && envelopeCount(projectId) === beforeCount,
+      '[C9] commit fence：事务前 archive → 创建失败、artifact/envelope 未新增',
+    );
+    setVoiceProfileStatus(cfPid, 'active');
+  }
+
+  // C10：commit fence —— 事务前删除 reference 文件 → 创建失败、0/0
+  {
+    const {profileId: fdPid, revisionId: fdRid} = await makeVoiceRevision(1710);
+    const beforeCount = assignmentCount(projectId);
+    const fdRow = getDb().prepare('SELECT canonical_audio_path AS p FROM voice_profile_revisions WHERE id = ?').get(fdRid) as {p: string};
+    setAssignmentBeforeCommitFenceForTest(() => {
+      fs.rmSync(path.join(process.cwd(), 'data', 'test-tts-b-assignment', 'voice-library', fdRow.p.slice('voice-library/'.length)));
+    });
+    let err: unknown = null;
+    try {
+      await buildProjectVoiceAssignment({projectId, voiceProfileId: fdPid, voiceProfileRevisionId: fdRid, requestId: 'req-cf-0002'});
+    } catch (e) {
+      err = e;
+    }
+    setAssignmentBeforeCommitFenceForTest(null);
+    ok(
+      err instanceof AssignmentError &&
+        (err.code === 'REVISION_NOT_FOUND' || err.code === 'VOICE_UNUSABLE') &&
+        assignmentCount(projectId) === beforeCount && envelopeCount(projectId) === beforeCount,
+      '[C10] commit fence：事务前 reference 删除 → 创建失败（final exact validator fail-closed）、artifact/envelope 0/0',
+      {code: err instanceof AssignmentError ? err.code : String(err)},
+    );
+  }
+
+  // C11：source 自洽（semantic fence——部分字段保持 schema 可 parse 仅值不一致 →
+  // ASSIGNMENT_SOURCE_MISMATCH；zod literal 字段（provider/adapter/schema）变异 →
+  // schema 拒绝，同样 fail-closed invalid_source）
+  {
+    const {profileId: scPid, revisionId: scRid} = await makeVoiceRevision(1810);
+    // 同 profile 第二 revision（供 revisionId 变异使用——同 profile 不同 revision
+    // 时 descriptor 可读，hash 不一致 → semantic ASSIGNMENT_SOURCE_MISMATCH）
+    const scRev2 = (
+      await ingestVoiceProfileRevision(
+        {voiceProfileId: scPid, requestId: `rev-2-sc-${crypto.randomUUID()}`, audioBuffer: makeWav(1500, 1820)},
+        MOCK_DEPS,
+      )
+    ).revision;
+    const sc = await buildProjectVoiceAssignment({
+      projectId,
+      voiceProfileId: scPid,
+      voiceProfileRevisionId: scRid,
+      requestId: 'req-sc-0001',
+    });
+    const missingUuid = '00000000-0000-4000-8000-000000000099';
+    // semantic cases：schema 保持可 parse，仅字段值不一致
+    const semanticCases: Array<{label: string; mutate: (c: Record<string, unknown>) => void}> = [
+      {label: 'canonicalAudioSha256 改错', mutate: (c) => { (c.source as Record<string, unknown>).canonicalAudioSha256 = 'e'.repeat(64); }},
+      {label: 'projectId 改错', mutate: (c) => { c.projectId = '00000000-0000-4000-8000-0000000000aa'; }},
+      {label: 'voiceProfileId 改另一个有效 UUID（缺失）', mutate: (c) => { (c.source as Record<string, unknown>).voiceProfileId = missingUuid; }},
+      {label: 'voiceProfileRevisionId 改同 profile 另一 revision', mutate: (c) => { (c.source as Record<string, unknown>).voiceProfileRevisionId = scRev2.id; }},
+    ];
+    for (const c of semanticCases) {
+      const original = (getDb().prepare('SELECT content_json FROM artifacts WHERE id = ?').get(sc.artifact.id) as {content_json: string}).content_json;
+      const mutated = JSON.parse(original) as Record<string, unknown>;
+      c.mutate(mutated);
+      const parsed = parseProjectVoiceAssignment({id: sc.artifact.id, project_id: projectId, kind: PROJECT_VOICE_ASSIGNMENT_KIND, version: 1, content_json: JSON.stringify(mutated), created_at: ''});
+      if (parsed === null) {
+        ok(false, `[C11-${c.label}] 前置：变异后仍可 parse（应为 semantic 而非 schema 拒绝）`);
+        continue;
+      }
+      const candidate = await classifyProjectVoiceAssignment(projectId, {
+        id: sc.artifact.id, project_id: projectId, kind: PROJECT_VOICE_ASSIGNMENT_KIND, version: 1,
+        content_json: JSON.stringify(mutated), created_at: '',
+      });
+      ok(
+        candidate.status === 'invalid_source' &&
+          ((candidate.statusReason?.includes('ASSIGNMENT_SOURCE_MISMATCH') ?? false) ||
+            (candidate.statusReason?.includes('不可读') ?? false)),
+        `[C11-${c.label}] source 不一致 → invalid_source（ASSIGNMENT_SOURCE_MISMATCH 或 descriptor 不可读，均 fail-closed）`,
+        {status: candidate.status, reason: candidate.statusReason},
+      );
+    }
+    // schema-level cases：provider/adapter/schema 是 zod literal，变异 → schema 拒绝（fail-closed）
+    for (const [label, mutate] of [
+      ['provider 改 mock', (c: Record<string, unknown>) => { (c.source as Record<string, unknown>).provider = 'mock'; }],
+      ['adapter key 改错', (c: Record<string, unknown>) => { (c.source as Record<string, unknown>).adapterCompatibilityKey = 'other@1'; }],
+      ['revisionSchemaVersion 改错', (c: Record<string, unknown>) => { (c.source as Record<string, unknown>).revisionSchemaVersion = 'voice-profile-revision@9.9'; }],
+    ] as const) {
+      const original = (getDb().prepare('SELECT content_json FROM artifacts WHERE id = ?').get(sc.artifact.id) as {content_json: string}).content_json;
+      const mutated = JSON.parse(original) as Record<string, unknown>;
+      mutate(mutated);
+      const parsed = parseProjectVoiceAssignment({id: sc.artifact.id, project_id: projectId, kind: PROJECT_VOICE_ASSIGNMENT_KIND, version: 1, content_json: JSON.stringify(mutated), created_at: ''});
+      ok(parsed === null, `[C11-${label}] zod literal 变异 → schema 拒绝（同样 fail-closed）`);
+    }
+  }
+
+  // C12：既有 envelope 的 artifact 损坏（source mismatch）→ 同 requestId replay → ASSIGNMENT_UNUSABLE，不重建
+  {
+    const {profileId: euPid, revisionId: euRid} = await makeVoiceRevision(1910);
+    const eu = await buildProjectVoiceAssignment({
+      projectId,
+      voiceProfileId: euPid,
+      voiceProfileRevisionId: euRid,
+      requestId: 'req-eu-0001',
+    });
+    const row = (getDb().prepare('SELECT content_json FROM artifacts WHERE id = ?').get(eu.artifact.id) as {content_json: string});
+    const mutated = JSON.parse(row.content_json) as Record<string, unknown>;
+    (mutated.source as Record<string, unknown>).canonicalAudioSha256 = 'f'.repeat(64);
+    getDb()
+      .prepare('UPDATE artifacts SET content_json = ? WHERE id = ?')
+      .run(JSON.stringify(mutated), eu.artifact.id);
+    const beforeCount = assignmentCount(projectId);
+    let err: unknown = null;
+    try {
+      await buildProjectVoiceAssignment({projectId, voiceProfileId: euPid, voiceProfileRevisionId: euRid, requestId: 'req-eu-0001'});
+    } catch (e) {
+      err = e;
+    }
+    ok(
+      err instanceof AssignmentError && err.code === 'ASSIGNMENT_UNUSABLE' &&
+        assignmentCount(projectId) === beforeCount,
+      '[C12] 既有 envelope 的 artifact source 不一致 → replay ASSIGNMENT_UNUSABLE（不重建、不新增）',
     );
   }
 

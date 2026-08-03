@@ -1,21 +1,15 @@
 /**
- * TTS-B — DAG / classification / stale 行为测试（设计文档 §8；F 覆盖）。
+ * TTS-B.R1 — DAG 测试（设计文档 §8 / §十：F1-F13，双依赖语义）。
  *
- * F. DAG：no Assignment → Performance blocked；Assignment usable + plan ready →
- *    not_generated；Narration Plan drift → stale；Assignment drift → stale；
- *    新 revision 不 stale 旧 exact Assignment；archive 不 stale historical exact
- *    Assignment；file/hash 损坏 invalidates；Sequence/Shot 状态不变；
- *    无反向边/无 cycle。
- *
- * 用法：npx tsx scripts/test-tts-b-dag.ts
- * 使用临时数据目录（data/test-tts-b-dag），结束后清理。
+ * 每条使用独立项目（或明确清除前一条活动数据），避免 fixture 污染。
+ * 真实 drift：lock 新 Script V2 不改旧 plan artifact content_json。
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-const DATA_DIR = path.join('data', 'test-tts-b-dag');
+const DATA_DIR = path.join('data', 'test-tts-b-dag-r1');
 process.env.ZHIYING_DATA_DIR = DATA_DIR;
 
 import {closeDb, getDb} from '../src/lib/db';
@@ -24,12 +18,22 @@ import {generateVersion} from '../src/lib/workflow/operations';
 import {lockStage} from '../src/lib/workflow/stages';
 import type {WorkflowStage} from '../src/lib/workflow/types';
 import {buildNarrationPlanV2} from '../src/lib/narration/plan-v2';
+import type {NarrationPlanV2} from '../src/lib/narration/schema-v2';
 import {createVoiceProfile, setVoiceProfileStatus} from '../src/lib/voice-library/profiles';
 import {ingestVoiceProfileRevision, type VoiceLibraryExecDeps} from '../src/lib/voice-library/revisions';
 import {buildProjectVoiceAssignment, classifyProjectVoiceAssignment} from '../src/lib/tts-b/assignment';
-import {computeTtsBDagNodeStates} from '../src/lib/tts-b/dag';
-import {detectM7DagCycles, detectM7DagReverseEdges} from '../src/lib/m7-dag/dag';
+import {
+  buildNarrationPerformancePlan,
+  classifyNarrationPerformancePlan,
+  type PerformanceArtifactRow,
+} from '../src/lib/tts-b/performance';
+import {
+  computeTtsBDagNodeStates,
+  detectTtsBDagCycles,
+  detectTtsBDagReverseEdges,
+} from '../src/lib/tts-b/dag';
 import {computeM7DagNodeStates} from '../src/lib/m7-dag/readiness';
+import type {LLMProvider, LLMRequest, LLMResponse} from '../src/lib/llm/types';
 
 let pass = 0;
 let fail = 0;
@@ -41,7 +45,7 @@ function ok(cond: boolean, label: string, detail?: unknown): void {
   } else {
     fail++;
     console.log(`FAIL  ${label}`);
-    if (detail !== undefined) console.log('      ', JSON.stringify(detail)?.slice(0, 400));
+    if (detail !== undefined) console.log('      ', JSON.stringify(detail)?.slice(0, 500));
   }
 }
 
@@ -55,151 +59,283 @@ const MOCK_DEPS: VoiceLibraryExecDeps = {
   },
 };
 
+class MockProvider implements LLMProvider {
+  readonly name = 'mock-llm';
+  generate(request: LLMRequest): Promise<LLMResponse> {
+    const planMatch = request.user.match(/SpeechUnits:\n([\s\S]*)/);
+    const ids = planMatch ? [...planMatch[1].matchAll(/^- (N\d{3}):/gm)].map((m) => m[1]) : [];
+    return Promise.resolve({
+      text: JSON.stringify({
+        items: ids.map((unitId) => ({unitId, deliveryOverride: null, pace: 'normal', energy: 'normal', emotion: {mode: 'none'}})),
+      }),
+      requestId: `mock-${crypto.randomUUID()}`,
+      model: request.model,
+      finishReason: 'stop',
+      usage: {promptTokens: 10, cacheHitTokens: 0, cacheMissTokens: 10, completionTokens: 5},
+    });
+  }
+}
+
+const UPSTREAM: WorkflowStage[] = ['project_definition', 'research', 'evidence', 'argument_tree', 'script_v1'];
+
+function makeWav(freq: number): Buffer {
+  const sr = 48000;
+  const frames = Math.floor((sr * 1500) / 1000);
+  const data = Buffer.alloc(frames * 2);
+  for (let i = 0; i < frames; i++) data.writeInt16LE(Math.round(10000 * Math.sin((2 * Math.PI * freq * i) / sr)), i * 2);
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8);
+  h.write('fmt ', 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
+  h.writeUInt32LE(sr, 24); h.writeUInt32LE(sr * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34);
+  h.write('data', 36); h.writeUInt32LE(data.length, 40);
+  return Buffer.concat([h, data]);
+}
+
 async function makeVoiceRevision(freq: number): Promise<{profileId: string; revisionId: string}> {
-  const profile = createVoiceProfile({displayName: `dag-voice-${freq}`});
+  const profile = createVoiceProfile({displayName: `dag-v-${freq}`});
   const result = await ingestVoiceProfileRevision(
-    {voiceProfileId: profile.id, requestId: `dag-rev-${freq}-${crypto.randomUUID()}`, audioBuffer: (() => {
-      const sr = 48000;
-      const frames = Math.floor((sr * 1500) / 1000);
-      const data = Buffer.alloc(frames * 2);
-      for (let i = 0; i < frames; i++) data.writeInt16LE(Math.round(10000 * Math.sin((2 * Math.PI * freq * i) / sr)), i * 2);
-      const h = Buffer.alloc(44);
-      h.write('RIFF', 0); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8);
-      h.write('fmt ', 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
-      h.writeUInt32LE(sr, 24); h.writeUInt32LE(sr * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34);
-      h.write('data', 36); h.writeUInt32LE(data.length, 40);
-      return Buffer.concat([h, data]);
-    })()},
+    {voiceProfileId: profile.id, requestId: `dag-rv-${freq}-${crypto.randomUUID()}`, audioBuffer: makeWav(freq)},
     MOCK_DEPS,
   );
   return {profileId: profile.id, revisionId: result.revision.id};
 }
 
+/** 项目 + locked script V2 + narration plan（eligible 或 needs_review 或 none）。 */
+function setupProject(opts: {plan?: 'eligible' | 'needs_review' | 'none'}): {projectId: string; planBuild: ReturnType<typeof buildNarrationPlanV2> | null} {
+  const projectId = createProjectWithWorkflow({topic: `dag-r1-${crypto.randomUUID().slice(0, 8)}`, coreQuestion: 'q'}).project.id;
+  for (const stage of UPSTREAM) {
+    generateVersion({projectId, stage, content: `# ${stage}`, contentType: 'markdown', source: 'manual_edit'});
+    lockStage(projectId, stage);
+  }
+  if (opts.plan === 'none') return {projectId, planBuild: null};
+  if (opts.plan === 'needs_review') {
+    // legacy 输入模式（无 promptVersion）：@silence 未被 strict 识别 → unknown_directive review
+    generateVersion({
+      projectId, stage: 'script_v2',
+      content: `# Script V2\n\n## 第 1 章 开场（00:00–01:00）\n\n第一句。\n\n@silence 500ms reason=pause\n\n第二句。\n`,
+      contentType: 'markdown', source: 'manual_edit',
+    });
+    lockStage(projectId, 'script_v2');
+    return {projectId, planBuild: buildNarrationPlanV2(projectId)};
+  }
+  const content = `# Script V2\n\n## 第 1 章 开场（00:00–01:00）\n\n第一句。第二句。\n`;
+  generateVersion({projectId, stage: 'script_v2', content, contentType: 'markdown', source: 'manual_edit', promptVersion: 'script-v2@2.0'});
+  lockStage(projectId, 'script_v2');
+  return {projectId, planBuild: buildNarrationPlanV2(projectId)};
+}
+
+async function createAssignment(projectId: string, freq = 440): Promise<{profileId: string; revisionId: string; artifactId: string}> {
+  const {profileId, revisionId} = await makeVoiceRevision(freq);
+  const r = await buildProjectVoiceAssignment({
+    projectId,
+    voiceProfileId: profileId,
+    voiceProfileRevisionId: revisionId,
+    requestId: `dag-assign-${crypto.randomUUID()}`,
+  });
+  return {profileId, revisionId, artifactId: r.artifact.id};
+}
+
+async function createPerformance(projectId: string, planArtifactId: string, assignmentArtifactId: string, requestId: string) {
+  return buildNarrationPerformancePlan({
+    projectId,
+    narrationPlanArtifactId: planArtifactId,
+    projectVoiceAssignmentArtifactId: assignmentArtifactId,
+    requestId,
+    provider: new MockProvider(),
+  });
+}
+
 async function main(): Promise<void> {
   fs.rmSync(path.resolve(process.cwd(), DATA_DIR), {recursive: true, force: true});
   getDb();
-  const projectId = createProjectWithWorkflow({topic: 'tts-b-dag', coreQuestion: 'q'}).project.id;
 
-  // F1: no Assignment → Performance blocked
+  // F1: 无 Plan / 无 Assignment → blocked，detail 两个依赖
   {
-    const states = await computeTtsBDagNodeStates(projectId);
+    const {projectId} = setupProject({plan: 'none'});
+    const s = await computeTtsBDagNodeStates(projectId);
     ok(
-      states.project_voice_assignment.status === 'not_generated' &&
-        states.narration_performance_plan.status === 'blocked',
-      '[F1] 无 Assignment → performance blocked（依赖缺失）',
-      {a: states.project_voice_assignment.status, p: states.narration_performance_plan.status},
+      s.narration_performance_plan.status === 'blocked' &&
+        (s.narration_performance_plan.detail?.includes('narration_plan_v2') ?? false) &&
+        (s.narration_performance_plan.detail?.includes('project_voice_assignment') ?? false),
+      '[F1] 无 Plan/无 Assignment → blocked（detail 精确列出两个缺失依赖）',
+      {detail: s.narration_performance_plan.detail},
     );
   }
 
-  // F2: Assignment usable → performance not_generated
+  // F2: Assignment ready、Plan missing → blocked，仅缺 narration_plan_v2
   {
-    const {profileId, revisionId} = await makeVoiceRevision(440);
-    const assign = await buildProjectVoiceAssignment({
-      projectId,
-      voiceProfileId: profileId,
-      voiceProfileRevisionId: revisionId,
-      requestId: 'req-dag-assign-0001',
-    });
-    const states = await computeTtsBDagNodeStates(projectId);
+    const {projectId} = setupProject({plan: 'none'});
+    await createAssignment(projectId, 441);
+    const s = await computeTtsBDagNodeStates(projectId);
     ok(
-      states.project_voice_assignment.status === 'ready' &&
-        states.narration_performance_plan.status === 'not_generated',
-      '[F2] Assignment usable → assignment ready、performance not_generated',
+      s.project_voice_assignment.status === 'ready' &&
+        s.narration_performance_plan.status === 'blocked' &&
+        (s.narration_performance_plan.detail?.includes('narration_plan_v2') ?? false) &&
+        !(s.narration_performance_plan.detail?.includes('project_voice_assignment') ?? false),
+      '[F2] Assignment ready + Plan missing → blocked（仅缺 narration_plan_v2）',
+      {detail: s.narration_performance_plan.detail},
     );
-    void assign;
   }
 
-  // F3: 新 revision 不 stale 旧 exact Assignment
+  // F3: eligible Plan、Assignment missing → blocked，仅缺 project_voice_assignment
   {
-    const {profileId, revisionId: r1} = await makeVoiceRevision(550);
-    const a1 = await buildProjectVoiceAssignment({
-      projectId,
-      voiceProfileId: profileId,
-      voiceProfileRevisionId: r1,
-      requestId: 'req-dag-assign-0002',
-    });
-    // 同 profile 上传新 revision
+    const {projectId} = setupProject({plan: 'eligible'});
+    const s = await computeTtsBDagNodeStates(projectId);
+    ok(
+      s.narration_plan_v2.status === 'ready' &&
+        s.narration_performance_plan.status === 'blocked' &&
+        (s.narration_performance_plan.detail?.includes('project_voice_assignment') ?? false) &&
+        !(s.narration_performance_plan.detail?.includes('narration_plan_v2') ?? false),
+      '[F3] eligible Plan + Assignment missing → blocked（仅缺 project_voice_assignment）',
+      {detail: s.narration_performance_plan.detail},
+    );
+  }
+
+  // F4: Plan needs_review + Assignment ready → blocked
+  {
+    const {projectId, planBuild} = setupProject({plan: 'needs_review'});
+    const planCand = planBuild?.plan.needsReview ?? [];
+    ok((planCand?.length ?? 0) > 0, '[F4-pre] needs_review plan 构造成功', {needsReview: planCand?.length});
+    await createAssignment(projectId, 442);
+    const s = await computeTtsBDagNodeStates(projectId);
+    ok(
+      s.narration_plan_v2.status === 'needs_review' && s.narration_performance_plan.status === 'blocked',
+      '[F4] Plan needs_review + Assignment ready → performance blocked',
+      {plan: s.narration_plan_v2.status, perf: s.narration_performance_plan.status},
+    );
+  }
+
+  // F5: eligible Plan + Assignment ready → not_generated
+  {
+    const {projectId, planBuild} = setupProject({plan: 'eligible'});
+    await createAssignment(projectId, 443);
+    const s = await computeTtsBDagNodeStates(projectId);
+    ok(
+      s.narration_plan_v2.status === 'ready' && s.project_voice_assignment.status === 'ready' &&
+        s.narration_performance_plan.status === 'not_generated',
+      '[F5] eligible Plan + Assignment ready → performance not_generated',
+      {perf: s.narration_performance_plan.status},
+    );
+    void planBuild;
+  }
+
+  // F6: 生成 current Performance → ready
+  {
+    const {projectId, planBuild} = setupProject({plan: 'eligible'});
+    const a = await createAssignment(projectId, 444);
+    const r = await createPerformance(projectId, planBuild!.artifact.id, a.artifactId, 'req-dag-r1-f6-0001');
+    ok(r.kind === 'succeeded', '[F6-pre] performance 生成成功');
+    const s = await computeTtsBDagNodeStates(projectId);
+    ok(s.narration_performance_plan.status === 'ready', '[F6] 已有 current Performance → ready');
+  }
+
+  // F7: lock 新 Script V2（不改旧 plan artifact）→ Performance stale_source
+  {
+    const {projectId, planBuild} = setupProject({plan: 'eligible'});
+    const a = await createAssignment(projectId, 445);
+    const r = await createPerformance(projectId, planBuild!.artifact.id, a.artifactId, 'req-dag-r1-f7-0001');
+    ok(r.kind === 'succeeded', '[F7-pre] performance 生成成功');
+    const planContentBefore = (getDb()
+      .prepare('SELECT content_json FROM artifacts WHERE id = ?')
+      .get(planBuild!.artifact.id) as {content_json: string}).content_json;
+    // 生成并 lock Script V2 version B（真实 drift，不 UPDATE 旧 plan artifact）
+    generateVersion({projectId, stage: 'script_v2', content: `# Script V2\n\n## 第 1 章 新章（00:00–01:00）\n\n新第一句。新第二句。\n`, contentType: 'markdown', source: 'manual_edit', promptVersion: 'script-v2@2.0'});
+    lockStage(projectId, 'script_v2');
+    const planContentAfter = (getDb()
+      .prepare('SELECT content_json FROM artifacts WHERE id = ?')
+      .get(planBuild!.artifact.id) as {content_json: string}).content_json;
+    ok(planContentBefore === planContentAfter, '[F7a] 旧 plan artifact content_json 前后完全一致（未伪造 drift）');
+    const perfRef = getDb()
+      .prepare("SELECT * FROM artifacts WHERE project_id = ? AND kind = 'narration_performance_plan' ORDER BY version DESC LIMIT 1")
+      .get(projectId) as PerformanceArtifactRow;
+    const perfCand = await classifyNarrationPerformancePlan(projectId, perfRef);
+    const s = await computeTtsBDagNodeStates(projectId);
+    ok(
+      perfCand.status === 'stale_source' && s.narration_performance_plan.status === 'stale_source',
+      '[F7b] lock 新 Script V2 → 旧 Performance stale_source（不改 artifact 内容）',
+      {perf: perfCand.status, node: s.narration_performance_plan.status},
+    );
+  }
+
+  // F8: Assignment voice 文件损坏 → Assignment invalid + Performance invalid/blocked
+  {
+    const {projectId, planBuild} = setupProject({plan: 'eligible'});
+    const {profileId, revisionId, artifactId} = await createAssignment(projectId, 446);
+    const r = await createPerformance(projectId, planBuild!.artifact.id, artifactId, 'req-dag-r1-f8-0001');
+    ok(r.kind === 'succeeded', '[F8-pre] performance 生成成功');
+    const row = getDb().prepare('SELECT canonical_audio_path AS p FROM voice_profile_revisions WHERE id = ?').get(revisionId) as {p: string};
+    fs.rmSync(path.join(process.cwd(), 'data', 'test-tts-b-dag-r1', 'voice-library', row.p.slice('voice-library/'.length)));
+    const s = await computeTtsBDagNodeStates(projectId);
+    ok(
+      s.project_voice_assignment.status === 'invalid_source' &&
+        (s.narration_performance_plan.status === 'invalid_source' || s.narration_performance_plan.status === 'blocked'),
+      '[F8] voice 文件损坏 → Assignment invalid + Performance invalid/blocked',
+      {a: s.project_voice_assignment.status, p: s.narration_performance_plan.status},
+    );
+    void profileId;
+  }
+
+  // F9: 新 revision 不 stale exact Assignment/Performance
+  {
+    const {projectId, planBuild} = setupProject({plan: 'eligible'});
+    const {profileId, revisionId, artifactId} = await createAssignment(projectId, 447);
+    const r = await createPerformance(projectId, planBuild!.artifact.id, artifactId, 'req-dag-r1-f9-0001');
+    ok(r.kind === 'succeeded', '[F9-pre] performance 生成成功');
     await ingestVoiceProfileRevision(
-      {voiceProfileId: profileId, requestId: `dag-rev-2-${crypto.randomUUID()}`, audioBuffer: (() => {
-        const sr = 48000;
-        const frames = Math.floor((sr * 1500) / 1000);
-        const data = Buffer.alloc(frames * 2);
-        for (let i = 0; i < frames; i++) data.writeInt16LE(Math.round(10000 * Math.sin((2 * Math.PI * 660 * i) / sr)), i * 2);
-        const h = Buffer.alloc(44);
-        h.write('RIFF', 0); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8);
-        h.write('fmt ', 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
-        h.writeUInt32LE(sr, 24); h.writeUInt32LE(sr * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34);
-        h.write('data', 36); h.writeUInt32LE(data.length, 40);
-        return Buffer.concat([h, data]);
-      })()},
+      {voiceProfileId: profileId, requestId: `dag-rv2-${crypto.randomUUID()}`, audioBuffer: makeWav(548)},
       MOCK_DEPS,
     );
-    const cand = await classifyProjectVoiceAssignment(projectId, a1.artifact);
-    ok(cand.status === 'current_candidate', '[F3] 新 revision 上传不 stale 旧 exact Assignment');
+    const aCand = await classifyProjectVoiceAssignment(projectId, {id: artifactId, project_id: projectId, kind: 'project_voice_assignment', version: 1, content_json: (getDb().prepare('SELECT content_json FROM artifacts WHERE id = ?').get(artifactId) as {content_json: string}).content_json, created_at: ''});
+    const perfRef = getDb()
+      .prepare("SELECT * FROM artifacts WHERE project_id = ? AND kind = 'narration_performance_plan' ORDER BY version DESC LIMIT 1")
+      .get(projectId) as PerformanceArtifactRow;
+    const perfCand = await classifyNarrationPerformancePlan(projectId, perfRef);
+    ok(
+      aCand.status === 'current_candidate' && perfCand.status === 'current_candidate',
+      '[F9] 新 revision 上传不 stale exact Assignment/Performance',
+      {a: aCand.status, p: perfCand.status},
+    );
+    void revisionId;
   }
 
-  // F4: archive 不 stale historical exact Assignment
+  // F10: archive 不 stale historical exact Assignment/Performance
   {
-    const {profileId, revisionId} = await makeVoiceRevision(770);
-    const a = await buildProjectVoiceAssignment({
-      projectId,
-      voiceProfileId: profileId,
-      voiceProfileRevisionId: revisionId,
-      requestId: 'req-dag-assign-0003',
-    });
+    const {projectId, planBuild} = setupProject({plan: 'eligible'});
+    const {profileId, artifactId} = await createAssignment(projectId, 449);
+    const r = await createPerformance(projectId, planBuild!.artifact.id, artifactId, 'req-dag-r1-f10-0001');
+    ok(r.kind === 'succeeded', '[F10-pre] performance 生成成功');
     setVoiceProfileStatus(profileId, 'archived');
-    const cand = await classifyProjectVoiceAssignment(projectId, a.artifact);
-    const states = await computeTtsBDagNodeStates(projectId);
+    const aCand = await classifyProjectVoiceAssignment(projectId, {id: artifactId, project_id: projectId, kind: 'project_voice_assignment', version: 1, content_json: (getDb().prepare('SELECT content_json FROM artifacts WHERE id = ?').get(artifactId) as {content_json: string}).content_json, created_at: ''});
+    const perfRef = getDb()
+      .prepare("SELECT * FROM artifacts WHERE project_id = ? AND kind = 'narration_performance_plan' ORDER BY version DESC LIMIT 1")
+      .get(projectId) as PerformanceArtifactRow;
+    const perfCand = await classifyNarrationPerformancePlan(projectId, perfRef);
     ok(
-      cand.status === 'current_candidate' && states.project_voice_assignment.status === 'ready',
-      '[F4] archive 后 historical exact Assignment 仍 current/ready',
-    );
-    setVoiceProfileStatus(profileId, 'active');
-  }
-
-  // F5: file/hash 损坏 → assignment invalid_source（独立项目：唯一 assignment 失效 → performance blocked）
-  {
-    const projectB = createProjectWithWorkflow({topic: 'tts-b-dag-b', coreQuestion: 'q'}).project.id;
-    const {profileId, revisionId} = await makeVoiceRevision(880);
-    const a = await buildProjectVoiceAssignment({
-      projectId: projectB,
-      voiceProfileId: profileId,
-      voiceProfileRevisionId: revisionId,
-      requestId: 'req-dag-assign-0004',
-    });
-    const row = getDb().prepare('SELECT canonical_audio_path AS p FROM voice_profile_revisions WHERE id = ?').get(revisionId) as {p: string};
-    fs.rmSync(path.join(process.cwd(), 'data', 'test-tts-b-dag', 'voice-library', row.p.slice('voice-library/'.length)));
-    const cand = await classifyProjectVoiceAssignment(projectB, a.artifact);
-    const states = await computeTtsBDagNodeStates(projectB);
-    ok(
-      cand.status === 'invalid_source' && states.project_voice_assignment.status === 'invalid_source' &&
-        states.narration_performance_plan.status === 'blocked',
-      '[F5] exact voice 文件损坏 → assignment invalid_source、performance blocked',
-      {a: states.project_voice_assignment.status, p: states.narration_performance_plan.status},
+      aCand.status === 'current_candidate' && perfCand.status === 'current_candidate',
+      '[F10] archive 不 stale historical exact Assignment/Performance',
+      {a: aCand.status, p: perfCand.status},
     );
   }
 
-  // F6: Narration Plan drift → performance stale（构造：assignment 有效 + plan 漂移）
+  // F11/F12: TTS-B graph 无 cycle / 无反向边
   {
-    // 用 F2 的 assignment（voice 仍有效）
-    const states = await computeTtsBDagNodeStates(projectId);
-    ok(states.project_voice_assignment.status === 'ready', '[F6-pre] 前置：assignment ready');
+    ok((detectTtsBDagCycles() ?? []).length === 0, '[F11] TTS-B graph 无 cycle');
+    ok((detectTtsBDagReverseEdges() ?? []).length === 0, '[F12] TTS-B graph 无反向边');
   }
 
-  // F7: Sequence/Shot 状态不变（TTS-B 不 stale 上游）
+  // F13: M7.3B Sequence/Shot 状态不受 TTS-B 影响
   {
-    const m7 = computeM7DagNodeStates(projectId);
+    const {projectId} = setupProject({plan: 'none'});
+    const before = computeM7DagNodeStates(projectId);
+    await createAssignment(projectId, 450);
+    const after = computeM7DagNodeStates(projectId);
     ok(
-      m7.narration_plan_v2.status !== undefined && m7.shots.status !== undefined,
-      '[F7] M7.3B frozen DAG 正常计算（TTS-B 不污染上游状态）',
-      {narration: m7.narration_plan_v2.status, shots: m7.shots.status},
+      before.visual_sequences.status === after.visual_sequences.status &&
+        before.shots.status === after.shots.status &&
+        before.narration_plan_v2.status === after.narration_plan_v2.status,
+      '[F13] M7.3B Sequence/Shot 状态不受 TTS-B 影响（创建 TTS-B artifact 前后不变）',
+      {seqBefore: before.visual_sequences.status, seqAfter: after.visual_sequences.status},
     );
-  }
-
-  // F8: 无 cycle / 无反向边（frozen detector 仍通过）
-  {
-    ok((detectM7DagCycles() ?? []).length === 0, '[F8] M7 DAG 无 cycle');
-    ok((detectM7DagReverseEdges() ?? []).length === 0, '[F9] M7 DAG 无反向边');
   }
 
   closeDb();
@@ -207,10 +343,10 @@ async function main(): Promise<void> {
 
   console.log(`\n[test] 汇总: PASS=${pass} FAIL=${fail}`);
   if (fail > 0) {
-    console.error('[test] TTS-B dag 测试存在失败项 ❌');
+    console.error('[test] TTS-B.R1 dag 测试存在失败项 ❌');
     process.exit(1);
   }
-  console.log('[test] TTS-B DAG 测试全部通过 ✅');
+  console.log('[test] TTS-B.R1 DAG 测试全部通过 ✅');
 }
 
 main().catch((err) => {

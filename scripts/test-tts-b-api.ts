@@ -27,7 +27,7 @@ import {lockStage} from '../src/lib/workflow/stages';
 import type {WorkflowStage} from '../src/lib/workflow/types';
 import type {LLMProvider, LLMRequest, LLMResponse} from '../src/lib/llm/types';
 import {buildNarrationPlanV2} from '../src/lib/narration/plan-v2';
-import {createVoiceProfile} from '../src/lib/voice-library/profiles';
+import {createVoiceProfile, setVoiceProfileStatus} from '../src/lib/voice-library/profiles';
 import {ingestVoiceProfileRevision, type VoiceLibraryExecDeps} from '../src/lib/voice-library/revisions';
 import {buildProjectVoiceAssignment} from '../src/lib/tts-b/assignment';
 import {buildNarrationPerformancePlan, setPerformanceProviderForTest} from '../src/lib/tts-b/performance';
@@ -302,6 +302,98 @@ async function main(): Promise<void> {
       !singleText.includes('spokenText') && !singleText.includes('audioPath') && !singleText.includes('canonicalAudioPath'),
       '[H17] performance 响应不含 spokenText/audio 路径',
     );
+  }
+
+  // ---------- H18-H21: ID schema / archived replay / stale performance replay ----------
+  {
+    // H18：malformed profile UUID → 422 invalid_request（zod）
+    const malformed = await assignPOST(
+      jsonReq(`${BASE}/api/projects/${projectId}/voice-assignments`, 'POST', {
+        requestId: 'req-api-uuid-0001',
+        voiceProfileId: 'no-such-profile',
+        voiceProfileRevisionId: rev.revision.id,
+      }),
+      params(projectId),
+    );
+    ok(malformed.status === 422, '[H18] malformed profile UUID → 422 invalid_request');
+    const malformedRev = await assignPOST(
+      jsonReq(`${BASE}/api/projects/${projectId}/voice-assignments`, 'POST', {
+        requestId: 'req-api-uuid-0002',
+        voiceProfileId: profile.id,
+        voiceProfileRevisionId: 'abc',
+      }),
+      params(projectId),
+    );
+    ok(malformedRev.status === 422, '[H19] malformed revision UUID → 422 invalid_request');
+    // H20：well-formed 但不存在 UUID → 404
+    const missingUuid = '00000000-0000-4000-8000-0000000000cc';
+    const missing = await assignPOST(
+      jsonReq(`${BASE}/api/projects/${projectId}/voice-assignments`, 'POST', {
+        requestId: 'req-api-uuid-0003',
+        voiceProfileId: missingUuid,
+        voiceProfileRevisionId: rev.revision.id,
+      }),
+      params(projectId),
+    );
+    ok(missing.status === 404, '[H20] well-formed 但不存在 profile UUID → 404');
+    // H21：archived 后同 requestId 同 revision → 200 reused；新 requestId → 409
+    const archProfile = createVoiceProfile({displayName: 'api arch'});
+    const archRev = await ingestVoiceProfileRevision(
+      {voiceProfileId: archProfile.id, requestId: `api-arch-rev-${crypto.randomUUID()}`, audioBuffer: makeWav(660)},
+      MOCK_DEPS,
+    );
+    const archAssign = await assignPOST(
+      jsonReq(`${BASE}/api/projects/${projectId}/voice-assignments`, 'POST', {
+        requestId: 'req-api-arch-0001',
+        voiceProfileId: archProfile.id,
+        voiceProfileRevisionId: archRev.revision.id,
+      }),
+      params(projectId),
+    );
+    ok(archAssign.status === 201, '[H21-pre] archived 前创建成功');
+    setVoiceProfileStatus(archProfile.id, 'archived');
+    const archReplay = await assignPOST(
+      jsonReq(`${BASE}/api/projects/${projectId}/voice-assignments`, 'POST', {
+        requestId: 'req-api-arch-0001',
+        voiceProfileId: archProfile.id,
+        voiceProfileRevisionId: archRev.revision.id,
+      }),
+      params(projectId),
+    );
+    ok(archReplay.status === 200, '[H21] archived 后同 requestId 同 revision → 200 reused');
+    const archNew = await assignPOST(
+      jsonReq(`${BASE}/api/projects/${projectId}/voice-assignments`, 'POST', {
+        requestId: 'req-api-arch-0002',
+        voiceProfileId: archProfile.id,
+        voiceProfileRevisionId: archRev.revision.id,
+      }),
+      params(projectId),
+    );
+    ok(archNew.status === 409, '[H22] archived 后新 requestId → 409 PROFILE_ARCHIVED');
+    setVoiceProfileStatus(archProfile.id, 'active');
+    // H23：stale succeeded Performance replay → 409（lock 新 Script V2 后同 requestId POST）
+    setPerformanceProviderForTest(new MockProvider());
+    const replayBuild = await buildNarrationPerformancePlan({
+      projectId,
+      narrationPlanArtifactId: planBuild.artifact.id,
+      projectVoiceAssignmentArtifactId: assignArtifactId,
+      requestId: 'req-api-perf-replay-0001',
+    });
+    ok(replayBuild.kind === 'succeeded', '[H23-pre] replay 目标 performance 生成成功');
+    generateVersion({projectId, stage: 'script_v2', content: `# Script V2\n\n## 第 1 章 新章（00:00–01:00）\n\n新第一句。\n`, contentType: 'markdown', source: 'manual_edit', promptVersion: 'script-v2@2.0'});
+    lockStage(projectId, 'script_v2');
+    const replay = await perfPOST(
+      jsonReq(`${BASE}/api/projects/${projectId}/narration-performance-plans`, 'POST', {
+        requestId: 'req-api-perf-replay-0001',
+        narrationPlanArtifactId: planBuild.artifact.id,
+        projectVoiceAssignmentArtifactId: assignArtifactId,
+      }),
+      params(projectId),
+    );
+    setPerformanceProviderForTest(null);
+    const replayBody = (await replay.json()) as {error?: string; errorCode?: string};
+    const replayCode = replayBody.error ?? replayBody.errorCode;
+    ok(replay.status === 409 && (replayCode === 'NARRATION_PLAN_NOT_ELIGIBLE' || replayCode === 'RESULT_ARTIFACT_STALE'), '[H23] stale succeeded replay → 409（不返回 200）', {status: replay.status, code: replayCode});
   }
 
   // ---------- G: TTS boundary ----------

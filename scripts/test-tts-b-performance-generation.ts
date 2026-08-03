@@ -24,19 +24,25 @@ import {generateVersion} from '../src/lib/workflow/operations';
 import {lockStage} from '../src/lib/workflow/stages';
 import type {WorkflowStage} from '../src/lib/workflow/types';
 import type {LLMProvider, LLMRequest, LLMResponse} from '../src/lib/llm/types';
-import {buildNarrationPlanV2} from '../src/lib/narration/plan-v2';
+import {
+  buildNarrationPlanV2,
+  classifyNarrationPlanV2Candidate,
+  getNarrationPlanV2Artifact,
+} from '../src/lib/narration/plan-v2';
+import {
+  buildNarrationPerformancePlan,
+  classifyNarrationPerformancePlan,
+  getNarrationPerformancePlan,
+  listNarrationPerformancePlanCandidates,
+  PerformanceError,
+} from '../src/lib/tts-b/performance';
 import {createVoiceProfile} from '../src/lib/voice-library/profiles';
 import {ingestVoiceProfileRevision, type VoiceLibraryExecDeps} from '../src/lib/voice-library/revisions';
 import {
   buildProjectVoiceAssignment,
   listProjectVoiceAssignmentCandidates,
 } from '../src/lib/tts-b/assignment';
-import {
-  buildNarrationPerformancePlan,
-  getNarrationPerformancePlan,
-  listNarrationPerformancePlanCandidates,
-  PerformanceError,
-} from '../src/lib/tts-b/performance';
+
 import {buildPerformanceInputIdentity} from '../src/lib/tts-b/identity';
 import {NARRATION_PERFORMANCE_PLAN_KIND} from '../src/lib/tts-b/constants';
 
@@ -355,6 +361,139 @@ async function main(): Promise<void> {
       .prepare("SELECT COUNT(*) AS c FROM generation_runs WHERE stage = 'm7_narration_performance_plan' AND status = 'succeeded'")
       .get() as {c: number};
     ok(runs.c >= 1, '[E13] performance generation_runs 落库（succeeded ≥1）', {runs: runs.c});
+  }
+
+  // ---------- E16-E18：locked Script V2 drift + succeeded 重放 fail-closed ----------
+  let eAssignArtifactId = '';
+  let e16PerfArtifactId = '';
+  let e18PerfArtifactId = '';
+  {
+    // E8 已删除共享 voice 的 reference 文件——本段用全新 voice + assignment
+    const eProfile = createVoiceProfile({displayName: 'e16 voice'});
+    const eRev = await ingestVoiceProfileRevision(
+      {voiceProfileId: eProfile.id, requestId: `e16-rev-${crypto.randomUUID()}`, audioBuffer: (() => {
+        const sr = 48000;
+        const frames = Math.floor((sr * 1500) / 1000);
+        const data = Buffer.alloc(frames * 2);
+        for (let i = 0; i < frames; i++) data.writeInt16LE(Math.round(10000 * Math.sin((2 * Math.PI * 560 * i) / sr)), i * 2);
+        const h = Buffer.alloc(44);
+        h.write('RIFF', 0); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8);
+        h.write('fmt ', 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
+        h.writeUInt32LE(sr, 24); h.writeUInt32LE(sr * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34);
+        h.write('data', 36); h.writeUInt32LE(data.length, 40);
+        return Buffer.concat([h, data]);
+      })()},
+      MOCK_DEPS,
+    );
+    const eAssign = await buildProjectVoiceAssignment({
+      projectId,
+      voiceProfileId: eProfile.id,
+      voiceProfileRevisionId: eRev.revision.id,
+      requestId: `e16-assign-${crypto.randomUUID()}`,
+    });
+    eAssignArtifactId = eAssign.artifact.id;
+
+    // 在 lock 新 Script V2 之前：构建 perf-E16 与 perf-E18（同 fresh plan）
+    const p16 = new ScriptableProvider();
+    p16.push({text: JSON.stringify({items: itemsFor(plan)})});
+    const r16 = await buildNarrationPerformancePlan({
+      projectId,
+      narrationPlanArtifactId: planBuild.artifact.id,
+      projectVoiceAssignmentArtifactId: eAssignArtifactId,
+      requestId: 'req-perf-e16-0001',
+      provider: p16,
+    });
+    ok(r16.kind === 'succeeded', '[E16-pre] perf-E16 生成成功');
+    e16PerfArtifactId = r16.kind === 'succeeded' ? r16.artifact.id : '';
+
+    const p18 = new ScriptableProvider();
+    p18.push({text: JSON.stringify({items: itemsFor(plan)})});
+    const r18 = await buildNarrationPerformancePlan({
+      projectId,
+      narrationPlanArtifactId: planBuild.artifact.id,
+      projectVoiceAssignmentArtifactId: eAssignArtifactId,
+      requestId: 'req-perf-e18-0001',
+      provider: p18,
+    });
+    ok(r18.kind === 'succeeded', '[E18-pre] perf-E18 生成成功');
+    e18PerfArtifactId = r18.kind === 'succeeded' ? r18.artifact.id : '';
+
+    // E18：篡改 perf-E18 的 source（schema 仍可 parse）→ classify invalid（PERFORMANCE_SOURCE_MISMATCH）
+    const row18 = (getDb().prepare('SELECT content_json FROM artifacts WHERE id = ?').get(e18PerfArtifactId) as {content_json: string});
+    const mutated = JSON.parse(row18.content_json) as Record<string, unknown>;
+    (mutated.source as Record<string, unknown>).canonicalAudioSha256 = 'e'.repeat(64);
+    getDb().prepare('UPDATE artifacts SET content_json = ? WHERE id = ?').run(JSON.stringify(mutated), e18PerfArtifactId);
+    const cand18 = await classifyNarrationPerformancePlan(projectId, {
+      id: e18PerfArtifactId, project_id: projectId, kind: NARRATION_PERFORMANCE_PLAN_KIND, version: 1,
+      content_json: JSON.stringify(mutated), created_at: '',
+    });
+    ok(
+      cand18.status === 'invalid_source' && (cand18.statusReason?.includes('PERFORMANCE_SOURCE_MISMATCH') ?? false),
+      '[E18] performance source.canonicalAudioSha256 改错 → invalid_source（PERFORMANCE_SOURCE_MISMATCH）',
+      {status: cand18.status, reason: cand18.statusReason},
+    );
+
+    // E18b：篡改后同 requestId 重放（plan 仍 eligible → precheck 过 → claim succeeded →
+    // classify tampered → RESULT_ARTIFACT_INVALID，provider calls=0、不新建 run）
+    const beforeRuns18 = (getDb().prepare("SELECT COUNT(*) AS c FROM generation_runs WHERE stage = 'm7_narration_performance_plan'").get() as {c: number}).c;
+    const p18b = new ScriptableProvider();
+    const r18b = await buildNarrationPerformancePlan({
+      projectId,
+      narrationPlanArtifactId: planBuild.artifact.id,
+      projectVoiceAssignmentArtifactId: eAssignArtifactId,
+      requestId: 'req-perf-e18-0001',
+      provider: p18b,
+    });
+    ok(
+      r18b.kind === 'terminal' && r18b.errorCode === 'RESULT_ARTIFACT_INVALID' &&
+        p18b.requests.length === 0 &&
+        (getDb().prepare("SELECT COUNT(*) AS c FROM generation_runs WHERE stage = 'm7_narration_performance_plan'").get() as {c: number}).c === beforeRuns18,
+      '[E18b] tampered artifact 同 requestId 重放 → RESULT_ARTIFACT_INVALID（不返回 200、provider calls=0、不新建 run）',
+      {kind: r18b.kind, errorCode: r18b.kind === 'terminal' ? r18b.errorCode : null},
+    );
+
+    // lock 新 Script V2（真实 drift，不改旧 plan artifact）
+    const planContentBefore = (getDb()
+      .prepare('SELECT content_json FROM artifacts WHERE id = ?')
+      .get(planBuild.artifact.id) as {content_json: string}).content_json;
+    generateVersion({projectId, stage: 'script_v2', content: `# Script V2\n\n## 第 1 章 新章（00:00–01:00）\n\n新第一句。新第二句。\n`, contentType: 'markdown', source: 'manual_edit', promptVersion: 'script-v2@2.0'});
+    lockStage(projectId, 'script_v2');
+    const planContentAfter = (getDb()
+      .prepare('SELECT content_json FROM artifacts WHERE id = ?')
+      .get(planBuild.artifact.id) as {content_json: string}).content_json;
+    ok(planContentBefore === planContentAfter, '[E16a] 旧 plan artifact content_json 前后一致（真实 drift，非伪造）');
+
+    // E16：lock 后 classify perf-E16 → stale_source（NARRATION_PLAN_STALE）
+    const perfRef16 = getNarrationPerformancePlan(projectId, e16PerfArtifactId);
+    const perfCand16 = await classifyNarrationPerformancePlan(projectId, perfRef16!.artifact);
+    ok(
+      perfCand16.status === 'stale_source' && (perfCand16.statusReason?.includes('NARRATION_PLAN_STALE') ?? false),
+      '[E16b] lock 新 Script V2 → 旧 Performance stale_source（NARRATION_PLAN_STALE）',
+      {status: perfCand16.status, reason: perfCand16.statusReason},
+    );
+
+    // E17a：lock 后同 requestId 重放（run 已 succeeded、plan 已 stale）→ precheck fail-closed
+    const beforeRuns = (getDb().prepare("SELECT COUNT(*) AS c FROM generation_runs WHERE stage = 'm7_narration_performance_plan'").get() as {c: number}).c;
+    const p17 = new ScriptableProvider();
+    let err17: unknown = null;
+    try {
+      await buildNarrationPerformancePlan({
+        projectId,
+        narrationPlanArtifactId: planBuild.artifact.id,
+        projectVoiceAssignmentArtifactId: eAssignArtifactId,
+        requestId: 'req-perf-e16-0001',
+        provider: p17,
+      });
+    } catch (e) {
+      err17 = e;
+    }
+    ok(
+      err17 instanceof PerformanceError && err17.code === 'NARRATION_PLAN_NOT_ELIGIBLE' &&
+        p17.requests.length === 0 &&
+        (getDb().prepare("SELECT COUNT(*) AS c FROM generation_runs WHERE stage = 'm7_narration_performance_plan'").get() as {c: number}).c === beforeRuns,
+      '[E17] stale succeeded 重放 → NARRATION_PLAN_NOT_ELIGIBLE（不返回 200、provider calls=0、run 数不变）',
+      {code: err17 instanceof Error ? (err17 as PerformanceError).code : String(err17)},
+    );
   }
 
   // ---------- E10: buildPerformanceInputIdentity ----------
