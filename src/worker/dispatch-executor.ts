@@ -8,6 +8,13 @@ import {
 } from '@/lib/narrative-beats/plan';
 import {SHOTS_USAGE_STAGE} from '@/lib/shots/generate';
 import {buildShots, ShotsError, type BuildShotsResult} from '@/lib/shots/plan';
+import {PERFORMANCE_USAGE_STAGE} from '@/lib/tts-b/constants';
+import {
+  buildNarrationPerformancePlan,
+  parsePerformanceSourceKey,
+  PerformanceError,
+  type BuildPerformancePlanResult,
+} from '@/lib/tts-b/performance';
 import {VISUAL_INTENT_USAGE_STAGE} from '@/lib/visual-intent/generate';
 import {
   buildVisualIntentPlan,
@@ -91,7 +98,12 @@ export async function runDispatchJob(
       `dispatch job ${job.id} start: project=${job.project_id} stage=${job.stage} ` +
         `requestId=${job.request_id} source=${job.source_artifact_id.slice(0, 8)}`,
     );
-    let result: BuildNarrativeBeatsResult | BuildVisualIntentResult | BuildVisualSequencesResult | BuildShotsResult;
+    let result:
+      | BuildNarrativeBeatsResult
+      | BuildVisualIntentResult
+      | BuildVisualSequencesResult
+      | BuildShotsResult
+      | BuildPerformancePlanResult;
     if (job.stage === BEATS_USAGE_STAGE) {
       result = await buildNarrativeBeats({
         projectId: job.project_id,
@@ -136,6 +148,30 @@ export async function runDispatchJob(
       result = await buildShots({
         projectId: job.project_id,
         visualSequencesArtifactId: job.source_artifact_id,
+        requestId: job.request_id,
+        provider: deps.provider,
+        signal: ctx.shutdownSignal,
+      });
+    } else if (job.stage === PERFORMANCE_USAGE_STAGE) {
+      // source_artifact_id 为 `${narrationPlanId}|${assignmentId}` 复合键。
+      let source: {narrationPlanArtifactId: string; projectVoiceAssignmentArtifactId: string};
+      try {
+        source = parsePerformanceSourceKey(job.source_artifact_id);
+      } catch {
+        completeDispatchFailed(db, {
+          dispatchId: job.id,
+          ownerToken,
+          runId: null,
+          errorCode: 'SOURCE_ARTIFACT_MALFORMED',
+          errorMessage: `performance dispatch source_artifact_id 复合键格式非法: ${job.source_artifact_id}`,
+        });
+        log(`dispatch job ${job.id} failed: SOURCE_ARTIFACT_MALFORMED`);
+        return;
+      }
+      result = await buildNarrationPerformancePlan({
+        projectId: job.project_id,
+        narrationPlanArtifactId: source.narrationPlanArtifactId,
+        projectVoiceAssignmentArtifactId: source.projectVoiceAssignmentArtifactId,
         requestId: job.request_id,
         provider: deps.provider,
         signal: ctx.shutdownSignal,
@@ -192,13 +228,15 @@ export async function runDispatchJob(
       log(`dispatch job ${job.id} requeued due to shutdown`);
       return;
     }
-    // precheck throw（NarrativeBeatsError/VisualIntentError/VisualSequencesError/ShotsError）：
-    // source 失效/请求非法，发生在 run claim 之前——零 run、零 provider 调用，直接终态。
+    // precheck throw（NarrativeBeatsError/VisualIntentError/VisualSequencesError/
+    // ShotsError/PerformanceError）：source 失效/请求非法，发生在 run claim 之前——
+    // 零 run、零 provider 调用，直接终态。
     const errorCode =
       err instanceof NarrativeBeatsError ||
       err instanceof VisualIntentError ||
       err instanceof VisualSequencesError ||
-      err instanceof ShotsError
+      err instanceof ShotsError ||
+      err instanceof PerformanceError
         ? err.code
         : 'INTERNAL_ERROR';
     const errorMessage = err instanceof Error ? err.message : String(err);
