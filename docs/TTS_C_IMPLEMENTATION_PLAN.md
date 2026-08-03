@@ -1,95 +1,119 @@
-# TTS-C 实施计划（TTS-C.0 产物；runtime implementation not started）
+# TTS-C 实施计划（TTS-C.0.R1 修订；runtime implementation not started）
 
-> 状态：**TTS-C.0 architecture audit completed；TTS-C runtime implementation not started**。
-> 本计划将 TTS-C 拆分为可独立测试/Review/部署的阶段；每阶段不产生半成品 active 状态、
-> migration 可回滚、不跨阶段实现后续功能、明确 production deployment gate 与禁真 provider 测试阶段。
-
----
-
-## 0. 总原则
-
-- **exact source 纪律**：全链路显式 artifact ID（TTS-A/B 冻结语义延续）；禁止 current/latest/default。
-- **不可变产物**：sentence audio / manifest / master 一律 append-only；regeneration = 新 artifact，不 UPDATE 旧产物。
-- **durability 顺序**：文件（temp 写 → 校验 → rename → fsync 目录）先于 SQLite commit（TTS-A 模式复用）。
-- **零真实 provider 门禁**：所有自动化测试用临时 DB + Mock provider（`MockTtsProvider` / `ScriptableProvider` 模式），零真实 APIYi / 零真实 IndexTTS2 / 零 GPU；真实 provider 只允许人工验收命令（独立于 CI）。
-- **单门禁入口**：每阶段新测试并入 `scripts/run-m7-quality-gate.sh`（suite 数随阶段递增，权威清单单一来源）。
-- **部署纪律**：每阶段 exact-SHA build + 镜像内 gate + production backup + compose up + invariants + docs-only evidence commit；禁止手工 sqlite3。
+> 状态：**TTS-C.0.R1 architecture closure completed；pending independent Review PASS；
+> TTS-C runtime implementation not started；TTS-C.1 not started**。
+> 本计划按 TTS-C.0.R1 Review 结论调整 milestone（materialization 拆 1A/1B/1C；
+> 四表分离与 fingerprint 三分离进入 C.2；manifest/master 分离进入 C.4）。
+> 每阶段：独立 migration、独立 tests、独立 Review、独立 deployment gate、不跨阶段、不产生半成品 active 状态。
 
 ---
 
-## TTS-C.1 — Voice materialization + registry 发布 + capability compile
+## 0. 总原则（R1 强化）
 
-**范围**（对应设计文档 §4/§5）：
-- materialization API（requestId 幂等；`UNIQUE(profile, revision, request_id)` envelope 或等价状态表）；temp 写 + fsync + rename 发布到 `<VOICE_ROOT>/<pid>/<rid>/reference.wav`；registry JSON 原子更新；并发 single-flight；crash 幂等重放；orphan best-effort cleanup（不得删 DB 已引用文件）。
-- capability snapshot + capability compiler（纯函数）：authorial intent（delivery/deliveryOverride/pace/energy/emotion）→ compiled capability（compiledDelivery/Speed/SynthesisParameters + unsupportedFlags[]）；版本化（capabilityCompilerVersion）；**禁止静默丢弃**（unsupported → 显式标记 + review/block）。
-- 迁移：materialization 状态表（append-only）；`tts_jobs` 暂不动（TTS-C.2 加列）。
-- 测试：materialization 原子性/幂等/并发/orphan/archive 语义；capability compile 全矩阵（intent×capability→unsupported/compiled）；registry 发布后 adapter 视角验证（用 adapter 校验逻辑的镜像实现，不启动真 adapter）；mock provider 零真实调用。
-- **不含**：不合成音频、不改 tts_jobs、不动 subtitle/timing。
-- **deployment gate**：materialization 不触发任何真实合成；production 可安全部署（voice-library 仍 0/0，无 materialize 动作）。
-- **Review 入口**：TTS-C.1 contract + 测试通过后独立 Review。
+- **exact source 纪律**：全链路显式 artifact ID；禁止 current/latest/default。
+- **mutable job ≠ immutable artifact**：`tts_jobs`（mutable execution）+ `sentence_audio_artifacts`（immutable result，trigger ABORT）；regeneration = 新 job + 新 artifact + 新文件。
+- **durability 顺序**：文件（temp → 校验 → rename → fsync 目录）先于 DB commit。
+- **零真实 provider 门禁**：自动化测试用临时 DB + Mock provider；真实 provider 仅人工验收命令。
+- **单门禁入口**：每阶段新测试并入 `scripts/run-m7-quality-gate.sh`（suite 数递增）。
+- **部署纪律**：exact-SHA build + 镜像内 gate + backup + compose up + invariants + docs evidence commit；禁手工 sqlite3。
 
-## TTS-C.2 — Exact sentence input fingerprint + durable sentence job/artifact
+---
 
-**范围**（对应设计文档 §3/§6）：
-- `tts-payload@2.0`（完整 source 引用 + `ttsInputFingerprintV2`）；`tts_jobs` 加列（`tts_input_fingerprint`、`assignment_artifact_id`、`performance_plan_artifact_id`、`capability_compiler_version`、`capability_snapshot_json`）；旧 payload union 保持可读，不改写历史行。
-- 幂等键升级：`(project_id, narration_plan_artifact_id, unit_id, tts_input_fingerprint)` 精确复用；fingerprint 不一致 → 新 job。
-- 执行路径：enqueue 前 exact 校验链（Narration candidate eligible + Assignment current + exact voice usable + Performance source 一致 + capability compile 成功）；worker 执行前重算 fingerprint 比对（fail-closed `INPUT_FINGERPRINT_MISMATCH`）。
-- 迁移：ALTER 加列（可回滚：仅加列不删）；副本演练 + 幂等重跑 + integrity ok。
-- 测试：fingerprint 两段式（source identity vs compiled payload 变化矩阵）；payload v2 兼容；幂等复用/冲突；worker fingerprint 比对 fail-closed；无真实 provider。
-- **不含**：preview/A-B、manifest、master。
-- **deployment gate**：可部署，但 production 不 enqueue 任何 TTS job（新增=0 不变量保持）。
+## TTS-C.1A — Voice materialization durable requests/files/DB projection
 
-## TTS-C.3 — Preview + override + A/B selection + incremental regeneration
+**范围**（设计文档 §5.1/§5.3/§5.5）：
+- materialization request envelope（DB rows 是 authoritative；exact Assignment/source 授权校验——**不按 Profile active 状态裁决**；archived Profile 的合法历史 Assignment 引用的 revision 允许 materialize）。
+- Worker 唯一 writer（Web 无 voice/registry 挂载、无文件写）；voice root rw + `/voice-config` 目录 rw（目录挂载，非单文件 bind）。
+- 文件发布：`<VOICE_ROOT>/<pid>/<rid>/reference.wav` temp 写 + fsync + rename + 目录 fsync。
+- `materialization_state` 表（TTS-C.1 定义 schema；rows = registry 的 authoritative source）。
+- 测试：幂等/并发 single-flight（全局锁）/orphan 清理（不得删 DB 已引用）/archive 语义（历史 Assignment 可 materialize、archive 禁新 revision/新 Assignment 不变量保持）/路径 containment。
+- **不含**：registry 发布、adapter reload、capability。
+- **deployment gate**：materialize 不触发合成；production 可安全部署（voice-library 仍 0/0，无 materialize 动作）。
 
-**范围**（对应设计文档 §7）：
-- sentence/unit preview（同一合成路径 + preview 标记；selection=null）；A/B（两次合成 → 比较 → 选择新 artifact，旧保留）。
-- selection 持久化（per-unit：selected job id / fingerprint / overrideRequestId / reviewedBy / reviewedAt / source）；bulk approve / unit override。
-- 失效规则实现：文本/voice/performance/pronunciation/capability 变化 → 受影响 unit 失效 + 局部重生成（复用未变 unit 的 exact artifact）；禁 full regeneration。
-- review lock（selected 后可 lock；source 漂移 → stale 提示 + 重 review，fail-closed）。
-- 测试：A/B 选择不覆盖旧 artifact；失效范围矩阵（§7.1 表逐项）；override provenance；lock 后漂移 stale；mock 合成零真实。
+## TTS-C.1B — Global registry publisher + adapter hot reload
+
+**范围**（设计文档 §5.3/§5.4）：
+- global registry publisher：全局发布锁 + 从 DB **全量确定性重建**完整 registry（canonical ordering）+ temp write → fsync → rename → **directory fsync**；无并发 read-modify-write patch；crash 后从 DB 重建。
+- adapter hot reload（修改 `server.py`）：mtime/inode/size 检测 → 原子加载临时 RegistryState（完整校验）→ 一次性 swap 内存 REGISTRY → 失败保持 **last-known-good** + health.detail 报告；health 与 synthesize 均触发检测；不依赖 Docker restart / 不需要 docker.sock。
+- 测试：真实 Python parser/reloader + mock upstream（httpx MockTransport）；并发 synthesize 不消费过期 registry；entry 增删语义；reference 先 durable 再发布。
+- **不含**：capability compile（1C）、TTS 合成。
+- **deployment gate**：adapter 镜像变更需 exact-SHA 重建 + 镜像内 gate + 部署；production 仍零合成。
+
+## TTS-C.1C — Provider capability snapshot/compiler
+
+**范围**（设计文档 §7）：
+- capability snapshot（provider/model/providerVersion/providerCommit + capabilityCompilerVersion）固化（enqueue 前）与校验（执行前比对）。
+- capability compiler 纯函数：intent 矩阵编译——**neutral 默认值（delivery=normal/pace=normal/energy=normal/emotion=none/deliveryOverride=null）→ supported no-op（unsupportedFlags=[]）**；非 neutral 无通道 → explicit unsupported（unsupportedFlags 精确 + block/review 语义，不静默丢弃）。
+- 编译结果进入 provenance + `synthesisPayloadFingerprint`。
+- 测试：neutral 矩阵全 unit 不 block；非 neutral 全矩阵 unsupported/compiled；compiler 版本化。
+- **不含**：任何音频合成。
+- **deployment gate**：纯函数 + 快照存储，production 零合成。
+
+## TTS-C.2 — Request envelope + durable job + attempt journal + immutable artifact + fingerprints
+
+**范围**（设计文档 §3/§4/§6）：
+- 新表：`tts_audio_requests`（`UNIQUE(project_id, request_id)` envelope）、`tts_generation_attempts`（append-only journal：in_flight/response_received/validation_failed/succeeded/transport_failed/indeterminate）、`sentence_audio_artifacts`（immutable，trigger ABORT 禁 UPDATE/DELETE，exact reader）。
+- `tts_jobs` ALTER：加 `tts_audio_request_id`、`result_artifact_id`（→ sentence_audio_artifacts.id）、`generation_variant_id`、fingerprint 列；`output_path/duration_ms/audio_sha256/result_json` 降级为 legacy 兼容（TTS-C 路径不写不读为 authoritative）。
+- fingerprint 三分离实现：`exactSourceFingerprint` / `synthesisPayloadFingerprint` / `finalTtsInputFingerprint`（length-prefixed + 版本化）；复用唯一依据 = finalTtsInputFingerprint 一致 + artifact usable；跨 source 复用需 immutable `acoustic_equivalence_attestation`（禁仅比 SHA 静默复用）；A/B variant（generationVariantId + seed）进入 identity。
+- DB 级 single-flight（envelope INSERT + job claim 同 BEGIN IMMEDIATE）；indeterminate 保守语义（禁自动重调 provider）；usage/attempt 对账。
+- 测试：四表分离（job mutable/artifact immutable trigger）；envelope replay/conflict/inconsistent；fingerprint 矩阵；indeterminate；usage 对账；零真实 provider。
+- **deployment gate**：可部署；production 不 enqueue 任何 TTS job（新增=0 不变量保持）。
+
+## TTS-C.3 — Preview/override/variant/A-B/selection
+
+**范围**（设计文档 §9 失效规则 + 设计文档 §7.2 的 variant 语义）：
+- preview（同一合成路径 + preview 标记；selection=null）；A/B（显式 variant/seed/override artifact——**adapter 无 variation 通道时禁止同请求伪造 A/B**）；selection 持久化（per-unit：selectedAudioArtifactId（**只引用 immutable artifact**）/overrideRequestId/reviewedBy/reviewedAt/source/bulk/unit override）。
+- 失效规则实现（§9 表）：文本/voice/performance/pronunciation/capability 变化 → 受影响 unit 局部失效 + 重生成；未变 unit 复用 exact artifact；禁 full regeneration。
+- review lock（selected 后可 lock；source 漂移 → stale + 重 review，fail-closed）。
+- 测试：A/B 不覆盖旧 artifact；失效矩阵逐项；override provenance；lock 漂移 stale；零真实 provider。
 - **不含**：manifest/master/subtitle。
-- **deployment gate**：selection 状态不影响已有管线（v2 管线未接 API/UI）；production 零 TTS job 不变量保持。
+- **deployment gate**：selection 不影响既有管线；production 零 TTS job 不变量保持。
 
-## TTS-C.4 — Narration Audio Manifest v2 + master re-concatenation + ffprobe
+## TTS-C.4 — Selection manifest + immutable master audio + ffprobe
 
-**范围**（对应设计文档 §8）：
-- `narration_audio_manifest_v2` artifact 层（candidate；selected 由 review lock 决定）+ master 构建（temp + ffprobe 校验 + rename + fsync 先于 DB commit；manifest 行 + master 文件原子序列）。
-- master 拼接实现决策（§12.6：Node PCM concat 现状 vs ffmpeg concat filter——静态 ffmpeg 可用性已验证于构建门禁）。
-- 测试：manifest 顺序对齐/缺失/重复/stale sentence artifact；gap 决策；concat 失败不覆盖旧 master；master 时长防线（±100ms 容差）；ffprobe 实测断言。
-- **不含**：subtitle timing v2 构建（下一阶段）。
-- **deployment gate**：v2 manifest/master 不接入 UI；production 零 TTS job 不变量保持（若启用生成需人工验收命令）。
+**范围**（设计文档 §8）：
+- `narration_audio_selection_manifest@2.0` artifact（**不含 master 信息**；含 ordered units + selected immutable sentence audio artifact IDs + SHA/duration/fingerprint + silence/gap + reviewSource；顺序逐 index 对齐校验）。
+- `narration_master_audio@1.0` immutable artifact（引用 selectionManifestArtifactId + ContentHash + concatCompilerVersion；**masterInputFingerprint 非循环**；output 相对路径/SHA/size/codec/sr/channels/ffprobeDurationMs）。
+- 顺序：selected immutable manifest → durable master temp/write/probe/rename/fsync → immutable master artifact DB commit。
+- master 拼接实现决策（Node PCM concat 现状 vs ffmpeg concat filter——静态 ffmpeg 可用性已验证于构建门禁）。
+- 测试：manifest 对齐/缺失/重复/stale artifact；master 失败不覆盖旧；时长防线 ±100ms；ffprobe 实测断言。
+- **不含**：subtitle timing v2（下阶段）。
+- **deployment gate**：v2 manifest/master 不接 UI；production 零 TTS job 不变量保持。
 
-## TTS-C.5 — Downstream stale 传播 + review UI + production acceptance
+## TTS-C.5 — Subtitle timing v2/reconciliation/stale graph/review UI
 
-**范围**（对应设计文档 §9/§10 + UI）：
-- `subtitle_timing_v2` artifact 层（复用既有 schema+compiler）+ `timing-reconciliation@2.0`（三源 reconcile）接入 DAG；downstream 失效按 §9 规则（文本/声音/时长/仅 metadata 区分）。
+**范围**（设计文档 §9 stale 图 + UI）：
+- `subtitle_timing_v2` artifact 层（复用既有 schema+compiler）+ `timing-reconciliation@2.0`（三源 reconcile）接入 DAG；downstream 失效按 §9 规则。
 - Review UI：Voice Assignment / Performance / Sentence Audio / Master / Timing review 节点 + preview/A-B/accept/reject/bulk/lock/stale 提示/failed-retry/cost-usage。
-- **production acceptance gate**：人工验收命令（真实 IndexTTS2、真实材料、受控 project）明确独立于 CI；验收通过前 production 不产生业务 TTS 数据。
-- 测试：stale 传播矩阵；UI 只读 smoke（无真实 provider）；DAG 状态机。
+- **production acceptance gate**：人工验收命令（真实 IndexTTS2、真实材料、受控 project）独立于 CI；验收前 production 不产生业务 TTS 数据。
+- 测试：stale 传播矩阵；UI 只读 smoke；DAG 状态机。
 
 ---
 
 ## 阶段门禁与禁止
 
-| 阶段 | 可独立测试 | 可独立 Review | 半成品 active 状态 | migration 回滚 | production 真 provider |
-|---|---|---|---|---|---|
-| C.1 | ✓ | ✓ | ✗（materialize 是显式用户动作） | ✓（仅加表） | ✗ |
-| C.2 | ✓ | ✓ | ✗（payload v2 只是新格式，不产生音频） | ✓（仅加列） | ✗ |
-| C.3 | ✓ | ✓ | ✗（preview/selection 是显式动作） | ✓（仅加表） | ✗ |
-| C.4 | ✓ | ✓ | ✗（master 只在显式构建时产生） | ✓ | ✗ |
-| C.5 | ✓ | ✓ | ✗ | ✓ | 仅人工验收命令 |
+| 阶段 | 独立 migration | 独立 tests | 独立 Review | deployment gate | 半成品 active | production 真 provider |
+|---|---|---|---|---|---|---|
+| 1A | ✓ | ✓ | ✓ | ✓ | ✗（materialize 是显式用户动作） | ✗ |
+| 1B | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| 1C | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| C.2 | ✓ | ✓ | ✓ | ✓ | ✗（payload v2 新格式，不产音频） | ✗ |
+| C.3 | ✓ | ✓ | ✓ | ✓ | ✗（preview/selection 显式动作） | ✗ |
+| C.4 | ✓ | ✓ | ✓ | ✓ | ✗（master 显式构建） | ✗ |
+| C.5 | ✓ | ✓ | ✓ | ✓ | ✗ | 仅人工验收命令 |
 
 ## 依赖顺序与建议
 
-- **依赖**：C.1 → C.2 → C.3 → C.4 → C.5（C.3 依赖 C.2 的 fingerprint/job；C.4 依赖 C.3 的 selection；C.5 依赖 C.4 的 manifest）。
-- **建议首先实现**：**TTS-C.1**（理由见设计文档 §13——零音频风险、解锁 materialization、capability compile 先行避免 payload 返工）。
-- **可并行**：C.1 的 capability compiler 与 materialization 是两个独立子任务（同一阶段内并行）。
+- **依赖**：1A → 1B → 1C → C.2 → C.3 → C.4 → C.5（1B 依赖 1A 的 DB projection；1C 独立于 1A/1B 可并行开发但 C.2 需三者齐备）。
+- **建议首先实现**：**TTS-C.1A**（零音频风险、解锁 materialization、为 1B/1C 提供 DB 基础）。
+- **可并行**：1C（capability compiler 纯函数）与 1A/1B 并行。
 
-## 未决事项（进入 C.1 前定）
+## 未决事项（进入 1A 前定）
 
-1. delivery 编译策略（文本改写 vs 显式 unsupported）——设计文档 §12.1。
-2. pace 经 adapter 扩展直传的可行性（upstream duration control 支持度）。
-3. unit vs sentence 原子单位。
-4. capability 升级后存量音频失效策略。
-5. pronunciation dictionary 是否纳入（建议 C.3 后）。
-6. master 拼接实现（Node PCM vs ffmpeg concat）。
+1. `materialization_state` 表 schema 与 request envelope 形式（1A 定）。
+2. delivery 编译策略（文本改写 vs 显式 unsupported，推荐显式 unsupported）。
+3. pace 经 adapter 扩展直传可行性。
+4. unit vs sentence 原子单位（推荐 unit）。
+5. capability 升级后存量音频失效策略。
+6. pronunciation dictionary 是否纳入（建议 C.3 后）。
+7. master 拼接实现（Node PCM vs ffmpeg concat，C.4 定）。

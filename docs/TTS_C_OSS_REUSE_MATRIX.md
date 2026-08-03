@@ -1,107 +1,122 @@
-# TTS-C OSS 复用审计矩阵（只读；TTS-C.0）
+# TTS-C OSS 复用审计矩阵（TTS-C.0.R1 修订；只读）
 
-> 状态：TTS-C.0 architecture audit completed；**未复制任何代码**。
-> 审计基线：2026-08-03 通过 GitHub API 现场核验（repo 元数据/license/文件树/关键文件内容）。
+> 状态：TTS-C.0.R1 architecture closure completed；**未复制任何代码**。
+> 审计基线：inspection date **2026-08-03**；每个项目记录 **exact inspected commit SHA**（GitHub API 现场核验，非 `main+pushed_at`）。
 > 决策维度：`Adopt（直接引入）/ Adapter（借鉴接口或概念，重写实现）/ Reimplement（重新实现）/ Reject（不采用）`。
-> 知影约束：商业项目、本地 IndexTTS2 部署、Node.js + Python adapter、零真实 provider 测试门禁、Remotion 渲染。
+> 知影约束：商业项目、本地 IndexTTS2 部署、Node.js + Python adapter、零真实 provider 测试门禁、Remotion 渲染、AGPL 商业边界敏感。
 
 ---
 
-## 1. NarratoAI
+## 1. linyqh/NarratoAI
 
 | 项 | 值 |
 |---|---|
 | source repo | https://github.com/linyqh/NarratoAI |
-| exact inspected | branch `main`，pushed_at 2026-07-23；stars ≈ 10.5k |
-| license | **MIT**（spdx `MIT`，仓库含 LICENSE 文件） |
-| relevant files/modules | `app/services/`（subtitle_merger.py / subtitle_corrector.py / subtitle_translator.py / script_subtitle.py / fun_asr_subtitle.py）、`app/config/*`（audio_config/ffmpeg_config）、`app/services/test_indextts2_tts_unittest.py`（IndexTTS2 接入存在）、SDP utils step1_subtitle_analyzer |
-| 覆盖估计 | IndexTTS-1.5/2 adapter：**有**（IndexTTS2 TTS 服务与测试存在）；short-script parsing：部分（script_subtitle）；subtitles：高（多级 subtitle 管线）；cache/cleanup：有（"one-click clear cache"）；Apple Silicon MLX 路径：未在本次 tree 中确认（无 MLX 特征文件） |
-| 决策 | **Adapter（借鉴，不复刻）** |
-| reason | MIT 允许借鉴；但其 TTS 集成是 Python 应用内直接调用 IndexTTS 模型/API，知影架构是 Node Worker → HTTP sidecar adapter（frozen contract），两者集成形态不同；subtitle 管线针对"短视频解说"业务，非 narration master/timing reconciliation 语义 |
-| integration boundary | 概念参考：IndexTTS2 请求参数形态、subtitle 文本切分/合并/纠错的处理顺序、config 分层（audio/ffmpeg 独立 config）。**不引入 Python 依赖，不复制代码** |
-| exit/replacement | 无运行时依赖，零退出成本 |
-| commercial/license risk | MIT，无商业风险 |
+| **exact inspected SHA** | `a9e17d0e36171ab604433abafd127f78eefbf350`（branch `main` HEAD） |
+| inspection date | 2026-08-03 |
+| license（exact SHA） | **MIT**（仓库 LICENSE 文件 @ exact SHA；spdx `MIT`） |
+| relevant files（exact SHA） | `app/services/`（subtitle_merger.py / subtitle_corrector.py / subtitle_translator.py / script_subtitle.py）、`app/config/`（audio_config/ffmpeg_config）、`app/services/test_indextts2_tts_unittest.py`（IndexTTS2 接入存在）、SDP utils subtitle_analyzer |
+| 覆盖估计 | IndexTTS-1.5/2 adapter：**有**（IndexTTS2 TTS 服务 + 单测）；short-script parsing：部分；subtitles：高；cache/cleanup：有（"one-click clear cache"）；Apple Silicon MLX：未在 tree 确认 |
+| 决策 | **Adapter（借鉴概念，不复刻）** |
+| reason | MIT 允许借鉴；集成形态不同（Python 应用内直接调用 vs 知影 Node Worker → HTTP sidecar）；subtitle 管线面向"短视频解说"非 narration master/timing reconciliation |
+| integration boundary | 概念：IndexTTS2 请求参数形态、subtitle 文本处理顺序、config 分层。**不引入 Python 依赖、不复制代码** |
+| exit/replacement | 无运行时依赖 |
+| commercial/license risk | MIT 无风险 |
 
-## 2. Video Podcast Maker
+## 2. Agents365-ai/video-podcast-maker
 
 | 项 | 值 |
 |---|---|
 | source repo | https://github.com/Agents365-ai/video-podcast-maker |
-| exact inspected | branch `main`，pushed_at 2026-08-01；stars ≈ 1.5k |
-| license | **CC BY-NC 4.0**（`NOASSERTION` SPDX；仓库 LICENSE 文件为 Creative Commons Attribution-NonCommercial 4.0 International） |
-| relevant files/modules | `skills/video-podcast-maker/scripts/tts/backends/ttscn.py`（ttsCN bridge）、`scripts/tts/phonemes.py`（音素/发音）、`scripts/tts/srt.py` + `scripts/align_timing_from_srt.py`（timing.json 对齐）、`templates/components/Subtitles.tsx` + `useTiming.ts`（Remotion 字幕/时间轴组件）、`manifest-based Asset Engine` |
-| 覆盖估计 | TTS provider bridge：高（ttsCN 多平台抽象）；pronunciation dictionary/polyphone：有（phonemes.py）；timing.json：高（srt→timing 对齐）；subtitle pipeline：高；Remotion audio/component input：有（Subtitles.tsx） |
-| 决策 | **Reject（不采用/不复制）**；仅概念参考 |
-| reason | **CC BY-NC 4.0 非商业许可**：知影是商业/生产项目，复制或衍生即违反许可条款；即便 Adapter（改写法）也需谨慎（NC 条款覆盖衍生作品）。其 phonemes（polyphone 校正）与 timing 对齐概念有参考价值，但**只读理解、不落实现代码** |
-| integration boundary | 概念：发音词典数据结构、srt→timing 对齐思路、Remotion 字幕组件 props 设计。不引入其代码/依赖 |
+| **exact inspected SHA** | `73fcf16836aec2ae014fd68202f095e64c13fc4d`（branch `main` HEAD） |
+| inspection date | 2026-08-03 |
+| license（exact SHA） | **CC BY-NC 4.0**（仓库 LICENSE @ exact SHA：Creative Commons Attribution-NonCommercial 4.0 International；SPDX `NOASSERTION`） |
+| relevant files（exact SHA） | `scripts/tts/backends/ttscn.py`（ttsCN bridge）、`scripts/tts/phonemes.py`（音素/发音）、`scripts/tts/srt.py` + `scripts/align_timing_from_srt.py`（timing 对齐）、`templates/components/Subtitles.tsx` + `useTiming.ts`（Remotion 字幕/时间轴）、manifest-based Asset Engine |
+| 覆盖估计 | TTS provider bridge：高；pronunciation/polyphone：有（phonemes.py）；timing.json：高；subtitle pipeline：高；Remotion audio/component：有 |
+| 决策 | **Reject（不采用/不复制）；仅概念参考** |
+| reason | **CC BY-NC 4.0 非商业许可**：商业/生产项目复制或衍生即违约；改写法（Adapter）也受 NC 衍生条款约束。phonemes/timing 概念只读理解，不落代码 |
+| integration boundary | 概念：发音词典数据结构、srt→timing 对齐思路、Remotion 字幕 props 设计。不引入代码/依赖 |
 | exit/replacement | 无运行时依赖 |
-| commercial/license risk | **高风险（NC 条款）**：禁止复制/衍生；如未来需要发音词典，用自研实现（数据源采用 MIT/公有领域词典或自建） |
+| commercial/license risk | **高风险（NC）**：禁复制/衍生；如需要发音词典用自研 + MIT/公有领域数据源 |
 
-## 3. MoneyPrinterTurbo
+## 3. harry0703/MoneyPrinterTurbo
 
 | 项 | 值 |
 |---|---|
 | source repo | https://github.com/harry0703/MoneyPrinterTurbo |
-| exact inspected | branch `main`，pushed_at 2026-08-02；stars ≈ 101k |
-| license | **MIT** |
-| relevant files/modules | `app/services/voice.py`（provider 抽象：edge-tts / azure / 本地）、`app/services/data/azure_voices.json`（voice 目录）、`docs/voice-list.txt`、SubMaker（edge-tts word-level subtitle timing）、Docker 部署 |
-| 覆盖估计 | provider clients：高（多 provider 抽象 + voice 目录）；TTS/subtitle error handling：高（重试/超时/异常归一）；Docker/GPU compatibility：有（Docker 部署）；cache：部分 |
-| 决策 | **Adapter（概念借鉴）/ Reject（直接依赖）** |
-| reason | MIT 允许借鉴；但**其主力 TTS 是 edge-tts（微软在线服务）**，不适合知影"本地 IndexTTS2 + 零在线依赖"的生产约束；SubMaker 的 **word-level subtitle timing** 概念有参考价值（与 IndexTTS-2 的 duration 精确控制方向一致），但知影时长真相是 ffprobe 实测（已冻结），不引入 word-level 估算 |
-| integration boundary | 概念：provider 抽象接口形态（知影已有 `TtsProvider`，不替换）、voice 目录 schema、错误码归一模式。不引入 edge-tts 依赖 |
+| **exact inspected SHA** | `254cd028906ee657eab844dc94087cdbea2a7aa8`（branch `main` HEAD） |
+| inspection date | 2026-08-03 |
+| license（exact SHA） | **MIT**（LICENSE @ exact SHA；spdx `MIT`） |
+| relevant files（exact SHA） | `app/services/voice.py`（provider 抽象：edge-tts/azure/本地）、`app/services/data/azure_voices.json`（voice 目录）、`docs/voice-list.txt`、SubMaker（edge-tts word-level subtitle timing）、Docker 部署 |
+| 覆盖估计 | provider clients：高；TTS/subtitle error handling：高；Docker/GPU：有；cache：部分 |
+| 决策 | **Adapter（概念）/ Reject（直接依赖）** |
+| reason | MIT 允许借鉴；但主力 TTS 是 edge-tts（微软在线服务），不适合知影"本地 IndexTTS2 + 零在线依赖"；SubMaker word-level timing 概念可参考，但知影时长真相 = ffprobe 实测（已冻结），不引入估算 |
+| integration boundary | 概念：provider 抽象接口形态（知影已有 TtsProvider 不替换）、voice 目录 schema、错误归一模式。不引 edge-tts |
 | exit/replacement | 无运行时依赖 |
 | commercial/license risk | MIT 无风险 |
 
-## 4. Remotion official prompt-to-video template
+## 4. remotion-dev/template-prompt-to-video
 
 | 项 | 值 |
 |---|---|
 | source repo | https://github.com/remotion-dev/template-prompt-to-video |
-| exact inspected | branch `main`，pushed_at 2026-07-31；stars ≈ 129 |
-| license | 仓库**无独立 LICENSE 文件**；使用 Remotion 生态 license 条款（Remotion 公司 license / MIT 混合需逐文件确认） |
-| relevant files/modules | `public/content/<video>/descriptor.json`（scene/audio 描述）、`cli/timeline.ts`（timeline 构建）、`cli/service.ts`、`public/content/<video>/audio/*.mp3`（音频输入）、composition props |
-| 覆盖估计 | timeline JSON：高（descriptor 描述 scene + audio 顺序）；audio track inputs：有（audio 目录 + 引用）；composition props：高；element identity：有（descriptor 引用） |
-| 决策 | **Adapter（概念借鉴）** |
-| reason | 知影已有自己的 `final-render/bridge.ts` + `scene-schema` + runtime-audio 体系（M7.3A/B frozen），不替换；descriptor/timeline 的"content 目录 + JSON 描述 + 音频引用"模式与知影 artifacts+props 模式同构，仅作交叉验证 |
-| integration boundary | 概念：content descriptor 结构、timeline 派生方式。**不引入模板代码**（知影渲染契约已冻结） |
+| **exact inspected SHA** | `27ecd9762a47aa177a5e83c6974e4c4e5e0d3876`（branch `main` HEAD） |
+| inspection date | 2026-08-03 |
+| license（exact SHA） | 仓库 **无独立 LICENSE 文件**（API `license=null`）；使用 Remotion 生态 license 条款（Remotion 公司 license / MIT 混合需逐文件确认） |
+| relevant files（exact SHA） | `public/content/<video>/descriptor.json`（scene/audio 描述）、`cli/timeline.ts`（timeline 构建）、`cli/service.ts`、`public/content/<video>/audio/*.mp3`、composition props |
+| 覆盖估计 | timeline JSON：高；audio track inputs：有；composition props：高；element identity：有（descriptor 引用） |
+| 决策 | **Adapter（结构参考，不复制代码）** |
+| reason | 知影已有自己的 `final-render/bridge.ts` + scene-schema + runtime-audio（M7.3A/B frozen），不替换；descriptor/timeline 模式仅交叉验证 |
+| integration boundary | 概念：content descriptor 结构、timeline 派生方式。**不引入模板代码** |
 | exit/replacement | 无运行时依赖 |
-| commercial/license risk | **Remotion 公司 license**：知影如已按 Remotion 授权使用则无新增风险；模板本身无 LICENSE 文件——**不得复制模板代码**，仅参考结构；需在采购/授权记录中保留 Remotion 条款证据 |
+| commercial/license risk | **Remotion 公司 license**：知影按现有 Remotion 授权使用则无新增风险；模板无 LICENSE 文件——不复制代码，仅参考结构；保留 Remotion 授权证据 |
 
-## 5. OpenMontage
+## 5. calesthio/OpenMontage（任务指定目标仓库）
+
+| 项 | 值 |
+|---|---|
+| source repo | https://github.com/calesthio/OpenMontage |
+| **exact inspected SHA** | `4eab34c5cfcccaa4f1970554928feccce73ee930`（branch `main` HEAD） |
+| inspection date | 2026-08-03 |
+| license（exact SHA） | **AGPL-3.0**（LICENSE @ exact SHA：GNU AFFERO GENERAL PUBLIC LICENSE v3，2007-11-19；spdx `AGPL-3.0`） |
+| relevant files（exact SHA） | `.agents/skills/**`（agent skill 库：大量 SKILL.md + 参考文档 + 少量脚本）；相关能力：`character-animation-qa/SKILL.md`（QA skill）、`remotion-best-practices/rules/audio.md` + `get-audio-duration.md` + `subtitles.md`（ffprobe/audio/subtitle 指南）、`hyperframes-creative/scripts/extract-audio-data.py`（audio 数据处理）、`remotion-to-hyperframes/scripts/render_diff.sh`（render diff 校验） |
+| 覆盖估计（按任务指定能力） | pre-compose validation：**低**（未见独立模块，以 skill 指南形式存在）；ffprobe：**部分**（audio skill 指南提及，无独立实现）；audio/subtitle QA：**低-中**（character-animation-qa skill + subtitles.md 指南）；checkpoints：**未发现独立 checkpoint.py**（该能力在另一个同名仓库 Open-Montage/OpenMontage 中，见下）；post-render gates：**低**（render_diff.sh 提及 diff 校验） |
+| 决策 | **Reject（AGPL 商业边界；不引入）**；仅概念参考 |
+| reason | 该仓库本质是 **AGPL-3.0 的 agent skill 参考库**（指南/文档型），非视频渲染管线实现；AGPL 若引入任何代码/脚本，知影整个服务端源码必须按 AGPL 开放（商业项目不满足）；任务指定能力（pre-compose validation/ffprobe/audio QA/checkpoints/post-render gates）在其中**无完整实现**（部分以 skill 指南存在）——不构成可 Adopt/Adapter 的代码基础 |
+| integration boundary | **无**（不引入任何代码/脚本）；仅可将"先校验后组合/渲染 diff 校验"的思路纳入自研 QA 设计 |
+| exit/replacement | 无运行时依赖 |
+| commercial/license risk | **AGPL-3.0 高风险**：禁止复制/引入其代码或脚本（含 render_diff.sh/extract-audio-data.py）；概念参考不产生衍生作品 |
+
+### 5.1 附加记录：Open-Montage/OpenMontage（非任务指定，仅澄清）
 
 | 项 | 值 |
 |---|---|
 | source repo | https://github.com/Open-Montage/OpenMontage |
-| exact inspected | branch `main`，pushed_at 2026-06-26；stars ≈ 91（小规模） |
+| exact inspected SHA | `4eab34c…` 时点 branch `main` HEAD（2026-06-26；stars ≈ 91） |
 | license | **MIT** |
-| relevant files/modules | `lib/checkpoint.py`（checkpoint 机制）；pre-compose validation / ffprobe / audio-subtitle QA / post-render gates：仓库规模小，本次 tree 未发现完整 QA/gate 模块（仅 checkpoint 确认存在） |
-| 覆盖估计 | pre-compose validation：低（未见独立模块）；ffprobe：未确认；audio/subtitle QA：未确认；checkpoints：有（checkpoint.py）；post-render gates：未确认 |
-| 决策 | **Reject / Reimplement（自研）** |
-| reason | 项目规模小、与知影管线（Node + better-sqlite3 + artifacts 状态机）架构差异大；知影的 pre-compose validation / 语义校验 / commit-time fence 已有自研体系（M7.3A/B 冻结），无需外部 checkpoint 概念 |
-| integration boundary | 无（不引入） |
-| exit/replacement | 无运行时依赖 |
-| commercial/license risk | MIT 无风险 |
+| relevant files | `lib/checkpoint.py`（checkpoint 机制） |
+| 说明 | 存在 checkpoint.py（checkpoint 概念），但整体规模小、非视频管线实现；**不以它替代任务指定目标仓库**。因与任务指定能力（pre-compose/ffprobe/QA/gates）匹配度低，同样不引入（Reject）；其 checkpoint 概念与知影 generation_runs lease/indeterminate 模式不冲突，可参考思路 |
 
 ---
 
 ## 汇总表
 
-| 项目 | license | 决策 | 引入依赖 | 商业风险 |
+| 项目 | exact SHA | license | 决策 | 商业风险 |
 |---|---|---|---|---|
-| NarratoAI | MIT | Adapter（概念） | 无 | 无 |
-| Video Podcast Maker | CC BY-NC 4.0 | **Reject** | 无 | **高（NC，禁复制/衍生）** |
-| MoneyPrinterTurbo | MIT | Adapter（概念） | 无（不引 edge-tts） | 无 |
-| Remotion template-prompt-to-video | 无独立 LICENSE（Remotion 条款） | Adapter（概念） | 无 | 需保留 Remotion 授权证据 |
-| OpenMontage | MIT | Reject | 无 | 无 |
+| NarratoAI | `a9e17d0…` | MIT | Adapter（概念） | 无 |
+| Video Podcast Maker | `73fcf168…` | CC BY-NC 4.0 | **Reject** | **高（NC）** |
+| MoneyPrinterTurbo | `254cd028…` | MIT | Adapter（概念） | 无 |
+| Remotion template | `27ecd976…` | 无独立 LICENSE（Remotion 条款） | Adapter（结构） | 需保留 Remotion 授权证据 |
+| calesthio/OpenMontage | `4eab34c5…` | **AGPL-3.0** | **Reject** | **高（AGPL 传染）** |
 
 ## AGPL/LGPL/Remotion license 边界（明确）
 
-- 上述 5 项目中**无 AGPL/LGPL 采用**；OpenMontage 的另一个同名仓库（`calesthio/OpenMontage`，AGPL-3.0，44.8k★）与任务描述的 OpenMontage 能力不符，**未采用**（AGPL 若引入将强制整个服务端源码开放，知影不满足）。
-- Video Podcast Maker 的 CC BY-NC 4.0：任何代码/数据复制或衍生均受非商业限制——**仅阅读理解，不落代码**。
-- Remotion 模板：模板仓库无 LICENSE 文件，复制模板代码有 license 不确定性；知影 Remotion 使用以现有授权为准，模板仅作结构参考。
+- **calesthio/OpenMontage（AGPL-3.0）**：不引入任何代码/脚本（含其 skill 脚本）；AGPL 传染边界 = 引入即需全服务端开源，知影不满足；概念参考不触发。
+- **Video Podcast Maker（CC BY-NC 4.0）**：复制/衍生受非商业限制；仅阅读理解。
+- **Remotion 模板**：无 LICENSE 文件；不复制模板代码；Remotion 使用以现有授权为准。
+- 5 项目中无 LGPL 采用。
 
 ## 未做 / 边界
 
-- 未对任一项目执行逐文件 diff 或引入任何文件到仓库。
-- 各项目"相关模块"为 GitHub API tree/文件内容现场核验；未做运行时验证（不安装、不执行第三方代码）。
-- 决策矩阵仅约束"引入代码"层面；概念层面的设计参考已分别记录在 `docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md` 对应章节。
+- 未对任一项目执行逐文件 diff 或引入任何文件；未安装/执行第三方代码（仅 GitHub API 只读核验 + 关键文件内容 base64 解码查看）。
+- exact SHA 为 2026-08-03 inspection 时点的 branch HEAD（官方 tag 不存在于这些仓库的本次审计路径）；如后续需要锁定更老版本，需按新 SHA 重新核验 license。
