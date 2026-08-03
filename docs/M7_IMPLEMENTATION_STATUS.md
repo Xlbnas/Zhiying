@@ -9,10 +9,10 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-03T03:47Z（M7.3B FROZEN；TTS-A.R1 code changes，TTS-A **not frozen**；TTS-B/TTS-C not started） |
+| statusUpdatedAt | 2026-08-03T04:06Z（M7.3B FROZEN；TTS-A.R1 deployed @`dca8dc4`，pending independent Review PASS；TTS-B/TTS-C not started） |
 | reviewedCodeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（M7.3B final code/runtime；M7.3B deployment evidence docs HEAD 为 `044ac23e2524d53f41d223c37d16619425b21182`；M7.3A frozen code 为 `aa3f814…`） |
-| productionRuntimeSHA | `fed3e3d19b4c1a0ef80e1b2822ff4e5ab8aaf798`（TTS-A 部署后容器镜像实际代码 SHA） |
-| productionHostCheckoutSHA | `fed3e3d19b4c1a0ef80e1b2822ff4e5ab8aaf798`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
+| productionRuntimeSHA | `dca8dc463596fdf1c0bb1a1a9be14d3bdbabe1c9`（TTS-A.R1 部署后容器镜像实际代码 SHA） |
+| productionHostCheckoutSHA | `dca8dc463596fdf1c0bb1a1a9be14d3bdbabe1c9`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
 | 当前分支 | `m7` |
 | 实时 origin/m7 HEAD | 以 `git rev-parse origin/m7` 为准（不硬编码为「永远当前」） |
 
@@ -55,7 +55,7 @@
 | **M7.3A.3.2 Atomic Candidate Binding + Monotonic Image Billing + Render Heartbeat Cleanup** | **DONE** | `528f5c9`/`a8056b4`/`b243233`/`6ddf720`/`8eb23d0`（runtime `8eb23d0`） | 原子绑定、三态 provenance、billing 单调、provider result 审计、heartbeat dispose、SHA 元数据模型 |
 | **M7.3A.3.3 Legacy Binding Safety + Charged Provider Result Audit + Render Bundle Exit Classification** | **FROZEN** | `e40de12`/`80f8d11`/`ead3a23`/`c0b6f8a` + R1 `695dc02` + R2 `f7d786f` + R3 `aa3f814`（runtime `aa3f814`） | legacy 目标可验证门禁、provider 返回即 charged、usage 证据只追加、bundle 实时状态退出、首次写入 metadata 危险键过滤；**独立 Review PASS（final code/runtime `aa3f814…`，deployment evidence docs `36ff32e…`）** |
 | **M7.3B Visual Sequences / Shots Contract + DAG Foundation** | **FROZEN（独立 Review PASS）** | `96ddcc8`/`c7cbba0`/`468d0c1`/`85e826c` + R1 `a71f0fe` + R2 `e3bd60a`（final code/runtime `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`，deployment evidence docs HEAD `044ac23e2524d53f41d223c37d16619425b21182`） | visual-sequences@1.0 / shots@1.0 契约、exact-source provenance、确定性语义校验、candidate generation（Worker LLM dispatch + commit-time source fence）、dispatch 幂等/canonical timeline/usable-candidate DAG；冻结语义见 §7 |
-| **TTS-A Immutable Custom Voice Library Foundation** | **DEPLOYED（pending independent Review PASS）** | `41d108c`/`c8aec05`/`1940397`/`b68914c`/`f4752bc`/`192118c`/`fed3e3d`（runtime `fed3e3d19b4c1a0ef80e1b2822ff4e5ab8aaf798`） | voice-profile@1.0 / voice-profile-revision@1.0、immutable revision（DB trigger ABORT）、安全音频摄取（canonical WAV 48k/mono/pcm_s16le）、exact reader、Voice Library API + `/settings/voices` 最小 UI；设计文档 `docs/TTS_A_VOICE_LIBRARY_DESIGN.md`；**未绑定项目、未生成 TTS、TTS-B/C not started** |
+| **TTS-A Immutable Custom Voice Library Foundation** | **DEPLOYED（R1，pending independent Review PASS）** | `41d108c`/`c8aec05`/`1940397`/`b68914c`/`f4752bc`/`192118c`/`fed3e3d` + R1 `dca8dc4`（runtime `dca8dc463596fdf1c0bb1a1a9be14d3bdbabe1c9`，部署证据见 §15.5） | voice-profile@1.0 / voice-profile-revision@1.0、immutable revision（DB trigger ABORT）、安全音频摄取（canonical WAV 48k/mono/pcm_s16le）、exact validator（单一真相源）、bounded multipart streaming（@fastify/busboy 3.2.0）、损坏 revision 不得 reused（409 revision_unusable）、staging/intermediate symlink 防护、Voice Library API + `/settings/voices` 最小 UI；设计文档 `docs/TTS_A_VOICE_LIBRARY_DESIGN.md`；**未绑定项目、未生成 TTS、TTS-B/C not started** |
 
 ## 4. 当前已实现功能详情
 
@@ -297,7 +297,7 @@
 
 - **M7.3A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `aa3f8145825f5a33542f54e90e661e0cccf3e692`；deployment evidence docs = `36ff32e3301f51bf054efbee029fc1e6115ad3f5`；independent Review = PASS。冻结语义见 §7。
 - **M7.3B 正式 FROZEN（独立 Review PASS）**：final code/runtime = `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`；deployment evidence docs HEAD = `044ac23e2524d53f41d223c37d16619425b21182`（§15.3）；independent Review = PASS。冻结语义见 §7「M7.3B 冻结语义」。
-- **TTS-A.R1 review closure in progress（TTS-A not frozen；TTS-B/TTS-C not started）**：独立 Review FAIL 结论下修复 7 项——① 文件 durability 先于 SQLite commit；② bounded multipart streaming（@fastify/busboy 3.2.0，25MB file / 30MB body / 严格字段）；③ multipart 字段严格性；④ 共享 exact validator（单一真相源 `validateVoiceProfileRevisionExact`）；⑤ 损坏 revision 不得 reused（409 revision_unusable）；⑥ staging/intermediate symlink 防护（ensureSafeDir）；⑦ 对应测试/文档/部署。代码见后续 commit；设计文档 `docs/TTS_A_VOICE_LIBRARY_DESIGN.md` §3/§4/§4.1/§5。
+- **TTS-A.R1 deployed（pending independent Review PASS；TTS-A not frozen；TTS-B/TTS-C not started）**：独立 Review FAIL 结论下修复 7 项并重新部署（部署证据见 §15.5）——① 文件 durability 先于 SQLite commit；② bounded multipart streaming（@fastify/busboy 3.2.0，25MB file / 30MB body / 严格字段）；③ multipart 字段严格性；④ 共享 exact validator（单一真相源 `validateVoiceProfileRevisionExact`）；⑤ 损坏 revision 不得 reused（409 revision_unusable）；⑥ staging/intermediate symlink 防护（ensureSafeDir）；⑦ 对应测试/文档/部署。设计文档 `docs/TTS_A_VOICE_LIBRARY_DESIGN.md` §3/§4/§4.1/§5。
 - **Production legacy 审计（只报告，不修改）**：generated assets 19；provenance NULL 19（全为历史 legacy）；NULL + requirement_json 缺失/损坏 1；active legacy bindings 17；active bindings 指向当前 active scenes 中缺失的 requirement 10（分布于 2 个项目，均为历史绑定；未删除/重绑）。
 - 下一步：TTS-A.R1 部署后等待独立 Review PASS；随后按序 TTS-B → TTS-C → narration master → ffprobe → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
 
@@ -432,7 +432,7 @@
 - `scripts/test-tts-a-voice-library-ingest.ts`（TTS-A 新增；R1 后 25 PASS）
 - `scripts/test-tts-a-voice-library-api.ts`（TTS-A 新增；R1 扩展 R 段「损坏 revision 不得 reused」后 78 PASS，KNOWN-ISSUE=0——415 不再泄漏 staging 路径，K1 自动转 PASS）
 - `scripts/test-tts-a-voice-library-files.ts`（TTS-A 新增；R1 扩展 E9-E17 symlink 防护后 23 PASS）
-- `scripts/test-tts-a-durability.ts`（TTS-A.R1 新增，30 PASS）：D1 file-op 顺序日志（rename→fsync final→fsync revisionDir→fsync profileDir→fsync root→fsync staging→commit→201）/ D2 rename 后 commit 前 fsync 失败（ingest_failed、row=0、orphan、exact null、不误判 duplicate）/ D3 INSERT 失败与 final 覆盖保护（row=0、sentinel 不被覆盖）/ D4 commit 后无 durability-critical 操作 / D5 crash model 文档措辞断言
+- `scripts/test-tts-a-durability.ts`（TTS-A.R1 新增，30 PASS）：D1 file-op 顺序日志（rename→fsync final→fsync revisionDir→fsync profileDir→fsync root→fsync staging→commit→201）/ D2 rename 后 commit 前 fsync 失败（ingest_failed、row=0、orphan、exact null、不误判 duplicate）/ D3 INSERT 失败与 final 覆盖保护（row=0、sentinel 不被覆盖）/ D4 commit 后无 durability-critical 操作 / D5 crash model 文档措辞断言（**镜像内运行需只读挂载 docs/：D5 读设计文档**）
 - `scripts/test-tts-a-multipart.ts`（TTS-A.R1 新增，31 PASS）：M1 Content-Length 预检 413（不读 body）/ M2 chunked 流式计数 413 提前中止 / M3 伪造 Content-Length / M4 单文件 >25MB 413 file_too_large / M5-M7 严格字段（双 audio、unknown、重复字段 422）/ M8 合法 multipart 201 + 无完整 Buffer 证据 / M9 parser 错误与断连（无 DB 行、staging 清理）
 - `scripts/test-llm-dispatch.ts`
 - `scripts/test-workflow-stages.ts`
@@ -606,4 +606,17 @@ M7.3A.2 Review 全部阻断项已修复（第二轮 hardening）。接续复核�
 - **Production 数据不变量（部署前后只读对比，24 项全过）**：projects 全 m6（3 个）；`m7_pipeline_snapshot_id` 全 NULL（3/3）；M7 snapshot 0；Freud narration_plan_v2/narrative_beats/visual_intent 全行 sha 与备份全等（`59d84eff…`/`727031a4…`/`078a882d…`）；旧 candidate `793c80fa…` 全行 sha 全等；`visual_sequence_plan`/`shot_plan`/`timing_reconciliation_v2` 全 0；`m7_visual_sequences`/`m7_shots` generation runs 0；artifacts 全表 sha 全等（`1bf0f861…`，覆盖 narration_audio_manifest 与 subtitle_timing）；tts_jobs 351=351 且全量 sha `02cfde74…` 与备份全等；llm_usage 69=69；project_usage_events 610=610；asset_generation_jobs 0=0；assets/bindings sha 全等；render_jobs 14=14；resource leases 0；**voice_profiles=0、voice_profile_revisions=0**；`/vol1/1000/docker/zhiying/data/voice-library` 不存在（未创建任何 production 声音数据）；无项目切换 m7；无真实 LLM/APIYi/IndexTTS2 调用。
 - **状态**：**M7.3B FROZEN；TTS-A deployed；TTS-A pending independent Review PASS；TTS-B not started；TTS-C not started**。
 - **本轮未执行**：不在 production 上传参考音频；不创建 production Voice Profile；不调用真实 IndexTTS2 adapter；不生成正式 TTS；不重新合成 Freud TTS；不绑定项目声音；不开始 TTS-B/C；不生成 narration master；不做 subtitle timing；不创建 timing-reconciliation@2.0；不创建 M7 snapshot；不切换任何项目到 m7；不改写历史 tts_jobs；不把 env-based voice 导入新库。
+- **证据边界**：OPS-AUDIT-BRIDGE 不可用（仓库无此设施）；以上 production 证据来自 Agent 现场命令，**不是** independently verified。
+
+### 15.5 TTS-A.R1 部署证据（dca8dc4，2026-08-03）
+
+- **部署链**：code SHA `dca8dc463596fdf1c0bb1a1a9be14d3bdbabe1c9` = production runtime SHA = host checkout SHA = origin/m7 HEAD（本 docs evidence commit 后 origin/m7 会高于 runtime——以现场 `git rev-parse` 为准）。
+- **pre-deployment backup**：`/vol1/1000/backups/zhiying/tts-a-r1-20260803T035559Z`（DB SHA `3b92bec5…`；integrity=ok；**SHA256SUMS 全 OK、0 FAILED**；`BACKUP_COMPLETED_AT` 先于 checkout；含 zhiying.db online backup、schema.sql、migration-state、tts_jobs 全表 dump+hash、voice_profiles/voice_profile_revisions（0/0）、voice-library-dir（NOT_EXIST）、narration/manifest/subtitle 按 kind 拆分 dump、llm/usage、assets/bindings、render、leases、compose×2、`.env.production`（内容不进报告）、previous-sha（fed3e3d）、invariants baseline、data audio 文件清单）。
+- **构建网络 runbook**：`production-build-network.sh start/check` 通过 → `docker build --network=host --add-host remotion.media:127.0.0.1 --build-arg APT_MIRROR=mirrors.aliyun.com --build-arg NPM_REGISTRY=https://registry.npmmirror.com -t zhiying:dca8dc4…`（**BUILD_EXIT=0**，trap 保证 stop）→ 构建后 tunnel `STOPPED`、443 无 listener、tunnel 容器 0 残留；image digest `d6d9f56c…`；host worktree clean。新增依赖 `@fastify/busboy@3.2.0`（package.json 精确 pin + lockfile 精确提交）。
+- **镜像内测试**（`NODE_ENV=development`，scripts 只读挂载，image code SHA = mounted scripts SHA = dca8dc4；durability 套件额外只读挂载 docs——D5 断言读设计文档）：**TTS-A 6 套件 34/25/78/23/30/31 全绿**（api KNOWN-ISSUE=0——415 不再泄漏 staging 路径，K1 自动转 PASS）+ frozen 11 套件全绿（m73b 92/96/114/71、m73a 184、billing 68、bind-atomicity 45、resource-leases 87、m71-tts 25、m3b-tts 99、m3c 82）。agentvm 同 17 套件全绿；m3f/m4b adapter 套件在 agentvm 环境阻塞（依赖 Python venv，adapter 走 Docker；不在既有门禁清单）。
+- **migration 演练**（production DB 副本，应用标准入口 `getDb()`）：voice_profiles / voice_profile_revisions / 2 个 ABORT trigger 就位，初始行数 0/0；重跑幂等；**351 条 tts_jobs 全量 sha256 演练前后完全一致**（`92c67ac2…`，与备份基线同方法 hash 一致）；integrity_check=ok。未手工 sqlite3 ALTER production。
+- **up 验证**：三容器 healthy @`zhiying:dca8dc4…`/`zhiying-indextts2-adapter:dca8dc4…`（adapter 代码未变，沿用原 digest 重新 tag；`ZHIYING_RELEASE_TAG=dca8dc4…`）；local 3210 与 LAN root 200、/api/projects 200、/settings/voices 200、/api/voice-profiles 200（`{"profiles":[]}`）；worker/web 日志无 migration/SQLite/lease/provider error（仅标准 node:sqlite ExperimentalWarning）；resource leases 0；443/tunnel 0；host worktree clean。
+- **Production 数据不变量（部署前后只读对比，24 项全过）**：projects 全 m6/rigorous（3 个）；`m7_pipeline_snapshot_id` 全 NULL；M7 snapshot 表 0；Freud narration_plan_v2/narrative_beats/visual_intent 全行 sha 与备份全等（`99e33ccf…`/`d3414755…`/`42fc4989…`）；`visual_sequence_plan`/`shot_plan`/`timing_reconciliation_v2` 全 0；narration_audio_manifest/subtitle_timing sha 与备份全等（`5e720665…`/`6afe7f06…`）；tts_jobs 351=351 且全量 sha `92c67ac2…` 与备份全等；llm_usage 69=69；project_usage_events 610=610；asset_generation_jobs 0=0；assets/bindings 40=40；render_jobs 14=14；resource leases 0；**voice_profiles=0、voice_profile_revisions=0**；`/vol1/1000/docker/zhiying/data/voice-library` 不存在（未创建任何 production 声音数据）；无项目切换 m7（pipeline_version 全 m6）；无真实 LLM/APIYi/IndexTTS2 调用。
+- **状态**：**M7.3B FROZEN；TTS-A.R1 deployed；TTS-A pending independent Review PASS；TTS-B not started；TTS-C not started**。
+- **本轮未执行**：不在 production 上传参考音频；不创建 production Voice Profile；不调用真实 IndexTTS2 adapter（不生成 TTS）；不重新合成 Freud TTS；不绑定项目声音；不开始 TTS-B/C；不生成 narration master；不做 subtitle timing；不创建 timing-reconciliation@2.0；不创建 M7 snapshot；不切换任何项目到 m7；不改写历史 tts_jobs；不把 env-based voice 导入新库。
 - **证据边界**：OPS-AUDIT-BRIDGE 不可用（仓库无此设施）；以上 production 证据来自 Agent 现场命令，**不是** independently verified。
