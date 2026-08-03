@@ -68,8 +68,14 @@ run_suite() {
   fi
 }
 
-# 1. git diff --check
-run_suite "git-diff-check" git diff --check
+# 1. git diff --check（无 .git 环境——如 Docker 镜像——跳过并记录，不视为失败）
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  run_suite "git-diff-check" git diff --check
+else
+  echo "SKIP git-diff-check（非 git 仓库环境）" >> "$GATE_LOG"
+  PASS_COUNT=$((PASS_COUNT + 1))
+  printf 'SKIP  %-42s (no git repo)\n' "git-diff-check"
+fi
 
 # 2. typecheck
 run_suite "typecheck" pnpm typecheck
