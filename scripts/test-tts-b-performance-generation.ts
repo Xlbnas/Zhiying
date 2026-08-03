@@ -496,6 +496,81 @@ async function main(): Promise<void> {
     );
   }
 
+  // ---------- E19: P0 commit-time Narration candidate fence（TTS-B.R2） ----------
+  // 生成期间（provider callback 内）lock Script V2 B → P.content_json 不变 →
+  // commit 前 classifyNarrationPlanV2Candidate → stale → SOURCE_STALE、run failed、
+  // 零 artifact、provider 恰好一次、不自动二次调用。独立项目避免前段 lock 污染。
+  {
+    const e19Project = createProjectWithWorkflow({topic: 'e19', coreQuestion: 'q'}).project.id;
+    for (const stage of (['project_definition', 'research', 'evidence', 'argument_tree', 'script_v1'] as WorkflowStage[])) {
+      generateVersion({projectId: e19Project, stage, content: `# ${stage}`, contentType: 'markdown', source: 'manual_edit'});
+      lockStage(e19Project, stage);
+    }
+    generateVersion({projectId: e19Project, stage: 'script_v2', content: `# Script V2\n\n## 第 1 章 开场（00:00–01:00）\n\n第一句。第二句。\n`, contentType: 'markdown', source: 'manual_edit', promptVersion: 'script-v2@2.0'});
+    lockStage(e19Project, 'script_v2');
+    const e19Plan = buildNarrationPlanV2(e19Project);
+    const eProfile = createVoiceProfile({displayName: 'e19 voice'});
+    const eRev = await ingestVoiceProfileRevision(
+      {voiceProfileId: eProfile.id, requestId: `e19-rev-${crypto.randomUUID()}`, audioBuffer: (() => {
+        const sr = 48000;
+        const frames = Math.floor((sr * 1500) / 1000);
+        const data = Buffer.alloc(frames * 2);
+        for (let i = 0; i < frames; i++) data.writeInt16LE(Math.round(10000 * Math.sin((2 * Math.PI * 570 * i) / sr)), i * 2);
+        const h = Buffer.alloc(44);
+        h.write('RIFF', 0); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8);
+        h.write('fmt ', 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
+        h.writeUInt32LE(sr, 24); h.writeUInt32LE(sr * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34);
+        h.write('data', 36); h.writeUInt32LE(data.length, 40);
+        return Buffer.concat([h, data]);
+      })()},
+      MOCK_DEPS,
+    );
+    const eAssign = await buildProjectVoiceAssignment({
+      projectId: e19Project,
+      voiceProfileId: eProfile.id,
+      voiceProfileRevisionId: eRev.revision.id,
+      requestId: `e19-assign-${crypto.randomUUID()}`,
+    });
+    const planContentBefore = (getDb()
+      .prepare('SELECT content_json FROM artifacts WHERE id = ?')
+      .get(e19Plan.artifact.id) as {content_json: string}).content_json;
+    const beforeCount = performanceCount(e19Project);
+    const provider = new ScriptableProvider();
+    provider.push({
+      text: JSON.stringify({items: itemsFor(e19Plan.plan)}),
+      before: () => {
+        // 生成期间 lock Script V2 B（真实 drift；不改旧 plan artifact）
+        generateVersion({projectId: e19Project, stage: 'script_v2', content: `# Script V2\n\n## 第 1 章 新章（00:00–01:00）\n\n新第一句。\n`, contentType: 'markdown', source: 'manual_edit', promptVersion: 'script-v2@2.0'});
+        lockStage(e19Project, 'script_v2');
+      },
+    });
+    const r = await buildNarrationPerformancePlan({
+      projectId: e19Project,
+      narrationPlanArtifactId: e19Plan.artifact.id,
+      projectVoiceAssignmentArtifactId: eAssign.artifact.id,
+      requestId: 'req-perf-e19-0001',
+      provider,
+    });
+    const planContentAfter = (getDb()
+      .prepare('SELECT content_json FROM artifacts WHERE id = ?')
+      .get(e19Plan.artifact.id) as {content_json: string}).content_json;
+    const runRow = getDb()
+      .prepare("SELECT status, error_code FROM generation_runs WHERE stage = 'm7_narration_performance_plan' AND request_id = 'req-perf-e19-0001'")
+      .get() as {status: string; error_code: string | null};
+    ok(
+      planContentBefore === planContentAfter,
+      '[E19a] 生成期间 lock Script V2 B 不改旧 plan artifact content_json（真实 drift）',
+    );
+    ok(
+      r.kind === 'terminal' && r.errorCode === 'SOURCE_STALE' &&
+        performanceCount(e19Project) === beforeCount &&
+        runRow.status === 'failed' && runRow.error_code === 'SOURCE_STALE' &&
+        provider.requests.length === 1,
+      '[E19b] commit 前 classifyNarrationPlanV2Candidate=stale → SOURCE_STALE、run failed、零 artifact、provider 恰好一次',
+      {kind: r.kind, errorCode: r.kind === 'terminal' ? r.errorCode : null, providerCalls: provider.requests.length, runStatus: runRow.status},
+    );
+  }
+
   // ---------- E10: buildPerformanceInputIdentity ----------
   {
     const i1 = buildPerformanceInputIdentity({

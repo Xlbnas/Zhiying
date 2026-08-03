@@ -31,6 +31,13 @@ import {
   computeTtsBDagNodeStates,
   detectTtsBDagCycles,
   detectTtsBDagReverseEdges,
+  deriveTtsBDagEdges,
+  deriveTtsBDagTopologicalOrder,
+  TTS_B_DAG_EDGES,
+  TTS_B_DAG_NODES,
+  validateTtsBDag,
+  type TtsBDagNodeDef,
+  type TtsBDagNodeId,
 } from '../src/lib/tts-b/dag';
 import {computeM7DagNodeStates} from '../src/lib/m7-dag/readiness';
 import type {LLMProvider, LLMRequest, LLMResponse} from '../src/lib/llm/types';
@@ -321,6 +328,72 @@ async function main(): Promise<void> {
   {
     ok((detectTtsBDagCycles() ?? []).length === 0, '[F11] TTS-B graph 无 cycle');
     ok((detectTtsBDagReverseEdges() ?? []).length === 0, '[F12] TTS-B graph 无反向边');
+  }
+
+  // ---------- G: graph detector 故障注入（TTS-B.R2 §七） ----------
+  {
+    const node = (id: string, deps: string[]): TtsBDagNodeDef => ({
+      id: id as TtsBDagNodeId,
+      label: id,
+      dependencies: deps as TtsBDagNodeId[],
+    });
+    // G1：canonical graph 合法——validate 无 issue、edges 由 nodes 派生、拓扑序可派生、
+    //     无 cycle、无 reverse edge
+    ok(
+      validateTtsBDag(TTS_B_DAG_NODES).length === 0 &&
+        TTS_B_DAG_EDGES.length === 2 &&
+        deriveTtsBDagTopologicalOrder(TTS_B_DAG_NODES) !== null &&
+        (detectTtsBDagCycles() ?? []).length === 0 &&
+        (detectTtsBDagReverseEdges() ?? []).length === 0,
+      '[G1] canonical graph：validate 干净、edges 派生、拓扑序可派生、无 cycle、无 reverse edge',
+      {edges: TTS_B_DAG_EDGES},
+    );
+    // G2：node id 重复 → validate issue
+    ok(
+      validateTtsBDag([node('a', []), node('a', [])]).some((i) => i.includes('node id 重复')),
+      '[G2] node id 重复 → 结构校验失败',
+    );
+    // G3：重复 edge（同一 (dep → id) 出现两次，由重复 node 产生）→ validate issue
+    ok(
+      validateTtsBDag([node('a', ['b']), node('a', ['b'])]).some((i) => i.includes('重复 edge')),
+      '[G3] 重复 edge → 结构校验失败',
+    );
+    // G4：注入 cycle（narration→performance 且 performance→narration）→ cycle 被检测、
+    //     拓扑序不可派生
+    const cycleGraph = [
+      node('narration_plan_v2', ['narration_performance_plan']),
+      node('project_voice_assignment', []),
+      node('narration_performance_plan', ['narration_plan_v2', 'project_voice_assignment']),
+    ];
+    ok(
+      (detectTtsBDagCycles(cycleGraph) ?? []).length > 0 &&
+        deriveTtsBDagTopologicalOrder(cycleGraph) === null,
+      '[G4] 注入 cycle → cycle 被检测、拓扑序派生失败',
+      {cycle: detectTtsBDagCycles(cycleGraph)},
+    );
+    // G5：注入单向 reverse edge（performance→narration，无 cycle）→ reverse edge 被检测
+    const reverseGraph = [
+      node('narration_plan_v2', ['narration_performance_plan']),
+      node('project_voice_assignment', []),
+      node('narration_performance_plan', ['project_voice_assignment']),
+    ];
+    ok(
+      (detectTtsBDagCycles(reverseGraph) ?? []).length === 0 &&
+        detectTtsBDagReverseEdges(reverseGraph).length > 0,
+      '[G5] 注入单向 reverse edge（performance→narration）→ 按规定（canonical）拓扑序检测到 reverse edge（无 cycle）',
+      {reverse: detectTtsBDagReverseEdges(reverseGraph)},
+    );
+    // G6：unknown endpoint → validate issue
+    ok(
+      validateTtsBDag([node('a', ['unknown_node'])]).some((i) => i.includes('未知端点')),
+      '[G6] unknown endpoint → 结构校验失败',
+    );
+    // G7：TTS-B edges 只允许 narration/assignment → performance（不允许 performance → 上游）
+    ok(
+      TTS_B_DAG_EDGES.every((e) => e.to === 'narration_performance_plan' && e.from !== 'narration_performance_plan'),
+      '[G7] TTS-B edges 仅 narration/assignment → performance（无性能 → 上游反向边）',
+      {edges: TTS_B_DAG_EDGES},
+    );
   }
 
   // F13: M7.3B Sequence/Shot 状态不受 TTS-B 影响

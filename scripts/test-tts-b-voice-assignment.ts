@@ -573,6 +573,114 @@ BEGIN SELECT RAISE(ABORT, 'voice_profile_revisions is immutable'); END;`);
     );
   }
 
+  // ---------- C13-C15：TTS-B.R2 竞态闭包（concurrent winner / existing2 损坏 / existing2 缺失） ----------
+  {
+    // C13：并发 winner 正常（5× 同 requestId 同 source）
+    const {profileId: cwPid, revisionId: cwRid} = await makeVoiceRevision(2010);
+    const beforeCount = assignmentCount(projectId);
+    const results = await Promise.all(
+      Array.from({length: 5}, (_, i) =>
+        buildProjectVoiceAssignment({
+          projectId,
+          voiceProfileId: cwPid,
+          voiceProfileRevisionId: cwRid,
+          requestId: 'req-cw-0001',
+        }).catch((e) => e),
+      ),
+    );
+    const okResults = results.filter((r) => r && (r.kind === 'created' || r.kind === 'reused'));
+    const createdCount = okResults.filter((r) => r.kind === 'created').length;
+    const reusedCount = okResults.filter((r) => r.kind === 'reused').length;
+    const artifactIds = new Set(okResults.map((r) => r.artifact.id));
+    ok(
+      createdCount === 1 && reusedCount === 4 && artifactIds.size === 1 &&
+        assignmentCount(projectId) === beforeCount + 1 && envelopeCount(projectId) === beforeCount + 1,
+      '[C13] 并发 5× 同 requestId 同 source → 1 created + 4 reused、artifact/envelope 仅 1、同一 artifactId',
+      {created: createdCount, reused: reusedCount, artifactIds: [...artifactIds]},
+    );
+
+    // C14：concurrent existing2 artifact 损坏——hook 模拟 winner 已插入 envelope+artifact
+    //      但 source 不自洽 → L 的 final tx 发现 existing2 → 事务后裁决 → ASSIGNMENT_UNUSABLE，
+    //      不创建第二个 artifact
+    const {profileId: cePid, revisionId: ceRid} = await makeVoiceRevision(2020);
+    const ceBefore = assignmentCount(projectId);
+    const ceArtifactId = crypto.randomUUID();
+    const ceEnvelopeId = crypto.randomUUID();
+    const ceContent = {
+      schemaVersion: 'project-voice-assignment@1.0',
+      compilerVersion: '1.0',
+      projectId,
+      source: {
+        voiceProfileId: cePid,
+        voiceProfileRevisionId: ceRid,
+        revisionSchemaVersion: 'voice-profile-revision@1.0',
+        provider: 'indextts2',
+        canonicalAudioSha256: 'a'.repeat(64), // 故意不一致（真实 hash 非 a...）
+        adapterCompatibilityKey: 'indextts2-adapter-registry@1',
+      },
+    };
+    setAssignmentBeforeCommitFenceForTest(() => {
+      // 模拟 winner 已提交 envelope + artifact（source.canonicalAudioSha256 与真实不一致）
+      const iso = new Date().toISOString();
+      getDb().prepare(
+        `INSERT INTO artifacts (id, project_id, kind, version, content_json, file_path, created_at)
+         VALUES (?, ?, ?, (SELECT COALESCE(MAX(version), 0) + 1 FROM artifacts WHERE project_id = ? AND kind = ?), ?, NULL, ?)`,
+      ).run(ceArtifactId, projectId, PROJECT_VOICE_ASSIGNMENT_KIND, projectId, PROJECT_VOICE_ASSIGNMENT_KIND, JSON.stringify(ceContent), iso);
+      getDb().prepare(
+        `INSERT INTO voice_assignment_requests (id, project_id, request_id, voice_profile_id, voice_profile_revision_id, artifact_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(ceEnvelopeId, projectId, 'req-ce-0001', cePid, ceRid, ceArtifactId, iso);
+    });
+    let ceErr: unknown = null;
+    try {
+      await buildProjectVoiceAssignment({
+        projectId,
+        voiceProfileId: cePid,
+        voiceProfileRevisionId: ceRid,
+        requestId: 'req-ce-0001',
+      });
+    } catch (e) {
+      ceErr = e;
+    }
+    setAssignmentBeforeCommitFenceForTest(null);
+    ok(
+      ceErr instanceof AssignmentError && ceErr.code === 'ASSIGNMENT_UNUSABLE' &&
+        assignmentCount(projectId) === ceBefore + 1, // 只有 winner 的 1 个，无第二个
+      '[C14] concurrent existing2 artifact source 不自洽 → 事务后裁决 ASSIGNMENT_UNUSABLE（不创建第二个 artifact）',
+      {code: ceErr instanceof Error ? (ceErr as AssignmentError).code : String(ceErr)},
+    );
+
+    // C15：concurrent existing2 artifact 缺失 → REQUEST_STATE_INCONSISTENT
+    const {profileId: cmPid, revisionId: cmRid} = await makeVoiceRevision(2030);
+    const cmBefore = assignmentCount(projectId);
+    const cmEnvelopeId = crypto.randomUUID();
+    setAssignmentBeforeCommitFenceForTest(() => {
+      const iso = new Date().toISOString();
+      getDb().prepare(
+        `INSERT INTO voice_assignment_requests (id, project_id, request_id, voice_profile_id, voice_profile_revision_id, artifact_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(cmEnvelopeId, projectId, 'req-cm-0001', cmPid, cmRid, '00000000-0000-4000-8000-0000000000dd', iso);
+    });
+    let cmErr: unknown = null;
+    try {
+      await buildProjectVoiceAssignment({
+        projectId,
+        voiceProfileId: cmPid,
+        voiceProfileRevisionId: cmRid,
+        requestId: 'req-cm-0001',
+      });
+    } catch (e) {
+      cmErr = e;
+    }
+    setAssignmentBeforeCommitFenceForTest(null);
+    ok(
+      cmErr instanceof AssignmentError && cmErr.code === 'REQUEST_STATE_INCONSISTENT' &&
+        assignmentCount(projectId) === cmBefore,
+      '[C15] concurrent existing2 artifact 缺失 → REQUEST_STATE_INCONSISTENT（不创建 artifact）',
+      {code: cmErr instanceof Error ? (cmErr as AssignmentError).code : String(cmErr)},
+    );
+  }
+
   closeDb();
   fs.rmSync(path.resolve(process.cwd(), DATA_DIR), {recursive: true, force: true});
 
