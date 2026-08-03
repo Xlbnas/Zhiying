@@ -13,6 +13,8 @@ import {VisualAssetsPanel} from './VisualAssetsPanel';
 import {UsageSummaryPanel} from './UsageSummaryPanel';
 import {NarrativeBeatsPanel} from './NarrativeBeatsPanel';
 import {VisualIntentPanel} from './VisualIntentPanel';
+import {VoiceAssignmentPanel} from './VoiceAssignmentPanel';
+import {PerformancePlanPanel} from './PerformancePlanPanel';
 import {WorkflowStepper} from './WorkflowStepper';
 import {ParallelLanes} from './ParallelLanes';
 import {STAGE_NAMES, type StagesResponse} from './shared';
@@ -320,6 +322,8 @@ export function WorkflowWorkspace({projectId}: {projectId: string}) {
       <NarrativeBeatsPanel projectId={projectId} />
 
       <VisualIntentPanel projectId={projectId} />
+      <VoiceAssignmentPanel projectId={projectId} />
+      <PerformancePlanPanel projectId={projectId} />
     </main>
   );
 }
