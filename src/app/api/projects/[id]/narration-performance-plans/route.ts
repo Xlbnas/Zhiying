@@ -17,6 +17,7 @@ import {
   PerformanceError,
 } from '@/lib/tts-b/performance';
 import {
+  classifyNarrationPerformancePlan,
   getNarrationPerformancePlan,
   listNarrationPerformancePlanCandidates,
 } from '@/lib/tts-b/performance';
@@ -157,6 +158,22 @@ export async function POST(
             status: 'failed',
             errorCode: 'RESULT_ARTIFACT_MISSING',
             message: `run ${result.runId} 已 succeeded 但 result artifact ${result.resultArtifactId ?? '(null)'} 不可读`,
+            candidateOnly: true,
+          },
+          {status: 409},
+        );
+      }
+      // TTS-B.R1：reused 前 classify——stale/invalid 不得返回 200
+      const candidate = await classifyNarrationPerformancePlan(id, ref.artifact);
+      if (candidate.status !== 'current_candidate') {
+        const errorCode =
+          candidate.status === 'invalid_source' ? 'RESULT_ARTIFACT_INVALID' : 'RESULT_ARTIFACT_STALE';
+        return Response.json(
+          {
+            runId: result.runId,
+            status: 'failed',
+            errorCode,
+            message: `result artifact 已 ${candidate.status}（${candidate.statusReason ?? ''}）——请用新 requestId + 新 exact source`,
             candidateOnly: true,
           },
           {status: 409},

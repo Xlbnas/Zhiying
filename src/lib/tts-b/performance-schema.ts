@@ -93,8 +93,9 @@ export const narrationPerformancePlanSourceSchema = z
     scriptV2ContentHash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
     projectVoiceAssignmentArtifactId: z.string().min(1),
     projectVoiceAssignmentContentHash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
-    voiceProfileId: z.string().min(1),
-    voiceProfileRevisionId: z.string().min(1),
+    voiceProfileId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+    voiceProfileRevisionId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+    provider: z.literal('indextts2'),
     canonicalAudioSha256: z.string().regex(/^[0-9a-f]{64}$/),
     adapterCompatibilityKey: z.literal('indextts2-adapter-registry@1'),
   })

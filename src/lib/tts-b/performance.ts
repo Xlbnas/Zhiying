@@ -209,6 +209,53 @@ export async function classifyNarrationPerformancePlan(
     };
   }
 
+  // Performance source 与 exact Narration Plan 逐项一致（TTS-B.R1：PERFORMANCE_SOURCE_MISMATCH）
+  const planSrcMismatch = [
+    performance.source.narrationPlanArtifactId === planRef.artifact.id ? null : 'narrationPlanArtifactId',
+    performance.source.narrationPlanContentHash === sha256Text(planRef.artifact.content_json) ? null : 'narrationPlanContentHash',
+    performance.source.narrationPlanSchemaVersion === planRef.plan.schemaVersion ? null : 'narrationPlanSchemaVersion',
+    performance.source.narrationPlanCompilerVersion === planRef.plan.compilerVersion ? null : 'narrationPlanCompilerVersion',
+    performance.source.scriptV2VersionId === planRef.plan.source.scriptV2VersionId ? null : 'scriptV2VersionId',
+    performance.source.scriptV2Version === planRef.plan.source.scriptV2Version ? null : 'scriptV2Version',
+    performance.source.scriptV2ContentHash === planRef.plan.source.scriptV2ContentHash ? null : 'scriptV2ContentHash',
+  ].filter((x): x is string => x !== null);
+  if (planSrcMismatch.length > 0) {
+    return {
+      artifact: row,
+      performance,
+      status: 'invalid_source',
+      statusReason: `PERFORMANCE_SOURCE_MISMATCH: ${planSrcMismatch.join(', ')}（与 exact Narration Plan 不一致，不得静默覆盖）`,
+    };
+  }
+
+  // Narration candidate 状态传播（TTS-B.R1：必须经 classifyNarrationPlanV2Candidate——
+  // locked Script V2 漂移不改 artifact content_json 也会使 candidate stale）
+  const narrationCandidate = classifyNarrationPlanV2Candidate(projectId, planRef.artifact);
+  if (narrationCandidate.status === 'needs_review') {
+    return {
+      artifact: row,
+      performance,
+      status: 'stale_source',
+      statusReason: 'NARRATION_PLAN_NOT_ELIGIBLE_NEEDS_REVIEW：narration plan 存在 needsReview，不可用于 performance',
+    };
+  }
+  if (narrationCandidate.status === 'stale') {
+    return {
+      artifact: row,
+      performance,
+      status: 'stale_source',
+      statusReason: `NARRATION_PLAN_STALE：narration plan candidate 已 stale（${narrationCandidate.statusReason ?? ''}）`,
+    };
+  }
+  if (narrationCandidate.status === 'invalid') {
+    return {
+      artifact: row,
+      performance,
+      status: 'invalid_source',
+      statusReason: `NARRATION_PLAN_INVALID：narration plan candidate 已 invalid（${narrationCandidate.statusReason ?? ''}）`,
+    };
+  }
+
   // Assignment source 漂移 → stale；assignment invalid（voice unusable）→ invalid
   const assignRef = getProjectVoiceAssignment(
     projectId,
@@ -233,6 +280,27 @@ export async function classifyNarrationPerformancePlan(
       statusReason: 'voice assignment 内容 hash 漂移（source 变化，需重新生成 performance plan）',
     };
   }
+
+  // Performance source 与 exact Assignment 逐项一致（PERFORMANCE_SOURCE_MISMATCH）
+  const assignSrc = assignRef.assignment.source;
+  const assignSrcMismatch = [
+    performance.source.projectVoiceAssignmentArtifactId === assignRef.artifact.id ? null : 'projectVoiceAssignmentArtifactId',
+    performance.source.projectVoiceAssignmentContentHash === sha256Text(assignRef.artifact.content_json) ? null : 'projectVoiceAssignmentContentHash',
+    performance.source.voiceProfileId === assignSrc.voiceProfileId ? null : 'voiceProfileId',
+    performance.source.voiceProfileRevisionId === assignSrc.voiceProfileRevisionId ? null : 'voiceProfileRevisionId',
+    performance.source.provider === assignSrc.provider ? null : 'provider',
+    performance.source.canonicalAudioSha256 === assignSrc.canonicalAudioSha256 ? null : 'canonicalAudioSha256',
+    performance.source.adapterCompatibilityKey === assignSrc.adapterCompatibilityKey ? null : 'adapterCompatibilityKey',
+  ].filter((x): x is string => x !== null);
+  if (assignSrcMismatch.length > 0) {
+    return {
+      artifact: row,
+      performance,
+      status: 'invalid_source',
+      statusReason: `PERFORMANCE_SOURCE_MISMATCH: ${assignSrcMismatch.join(', ')}（与 exact Assignment 不一致）`,
+    };
+  }
+
   const assignCandidate = await classifyProjectVoiceAssignment(projectId, assignRef.artifact);
   if (assignCandidate.status === 'invalid_source') {
     return {
@@ -251,7 +319,7 @@ export async function classifyNarrationPerformancePlan(
     };
   }
 
-  // exact voice 再次确认（fail-closed）
+  // exact voice 再次确认（fail-closed）+ descriptor 与 performance source 逐项一致
   const descriptor = await validateVoiceProfileRevisionExact(
     assignRef.assignment.source.voiceProfileId,
     assignRef.assignment.source.voiceProfileRevisionId,
@@ -262,6 +330,21 @@ export async function classifyNarrationPerformancePlan(
       performance,
       status: 'invalid_source',
       statusReason: `exact voice revision 不可用（${descriptor?.unusableReason ?? '不可读'}）`,
+    };
+  }
+  const voiceSrcMismatch = [
+    descriptor.row.voice_profile_id === performance.source.voiceProfileId ? null : 'voiceProfileId',
+    descriptor.row.id === performance.source.voiceProfileRevisionId ? null : 'voiceProfileRevisionId',
+    descriptor.row.provider === performance.source.provider ? null : 'provider',
+    descriptor.row.canonical_audio_sha256 === performance.source.canonicalAudioSha256 ? null : 'canonicalAudioSha256',
+    descriptor.row.adapter_compatibility_key === performance.source.adapterCompatibilityKey ? null : 'adapterCompatibilityKey',
+  ].filter((x): x is string => x !== null);
+  if (voiceSrcMismatch.length > 0) {
+    return {
+      artifact: row,
+      performance,
+      status: 'invalid_source',
+      statusReason: `PERFORMANCE_SOURCE_MISMATCH: ${voiceSrcMismatch.join(', ')}（与 exact voice descriptor 不一致）`,
     };
   }
 
@@ -430,6 +513,19 @@ export async function buildNarrationPerformancePlan(input: {
         errorMessage: `run ${claim.run.id} 已 succeeded 但 result artifact ${artifactId ?? '(null)'} 不可读`,
       };
     }
+    // TTS-B.R1：reused 前必须 classify——stale/invalid 不得返回 succeeded（fail-closed）
+    const candidate = await classifyNarrationPerformancePlan(input.projectId, ref.artifact);
+    if (candidate.status !== 'current_candidate') {
+      const errorCode =
+        candidate.status === 'invalid_source' ? 'RESULT_ARTIFACT_INVALID' : 'RESULT_ARTIFACT_STALE';
+      return {
+        kind: 'terminal',
+        runId: claim.run.id,
+        status: 'failed',
+        errorCode,
+        errorMessage: `run ${claim.run.id} 的 result artifact 已 ${candidate.status}（${candidate.statusReason ?? ''}）——不新建 artifact、不重新调用 LLM；请用新 requestId + 新 exact source`,
+      };
+    }
     return {
       kind: 'succeeded',
       artifact: ref.artifact,
@@ -480,6 +576,7 @@ export async function buildNarrationPerformancePlan(input: {
         projectVoiceAssignmentContentHash: sha256Text(assignmentRef.artifact.content_json),
         voiceProfileId: assignmentRef.assignment.source.voiceProfileId,
         voiceProfileRevisionId: assignmentRef.assignment.source.voiceProfileRevisionId,
+        provider: assignmentRef.assignment.source.provider,
         canonicalAudioSha256: assignmentRef.assignment.source.canonicalAudioSha256,
         adapterCompatibilityKey: assignmentRef.assignment.source.adapterCompatibilityKey,
       },
