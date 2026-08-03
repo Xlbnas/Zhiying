@@ -9,10 +9,10 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-03T06:56Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B.R1 review closure in progress（TTS-B not frozen）**；TTS-C not started） |
+| statusUpdatedAt | 2026-08-03T07:08Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B.R1 deployed @`d24b176`**，pending independent Review PASS；TTS-C not started） |
 | reviewedCodeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（M7.3B final code/runtime；M7.3B deployment evidence docs HEAD 为 `044ac23e2524d53f41d223c37d16619425b21182`；M7.3A frozen code 为 `aa3f814…`） |
-| productionRuntimeSHA | `0b70e8117277a76e776b6f22494a48142aa460e9`（TTS-B 部署后容器镜像实际代码 SHA） |
-| productionHostCheckoutSHA | `0b70e8117277a76e776b6f22494a48142aa460e9`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
+| productionRuntimeSHA | `d24b17644f2f22f864392a272d7d7ea7b493892c`（TTS-B.R1 部署后容器镜像实际代码 SHA） |
+| productionHostCheckoutSHA | `d24b17644f2f22f864392a272d7d7ea7b493892c`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
 | 当前分支 | `m7` |
 | 实时 origin/m7 HEAD | 以 `git rev-parse origin/m7` 为准（不硬编码为「永远当前」） |
 
@@ -298,7 +298,7 @@
 - **M7.3A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `aa3f8145825f5a33542f54e90e661e0cccf3e692`；deployment evidence docs = `36ff32e3301f51bf054efbee029fc1e6115ad3f5`；independent Review = PASS。冻结语义见 §7。
 - **M7.3B 正式 FROZEN（独立 Review PASS）**：final code/runtime = `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`；deployment evidence docs HEAD = `044ac23e2524d53f41d223c37d16619425b21182`（§15.3）；independent Review = PASS。冻结语义见 §7「M7.3B 冻结语义」。
 - **TTS-A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `1460efd12c9f4bbb3fa4188757deeff3c8566c99`；deployment evidence docs = `2fc7ffb460dc36cd44fdcb3c5b98e9e09e9e392f`。冻结语义见 §7「TTS-A 冻结语义」；非阻断 hardening note 见 §7 末。
-- **TTS-B.R1 review closure in progress（TTS-B not frozen；TTS-C not started）**：独立 Review 结论下修复——① Performance 传播 Narration candidate 状态（classifyNarrationPlanV2Candidate，locked Script V2 漂移 → stale）；② TTS-B DAG 双依赖（narration_plan_v2 + project_voice_assignment）；③ Assignment atomic commit fence（envelope-first + 两阶段）；④ archived 历史 requestId 幂等复用（200 reused）；⑤ Assignment/Performance source 自洽（ASSIGNMENT_SOURCE_MISMATCH / PERFORMANCE_SOURCE_MISMATCH）；⑥ ID schema（UUID，malformed 422 / missing 404）；⑦ succeeded 重放 fail-closed（RESULT_ARTIFACT_STALE/INVALID）。设计文档 `docs/TTS_B_ASSIGNMENT_PERFORMANCE_DESIGN.md`。
+- **TTS-B.R1 deployed（pending independent Review PASS；TTS-B not frozen；TTS-C not started，部署证据见 §15.8）**：独立 Review 结论下修复——① Performance 传播 Narration candidate 状态（classifyNarrationPlanV2Candidate，locked Script V2 漂移 → stale）；② TTS-B DAG 双依赖（narration_plan_v2 + project_voice_assignment）；③ Assignment atomic commit fence（envelope-first + 两阶段）；④ archived 历史 requestId 幂等复用（200 reused）；⑤ Assignment/Performance source 自洽（ASSIGNMENT_SOURCE_MISMATCH / PERFORMANCE_SOURCE_MISMATCH）；⑥ ID schema（UUID，malformed 422 / missing 404）；⑦ succeeded 重放 fail-closed（RESULT_ARTIFACT_STALE/INVALID）。设计文档 `docs/TTS_B_ASSIGNMENT_PERFORMANCE_DESIGN.md`。
 - **Production legacy 审计（只报告，不修改）**：generated assets 19；provenance NULL 19（全为历史 legacy）；NULL + requirement_json 缺失/损坏 1；active legacy bindings 17；active bindings 指向当前 active scenes 中缺失的 requirement 10（分布于 2 个项目，均为历史绑定；未删除/重绑）。
 - 下一步：TTS-A.R1 部署后等待独立 Review PASS；随后按序 TTS-B → TTS-C → narration master → ffprobe → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
 
@@ -673,4 +673,17 @@ M7.3A.2 Review 全部阻断项已修复（第二轮 hardening）。接续复核�
 - **Production 数据不变量（部署前后只读对比，28 项全过）**：projects 全 m6/rigorous（3）；snapshot pointer 全 NULL；M7 snapshot 0；Freud narration_plan_v2/narrative_beats/visual_intent hash 与备份全等；visual_sequence_plan/shot_plan/timing_reconciliation_v2 全 0；**project_voice_assignment artifact=0、narration_performance_plan artifact=0**；**TTS-B generation runs=0、dispatch jobs=0**；tts_jobs 351=351 且 hash `92c67ac2` 全等；voice_profiles=0、voice_profile_revisions=0；`data/voice-library` 不存在；narration_audio_manifest/subtitle_timing hash 全等；llm_usage 69=69；usage_events 610=610；asset_generation_jobs 0=0；assets/bindings 40=40；render_jobs 14=14；leases=0；无项目切换 m7；无真实 LLM/APIYi/IndexTTS2 调用。
 - **状态**：**M7.3B FROZEN；TTS-A FROZEN；TTS-B deployed；TTS-B pending independent Review PASS；TTS-C not started**。
 - **本轮未执行**：不在 production 创建 Voice Profile/Assignment/Performance candidate；不调用真实 IndexTTS2 adapter；不生成 TTS；不 enqueue tts_jobs；不生成 narration master；不做 subtitle timing；不创建 timing-reconciliation@2.0；不创建 M7 snapshot；不切换任何项目到 m7；不改写历史 tts_jobs；不 materialize adapter `/voices`；不发布 adapter registry。
+- **证据边界**：OPS-AUDIT-BRIDGE 不可用（仓库无此设施）；以上 production 证据来自 Agent 现场命令，**不是** independently verified。
+
+### 15.8 TTS-B.R1 部署证据（d24b176，2026-08-03）
+
+- **部署链**：code SHA `d24b17644f2f22f864392a272d7d7ea7b493892c` = production runtime SHA = host checkout SHA = origin/m7 HEAD（本 docs evidence commit 后 origin/m7 会高于 runtime——以现场 `git rev-parse` 为准）。
+- **pre-deployment backup**：`/vol1/1000/backups/zhiying/tts-b-r1-20260803T065943Z`（DB SHA `4d3c577e…`；integrity=ok；**SHA256SUMS 全 OK、0 FAILED**；含 zhiying.db online backup、schema.sql、migration-state、voice_assignment_requests、voice tables、tts_jobs 全表 dump+hash、narration/manifest/subtitle、llm/usage、assets/bindings、render、leases、compose×2、`.env.production`（内容不进报告）、previous-sha（0b70e81）、invariants baseline）。
+- **构建网络 runbook**：`production-build-network.sh start/check` 通过 → `docker build --network=host --add-host remotion.media:127.0.0.1 --build-arg APT_MIRROR --build-arg NPM_REGISTRY -t zhiying:d24b176…`（**BUILD_EXIT=0**，trap 保证 stop）→ tunnel `STOPPED`、443 无 listener、worktree clean；image digest `124cc0a6…`。
+- **镜像内测试**（`NODE_ENV=development`，scripts+docs 只读挂载，image SHA = mounted SHA = d24b176）：**23 套件全绿**——TTS-A 7（34/25/78/23/30/31/39）、**TTS-B 5（55/31/22/20/29，TTS-B.R1 新增 ID schema/commit fence/archived replay/source 自洽/locked Script drift/succeeded 重放）**、frozen 11（m73b 92/96/114/71、m73a、billing 68、bind 45、leases 87、m71-tts 25、m3b-tts 99、m3c 82）。agentvm 同 23 套全绿。
+- **migration 演练**（production DB 副本，`getDb()`）：无 schema 变更——voice_assignment_requests schema 不变且 0 行；voice tables 0/0；重跑幂等；**351 条 tts_jobs hash `92c67ac2` 不变**；integrity ok。未手工 sqlite3 ALTER production。
+- **up 验证**：三容器 healthy @`zhiying:d24b176…`/`zhiying-indextts2-adapter:d24b176…`（adapter 代码未变，沿用原 digest 重新 tag；`ZHIYING_RELEASE_TAG=d24b176…`）；local root//api/projects//settings/voices//api/voice-profiles 200（`{"profiles":[]}`）；**TTS-B GET routes 404（route 挂载 + project 检查生效）**；worker/web 日志无 startup/SQLite/lease/provider error；resource leases 0；443/tunnel 0；host worktree clean。
+- **Production 数据不变量（部署前后只读对比，29 项全过）**：projects 全 m6（3）；snapshot 全 NULL/0；Freud narration/beats/intent hash 全等；m7b kinds 全 0；project_voice_assignment artifact=0、narration_performance_plan artifact=0、voice_assignment_requests=0、TTS-B runs=0、dispatch=0；**tts_jobs total=351、hash `92c67ac2` 全等、本轮新增 TTS job=0**；voice_profiles/revisions 0/0；voice-library 不存在；narration_audio_manifest/subtitle_timing hash 全等；timing_reconciliation_v2=0；llm_usage 69=69；usage_events 610=610；assets/bindings 40=40；render 14=14；leases=0；无项目切换 m7；无真实 LLM/APIYi/IndexTTS2 调用。
+- **状态**：**M7.3B FROZEN；TTS-A FROZEN；TTS-B.R1 deployed；TTS-B pending independent Review PASS；TTS-C not started**。
+- **本轮未执行**：不在 production 创建 Voice Profile/Assignment/Performance candidate；不 POST Assignment/Performance；不调用真实 IndexTTS2 adapter；不 enqueue TTS job（新增=0）；不生成 narration master；不做 subtitle timing；不创建 timing-reconciliation@2.0；不创建 M7 snapshot；不切换任何项目到 m7；不改写历史 tts_jobs；不 materialize adapter `/voices`；不发布 adapter registry。
 - **证据边界**：OPS-AUDIT-BRIDGE 不可用（仓库无此设施）；以上 production 证据来自 Agent 现场命令，**不是** independently verified。
