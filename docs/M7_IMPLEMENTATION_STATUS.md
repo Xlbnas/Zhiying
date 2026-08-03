@@ -9,7 +9,7 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-03T09:40Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B.R3 deployed @`86f7f52`**，pending independent Review PASS；TTS-B not frozen；TTS-C not started） |
+| statusUpdatedAt | 2026-08-03T09:50Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B FROZEN（独立 Review PASS）**；TTS-C not started） |
 | reviewedCodeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（M7.3B final code/runtime；M7.3B deployment evidence docs HEAD 为 `044ac23e2524d53f41d223c37d16619425b21182`；M7.3A frozen code 为 `aa3f814…`） |
 | productionRuntimeSHA | `86f7f52b2f81d20d352de6d3189792c25e6cfe29`（TTS-B.R3 部署后容器镜像实际代码 SHA） |
 | productionHostCheckoutSHA | `86f7f52b2f81d20d352de6d3189792c25e6cfe29`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
@@ -298,10 +298,10 @@
 - **M7.3A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `aa3f8145825f5a33542f54e90e661e0cccf3e692`；deployment evidence docs = `36ff32e3301f51bf054efbee029fc1e6115ad3f5`；independent Review = PASS。冻结语义见 §7。
 - **M7.3B 正式 FROZEN（独立 Review PASS）**：final code/runtime = `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`；deployment evidence docs HEAD = `044ac23e2524d53f41d223c37d16619425b21182`（§15.3）；independent Review = PASS。冻结语义见 §7「M7.3B 冻结语义」。
 - **TTS-A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `1460efd12c9f4bbb3fa4188757deeff3c8566c99`；deployment evidence docs = `2fc7ffb460dc36cd44fdcb3c5b98e9e09e9e392f`。冻结语义见 §7「TTS-A 冻结语义」；非阻断 hardening note 见 §7 末。
-- **TTS-B.R3 deployed @`86f7f52`（pending independent Review PASS；TTS-B not frozen；TTS-C not started；部署证据见 §15.10；GitHub Actions 独立 CI run 30801164259 success @ 86f7f52，27 suites）**：R2 独立 Review FAIL 后聚焦修复——① **Performance transaction-atomic Narration fence**：最终权威判断移入 final BEGIN IMMEDIATE 事务内（INSERT 前同步重新读取 exact Narration Plan + 重新运行 `classifyNarrationPlanV2Candidate`，仅 eligible 提交；`lockStage` 同为 BEGIN IMMEDIATE，写锁关闭「outer check 通过 → lock 新 Script V2 → 提交 stale artifact」竞态；事务前检查降级为 early rejection/optimization）；测试 hook `setPerformanceBeforeCommitTransactionForTest`（production 抛错）+ E20 精确复现 outer-check 后、BEGIN IMMEDIATE 前 drift（真实 generateVersion+lockStage，E19/E20 独立覆盖两个窗口，mutation 验证：禁用事务内 fence 时 E20c FAIL）；② **GitHub Actions 失败退出码传播**：gate 步骤 `set -o pipefail` + tee（防止吞码），新增 `scripts/test-m7-quality-gate-exit-propagation.sh` 纳入统一 gate（suite 数 26→27），job summary 从 gate 输出读取 suite 数（不再硬编码 23）。设计文档 `docs/TTS_B_ASSIGNMENT_PERFORMANCE_DESIGN.md`。
-- **TTS-B.R2（历史，pending independent Review PASS）**：R1 Review FAIL 后聚焦修复——① Performance commit-time Narration candidate fence（commit 前重新 classifyNarrationPlanV2Candidate，仅 eligible 提交）；② Assignment concurrent existing2 复用同一 authoritative helper（usable 裁决）；③ graph detector 单一真相源 + 故障注入；④ GitHub Actions 独立 CI（m7-quality-gate，run 30796556192 success @ 34ee6c3）。其修复在 R3 中被强化（fence 移入事务内）。
+- **TTS-B 正式 FROZEN（独立 Review PASS）**：final code/runtime = `86f7f52b2f81d20d352de6d3189792c25e6cfe29`；deployment evidence docs = `eac6f2d67ed0c2c6723c9d77e9b4400e251cd6f1`；GitHub Actions 独立证据：run `30801164259` / job `M7 Quality Gate` / head SHA `86f7f52…` / completed / success / 27 suites / artifact `8850888730`（digest `sha256:0b7f7386…`）。冻结语义见 §7「TTS-B 冻结语义」。TTS-B 演变：R1（candidate 传播/DAG 双依赖/commit fence/UUID/archived replay/source 自洽）→ R2（commit-time Narration candidate fence、concurrent existing2 usable 裁决、graph 故障注入、GitHub CI）→ R3（**transaction-atomic Narration fence**：权威判断移入 final BEGIN IMMEDIATE、E20 竞态测试 + mutation 验证、CI pipefail 失败退出码传播）。
+- **TTS-B.R2（历史记录）**：R1 Review FAIL 后聚焦修复——① Performance commit-time Narration candidate fence；② Assignment concurrent existing2 复用同一 authoritative helper；③ graph detector 单一真相源 + 故障注入；④ GitHub Actions 独立 CI（run 30796556192 success @ 34ee6c3）。其修复在 R3 中被强化（fence 移入事务内）。
 - **Production legacy 审计（只报告，不修改）**：generated assets 19；provenance NULL 19（全为历史 legacy）；NULL + requirement_json 缺失/损坏 1；active legacy bindings 17；active bindings 指向当前 active scenes 中缺失的 requirement 10（分布于 2 个项目，均为历史绑定；未删除/重绑）。
-- 下一步：等待 TTS-B 独立 Review PASS；随后按序 TTS-C → narration master → ffprobe → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
+- 下一步：TTS-C.0 架构审计完成后，按序 TTS-C.1（voice materialization + registry + capability compile）→ TTS-C.2（exact sentence input fingerprint + durable sentence job/artifact）→ TTS-C.3（preview/override/A-B + incremental）→ TTS-C.4（Narration Audio Manifest + master + ffprobe）→ TTS-C.5（downstream stale + review UI）→ narration master → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
 
 ## 6. 尚未完成 TODO
 
@@ -379,6 +379,37 @@
   18. TTS-A 未绑定项目、未调用 adapter、未生成 TTS（voice_profiles/revisions 在 production 仍 0/0）；
   19. 后续 TTS-B/TTS-C 不得顺带重构以上语义。
   - **非阻断 hardening note（本 docs-only commit 不改代码）**：core（`ingestVoiceProfileRevisionFromStaged`）的直接内部调用者若未来绕过 route，应确保 DB 初始化也位于 staging ownership scope 内（即 `getDb()` 调用也应纳入 try/finally 或由调用方先行初始化）。此项不是 TTS-A blocker，不在本次冻结 commit 修改代码。
+- **TTS-B 冻结语义（正式生效，independent Review = PASS；final code/runtime `86f7f52b2f81d20d352de6d3189792c25e6cfe29`；deployment evidence docs `eac6f2d67ed0c2c6723c9d77e9b4400e251cd6f1`；GitHub Actions run `30801164259` success / 27 suites / artifact `8850888730`；后续 TTS-C 不得顺带重构；改动需显式评审）**：
+  - **Assignment**：
+    1. Project Voice Assignment 是 immutable candidate artifact（schemaVersion `project-voice-assignment@1.0`，compilerVersion `1.0`）；不 current/active/locked/default，不更新 projects 指针，不创建 snapshot；
+    2. exact `voiceProfileId + voiceProfileRevisionId` 双 ID 引用；禁止 latest/current/default 隐式解析；
+    3. requestId envelope-first（`voice_assignment_requests` 表）优先裁决；
+    4. 同 requestId + 同 exact source + 既有 artifact/source/voice 均 usable → 200 reused（不新增 artifact/envelope）；
+    5. 同 requestId 不同 exact source → 409 REQUEST_ID_CONFLICT；
+    6. archived Profile 允许 historical same-request replay（200 reused）；archived Profile 禁止新 requestId 创建新 Assignment（409 PROFILE_ARCHIVED）；
+    7. 新建时 Profile 必须 active；initial exact validator + final exact validator 双道；
+    8. BEGIN IMMEDIATE 内重读 request envelope 仍不存在 + Profile active + Revision exact 归属该 Profile + schema/provider/hash/adapter 与最终 descriptor 完全一致；
+    9. concurrent existing2 路径必须走统一 authoritative adjudication helper（artifact 存在 + schema 可解析 + source 自洽 + exact voice usable → reused；artifact 缺失/契约非法 → REQUEST_STATE_INCONSISTENT；source/voice 不可用 → ASSIGNMENT_UNUSABLE）；不在事务内直接声称 reused；
+    10. artifact/source/voice 不可用一律 fail-closed；不创建第二个 artifact；不修改旧 envelope 指针；不 fallback latest revision；
+    11. Assignment source self-consistency 逐项校验（projectId / voiceProfileId / voiceProfileRevisionId / revisionSchemaVersion / provider / canonicalAudioSha256 / adapterCompatibilityKey），任一不一致 → ASSIGNMENT_SOURCE_MISMATCH → invalid_source；
+    12. malformed UUID → 422 invalid_request；well-formed missing UUID → 404 PROFILE_NOT_FOUND / REVISION_NOT_FOUND；
+    13. 新 revision 上传不 stale 旧 exact Assignment；archive 不 stale 历史 exact Assignment。
+  - **Performance Plan**：
+    14. 显式 exact Narration Plan artifact ID + 显式 exact Project Voice Assignment artifact ID；不解析 current/latest；
+    15. candidate artifact 不代表 selected/active；classify 状态机 current_candidate / stale_source / invalid_source；
+    16. Narration、Assignment、Voice descriptor 三层 source self-consistency 逐项校验（narrationPlanArtifactId/Hash/schemaVersion/compilerVersion/scriptV2VersionId/scriptV2Version/scriptV2ContentHash + assignmentArtifactId/Hash/voiceProfileId/voiceProfileRevisionId/canonicalAudioSha256/adapterCompatibilityKey/provider），任一不一致 → PERFORMANCE_SOURCE_MISMATCH → invalid_source；
+    17. 复用 generation_runs（`UNIQUE(project_id, stage, request_id)` durable single-flight）+ generation_attempts attempt journal + generation_dispatch_jobs 双持久状态 fail-closed；stage `m7_narration_performance_plan`；
+    18. Web 不直接调用 LLM：POST 只 precheck + enqueue（202）；Worker claim 后执行；
+    19. succeeded result replay 必须重新 `classifyNarrationPerformancePlan`，仅 current_candidate 返回 200 reused；stale/invalid → 409 RESULT_ARTIFACT_STALE / RESULT_ARTIFACT_INVALID（不新建 artifact、不重调 provider）；
+    20. locked Script V2 drift（不改旧 plan artifact content_json）→ Narration candidate stale → Performance stale_source（NARRATION_PLAN_STALE）；needs_review → NARRATION_PLAN_NOT_ELIGIBLE_NEEDS_REVIEW；
+    21. 事务外检查只是 early rejection / optimization，不是最终 fence；
+    22. final BEGIN IMMEDIATE 事务内、INSERT 前重新读取 exact Narration Plan + 重新执行 `classifyNarrationPlanV2Candidate`；只有 `eligible_candidate` 可提交；其余状态（needs_review/stale/invalid/missing）→ SOURCE_STALE 抛错 → 整事务回滚；
+    23. Performance artifact INSERT 与 generation run succeeded（`completeGenerationRunSuccess`，owner_token + status='running' 守卫）同事务原子；Assignment 行 hash 在事务内重读；
+    24. exact voice 文件校验（异步文件 SHA，`validateVoiceProfileRevisionExact`）在事务外执行；TTS-C dispatch 前还必须再次校验；
+    25. stale/invalid source 不重建、不重调 provider；repair 上限 2，attempt 达上限 terminal failed。
+  - **DAG**：`narration_plan_v2 → narration_performance_plan` 与 `project_voice_assignment → narration_performance_plan` 双依赖；无反向边、无 cycle；Narration Plan 仅 `eligible_candidate` usable（needs_review/stale/invalid/missing/script_not_locked 均不可用）；Assignment 仅 `current_candidate` usable；blocked detail 精确列出缺失依赖（narration_plan_v2 / project_voice_assignment）；不 stale Narrative Beats / Visual Intent / Sequence / Shot。
+  - **范围边界**：TTS-B 不负责 adapter `/voices` materialization、adapter registry publish、provider capability compile、TTS input fingerprint、sentence preview、sentence audio generation、incremental regeneration、narration audio manifest、master concatenation、ffprobe duration、subtitle timing、timing reconciliation、storyboard/animatic stale——以上属于 TTS-C 及后续阶段。
+
 
 ## 8. 已知事故和修复
 

@@ -4,6 +4,11 @@
 > TTS-A 已 FROZEN（final code/runtime `1460efd12c9f4bbb3fa4188757deeff3c8566c99`，
 > deployment evidence docs `2fc7ffb460dc36cd44fdcb3c5b98e9e09e9e392f`，冻结语义见
 > `docs/M7_IMPLEMENTATION_STATUS.md` §7）。
+> **TTS-B 已 FROZEN（独立 Review PASS）**：final code/runtime
+> `86f7f52b2f81d20d352de6d3189792c25e6cfe29`；deployment evidence docs
+> `eac6f2d67ed0c2c6723c9d77e9b4400e251cd6f1`；GitHub Actions run `30801164259`
+> （job `M7 Quality Gate`，completed/success，27 suites，artifact `8850888730`）。
+> 冻结语义见 `docs/M7_IMPLEMENTATION_STATUS.md` §7「TTS-B 冻结语义」。
 > TTS-B 只建立两个 immutable candidate：Project Voice Assignment 与
 > Narration Performance Plan。TTS-B 不生成音频；TTS-C 才负责 TTS payload / job。
 
