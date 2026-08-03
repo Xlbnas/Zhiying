@@ -9,7 +9,7 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-03T04:53Z（M7.3B FROZEN；TTS-A.R2 deployed @`1460efd`，pending independent Review PASS；TTS-B/TTS-C not started） |
+| statusUpdatedAt | 2026-08-03T05:02Z（M7.3B FROZEN；**TTS-A FROZEN（独立 Review PASS）**；TTS-B starting；TTS-C not started） |
 | reviewedCodeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（M7.3B final code/runtime；M7.3B deployment evidence docs HEAD 为 `044ac23e2524d53f41d223c37d16619425b21182`；M7.3A frozen code 为 `aa3f814…`） |
 | productionRuntimeSHA | `1460efd12c9f4bbb3fa4188757deeff3c8566c99`（TTS-A.R2 部署后容器镜像实际代码 SHA） |
 | productionHostCheckoutSHA | `1460efd12c9f4bbb3fa4188757deeff3c8566c99`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
@@ -297,7 +297,7 @@
 
 - **M7.3A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `aa3f8145825f5a33542f54e90e661e0cccf3e692`；deployment evidence docs = `36ff32e3301f51bf054efbee029fc1e6115ad3f5`；independent Review = PASS。冻结语义见 §7。
 - **M7.3B 正式 FROZEN（独立 Review PASS）**：final code/runtime = `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`；deployment evidence docs HEAD = `044ac23e2524d53f41d223c37d16619425b21182`（§15.3）；independent Review = PASS。冻结语义见 §7「M7.3B 冻结语义」。
-- **TTS-A.R2 deployed（pending independent Review PASS；TTS-A not frozen；TTS-B/TTS-C not started）**：独立 Review 结论下修复 staging ownership + I/O failure containment 并重新部署（部署证据见 §15.6）——① DB commit 后 staging cleanup 不得改变业务成功结果（best-effort cleanup，`cleanupStagingBestEffort`）；② multipart open/write/fsync/close 错误全部 fail-contained（统一 failOnce，`MultipartStagingFileOps` 可注入，fs error 不逃逸 EventEmitter）；③ staging ownership 从 core 函数入口开始（所有 validation 均在 try 内）；④ 删除 route 与 core 的模糊双重 ownership（route 不再持有 staging）；⑤ 真实故障注入测试（S1-S8，39 PASS）；⑥ 文档/回归/重新部署。设计文档 `docs/TTS_A_VOICE_LIBRARY_DESIGN.md` §4/§4.1/§4.2。
+- **TTS-A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `1460efd12c9f4bbb3fa4188757deeff3c8566c99`；deployment evidence docs = `2fc7ffb460dc36cd44fdcb3c5b98e9e09e9e392f`。冻结语义见 §7「TTS-A 冻结语义」；非阻断 hardening note 见 §7 末。**TTS-B starting；TTS-C not started**。
 - **Production legacy 审计（只报告，不修改）**：generated assets 19；provenance NULL 19（全为历史 legacy）；NULL + requirement_json 缺失/损坏 1；active legacy bindings 17；active bindings 指向当前 active scenes 中缺失的 requirement 10（分布于 2 个项目，均为历史绑定；未删除/重绑）。
 - 下一步：TTS-A.R1 部署后等待独立 Review PASS；随后按序 TTS-B → TTS-C → narration master → ffprobe → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
 
@@ -356,6 +356,27 @@
   8. durable idempotency：queued/running dispatch source immutable；同 requestId 不同 source 409；dispatch-only running 原样返回 running；run/dispatch source 矛盾 fail-closed（错误明确标识发生冲突的持久 source，不选择任一 source 继续）；
   9. DAG usable-candidate：current/eligible 可用；Visual Intent `needs_review` 可用于 Sequence/Shot；Visual Sequence `needs_review` 可用于 Shot；Narration Plan `needs_review` 不可用于 downstream；stale/invalid 不可用；
   10. 后续 TTS、timing、asset、render 阶段不得顺带重构以上语义。
+- **TTS-A 冻结语义（正式生效，independent Review = PASS；final code/runtime `1460efd12c9f4bbb3fa4188757deeff3c8566c99`；deployment evidence docs `2fc7ffb460dc36cd44fdcb3c5b98e9e09e9e392f`；后续 TTS-B/TTS-C 不得顺带重构；改动需显式评审）**：
+  1. Voice Profile 是稳定身份（服务端 UUID；provider 仅 `indextts2`）；
+  2. Voice Profile Revision append-only；revision_number 在 BEGIN IMMEDIATE 内 MAX+1；
+  3. Revision UPDATE/DELETE 由 DB trigger ABORT 禁止（数据库层不可变）；
+  4. 业务必须使用 exact profileId + revisionId 双 ID 引用；
+  5. 禁止隐式 latest/current/default revision（无 getLatest 业务接口；UI 建议仅命名 `suggestedLatestForDisplay`）；
+  6. archived Profile 的历史 exact revision 仍可读（historical exact read）；
+  7. archived Profile 禁止新增 revision（409 profile_archived）；
+  8. canonical reference 冻结：WAV / pcm_s16le / mono / 48000Hz（canonical 生成参数全部服务端固定，上传内容不影响 ffmpeg 参数）；
+  9. exact validator（`validateVoiceProfileRevisionExact`）是单一真相源：getVoiceProfileRevisionExact / readRevisionAudio / resolveVoiceRevisionForFutureTts / requestId reused 检查全部复用；
+  10. exact validator 校验：Profile/Revision schema、provider、adapter_compatibility_key 精确、metadata strict schema（仅 canonicalizationVersion/adapterCompatibilityKey/ingestedAt）且与行一致、codec/sample_rate/channels/duration 冻结范围、hash 字段格式、`canonical_audio_path` 精确等于 `voice-library/<pid>/<rid>/reference.wav`、lexical resolve 不越界、root realpath、中间目录 realpath 不越界、final 非 symlink 且 regular file、文件 SHA256 与 DB 完全一致；
+  11. bounded multipart：25MB 单文件、30MB 总 body、严格字段白名单（requestId/audio/transcript/language）、流式解析（@fastify/busboy 3.2.0），Content-Length 预检 + 流式实测双保险；
+  12. staging ownership：parser → core 单次转移；route 不持有 staging；core 从函数入口持有；
+  13. durability：final rename/fsync（final 文件/revisionDir/profileDir/root/staging 源目录）全部先于 SQLite commit；commit 后不再执行关键 fsync；
+  14. cleanup 是 best-effort（`cleanupStagingBestEffort`）：不覆盖业务错误；commit 后失败不推翻 201/200；
+  15. same requestId + same fingerprint：exact validator usable=true 才允许 200 reused；否则 409 revision_unusable；
+  16. damaged revision（文件缺失/hash 漂移/中间 symlink/metadata/provider/adapter/codec/sr/ch/duration 不符）→ 409 revision_unusable（fail-closed，绝不返回 200）；
+  17. API 不返回绝对或相对 canonical path（序列化出口不含 canonical_audio_path/metadata_json；响应不含 dataDir）；
+  18. TTS-A 未绑定项目、未调用 adapter、未生成 TTS（voice_profiles/revisions 在 production 仍 0/0）；
+  19. 后续 TTS-B/TTS-C 不得顺带重构以上语义。
+  - **非阻断 hardening note（本 docs-only commit 不改代码）**：core（`ingestVoiceProfileRevisionFromStaged`）的直接内部调用者若未来绕过 route，应确保 DB 初始化也位于 staging ownership scope 内（即 `getDb()` 调用也应纳入 try/finally 或由调用方先行初始化）。此项不是 TTS-A blocker，不在本次冻结 commit 修改代码。
 
 ## 8. 已知事故和修复
 
