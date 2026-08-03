@@ -601,9 +601,38 @@ export async function buildNarrationPerformancePlan(input: {
       );
     }
 
+    // P0（TTS-B.R2）：commit 前重新读取 exact Narration Plan 并重新运行
+    // classifyNarrationPlanV2Candidate——locked Script V2 漂移不改 plan content_json，
+    // 单纯 hash fence 覆盖不了，必须重新 classify。只有 eligible_candidate 才允许提交。
+    const commitPlanRef = getNarrationPlanV2Artifact(input.projectId, content.source.narrationPlanArtifactId);
+    if (!commitPlanRef) {
+      throw new PerformanceError('SOURCE_STALE', 'commit 前 narration plan artifact 不可读——放弃提交（零 artifact）');
+    }
+    if (sha256Text(commitPlanRef.artifact.content_json) !== content.source.narrationPlanContentHash) {
+      throw new PerformanceError('SOURCE_STALE', 'commit 前 narration plan 内容 hash 漂移——放弃提交（零 artifact）');
+    }
+    const commitNarrationCandidate = classifyNarrationPlanV2Candidate(input.projectId, commitPlanRef.artifact);
+    if (commitNarrationCandidate.status !== 'eligible_candidate') {
+      throw new PerformanceError(
+        'SOURCE_STALE',
+        `commit 前 narration plan candidate 状态=${commitNarrationCandidate.status}（${commitNarrationCandidate.statusReason ?? ''}）——locked Script V2 漂移，放弃提交（零 artifact，run 转 failed）`,
+      );
+    }
+
     // 单 BEGIN IMMEDIATE：commit-time source fence —— 事务前重新调用 TTS-A exact
-    // voice validator（异步 sha256），事务内重读 source 行核对 hash；任一漂移 →
-    // SOURCE_STALE / VOICE_SOURCE_INVALID，零 partial artifact。
+    // voice validator（异步 sha256）并重新确认 Assignment current_candidate，事务内
+    // 重读 source 行核对 hash；任一漂移 → SOURCE_STALE / VOICE_SOURCE_INVALID，
+    // 零 partial artifact。
+    const commitAssignCandidate = await classifyProjectVoiceAssignment(
+      input.projectId,
+      assignmentRef.artifact,
+    );
+    if (commitAssignCandidate.status !== 'current_candidate') {
+      throw new PerformanceError(
+        'VOICE_SOURCE_INVALID',
+        `commit 前 voice assignment 状态=${commitAssignCandidate.status}（${commitAssignCandidate.statusReason ?? ''}）——放弃提交`,
+      );
+    }
     const commitVoiceDescriptor = await validateVoiceProfileRevisionExact(
       assignmentRef.assignment.source.voiceProfileId,
       assignmentRef.assignment.source.voiceProfileRevisionId,
