@@ -3,6 +3,7 @@
 > 状态：TTS-C.0.R2 architecture closure completed；**未复制任何代码**。
 > 审计基线：inspection date **2026-08-03**；每个项目记录 **exact inspected commit SHA**（GitHub API 现场核验，非 `main+pushed_at`）。
 > R2 修正：① OpenMontage（calesthio）按真实代码重新审计（lib/checkpoint.py / tests / schemas / tools/video / pipeline_defs / README），Reject 依据 = AGPL license/integration mismatch（不再错误声称代码不存在）；② Open-Montage/OpenMontage 修正为正确 SHA `50279751590dc639d847ae909c7d592cb207ec57`；③ AGPL/NC 措辞保持谨慎（license 判断，不构成法律意见）。
+> R3 修正：license 边界措辞去绝对化（AGPL 表述为"可能产生网络交互源码提供义务及组合/衍生作品风险；知影基于商业与合规风险决定不引入；不构成法律意见"）。
 > 决策维度：`Adopt（直接引入）/ Adapter（借鉴接口或概念，重写实现）/ Reimplement（重新实现）/ Reject（不采用）`。
 
 ---
@@ -109,11 +110,11 @@
 | Remotion template | `27ecd976…` | 无独立 LICENSE（Remotion 条款） | Adapter（结构） | 需保留 Remotion 授权证据 |
 | calesthio/OpenMontage | `4eab34c5…` | **AGPL-3.0** | **Reject** | **高（AGPL 传染）** |
 
-## AGPL/LGPL/Remotion license 边界（明确）
+## AGPL/LGPL/Remotion license 边界（谨慎表述）
 
-- **calesthio/OpenMontage（AGPL-3.0）**：不引入任何代码/脚本（含其 skill 脚本）；AGPL 传染边界 = 引入即需全服务端开源，知影不满足；概念参考不触发。
-- **Video Podcast Maker（CC BY-NC 4.0）**：复制/衍生受非商业限制；仅阅读理解。
-- **Remotion 模板**：无 LICENSE 文件；不复制模板代码；Remotion 使用以现有授权为准。
+- **calesthio/OpenMontage（AGPL-3.0）**：AGPL 可能产生网络交互源码提供义务（AGPL §13）及组合/衍生作品风险；知影基于商业与合规风险决定**不引入**其任何代码/脚本；概念参考（checkpoint/prerequisite/gate 思路）不产生衍生作品，不触发传染。本结论为 license 风险判断，**不构成法律意见**；若未来需正式采用任何 AGPL 组件，须经法律审查。
+- **Video Podcast Maker（CC BY-NC 4.0）**：复制/衍生受非商业限制（NC 条款覆盖衍生作品）；知影不复制/不衍生；仅阅读理解。同样不构成法律意见。
+- **Remotion 模板**：仓库无 LICENSE 文件；不复制模板代码；Remotion 使用以现有授权为准（授权证据保留）。
 - 5 项目中无 LGPL 采用。
 
 ## 未做 / 边界

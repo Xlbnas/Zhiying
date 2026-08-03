@@ -1,465 +1,627 @@
-# TTS-C Incremental Narration 架构设计（TTS-C.0.R2 修订，只读审计，未实现）
+# TTS-C Incremental Narration 架构设计（TTS-C.0.R3 修订，只读审计，未实现）
 
-> 状态：**TTS-C.0.R2 architecture closure completed；pending independent Review PASS；
+> 状态：**TTS-C.0.R3 architecture closure completed；pending independent Review PASS；
 > TTS-C runtime implementation not started；TTS-C.1A not started**。
-> 本文档是只读架构审计产物（R2 修订）：不修改 runtime code / schema / config / migration / compose。
-> 运行时真相以真实代码为准（审计基线 m7 @ `a4428dc`；TTS-B final code `86f7f52…` 已 FROZEN）。
-> 本修订关闭 ChatGPT 独立 Review FAIL 发现：① 不同 requestId 的 synthesis single-flight（active unique）；
-> ② phase-aware crash recovery；③ 原子成功终局事务；④ attempt journal 定义修正；
-> ⑤ fingerprint vs generation variant 修正（materialization transport 不入 fingerprint）；
-> ⑥ registry legacy cutover / empty registry / LKG health；⑦ 1A unpublished 状态边界；
-> ⑧ OpenMontage 真实代码审计修正。
+> 本文档是只读架构审计产物（R3 修订）：不修改 runtime code / schema / config / migration / compose。
+> 运行时真相以真实代码为准（审计基线 m7 @ `f94e60d`；TTS-B final code `86f7f52…` 已 FROZEN）。
+> 本修订关闭 ChatGPT 独立 Review FAIL 发现：① unschedulable reuse reservation（`tts_synthesis_claims`）；
+> ② 共享 request fan-in（many-to-one + fan-out + per-request cancellation）；③ persisted execution phases；
+> ④ 原子 claim/job/request/artifact 成功终局；⑤ materialization request/job/projection 三层拆分；
+> ⑥ legacy registry shadow + publisher source union；⑦ adapter activation acknowledgement；
+> ⑧ **自包含最终 schema**（9 张表完整定义，实施者不得跨历史 commit 拼接）。
 
 ---
 
-## 1. 现有真实状态（TTS-C 起点，R1 结论保留）
+## 0. 本文档是唯一权威 schema 契约
+
+R3 起，**历史 commit 不是权威 contract 的一部分**。以下 §2–§8 完整写出当前最终 schema（PK/FK、
+UNIQUE/partial UNIQUE、CHECK、UPDATE/DELETE triggers、状态机、exact reader、authoritative source、
+file/DB durability、API path redaction、migration/legacy compatibility）。实施者以此为准，不得跨 commit 拼接。
+
+---
+
+## 1. 现有真实状态（TTS-C 起点）
 
 ### 1.1 Voice Library（TTS-A，FROZEN `1460efd…`）
 
-- 表 `voice_profiles`：`id / schema_version('voice-profile@1.0') / display_name / provider('indextts2') / status(active|archived) / created_at / updated_at`。
-- 表 `voice_profile_revisions`（**DB trigger ABORT 禁 UPDATE/DELETE，不可变**）：`id / schema_version / voice_profile_id / revision_number / request_id / provider / adapter_compatibility_key / original_audio_sha256 / canonical_audio_sha256 / original_filename_display / canonical_audio_path / codec / sample_rate / channels / duration_ms / transcript / language / metadata_json / request_fingerprint / created_at`，`UNIQUE(voice_profile_id, revision_number)` + `UNIQUE(voice_profile_id, request_id)`。
-- canonical 文件：`voice-library/<profileId>/<revisionId>/reference.wav`；canonical 参数冻结：WAV / pcm_s16le / mono / 48000Hz。
-- `validateVoiceProfileRevisionExact(pid, rid)` 单一真相源（usable + unusableReason 或 null）。
+- `voice_profiles`：`id / schema_version('voice-profile@1.0') / display_name / provider('indextts2') / status(active|archived) / created_at / updated_at`。
+- `voice_profile_revisions`（trigger ABORT 不可变）：`id / schema_version / voice_profile_id / revision_number / request_id / provider / adapter_compatibility_key / original_audio_sha256 / canonical_audio_sha256 / original_filename_display / canonical_audio_path / codec / sample_rate / channels / duration_ms / transcript / language / metadata_json / request_fingerprint / created_at`，`UNIQUE(voice_profile_id, revision_number)` + `UNIQUE(voice_profile_id, request_id)`。
+- canonical 文件：`voice-library/<pid>/<rid>/reference.wav`；canonical 参数冻结：WAV / pcm_s16le / mono / 48000Hz；`validateVoiceProfileRevisionExact` 单一真相源。
 
 ### 1.2 TTS-B（FROZEN `86f7f52…`）
 
-- `voice_assignment_requests` envelope；`project_voice_assignment` artifact（exact 双 ID，envelope-first，BEGIN IMMEDIATE fence）；`narration_performance_plan` artifact（三层 source 自洽 + items `deliveryOverride/pace/energy/emotion`）；`generation_runs/attempts/dispatch_jobs`（stage `m7_narration_performance_plan`）。
+- `voice_assignment_requests` envelope；`project_voice_assignment` artifact（exact 双 ID）；`narration_performance_plan` artifact（三层 source 自洽 + items）；`generation_runs/attempts/dispatch_jobs`。
 
-### 1.3 现有 TTS job 体系（M3-B / M7.1；TTS-C 中降级为 mutable execution）
+### 1.3 现有 TTS job 体系（M3-B / M7.1；TTS-C 中降级）
 
-- 表 `tts_jobs`（现有列）：`id / project_id / narration_plan_artifact_id / narration_plan_version / unit_id / provider / voice_profile_id / voice_profile_revision / status / payload_json / output_path / duration_ms / audio_sha256 / result_json / queued_at / started_at / finished_at / claimed_by / claimed_at / heartbeat_at / attempt / max_attempts / progress / error_code / error_message / cancel_requested`。R2：`output_path/duration_ms/audio_sha256/result_json` 为 **legacy 兼容字段**，非 TTS-C authoritative result。
-- worker `tts-executor.ts`：claim（scheduler + `production_gpu` lease）+ 5s heartbeat + Gate C leakage + provider 快照解析 + 写盘 `projects/{pid}/audio/units/{planVersion}/{unitId}-{job.id}.wav` + `finalizeTtsJobSuccess`（BEGIN IMMEDIATE，cancel 优先）+ `failTtsJob`（retryable<2）+ `recoverStaleTtsJobs`（heartbeat 2min，**无条件 requeue/cancel——R2 废弃其对 TTS-C 的复用，见 §4**）。
-- v2 复用机制（`audio-v2.ts`，已实现未接 API/UI）：`fingerprintForUnit` / `planTtsReuseDecisions`（读 succeeded tts_jobs 行——R2 改为读 immutable `sentence_audio_artifacts`）/ `enqueueNarrationAudioJobsV2`。
+- `tts_jobs`（现有列）含 `output_path/duration_ms/audio_sha256/result_json`（legacy 兼容，非 TTS-C authoritative）；worker `tts-executor.ts`（claim + GPU lease + heartbeat + `finalizeTtsJobSuccess`）；`recoverStaleTtsJobs`（**不得用于 TTS-C 无条件 requeue**）。
 
 ### 1.4 IndexTTS2 Adapter（`server.py`）
 
-- `/v1/synthesize` 仅支持 `text + voiceProfile@voiceRevision + useRandom=false + emotion='none'`；无 delivery/pace/energy/emotion/prosody/duration 通道。
-- registry `{schemaVersion:'1.0', voices:[…]}` **启动时加载一次**（`REGISTRY = _load_registry()`）；**当前实现拒绝 `voices=[]`**（`len(voices)==0 → VOICE_REGISTRY_INVALID`）——影响 empty registry 语义（§8.2）。
-- containment：`ADAPTER_VOICE_ROOT` realpath + commonpath；`_check_voice` mtime+size 缓存 SHA-256。
-- materialization API 不存在；`ZHIYING_HOST_VOICES_DIR:/voices:ro` + `ZHIYING_HOST_VOICE_REGISTRY:/config/voice-registry.json:ro` 部署时手工配置。
-
-### 1.5 TTS Provider 抽象
-
-- `TtsRequest`：`{text, voiceProfile, unitId, style?{directive?}, emotion?}`；`TtsResult`：`{audio, format:'wav', provider, model, providerVersion?, providerCommit?, settings}`；Provider 不宣称 duration（时长真相 = ffprobe 实测）。
-- fingerprint（M7.1 冻结）：`computeTtsInputFingerprint` 8 字段 length-prefixed。
-
-### 1.6 v1 音频管线（已闭环，模式参考）
-
-`tts_jobs` → `narration_audio_manifest` + master（Buffer.concat）→ `subtitle_timing` → `timing_reconciliation` → final-render bridge。v2 半成品：`narration_audio_manifest_v2` 只有 schema；`subtitle_timing_v2` 无 artifact 层；`timing-reconciliation@2.0` 不存在。
+- `/v1/synthesize` 仅 `text + voiceProfile@voiceRevision + useRandom=false + emotion='none'`；registry 启动加载一次；拒绝 `voices=[]`；containment + `_check_voice`；materialization API 不存在。
 
 ---
 
-## 2. 四表分离（R1 冻结，保留）
+## 2. 最终 schema（9 表，自包含）
 
-```
-tts_audio_requests          = durable requestId envelope / replay / conflict（UNIQUE(project_id, request_id)）
-tts_jobs                    = mutable execution state machine（含 active synthesis claim）
-tts_generation_attempts     = append-one-row-per-provider-call journal（§6）
-sentence_audio_artifacts    = immutable successful audio result（trigger ABORT；exact reader）
-```
-
-- `tts_jobs` 新列（TTS-C.2 ALTER，R2 冻结）：`tts_audio_request_id`、`exact_source_fingerprint`、`synthesis_payload_fingerprint`、`final_tts_input_fingerprint`、`generation_variant_id`、`result_artifact_id`。
-- `sentence_audio_artifacts`（R1 schema 保留；**R2 明确不设 fingerprint UNIQUE**，见 §3.2）。
-
----
-
-## 3. 不同 requestId 的 synthesis single-flight（§三 P0 修复）
-
-### 3.1 Mandatory active synthesis constraint（强制，非可选）
-
-`tts_audio_requests.UNIQUE(project_id, request_id)` 只解决 request idempotency，不能解决：
-
-```
-requestId A + synthesis identity F
-requestId B + synthesis identity F
-```
-
-**冻结强制 partial unique index**：
+### 2.1 `tts_audio_requests`（request envelope；many-to-one 到 claim/job）
 
 ```sql
-CREATE UNIQUE INDEX uq_tts_jobs_active_synthesis
-ON tts_jobs (
-  project_id,
-  unit_id,
-  final_tts_input_fingerprint,
-  generation_variant_id
+CREATE TABLE tts_audio_requests (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  request_id TEXT NOT NULL,               -- canonicalizeRequestId（8–128，[A-Za-z0-9._:-]）
+  exact_source_fingerprint TEXT NOT NULL,
+  synthesis_payload_fingerprint TEXT NOT NULL,
+  final_tts_input_fingerprint TEXT NOT NULL,
+  generation_variant_id TEXT NOT NULL DEFAULT 'default',
+  claim_id TEXT,                          -- tts_synthesis_claims.id（fan-in 链接）
+  job_id TEXT,                            -- tts_jobs.id（可能 NULL：reuse 路径无 job）
+  result_artifact_id TEXT,                -- sentence_audio_artifacts.id（成功时）
+  status TEXT NOT NULL,                   -- waiting/running/succeeded/failed/cancelled/indeterminate
+  error_code TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, request_id)
+);
+```
+
+- PK：`id`；FK：`project_id → projects`、`claim_id → tts_synthesis_claims(id)`（SET NULL 允许 reuse 无 claim 之外不变）、`job_id → tts_jobs(id)`、`result_artifact_id → sentence_audio_artifacts(id)`。
+- UNIQUE：`(project_id, request_id)`（request idempotency）。
+- CHECK：`status IN ('waiting','running','succeeded','failed','cancelled','indeterminate')`。
+- UPDATE/DELETE：允许 UPDATE（status/result/error 生命周期）；DELETE 禁（append-only 请求历史；trigger ABORT）。
+- 状态机：`waiting → running → succeeded`；`waiting/running → failed/cancelled`；`waiting/running → indeterminate`。
+- **authoritative source**：request identity 的持久真相（`exact_source_fingerprint/synthesis_payload_fingerprint/final_tts_input_fingerprint/generation_variant_id`）。
+- 注意：**不设 `tts_jobs.tts_audio_request_id` 单数 FK 作为唯一 owner**——若保留该列，仅命名为 `originating_request_id`（创建者），不承担 subscriber 真相；subscriber 真相由 `tts_audio_requests.claim_id` 反向查询。
+
+### 2.2 `tts_synthesis_claims`（唯一 synthesis reservation；unschedulable）
+
+```sql
+CREATE TABLE tts_synthesis_claims (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  unit_id TEXT NOT NULL,                  -- N\d{3}
+  final_tts_input_fingerprint TEXT NOT NULL,
+  generation_variant_id TEXT NOT NULL DEFAULT 'default',
+  status TEXT NOT NULL,                   -- validating_reuse/generation_pending/running/succeeded/failed/cancelled/indeterminate
+  job_id TEXT,                            -- tts_jobs.id（generation_pending 起）
+  result_artifact_id TEXT,                -- sentence_audio_artifacts.id（succeeded）
+  owner_token TEXT,
+  lease_expires_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX uq_tts_synthesis_claim_active
+ON tts_synthesis_claims (
+  project_id, unit_id, final_tts_input_fingerprint, generation_variant_id
 )
+WHERE status IN ('validating_reuse', 'generation_pending', 'running', 'indeterminate');
+```
+
+- **一个 active synthesis identity 的唯一 reservation**；**不等于 provider execution job**（可处于 `validating_reuse`——Scheduler 永不 claim）。
+- UNIQUE（partial）：active claim 唯一；`indeterminate` 继续占用。
+- 状态机：`validating_reuse → generation_pending → running → succeeded`；`validating_reuse → succeeded`（reuse 路径，无 job）；`* → failed/cancelled/indeterminate`。
+- **Scheduler 只 claim `tts_jobs.status='queued'` 且 `tts_synthesis_claims.status='generation_pending'/'running'` 的 job；`validating_reuse` 阶段无 queued job 存在**（见 §3.2 算法——这是修复的核心）。
+
+### 2.3 `tts_jobs`（mutable execution；TTS-C 新列）
+
+```sql
+ALTER TABLE tts_jobs ADD COLUMN claim_id TEXT;                -- tts_synthesis_claims.id
+ALTER TABLE tts_jobs ADD COLUMN originating_request_id TEXT;  -- 仅创建者 envelope（非 subscriber 真相）
+ALTER TABLE tts_jobs ADD COLUMN exact_source_fingerprint TEXT;
+ALTER TABLE tts_jobs ADD COLUMN synthesis_payload_fingerprint TEXT;
+ALTER TABLE tts_jobs ADD COLUMN final_tts_input_fingerprint TEXT;
+ALTER TABLE tts_jobs ADD COLUMN generation_variant_id TEXT;
+ALTER TABLE tts_jobs ADD COLUMN result_artifact_id TEXT;      -- sentence_audio_artifacts.id
+
+CREATE UNIQUE INDEX uq_tts_jobs_active_synthesis
+ON tts_jobs (project_id, unit_id, final_tts_input_fingerprint, generation_variant_id)
 WHERE status IN ('queued', 'running', 'indeterminate');
 ```
 
-语义：
-- **indeterminate 继续占用 claim**（不释放 active unique，防止并发双开 provider）；
-- 不同 requestId、同 synthesis key → **必须链接同一个 active job**（第二个 request envelope 不创建第二个 job）；
-- active job 终态（succeeded/failed/cancelled）后释放 active unique；
-- succeeded artifact usable 时直接 reused；
-- damaged artifact **不得 reused**，但允许显式 repair 创建新 job（repair = 新 request + 显式 generation variant，见 §3.2）。
-
-### 3.2 不要对 immutable artifact 设置阻断 repair 的 UNIQUE
-
-**删除** R1 文档中 `sentence_audio_artifacts UNIQUE(…fingerprint…, generation_variant_id) 可选防重` 或明确不得把它作为唯一性依赖。
-
-同一 final input fingerprint 可以存在**多个 immutable candidate**：
-- 历史 artifact 文件损坏后的 replacement（exact reader fail-closed，新 job 重生成新 artifact）；
-- 显式重复生成（repeat generation）；
-- provider 非 byte-deterministic 的新 candidate。
-
-**single-flight 必须由 active job/claim（partial unique）控制，不由 successful artifact 的 UNIQUE 控制。** selection/reuse 按 exact reader usable + 最新可读 candidate 裁决，不依赖唯一性。
-
-### 3.3 两阶段事务算法（完整 BEGIN IMMEDIATE 流程）
-
-涉及文件 SHA 的 exact reader 是异步/文件 I/O，**不能放进 better-sqlite3 transaction**。冻结两阶段裁决：
-
-**Phase 1 — 同步 DB 裁决（单 BEGIN IMMEDIATE）**：
-
-```text
-BEGIN IMMEDIATE
-
-1. envelope-first：
-   - same requestId + same exact request identity（source+payload+variant 全同）
-     → adjudicate existing（读 envelope → 按状态返回 running/reused/终态）
-   - same requestId + different identity → REQUEST_ID_CONFLICT
-
-2. 查找 exact final_tts_input_fingerprint 的 usable artifact metadata candidate
-   （同步 DB：status 元数据 + 文件元数据，不读文件内容）
-
-3. 查找 active synthesis job（uq_tts_jobs_active_synthesis 覆盖）
-
-4. 若 active job 存在：
-   - 新 request envelope 指向 existing job（INSERT envelope + job_id = existing job id）
-   - 返回 running / indeterminate（不创建第二个 job）
-
-5. 若无 active job：
-   - INSERT request envelope
-   - INSERT queued job（满足 active unique）
-   - 两者建立 exact link（job.tts_audio_request_id = envelope.id）
-
-COMMIT
-```
-
-**Phase 2 — 事务外 exact file validator（异步 SHA/文件检查）**：对 Phase 1 找到的 candidate artifact 执行 `validateSentenceAudioArtifactExact`（文件存在、非 symlink、SHA/size/codec/duration 一致）。
-
-**Phase 3 — 复用/repair 最终裁决（重新进入 BEGIN IMMEDIATE）**：
-
-```text
-BEGIN IMMEDIATE
-- Phase 2 通过且 active unique 无冲突 → 复用该 artifact（envelope/job 标记 reused）
-- Phase 2 失败（damaged）→ fail-closed 不复用；显式 repair：新 request + explicit
-  generation variant → INSERT 新 job（若原 active job 已终态，active unique 已释放）
-COMMIT
-```
-
-并发期间**不得双开 job**：Phase 1 的 active unique + Phase 3 重入时再查 active（防 Phase 1 与 Phase 3 之间另一请求抢先）。
-
----
-
-## 4. Phase-aware crash recovery（§四 P0 修复）
-
-废弃 TTS-C 对旧 `recoverStaleTtsJobs` 的无条件 requeue 复用（旧逻辑只看 `status='running' + heartbeat 超时`）。
-
-### 4.1 执行阶段（冻结）
-
-```
-queued
-claimed_pre_provider     （claim 完成、provider 调用前）
-provider_in_flight       （provider 请求已发出、响应未收齐）
-response_received        （provider 响应已收到，未完成文件校验）
-file_validated           （ffprobe/SHA/size/codec 通过，final 未 rename）
-file_durable             （final rename + fsync 完成，DB 未完成）
-db_completed             （原子完成事务已提交）
-```
-
-阶段由 `tts_generation_attempts` latest attempt 状态 + `tts_jobs` 字段推导（job 表不单独存 phase 列；attempt 是阶段真相）。
-
-### 4.2 Recovery matrix（冻结）
-
-| 阶段 | 恢复行为 |
-|---|---|
-| `queued` / `claimed_pre_provider` | **可安全 requeue**（无 provider 调用发生，零副作用） |
-| `provider_in_flight` | **indeterminate**（请求已发出，无法证明 upstream 是否完成；**禁止自动再次调用 provider**） |
-| `response_received` + durable candidate 文件可读 | **继续 probe/hash/DB finalize**（不再次调用 provider） |
-| `response_received` 但 response/file 无法恢复 | **indeterminate** |
-| `file_validated` / `file_durable` + DB 未完成 | **校验 exact job/attempt/file → 仅恢复 DB finalize**（不再次调用 provider） |
-| `db_completed` | exact artifact reader 验证（usable / damaged fail-closed） |
-
-### 4.3 Heartbeat stale（新规则）
-
-新的 recovery **必须读取 latest attempt phase**，不得仅凭 `tts_jobs.status='running'` 就 requeue：
-
-- 无 provider attempt → requeue（安全）；
-- attempt `in_flight` → indeterminate；
-- attempt `response_received` → 尝试本地恢复（probe/hash/finalize）；
-- attempt `transport_failed`（已终态）→ job 转 failed 或按 retry 规则。
-
-### 4.4 Indeterminate resolution（冻结）
-
-- indeterminate **不自动重调** provider；
-- indeterminate **保留 active synthesis claim**（partial unique 仍占用）；
-- 用户显式 resolve 三选一：
-  1. **接受可恢复结果**（artifact 可验证 → 完成 finalize）；
-  2. **标记 failed**（释放 claim）；
-  3. **创建新 request + explicit generation variant** 进行 retry（新 job，不抢原 claim）；
-- **usage/cost 保留**，不能回滚或伪造成 0（attempt journal + usage 对账不可变）。
-
----
-
-## 5. 成功终局原子事务（§五 P0 修复）
-
-### 5.1 文件持久化顺序（先于 DB）
-
-```text
-provider response
-→ attempt-specific temp file（.tmp-<uuid>）
-→ ffprobe / SHA / size / codec validation
-→ final rename（同目录）
-→ final file fsync
-→ parent directory fsync
-```
-
-### 5.2 单 BEGIN IMMEDIATE 原子完成（只允许一个）
-
-```text
-BEGIN IMMEDIATE
-
-1. 重读 job：
-   - exact owner/claim（owner_token 匹配）
-   - status = running
-   - cancel_requested = 0
-
-2. 重读 request envelope：
-   - request identity（source+payload+variant）与 job 完全一致
-
-3. 重读 active synthesis identity（final fingerprint + variant 与 job 一致）
-
-4. INSERT sentence_audio_artifacts（immutable）
-
-5. UPDATE current tts_generation_attempt：
-   - status = succeeded
-   - result/audio evidence（response hash / probe 元数据）
-
-6. UPDATE tts_jobs：
-   - status = succeeded
-   - result_artifact_id = artifact.id
-   - clear owner / lease
-
-7. UPDATE tts_audio_requests：
-   - result_artifact_id = artifact.id
-
-COMMIT
-```
-
-**任何一步失败 → SQLite 整事务回滚**；已 durable 文件属于 **orphan**（DB 无引用）；cleanup/recovery **不得触发第二次 provider 调用**；**不允许 artifact/job/request 三者出现部分成功**（同事务原子）。
-
-### 5.3 Cancel 与 success 的裁决
-
-进入该 BEGIN IMMEDIATE 的顺序决定结果（cancel 优先，沿用 M3-B 原子裁决语义）：
-
-```text
-cancel_requested = 1
-→ 不插入 artifact
-→ job 转 cancelled（finished_at + error_code）
-→ attempt 转 cancelled/terminated
-→ envelope 保留终态（cancelled）
-```
-
----
-
-## 6. Attempt journal 定义（§六 修正）
-
-**选定一种并冻结**（不再称"严格 append-only row"）：
-
-```
-tts_generation_attempts
-= append-one-row-per-provider-call
-= mutable lifecycle fields（行内状态受控更新）
-= immutable request identity（禁止修改）
-= 禁止 DELETE
-```
-
-- 每行 = 一次 provider 调用（attempt_number 唯一于 job）；
-- **immutable**：`job_id / attempt_number / request_hash / request_json / provider / model`（DB trigger ABORT 禁止修改）；
-- **mutable lifecycle**：`status / response_hash / response_metadata / error_classification / usage_record_id / finished_at`（受控更新）；
-- 状态机（冻结，禁倒退）：`in_flight → response_received → succeeded`；`in_flight → validation_failed → （repair 新 attempt 或终态）`；`in_flight → transport_failed`；`in_flight → indeterminate`；`response_received → indeterminate`（恢复失败）；
-- **DB trigger** 限制非法字段更新与状态倒退（如 succeeded 后不得回 in_flight；immutable 字段 UPDATE 直接 ABORT）；
-- usage/cost 与 attempt 一一对账（usage_record_id）。
-
----
-
-## 7. Fingerprint 与 generation variant（§七 修正）
-
-### 7.1 Materialization transport 不进入 TTS input fingerprint
-
-**从 `exactSourceFingerprint` 删除**：
-
-```
-registry publish sequence
-materialization publish sequence
-transport destination path
-global registry generation
-```
-
-**保留真正 source/acoustic identity**：
-
-```
-voiceProfileId
-voiceProfileRevisionId
-canonicalAudioSha256
-adapterCompatibilityKey
-provider
-```
-
-materialization row / registry generation **只用于**：provenance、execution readiness、exact preflight、incident diagnosis。
-
-**以下操作不得改变 TTS fingerprint**：
-- 同一 reference 文件重新 materialize；
-- registry 原子重新发布；
-- 新增其他 voice；
-- registry entry canonical reorder；
-- container restart。
-
-### 7.2 三种身份重新划分（冻结）
-
-```
-exactSourceFingerprint       = exact artifact/provenance identity
-synthesisPayloadFingerprint  = 实际送给 provider、可能影响声学输出的 canonical payload
-finalTtsInputFingerprint     = hash(exactSourceFingerprint, synthesisPayloadFingerprint, version)
-generationVariantId          = 候选生成身份，不是自动等同于声学参数
-```
-
-- **只有 provider seed/override 真正进入 provider payload 时**，seed/override 才进入 `synthesisPayloadFingerprint`；
-- 纯 opaque `generationVariantId`：
-  - 进入 request identity；
-  - 进入 active synthesis claim key（partial unique 含 generation_variant_id）；
-  - 进入 artifact provenance；
-  - **不得伪称为实际 provider payload**；
-- 这允许：同一 final input fingerprint 下显式产生多个 immutable candidate（不依赖 artifact fingerprint UNIQUE）；A/B 精确区分 candidate；
-- **adapter 不支持真实 variation 时**（当前 adapter 无 seed 通道）：UI 必须标注 **"repeat generation"**，**不得声称参数化 A/B**；variant 只能来自 override artifact 或文本/参数真实差异。
-
----
-
-## 8. Registry cutover 与 last-known-good（§八 P0 修复）
-
-### 8.1 Existing registry cutover（1B 首次启用 DB-authoritative publisher 前）
-
-当前 production voice rows 0/0，但 adapter registry 必须非空才 healthy（`voices=[]` → invalid）。冻结迁移策略：
-
-```text
-1B 首次启用 DB-authoritative publisher 前：
-1. 读取并严格验证现有 registry（adapter 校验规则：schema/path containment/reference SHA）
-2. 将合法 entry 导入 legacy materialization rows（import provenance 记录来源 registry 文件 hash/时间）
-3. 新 DB 全量重建结果与旧 registry entry 集合【完全一致】才允许切换 publisher
-```
-
-**不得**：
-- 因 DB materialization rows 为空而发布空 registry；
-- 首次 materialize 一个新 voice 时删除全部 legacy entries；
-- 静默丢弃无法映射的旧 entry。
-
-无法映射的 entry → **fail-closed 并要求人工裁决**（不进入新 registry，标记 `LEGACY_UNMAPPED_PENDING_REVIEW`）。
-
-### 8.2 Empty registry（冻结）
-
-- **cold start / DB 无 rows / 无 legacy import**：publisher 在空集合时**不得替换现有 registry**（保持 last-known-good；无 LKG 且无 legacy → adapter 维持启动时状态 + health 报告 `VOICE_REGISTRY_EMPTY`，ready=false）；
-- registry schema 层面：adapter 当前拒绝 `voices=[]`——**保留该拒绝**（避免空 registry 伪装可用）；publisher 空集合 = 无发布动作；
-- **production deployment 不得因 0/0 DB 让 adapter unhealthy**：部署顺序保证——先 legacy import（8.1）再切换 publisher；新部署环境（无 legacy）→ adapter 明确 `VOICE_REGISTRY_EMPTY` 状态，由运维 materialize 首个 voice 后进入可用。
-
-### 8.3 Last-known-good health（冻结语义）
-
-```text
-candidate registry invalid + valid LKG 存在
-→ 保持 LKG
-→ ready = true
-→ degraded = true
-→ detail = VOICE_REGISTRY_PUBLISH_FAILURE
-→ synthesize 只消费 LKG snapshot
-
-candidate registry invalid + 无 LKG
-→ ready = false
-→ synthesize 503
-```
-
-配套定义：
-- **Docker healthcheck**：`/health` ready 由 `upstream_ok && registry_ok && voices_ok` 决定；degraded（LKG）视为 **healthy**（容器不重启，detail 透传）；
-- **worker depends_on**：依赖 adapter healthy（LKG 状态满足 healthy）；
-- **/health body**：`{ready, degraded, detail, provider, model}`（degraded=true 时 detail=VOICE_REGISTRY_PUBLISH_FAILURE）；
-- **synthesize 行为**：degraded（LKG）→ 正常服务（消费 LKG）；无 LKG + registry invalid → 503；
-- **cold start**：见 8.2；
-- **reload failure**：保持 LKG + 报告 publish failure（不 crash、不依赖 Docker restart）。
-
-### 8.4 Materialization 状态机 + 1A 边界（冻结）
-
-```
-requested
-→ file_writing
-→ file_ready_unpublished
-→ registry_pending
-→ published_usable
-→ failed / indeterminate（任意阶段可失败）
-```
-
-- **TTS-C.1A 只实现到 `file_ready_unpublished`**；
-- 1A 阶段要求：API **不声称 adapter ready**；**TTS dispatch 不可使用**（未发布 voice 不可用于合成）；只有 1B registry publish 成功后才进入 `published_usable`；
-- 不产生半成品 active 状态。
-
-### 8.5 `voice_materialization_state` 精确 schema（R2 冻结，不再留待 1A 决定）
+- 现有列保留（status/claim/heartbeat/attempt/cancel 等）；`output_path/duration_ms/audio_sha256/result_json` 为 legacy 兼容（TTS-C 路径不写不读为 authoritative）。
+- `uq_tts_jobs_active_synthesis` 与 `uq_tts_synthesis_claim_active` 双保险（claim 先占，job 后入；极端不一致时唯一索引兜底）。
+- 状态机沿用：`queued → running → succeeded`；`queued → failed/cancelled`；`running → indeterminate`（保守）等。
+
+### 2.4 `tts_generation_attempts`（persisted execution phase；append-one-row-per-provider-call）
 
 ```sql
-CREATE TABLE voice_materialization_state (
+CREATE TABLE tts_generation_attempts (
   id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL REFERENCES tts_jobs(id),
+  attempt_number INTEGER NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  request_hash TEXT NOT NULL,             -- 安全 request 投影 hash
+  request_json TEXT NOT NULL,             -- 安全投影（无 header/secret）
+  execution_phase TEXT NOT NULL,          -- created/provider_in_flight/response_persisted/file_validated/file_durable/succeeded/transport_failed/validation_failed/indeterminate
+  recovery_temp_relative_path TEXT,       -- attempt-specific recovery temp（data-relative）
+  final_relative_path TEXT,               -- final output（data-relative；file_durable 起）
+  response_hash TEXT,
+  audio_sha256 TEXT,
+  output_size INTEGER,
+  codec TEXT,
+  sample_rate INTEGER,
+  channels INTEGER,
+  ffprobe_duration_ms INTEGER,
+  provider_request_id TEXT,
+  error_classification TEXT,
+  usage_record_id TEXT,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  UNIQUE(job_id, attempt_number)
+);
+```
+
+- **immutable**（trigger ABORT 禁改）：`job_id / attempt_number / provider / model / request_hash / request_json`；
+- **mutable lifecycle**（受控更新）：`execution_phase / recovery_temp_relative_path / final_relative_path / response_hash / audio_sha256 / output_size / codec / sample_rate / channels / ffprobe_duration_ms / provider_request_id / error_classification / usage_record_id / finished_at`；
+- 禁 DELETE；状态机禁倒退（trigger 检查：`created → provider_in_flight → response_persisted → file_validated → file_durable → succeeded`，或 `→ transport_failed / validation_failed / indeterminate`，不得回退）；
+- `execution_phase` 是 **crash recovery 的持久化真相**（不是推导值，见 §5）。
+
+### 2.5 `sentence_audio_artifacts`（immutable successful result）
+
+```sql
+CREATE TABLE sentence_audio_artifacts (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  schema_version TEXT NOT NULL DEFAULT 'sentence-audio-artifact@1.0',
+  unit_id TEXT NOT NULL,                  -- N\d{3}
+  narration_plan_artifact_id TEXT NOT NULL,
+  narration_plan_content_hash TEXT NOT NULL,
+  assignment_artifact_id TEXT NOT NULL,
+  assignment_content_hash TEXT NOT NULL,
+  performance_plan_artifact_id TEXT NOT NULL,
+  performance_plan_content_hash TEXT NOT NULL,
   voice_profile_id TEXT NOT NULL,
   voice_profile_revision_id TEXT NOT NULL,
-  request_id TEXT NOT NULL,                 -- 幂等键
-  assignment_artifact_id TEXT NOT NULL,     -- exact Assignment 授权（archive 后历史 Assignment 仍可用）
-  status TEXT NOT NULL,                     -- requested/file_writing/file_ready_unpublished/registry_pending/published_usable/failed/indeterminate
-  source_canonical_sha256 TEXT NOT NULL,    -- = voice_profile_revisions.canonical_audio_sha256（声学身份，进 fingerprint）
-  destination_relative_path TEXT NOT NULL,  -- <VOICE_ROOT>/<pid>/<rid>/reference.wav（data-relative 或 voice-root-relative）
-  published_registry_generation INTEGER,    -- 发布序号（provenance；不进 fingerprint）
-  legacy_import_provenance TEXT,            -- legacy cutover 导入来源（registry 文件 hash + 时间）
-  error_code TEXT, error_message TEXT,
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  canonical_audio_sha256 TEXT NOT NULL,
+  exact_source_fingerprint TEXT NOT NULL,
+  synthesis_payload_fingerprint TEXT NOT NULL,
+  final_tts_input_fingerprint TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  provider_version TEXT,
+  provider_commit TEXT,
+  capability_compiler_version TEXT NOT NULL,
+  capability_snapshot_json TEXT NOT NULL,
+  compiled_payload_json TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  job_id TEXT NOT NULL,
+  successful_attempt_id TEXT,
+  output_relative_path TEXT NOT NULL,     -- 仅 data-relative
+  audio_sha256 TEXT NOT NULL,
+  output_size INTEGER NOT NULL,
+  codec TEXT NOT NULL,
+  sample_rate INTEGER NOT NULL,
+  channels INTEGER NOT NULL,
+  ffprobe_duration_ms INTEGER NOT NULL,
+  generation_variant_id TEXT NOT NULL DEFAULT 'default',
+  created_at TEXT NOT NULL
+);
+```
+
+- **DB trigger ABORT 禁止 UPDATE/DELETE**（immutable）；
+- **无 fingerprint UNIQUE**（多 immutable candidate 合法共存：损坏 replacement / 显式重复生成 / provider 非 byte-deterministic）；
+- exact reader `validateSentenceAudioArtifactExact`（单一真相源）：schema 可解析、路径 containment（realpath 不越界）、regular file、非 symlink、audio_sha256、output_size、codec/sample_rate/channels、ffprobe_duration_ms 全检；damaged → fail-closed；
+- **API 不输出 `output_relative_path`**（序列化出口 redaction）；
+- `job_id` 引用可指向已终态 job（immutable 快照，不因 job 变化失效）。
+
+### 2.6 `voice_materialization_requests`（materialization request envelope）
+
+```sql
+CREATE TABLE voice_materialization_requests (
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL,               -- 幂等键（scope：见下）
+  voice_profile_id TEXT NOT NULL,
+  voice_profile_revision_id TEXT NOT NULL,
+  assignment_artifact_id TEXT NOT NULL,   -- exact Assignment 授权（archive 后历史 Assignment 仍可 materialize）
+  request_fingerprint TEXT NOT NULL,      -- hash(profile, revision, assignment, source_canonical_sha256)
+  job_id TEXT,                            -- voice_materialization_jobs.id
+  materialization_id TEXT,                -- voice_materializations.id（canonical projection）
+  status TEXT NOT NULL,                   -- waiting/running/succeeded/failed/cancelled/indeterminate
+  error_code TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
   UNIQUE(voice_profile_id, voice_profile_revision_id, request_id)
 );
 ```
 
-request envelope 形式：materialization 请求 = `{requestId, voiceProfileId, voiceProfileRevisionId, assignmentArtifactId}`；裁决 = exact Assignment artifact 存在 + source 自洽 + exact voice usable（**不按 Profile active 状态**；archive 后合法历史 Assignment 引用的 revision 允许 materialize）。
+- requestId 作用域：**per (voice_profile_id, voice_profile_revision_id)**；同 profile+revision 内同 requestId 幂等；跨 profile/revision 不同 requestId 独立；冲突语义 = 同 scope 同 requestId 不同 source → 409 `REQUEST_ID_CONFLICT`。
+- **authoritative authorization**：`assignment_artifact_id` 必须存在 + source 自洽 + exact voice usable（**不按 Profile active 状态**）。
+
+### 2.7 `voice_materialization_jobs`（mutable Worker execution）
+
+```sql
+CREATE TABLE voice_materialization_jobs (
+  id TEXT PRIMARY KEY,
+  voice_profile_id TEXT NOT NULL,
+  voice_profile_revision_id TEXT NOT NULL,
+  status TEXT NOT NULL,                   -- queued/running/succeeded/failed/cancelled/indeterminate
+  owner_token TEXT,
+  lease_expires_at TEXT,
+  heartbeat_at TEXT,
+  attempt INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 2,
+  cancel_requested INTEGER NOT NULL DEFAULT 0,
+  destination_voice_root_relative_path TEXT NOT NULL,  -- voice-root-relative（固定，非 data-relative 二选一）
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+```
+
+- mutable；Worker 唯一 writer；claim/lease/heartbeat/retry/cancel 沿用 tts_jobs 模式。
+
+### 2.8 `voice_materializations`（canonical projection；每 exact profile+revision 唯一）
+
+```sql
+CREATE TABLE voice_materializations (
+  id TEXT PRIMARY KEY,
+  voice_profile_id TEXT NOT NULL,
+  voice_profile_revision_id TEXT NOT NULL,
+  source_canonical_sha256 TEXT NOT NULL,  -- = voice_profile_revisions.canonical_audio_sha256（声学身份）
+  adapter_compatibility_key TEXT NOT NULL,
+  destination_voice_root_relative_path TEXT NOT NULL,
+  status TEXT NOT NULL,                   -- file_ready_unpublished/registry_pending/published_usable/failed/indeterminate
+  published_registry_generation INTEGER,
+  published_registry_sha256 TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(voice_profile_id, voice_profile_revision_id)
+);
+```
+
+- **UNIQUE(profile, revision)**：canonical projection 每 exact voice 唯一；多个 requestId 复用同一 projection/job；
+- 状态机：`file_ready_unpublished → registry_pending → published_usable`；`* → failed/indeterminate`；
+- 1A 止于 `file_ready_unpublished`（§7.2）。
+
+### 2.9 `legacy_adapter_voice_entries`（legacy registry shadow，独立于 TTS-A）
+
+```sql
+CREATE TABLE legacy_adapter_voice_entries (
+  id TEXT PRIMARY KEY,
+  voice_profile_key TEXT NOT NULL,        -- legacy registry voiceProfile 值（可能非 UUID）
+  voice_revision_key TEXT NOT NULL,       -- legacy registry voiceRevision 值
+  speaker_name TEXT NOT NULL,
+  reference_asset_path_or_safe_projection TEXT NOT NULL,
+  reference_sha256 TEXT NOT NULL,
+  source_registry_sha256 TEXT NOT NULL,   -- 来源 registry 文件 SHA
+  imported_at TEXT NOT NULL,
+  mapping_status TEXT NOT NULL,           -- unmapped/mapped/retired
+  mapped_voice_materialization_id TEXT,
+  retired_at TEXT,
+  UNIQUE(voice_profile_key, voice_revision_key)
+);
+```
+
+- **不伪造 TTS-A 数据**：legacy entry 不要求存在 Voice Profile/Revision 或 Assignment；不写 `voice_profiles/voice_profile_revisions`；
+- `mapping_status`：`unmapped`（publisher 可原样保留，**不得用于新 TTS-C exact source**）→ `mapped`（链接 canonical projection）→ `retired`（显式弃用）。
 
 ---
 
-## 9. Exact input chain 与 capability matrix（R1 结论保留 + 更新）
+## 3. Unschedulable reuse reservation（§三 P0 修复）
 
-- exact input chain 见 R1 §2（全显式 ID）；fingerprint 三分离按 §7 本修订执行。
-- capability neutral matrix（R1 §7 保留）：neutral 默认值（delivery=normal/pace=normal/energy=normal/emotion=none/deliveryOverride=null）→ **supported no-op**；非 neutral 无通道 → explicit unsupported（不静默丢弃）。
+### 3.1 模型
+
+**修复目标**：Phase 1 INSERT queued job → COMMIT → Phase 2 校验 artifact 的竞态（queued job 可能在校验完成前被 Scheduler claim → 重复 provider 调用）。
+
+**冻结方案**：新增 `tts_synthesis_claims`（§2.2）作为 active synthesis identity 的唯一 reservation：
+- `validating_reuse`：Scheduler **永不 claim**（无 queued job 存在）；
+- artifact usable → 直接 reused，**不创建 tts_job**；
+- artifact unusable → 原子转为 `generation_pending` 并 INSERT queued tts_job（claim 保护下）；
+- **不能在 artifact 校验前产生可执行 queued job**。
+
+### 3.2 正确算法（两阶段）
+
+```text
+BEGIN IMMEDIATE                                     -- Phase 1（同步 DB）
+1. envelope-first requestId 裁决（tts_audio_requests）
+2. 取得/创建 synthesis claim（status=validating_reuse；
+   partial unique 保证同一 synthesis 只有一个 claim）
+3. request envelope 链接 claim（claim_id）
+4. 读取 candidate artifact metadata（同步 DB，不读文件内容）
+COMMIT
+
+事务外 exact artifact validator                    -- Phase 2（异步文件 I/O）
+（validateSentenceAudioArtifactExact）
+
+BEGIN IMMEDIATE                                     -- Phase 3（同步 DB）
+5A. artifact usable：
+    - request / 所有 subscriber 链接 artifact
+    - claim → succeeded（result_artifact_id）
+    - 不创建 tts_job
+5B. artifact unusable 或不存在：
+    - 在 claim 保护下 INSERT queued tts_job（claim_id 链接）
+    - claim.job_id = job.id
+    - claim → generation_pending
+COMMIT
+```
+
+**必须测试**：
+- Scheduler 在 Phase 1/Phase 2 之间运行，provider 调用仍为 0（validating_reuse 无 queued job）；
+- candidate usable 时始终零新 job；
+- candidate damaged 时恰好一个 queued job（claim 保护）；
+- 两个不同 requestId 并发只创建一个 claim/job（partial unique + fan-in）。
 
 ---
 
-## 10. Manifest/Master 非循环身份（R1 §8 保留）
+## 4. Shared request fan-in（§四 P0 修复）
 
-- `narration_audio_selection_manifest@2.0`（无 master 信息）+ `narration_master_audio@1.0`（引用 manifest；`masterInputFingerprint = hash(selectionManifestArtifactId, selectionManifestContentHash, concatCompilerVersion)` 无自引用）；顺序：selected immutable manifest → durable master → immutable master artifact DB commit。
+### 4.1 关系模型
+
+```
+tts_audio_requests（many）──claim_id──▶ tts_synthesis_claims（1）
+                                        │
+                                        └─job_id─▶ tts_jobs（0..1；reuse 路径无 job）
+```
+
+- **many-to-one**：多个 request envelope 共享同一 claim/job；
+- `tts_jobs` **不设单数 `tts_audio_request_id` FK 作为唯一 owner**；若保留列仅命名 `originating_request_id`（创建者，不承担 subscriber 真相）；subscriber 真相 = `SELECT * FROM tts_audio_requests WHERE claim_id = ?`；
+- 每个 envelope 存：`claim_id / job_id / result_artifact_id / status / error_code / error_message / created_at / updated_at`。
+
+### 4.2 成功 fan-out（同一 BEGIN IMMEDIATE）
+
+```sql
+UPDATE tts_audio_requests
+SET status = 'succeeded',
+    result_artifact_id = ?,
+    updated_at = ?
+WHERE claim_id = ?
+  AND status IN ('waiting', 'running');
+```
+
+- 更新**全部有效 subscriber**（waiting/running）；
+- **每个 envelope 的 request identity 必须与 claim 完全一致**——发现一个 mismatch → 整事务回滚并 `REQUEST_STATE_INCONSISTENT`；
+- same-request replay 从自己的 envelope 得到相同 result；
+- failed / cancelled / indeterminate 同样 fan-out，**除非该 envelope 已单独取消**（见 4.3）。
+
+### 4.3 Per-request cancellation
+
+- 单个 envelope cancel = **仅该 subscriber 转 cancelled/detached**（`status='cancelled'`，claim/job 不受影响）；
+- 还有其他 active subscriber → shared claim/job **继续**；
+- **所有 subscriber 均 cancelled → 才允许设置 job-level `cancel_requested=1`**（claim 层检查）；
+- 管理员显式 job cancel 可取消全体，但必须记录 provenance（error_message 注明 admin cancel + operator）；
+- success 与最后一个 cancel 的竞争由同一 BEGIN IMMEDIATE 原子裁决（cancel 优先：进入事务时 `cancel_requested=1` → 不插 artifact，job cancelled，subscribers cancelled）。
+
+**测试矩阵（必须）**：
+
+```
+A+B 共享 job
+A cancel → B 仍 succeeds（fan-out 只到 B）
+A+B 均 cancel → job cancelled（最后 cancel 置 cancel_requested=1）
+A cancel 与 success 并发 → 原子结果，无悬空 envelope
+```
 
 ---
 
-## 11. Downstream stale 传播（R1 §9 保留）
+## 5. Persisted recovery phases（§五 P0 修复）
 
-文本/声音/Performance/单句时长/仅 provider metadata/master SHA 同时长的区分规则不变；subtitle_timing_v2 全量确定性重算 + 复用未变 unit 实测时长。
+### 5.1 `tts_generation_attempts.execution_phase`（持久化真相，非推导）
+
+```
+created
+provider_in_flight
+response_persisted
+file_validated
+file_durable
+succeeded
+transport_failed
+validation_failed
+indeterminate
+```
+
+`recovery_temp_relative_path / final_relative_path / response_hash / audio_sha256 / output_size / codec / sample_rate / channels / ffprobe_duration_ms` 随阶段逐步填充（§2.4）。
+
+### 5.2 严格顺序（provider 调用前的持久化屏障）
+
+```text
+BEGIN IMMEDIATE
+→ INSERT attempt（phase=provider_in_flight）
+COMMIT
+→ 才允许发送 provider request
+```
+
+- 即便 crash 发生在 commit 后、网络发送前，也**保守进入 indeterminate**（不能冒险自动重调——无法证明请求是否已计费）。
+
+收到 provider response：
+
+```text
+写 attempt-specific recovery temp（recovery_temp_relative_path）
+→ fsync temp
+→ DB：phase=response_persisted + response_hash + temp path
+```
+
+随后：
+
+```text
+ffprobe / hash / size / codec 校验
+→ phase=file_validated
+
+final rename + file fsync + dir fsync
+→ phase=file_durable
+
+最后执行 artifact/job/claim/requests 原子成功事务（§6）
+```
+
+### 5.3 Recovery（按 phase 精确恢复）
+
+| phase | 恢复行为 |
+|---|---|
+| `created` / `provider_in_flight` | **indeterminate**（provider 调用已发生或可能已发生；禁自动重调） |
+| `response_persisted` | 从 exact recovery temp 恢复（继续 probe/hash/finalize），**不调用 provider** |
+| `file_validated` | 完成 final rename + fsync（不调用 provider） |
+| `file_durable` | 只执行 DB finalize（§6） |
+| `succeeded` | exact artifact reader 验证 |
+| `transport_failed` / `validation_failed` | 按 retry 规则（retryable 且 attempt<max → 新 attempt；否则 failed） |
+
+- recovery **必须校验** attempt/job/claim/source/fingerprint/owner 一致；任一证据不一致 → indeterminate；
+- **cleanup 不能删除 DB 正在引用的 recovery temp/final 文件**（orphan 判定：DB 无引用才可清理）。
 
 ---
 
-## 12. Security / Tests / Migrations / Deployment（R1 §10-11 保留）
+## 6. 原子成功终局（§六 P0 修复；含 claim 与全部 subscriber）
 
-- API 不输出路径；客户端只提交 ID；Web 无 voice/registry 挂载；attempt journal 只存安全投影；registry 服务端生成。
-- 每阶段 `scripts/test-tts-c-*.ts` + 临时 DB + Mock provider + 统一 gate；migration 可回滚 + 副本演练；exact-SHA 部署纪律。
+文件 durable 后，**唯一成功事务**：
+
+```text
+BEGIN IMMEDIATE
+
+1. 重读 claim：
+   - exact synthesis key（partial unique 命中）
+   - status = running / generation_pending
+   - owner/lease 合法
+
+2. 重读 job：
+   - claim_id 一致
+   - status = running
+   - cancel_requested = 0
+
+3. 重读 current attempt：
+   - execution_phase = file_durable
+   - immutable request identity 一致
+
+4. 重读所有 active request subscribers：
+   - claim_id 一致
+   - request identity 全部一致（任一 mismatch → 整事务回滚 + REQUEST_STATE_INCONSISTENT）
+
+5. INSERT immutable sentence_audio_artifact
+
+6. attempt → succeeded（execution_phase=succeeded + audio evidence）
+
+7. job → succeeded + result_artifact_id（clear owner/lease）
+
+8. claim → succeeded + result_artifact_id
+
+9. 所有未取消 request envelope → succeeded + result_artifact_id
+
+COMMIT
+```
+
+**任一步失败**：
+- 整事务回滚；
+- durable file 为 **recoverable orphan**（`file_durable` attempt 保留 → 可重新执行 DB finalize）；
+- **不调用 provider**；
+- **不允许 request/claim/job/artifact 部分成功**。
+
+cancel 与 success：进入本事务顺序决定结果（`cancel_requested=1` → 不插 artifact，job cancelled，subscribers cancelled）。
 
 ---
 
-## 13. Unresolved decisions（进入 1A 前定）
+## 7. Materialization 控制面三层拆分（§七 P0 修复）
 
-1. `voice_materialization_state` 与 TTS-C.2 的 `tts_audio_requests` 是否统一 envelope 模式（1A 定实现细节）。
-2. delivery 编译策略（文本改写 vs 显式 unsupported，推荐显式 unsupported）。
-3. pace 经 adapter 扩展直传可行性（upstream duration control 支持度）。
-4. unit vs sentence 原子单位（推荐 unit）。
-5. capability 升级后存量音频失效策略（推荐不自动删，review 决定）。
-6. pronunciation dictionary 是否纳入（推荐 C.3 后评估）。
-7. master 拼接：Node PCM concat（现状）vs ffmpeg concat filter（C.4 定）。
+### 7.1 三层（§2.6–2.8）
 
-## 14. Recommended first implementation stage
+```
+voice_materialization_requests   = requestId envelope / replay / conflict / authorization provenance
+voice_materialization_jobs      = mutable Worker execution / owner / lease / heartbeat / attempt / recovery
+voice_materializations          = 每 exact profile+revision 唯一 canonical projection
+```
 
-**TTS-C.1A**（voice materialization durable requests/files/DB projection，实现到 `file_ready_unpublished`）——零音频风险、解锁 materialization；随后 1B（global registry publisher + adapter hot reload + **legacy cutover**）、1C（capability compiler）；C.2 依赖 1A/1B/1C 齐备（envelope + active synthesis constraint + fingerprint 三分离 + immutable artifact 需要 materialization 与 capability 支持）。
+- 多个 requestId 复用同一 projection/job（`voice_materializations.UNIQUE(profile, revision)` + 请求 → 复用 job）；
+- requestId scope：per (profile, revision)；同 scope 同 requestId 幂等；异 source → 409。
+
+### 7.2 1A durability（冻结；目标路径固定 voice-root-relative）
+
+```text
+exact source validator（validateVoiceProfileRevisionExact usable）
+→ materialization claim（voice_materialization_jobs，单 BEGIN IMMEDIATE claim）
+→ temp copy（destination dir .tmp-<uuid>）
+→ SHA / codec / size 校验
+→ final rename + file fsync + dir fsync
+→ BEGIN IMMEDIATE
+   projection = file_ready_unpublished
+   job = succeeded
+   all linked requests = succeeded
+→ COMMIT
+```
+
+- 1A **不写 registry、不声称 adapter ready**；
+- 目标路径**固定为 voice-root-relative**（`<voice_profile_id>/<voice_profile_revision_id>/reference.wav`），**禁止"data-relative 或 voice-root-relative"二选一**。
+
+---
+
+## 8. Legacy registry cutover（§八 P0 修复）
+
+### 8.1 独立 legacy shadow（`legacy_adapter_voice_entries`，§2.9）
+
+- production TTS-A rows 0/0，**不能把手工 registry entry 伪装成 TTS-A materialization**；
+- legacy entry 可被 publisher 原样保留（`mapping_status=unmapped`）；
+- **unmapped legacy entry 不允许用于新 TTS-C exact source**；
+- 不要求存在 TTS-A Voice Revision 或 Assignment；不伪造 TTS-A 数据；
+- 可后续映射（mapped）或显式 retire（retired）。
+
+### 8.2 Publisher source union（过渡期 registry 全量来源）
+
+```text
+validated non-retired legacy entries（legacy_adapter_voice_entries WHERE mapping_status IN ('unmapped','mapped') AND retired_at IS NULL）
++
+published / registry_pending TTS-A voice_materializations（voice_materializations WHERE status IN ('published_usable','registry_pending')）
+```
+
+- **canonical key 唯一**（`voiceProfileKey@voiceRevisionKey`）；**key 冲突 fail-closed**（不静默覆盖，标记冲突待裁决）；
+- 新 TTS-A voice 发布**不会删除 legacy entry**；
+- cutover 前后 legacy entry 集合与 SHA **完全保持**（重建结果对比断言）；
+- 无法映射**不阻止保留服务**，但阻止它进入 TTS-C 新业务引用（exact source 只认 voice_materializations）。
+
+---
+
+## 9. Adapter activation acknowledgement（§九 P0 修复）
+
+仅 `ready=true/degraded=true` 不足以证明新 registry 已激活。Registry 文档增加：
+
+```json
+{"schemaVersion": "1.0",
+ "registryGeneration": 12,
+ "publisherSchemaVersion": "voice-registry-publisher@1.0",
+ "voices": [...]}
+```
+
+Adapter `/health` 增加：
+
+```json
+{"ready": true, "degraded": false,
+ "activeRegistrySha256": "...", "activeRegistryGeneration": 12,
+ "candidateRegistrySha256": "...", "detail": ""}
+```
+
+Publisher 流程（1B）：
+
+```text
+atomic publish registry
+→ projection = registry_pending
+→ poll adapter /health
+→ activeRegistrySha256 == published SHA
+→ projection = published_usable
+```
+
+- adapter 保持 LKG（`ready=true/degraded=true/active SHA != candidate SHA`）→ projection **必须保持 registry_pending，不得标记 usable**；
+- `registryGeneration` 单调递增（provenance，**不进 TTS fingerprint**——R2 已冻结）。
+
+---
+
+## 10. Fingerprint / capability / manifest-master / stale（R1/R2 结论保留）
+
+- fingerprint 三分离（exactSourceFingerprint / synthesisPayloadFingerprint / finalTtsInputFingerprint）+ generationVariantId = 候选生成身份（R2 §7 冻结，本修订不变）；
+- materialization transport 不入 fingerprint（R2 §7.1）；
+- capability neutral matrix（neutral → supported no-op；非 neutral 无通道 → explicit unsupported，不静默丢弃）；
+- `narration_audio_selection_manifest@2.0`（无 master 信息）+ `narration_master_audio@1.0`（masterInputFingerprint 非循环）；
+- downstream stale 图（文本/声音/Performance/时长/仅 metadata 区分）；
+- Security：API 不输出路径；Web 无 voice/registry 挂载；attempt journal 只存安全投影。
+
+---
+
+## 11. Unresolved decisions（进入 1A 前定）
+
+1. delivery 编译策略（文本改写 vs 显式 unsupported，推荐显式 unsupported）。
+2. pace 经 adapter 扩展直传可行性。
+3. unit vs sentence 原子单位（推荐 unit）。
+4. capability 升级后存量音频失效策略。
+5. pronunciation dictionary 是否纳入（建议 C.3 后）。
+6. master 拼接实现（Node PCM vs ffmpeg concat，C.4 定）。
+7. `tts_synthesis_claims` 与 `tts_jobs` 的 claim/lease 双表实现细节（C.2 定；schema 已冻结）。
+
+## 12. Recommended first implementation stage
+
+**TTS-C.1A**（materialization requests/jobs/projection，止于 `file_ready_unpublished`）——零音频风险、解锁 materialization；随后 1B（legacy shadow + global publisher + adapter reload/activation ack）、1C（capability compiler）；C.2（audio request/claim/job/attempt/immutable artifact）依赖 1A/1B/1C 齐备。
