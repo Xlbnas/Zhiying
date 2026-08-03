@@ -4,6 +4,7 @@
 > 审计基线：inspection date **2026-08-03**；每个项目记录 **exact inspected commit SHA**（GitHub API 现场核验，非 `main+pushed_at`）。
 > R2 修正：① OpenMontage（calesthio）按真实代码重新审计（lib/checkpoint.py / tests / schemas / tools/video / pipeline_defs / README），Reject 依据 = AGPL license/integration mismatch（不再错误声称代码不存在）；② Open-Montage/OpenMontage 修正为正确 SHA `50279751590dc639d847ae909c7d592cb207ec57`；③ AGPL/NC 措辞保持谨慎（license 判断，不构成法律意见）。
 > R3 修正：license 边界措辞去绝对化（AGPL 表述为"可能产生网络交互源码提供义务及组合/衍生作品风险；知影基于商业与合规风险决定不引入；不构成法律意见"）。
+> R4 确认：矩阵中所有 AGPL/NC 表述统一为上述谨慎措辞（汇总表标签改用"AGPL 合规风险"；移除"传染/必然全服务端开源"等绝对化表述）；OpenMontage 审计保持 R2/R3 结论，不扩大范围。
 > 决策维度：`Adopt（直接引入）/ Adapter（借鉴接口或概念，重写实现）/ Reimplement（重新实现）/ Reject（不采用）`。
 
 ---
@@ -86,7 +87,7 @@
 | reason | 该仓库是 **AGPL-3.0 的 agentic video production 系统**（pipeline 编排 + checkpoint/governance 体系），其 checkpoint/prerequisite/JSON Schema/gate 概念与知影的 artifacts 状态机 + commit-time fence 体系在**概念上同构**（这是有价值的交叉验证），但：① AGPL-3.0 引入任何代码（含脚本）可能带来网络服务源码提供义务及组合/衍生作品风险，知影为商业项目，决定**不引入**；② 集成形态差异大（Python pipeline orchestrator vs 知影 Node + better-sqlite3 + artifacts 表）；③ ffprobe/audio/subtitle QA 在其 README 中以 self-review 概念存在，无独立可复用实现。Reject 依据 = license/integration mismatch（**非**"代码不存在"——checkpoint.py 等真实存在） |
 | integration boundary | **无**（不引入任何代码/脚本）；概念参考：stage prerequisite + human gate + checkpoint 持久化思路（与知影 generation_runs lease/indeterminate 模式对照），全部以自研实现落地 |
 | exit/replacement | 无运行时依赖 |
-| commercial/license risk | **AGPL-3.0 高风险**：可能触发网络服务源码提供义务（AGPL §13）及组合/衍生作品传染；知影不引入其任何代码/脚本。本结论为谨慎的 license 判断，不构成法律意见；如需正式采用任何 AGPL 组件，须经法律审查 |
+| commercial/license risk | **AGPL-3.0 高风险**：可能产生网络交互源码提供义务及组合/衍生作品风险；知影基于商业与合规风险决定不引入其任何代码/脚本。本结论为谨慎的 license 判断，不构成法律意见；如需正式采用任何 AGPL 组件，须经法律审查 |
 
 ### 5.1 附加记录：Open-Montage/OpenMontage（非任务指定，仅澄清）
 
@@ -108,11 +109,11 @@
 | Video Podcast Maker | `73fcf168…` | CC BY-NC 4.0 | **Reject** | **高（NC）** |
 | MoneyPrinterTurbo | `254cd028…` | MIT | Adapter（概念） | 无 |
 | Remotion template | `27ecd976…` | 无独立 LICENSE（Remotion 条款） | Adapter（结构） | 需保留 Remotion 授权证据 |
-| calesthio/OpenMontage | `4eab34c5…` | **AGPL-3.0** | **Reject** | **高（AGPL 传染）** |
+| calesthio/OpenMontage | `4eab34c5…` | **AGPL-3.0** | **Reject** | **高（AGPL 合规风险）** |
 
 ## AGPL/LGPL/Remotion license 边界（谨慎表述）
 
-- **calesthio/OpenMontage（AGPL-3.0）**：AGPL 可能产生网络交互源码提供义务（AGPL §13）及组合/衍生作品风险；知影基于商业与合规风险决定**不引入**其任何代码/脚本；概念参考（checkpoint/prerequisite/gate 思路）不产生衍生作品，不触发传染。本结论为 license 风险判断，**不构成法律意见**；若未来需正式采用任何 AGPL 组件，须经法律审查。
+- **calesthio/OpenMontage（AGPL-3.0）**：AGPL 可能产生网络交互源码提供义务及组合/衍生作品风险；知影基于商业与合规风险决定**不引入**其任何代码/脚本；概念参考（checkpoint/prerequisite/gate 思路）不复制/不衍生代码。本结论为 license 风险判断，**不构成法律意见**；若未来需正式采用任何 AGPL 组件，须经法律审查。
 - **Video Podcast Maker（CC BY-NC 4.0）**：复制/衍生受非商业限制（NC 条款覆盖衍生作品）；知影不复制/不衍生；仅阅读理解。同样不构成法律意见。
 - **Remotion 模板**：仓库无 LICENSE 文件；不复制模板代码；Remotion 使用以现有授权为准（授权证据保留）。
 - 5 项目中无 LGPL 采用。
