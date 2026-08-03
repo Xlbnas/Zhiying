@@ -8,9 +8,10 @@
 #   1. git diff --check
 #   2. pnpm typecheck
 #   3. pnpm build
-#   4. TTS-B 5 套
-#   5. TTS-A frozen 7 套
-#   6. frozen / existing 11 套
+#   4. CI 失败退出码传播自测（TTS-B.R3）
+#   5. TTS-B 5 套
+#   6. TTS-A frozen 7 套
+#   7. frozen / existing 11 套
 #   任一失败立即非零退出。
 #
 # 用法：
@@ -84,14 +85,17 @@ run_suite "typecheck" pnpm typecheck
 #    CI/agentvm/镜像内共用本入口，build 统一以无 NODE_ENV 运行）
 run_suite "next-build" env -u NODE_ENV pnpm build
 
-# 4. TTS-B 5 套
+# 4. CI 失败退出码传播自测（TTS-B.R3：gate 失败必须使 workflow conclusion=failure）
+run_suite "m7-exit-propagation" bash scripts/test-m7-quality-gate-exit-propagation.sh
+
+# 5. TTS-B 5 套
 run_suite "tts-b-voice-assignment" npx tsx scripts/test-tts-b-voice-assignment.ts
 run_suite "tts-b-performance-schema" npx tsx scripts/test-tts-b-performance-schema.ts
 run_suite "tts-b-performance-generation" npx tsx scripts/test-tts-b-performance-generation.ts
 run_suite "tts-b-dag" npx tsx scripts/test-tts-b-dag.ts
 run_suite "tts-b-api" npx tsx scripts/test-tts-b-api.ts
 
-# 5. TTS-A frozen 7 套（docs/M7_IMPLEMENTATION_STATUS.md §11 权威清单）
+# 6. TTS-A frozen 7 套（docs/M7_IMPLEMENTATION_STATUS.md §11 权威清单）
 run_suite "tts-a-voice-library-schema" npx tsx scripts/test-tts-a-voice-library-schema.ts
 run_suite "tts-a-voice-library-ingest" npx tsx scripts/test-tts-a-voice-library-ingest.ts
 run_suite "tts-a-voice-library-api" npx tsx scripts/test-tts-a-voice-library-api.ts
@@ -100,7 +104,7 @@ run_suite "tts-a-durability" npx tsx scripts/test-tts-a-durability.ts
 run_suite "tts-a-multipart" npx tsx scripts/test-tts-a-multipart.ts
 run_suite "tts-a-staging-failures" npx tsx scripts/test-tts-a-staging-failures.ts
 
-# 6. frozen / existing 11 套（docs/M7_IMPLEMENTATION_STATUS.md §11 权威清单）
+# 7. frozen / existing 11 套（docs/M7_IMPLEMENTATION_STATUS.md §11 权威清单）
 run_suite "m73b-visual-sequences" npx tsx scripts/test-m73b-visual-sequences.ts
 run_suite "m73b-shots" npx tsx scripts/test-m73b-shots.ts
 run_suite "m73b-generation" npx tsx scripts/test-m73b-generation.ts

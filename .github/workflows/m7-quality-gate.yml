@@ -62,8 +62,13 @@ jobs:
 
       - name: Run M7 quality gate（统一权威入口）
         id: gate
-        run: bash scripts/run-m7-quality-gate.sh | tee /tmp/quality-gate-console.log
-        # 失败必须使 workflow conclusion = failure（不使用 continue-on-error / command || true）
+        run: |
+          set -o pipefail
+          bash scripts/run-m7-quality-gate.sh |
+            tee /tmp/quality-gate-console.log
+        # 失败必须使 workflow conclusion = failure：
+        #   - 外层 shell 显式启用 pipefail，防止 tee 吞掉子脚本退出码（TTS-B.R3）；
+        #   - 不使用 continue-on-error / command || true / 只看日志中的 QUALITY_GATE_RESULT。
 
       - name: Upload quality gate logs（成功/失败均上传）
         if: always()
@@ -79,6 +84,9 @@ jobs:
       - name: Write job summary
         if: always()
         run: |
+          GATE_RESULT=$(grep -E '^QUALITY_GATE_RESULT=' /tmp/quality-gate-console.log | tail -1 | cut -d= -f2 | xargs || echo unknown)
+          GATE_SHA=$(grep -E '^QUALITY_GATE_SHA=' /tmp/quality-gate-console.log | tail -1 | cut -d= -f2 | xargs || echo unknown)
+          GATE_SUITES=$(grep -E '^QUALITY_GATE_TOTAL_SUITES=' /tmp/quality-gate-console.log | tail -1 | cut -d= -f2 | xargs || echo unknown)
           {
             echo "## M7 Quality Gate — ${{ github.sha }}"
             echo ""
@@ -90,7 +98,9 @@ jobs:
             echo "| ffmpeg | $(ffmpeg -version 2>/dev/null | head -1) |"
             echo "| ffprobe | $(ffprobe -version 2>/dev/null | head -1) |"
             echo "| typecheck/build | 见 gate 步骤日志 |"
-            echo "| suites | 23（TTS-B 5 + TTS-A frozen 7 + frozen/existing 11） |"
+            echo "| gate result | ${GATE_RESULT} |"
+            echo "| gate SHA | ${GATE_SHA} |"
+            echo "| suites | ${GATE_SUITES}（由 run-m7-quality-gate.sh 权威输出，非硬编码） |"
             echo "| conclusion | ${{ job.status }} |"
             echo ""
             echo "完整测试日志见 artifact \`m7-quality-gate-${{ github.sha }}\`。"
