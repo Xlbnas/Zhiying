@@ -37,6 +37,9 @@ export interface TtsBDagNodeDef {
 }
 
 /** TTS-B graph 定义（narration + assignment 双依赖，无反向边）。 */
+// ── TTS-B graph 定义（单一真相源：nodes.dependencies） ──
+// edges / topological order 由 nodes.dependencies 派生，禁止维护三份互不验证的手写真相源。
+
 export const TTS_B_DAG_NODES: readonly TtsBDagNodeDef[] = [
   {id: 'narration_plan_v2', label: '旁白计划 V2', dependencies: []},
   {id: 'project_voice_assignment', label: '项目声音指定', dependencies: []},
@@ -47,37 +50,108 @@ export const TTS_B_DAG_NODES: readonly TtsBDagNodeDef[] = [
   },
 ];
 
-export const TTS_B_DAG_EDGES: ReadonlyArray<{from: TtsBDagNodeId; to: TtsBDagNodeId}> = [
-  {from: 'narration_plan_v2', to: 'narration_performance_plan'},
-  {from: 'project_voice_assignment', to: 'narration_performance_plan'},
-];
+export interface TtsBDagEdge {
+  from: TtsBDagNodeId;
+  to: TtsBDagNodeId;
+}
 
-export const TTS_B_DAG_TOPOLOGICAL_ORDER: readonly TtsBDagNodeId[] = [
-  'narration_plan_v2',
-  'project_voice_assignment',
-  'narration_performance_plan',
-];
+/** 从 nodes.dependencies 派生 edges（单一真相源）。 */
+export function deriveTtsBDagEdges(nodes: readonly TtsBDagNodeDef[]): TtsBDagEdge[] {
+  const edges: TtsBDagEdge[] = [];
+  for (const n of nodes) {
+    for (const dep of n.dependencies) {
+      edges.push({from: dep, to: n.id});
+    }
+  }
+  return edges;
+}
 
-/** DFS 三色环检测；返回构成环的节点序列（无环 → null）。 */
-export function detectTtsBDagCycles(): TtsBDagNodeId[] | null {
+export const TTS_B_DAG_EDGES: readonly TtsBDagEdge[] = deriveTtsBDagEdges(TTS_B_DAG_NODES);
+
+/**
+ * 从 nodes.dependencies 派生 topological order（Kahn 算法；含环 → null）。
+ * 派生结果必须与 edges 语义一致，不再手写第三份真相源。
+ */
+export function deriveTtsBDagTopologicalOrder(
+  nodes: readonly TtsBDagNodeDef[],
+): TtsBDagNodeId[] | null {
+  const indegree = new Map<string, number>();
+  const dependents = new Map<string, string[]>();
+  const ids = new Set(nodes.map((n) => n.id));
+  for (const n of nodes) {
+    indegree.set(n.id, 0);
+    dependents.set(n.id, []);
+  }
+  for (const n of nodes) {
+    for (const dep of n.dependencies) {
+      if (!ids.has(dep)) continue; // endpoint validation 另行报告
+      indegree.set(n.id, (indegree.get(n.id) ?? 0) + 1);
+      dependents.set(dep, [...(dependents.get(dep) ?? []), n.id]);
+    }
+  }
+  const queue: string[] = nodes.filter((n) => (indegree.get(n.id) ?? 0) === 0).map((n) => n.id);
+  const order: TtsBDagNodeId[] = [];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    order.push(id as TtsBDagNodeId);
+    for (const dependent of dependents.get(id) ?? []) {
+      const next = (indegree.get(dependent) ?? 0) - 1;
+      indegree.set(dependent, next);
+      if (next === 0) queue.push(dependent);
+    }
+  }
+  if (order.length !== nodes.length) return null; // 有环
+  return order as TtsBDagNodeId[];
+}
+
+export const TTS_B_DAG_TOPOLOGICAL_ORDER: readonly TtsBDagNodeId[] = (() => {
+  const order = deriveTtsBDagTopologicalOrder(TTS_B_DAG_NODES);
+  if (!order) throw new Error('TTS-B graph 含环——canonical graph 必须无环');
+  return order;
+})();
+
+/** 结构校验：node ID 唯一、每条 dependency 端点必须存在、edge 不重复。返回 issue 列表（空 = 合法）。 */
+export function validateTtsBDag(nodes: readonly TtsBDagNodeDef[]): string[] {
+  const issues: string[] = [];
+  const ids = nodes.map((n) => n.id);
+  const idSet = new Set(ids);
+  if (new Set(ids).size !== ids.length) issues.push('node id 重复');
+  const edgeSet = new Set<string>();
+  for (const n of nodes) {
+    for (const dep of n.dependencies) {
+      if (!idSet.has(dep)) {
+        issues.push(`未知端点 ${dep} → ${n.id}（dependency 端点不存在）`);
+      }
+      const key = `${dep}|${n.id}`;
+      if (edgeSet.has(key)) issues.push(`重复 edge ${key}`);
+      edgeSet.add(key);
+    }
+  }
+  return issues;
+}
+
+/** DFS 三色环检测（参数化 graph，便于故障注入；无环 → null）。 */
+export function detectTtsBDagCycles(
+  nodes: readonly TtsBDagNodeDef[] = TTS_B_DAG_NODES,
+): TtsBDagNodeId[] | null {
   const WHITE = 0;
   const GRAY = 1;
   const BLACK = 2;
-  const color = new Map<TtsBDagNodeId, number>();
-  const adj = new Map<TtsBDagNodeId, TtsBDagNodeId[]>();
-  for (const n of TTS_B_DAG_NODES) {
+  const color = new Map<string, number>();
+  const adj = new Map<string, string[]>();
+  for (const n of nodes) {
     color.set(n.id, WHITE);
     adj.set(n.id, n.dependencies);
   }
-  const stack: TtsBDagNodeId[] = [];
-  const dfs = (node: TtsBDagNodeId): TtsBDagNodeId[] | null => {
+  const stack: string[] = [];
+  const dfs = (node: string): TtsBDagNodeId[] | null => {
     color.set(node, GRAY);
     stack.push(node);
     for (const dep of adj.get(node) ?? []) {
       const c = color.get(dep) ?? WHITE;
       if (c === GRAY) {
         const start = stack.indexOf(dep);
-        return [...stack.slice(start), dep];
+        return [...stack.slice(start), dep] as TtsBDagNodeId[];
       }
       if (c === WHITE) {
         const cycle = dfs(dep);
@@ -88,7 +162,7 @@ export function detectTtsBDagCycles(): TtsBDagNodeId[] | null {
     color.set(node, BLACK);
     return null;
   };
-  for (const n of TTS_B_DAG_NODES) {
+  for (const n of nodes) {
     if ((color.get(n.id) ?? WHITE) === WHITE) {
       const cycle = dfs(n.id);
       if (cycle) return cycle;
@@ -97,14 +171,25 @@ export function detectTtsBDagCycles(): TtsBDagNodeId[] | null {
   return null;
 }
 
-/** 反向边检测：任何节点出现在其依赖的 dependencies 中 → 反向边。 */
-export function detectTtsBDagReverseEdges(): Array<{from: TtsBDagNodeId; to: TtsBDagNodeId}> {
-  const out: Array<{from: TtsBDagNodeId; to: TtsBDagNodeId}> = [];
-  for (const n of TTS_B_DAG_NODES) {
+/**
+ * 反向边检测（参数化 graph + topological order，便于故障注入）：
+ * 根据规定的 topological order，edge (from → to) 若 from 排在 to 之后
+ * （即下游依赖上游），即为反向边。合法双依赖 graph 无反向边。
+ */
+export function detectTtsBDagReverseEdges(
+  nodes: readonly TtsBDagNodeDef[] = TTS_B_DAG_NODES,
+  order: readonly TtsBDagNodeId[] = TTS_B_DAG_TOPOLOGICAL_ORDER,
+): TtsBDagEdge[] {
+  const index = new Map<string, number>();
+  order.forEach((id, i) => index.set(id, i));
+  const out: TtsBDagEdge[] = [];
+  for (const n of nodes) {
     for (const dep of n.dependencies) {
-      const depDef = TTS_B_DAG_NODES.find((d) => d.id === dep);
-      if (depDef?.dependencies.includes(n.id)) {
-        out.push({from: n.id, to: dep});
+      const fromIdx = index.get(dep);
+      const toIdx = index.get(n.id);
+      if (fromIdx === undefined || toIdx === undefined) continue; // 端点校验另行报告
+      if (toIdx < fromIdx) {
+        out.push({from: dep, to: n.id});
       }
     }
   }
