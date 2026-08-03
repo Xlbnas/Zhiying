@@ -1,0 +1,97 @@
+# 知影 M7 quality gate（TTS-B.R2）：m7 分支独立可审计 CI
+#
+# 边界：不调用真实 APIYi / DeepSeek / 其他 LLM / IndexTTS2 / production DB /
+#       production SSH / production GPU / production secret。所有测试使用临时 DB、
+#       Mock LLM、Mock TTS。authoritative 测试清单唯一来源：
+#       scripts/run-m7-quality-gate.sh（与 agentvm / 镜像内共用）。
+name: m7-quality-gate
+
+on:
+  push:
+    branches:
+      - m7
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: m7-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality-gate:
+    name: M7 Quality Gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      NODE_ENV: test
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node / pnpm 版本与仓库一致（package.json packageManager = pnpm@11.9.0；Dockerfile node:22-bookworm）
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Node dependencies（frozen-lockfile）
+        run: pnpm install --frozen-lockfile
+
+      - name: Install real ffmpeg / ffprobe（TTS-A/TTS-B 音频回归依赖）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
+      - name: Version info
+        id: versions
+        run: |
+          echo "node=$(node --version)"
+          echo "pnpm=$(pnpm --version)"
+          echo "ffmpeg=$(ffmpeg -version | head -1)"
+          echo "ffprobe=$(ffprobe -version | head -1)"
+          echo "sha=$(git rev-parse HEAD)"
+
+      - name: Run M7 quality gate（统一权威入口）
+        id: gate
+        run: bash scripts/run-m7-quality-gate.sh | tee /tmp/quality-gate-console.log
+        # 失败必须使 workflow conclusion = failure（不使用 continue-on-error / command || true）
+
+      - name: Upload quality gate logs（成功/失败均上传）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m7-quality-gate-${{ github.sha }}
+          path: |
+            /tmp/quality-gate-console.log
+            /tmp/m7-quality-gate.log
+            /tmp/versions.txt
+          if-no-files-found: ignore
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## M7 Quality Gate — ${{ github.sha }}"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| commit SHA | \`${{ github.sha }}\` |"
+            echo "| Node | $(node --version) |"
+            echo "| pnpm | $(pnpm --version) |"
+            echo "| ffmpeg | $(ffmpeg -version 2>/dev/null | head -1) |"
+            echo "| ffprobe | $(ffprobe -version 2>/dev/null | head -1) |"
+            echo "| typecheck/build | 见 gate 步骤日志 |"
+            echo "| suites | 23（TTS-B 5 + TTS-A frozen 7 + frozen/existing 11） |"
+            echo "| conclusion | ${{ job.status }} |"
+            echo ""
+            echo "完整测试日志见 artifact \`m7-quality-gate-${{ github.sha }}\`。"
+          } >> "$GITHUB_STEP_SUMMARY"
