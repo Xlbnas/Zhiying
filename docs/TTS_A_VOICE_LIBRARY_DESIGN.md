@@ -98,8 +98,8 @@ voice-library/
 客户端不得提供 path/directory/filename/命令/ffmpeg 参数/adapter URL；
 `original_filename_display` 仅清洗后 display metadata。
 
-摄取顺序（fail-closed，任何一步失败清理 staging 并返回错误）——TTS-A.R1 起，
-**durability-critical 的 rename/fsync 全部在 SQLite commit 之前完成**：
+摄取顺序（fail-closed；cleanup 语义见 §4.2——best-effort，不改变业务结果）——
+TTS-A.R1 起，**durability-critical 的 rename/fsync 全部在 SQLite commit 之前完成**：
 
 1. multipart streaming 解析（TTS-A.R1，见 §4.1）：单文件 + `requestId` 必填；
    单文件 > 25MB → 413 file_too_large；总 body 超限 → 413 body_too_large；
@@ -132,14 +132,64 @@ Crash model（TTS-A.R1 修正；显式承认 SQLite 事务不能回滚 filesyste
   「committed 行必然有文件，因为 rename 在 commit 前」——正确表述是：committed 行对应的
   final 文件在 commit 前已经 rename 且 fsync 持久化。
 - crash window 与允许状态（只允许以下三种）：
-  - canonicalization 前 → 无 DB、无文件（仅 transient staging，可能被下次清理）；
+  - canonicalization 前 → 无 DB、无文件（仅 transient staging，cleanup attempted，
+    失败时 staging residue 可审计、不可 usable，且不影响业务错误）；
   - staging 完成后 / rename 前 → 无 DB、无文件（staging 目录可能残留为 transient）；
   - rename 后 DB commit 前 → 无 DB、orphan 文件（final 存在但无 DB 行，永不视为 revision）；
   - DB commit 后 → DB + durable 文件（commit 前已 fsync，崩溃后文件仍在）。
   - 禁止：DB + missing/non-durable 文件（committed 行对应文件必须已 durable）。
 - orphan 永远不被视为 usable；exact reader 只按 DB 行读取；自动清理逻辑**不删除**
-  任何被 DB 引用的文件（staging 清理只触碰 `.staging/` 下 transient 文件）。
+  任何被 DB 引用的文件（staging cleanup 只触碰 `.staging/` 下 transient 文件）。
 - API 无 pending 状态：只有 commit 成功才返回 201；不返回虚假 success。
+
+## 4.2 staging ownership / best-effort cleanup / I/O failure model（TTS-A.R2）
+
+Staging ownership contract（单一持有者，无模糊双重 ownership）：
+
+- **Parser 阶段**：`parseVoiceUploadMultipart` 创建并持有 staging（`.staging/<uuid>/`）；
+  parser 失败 → parser best-effort 清理；parser 成功返回 `StagedVoiceUpload` →
+  ownership **精确转移**给 `ingestVoiceProfileRevisionFromStaged`；成功返回后 parser
+  不再清理。
+- **Core 阶段**：`ingestVoiceProfileRevisionFromStaged` 从函数入口第一行开始持有
+  staging（所有 validation / profile lookup / UUID / fingerprint / precheck / ffprobe /
+  ffmpeg / transaction 均在同一 try 内）；finally 执行 best-effort cleanup。
+- **Route 阶段**：route 不维护任何 staging ownership——无 `stagingDir` 局部变量、
+  无 `fs.rmSync`、无第二套 cleanup finally；parser 失败由 parser 清理，
+  parser 成功由 core 清理。
+
+Best-effort cleanup（统一 helper `cleanupStagingBestEffort(stagingDir, {rm?})`）：
+
+- 只允许清理经过验证、位于 `{dataDir}/voice-library/.staging/<server-generated-uuid>`
+  的目录：lexical 前缀 / UUID shape / realpath 包含性任一不满足 → 不删除并记录错误；
+- 不接受任意目录；绝不删除 final 文件（final 不在 `.staging/` 下）；
+- 永远不向调用方抛出（失败只 console.error 并返回 `{ok:false, errorCode}`）；
+- 目录不存在 → 幂等视为已清理；
+- 使用 injected rm（`VoiceLibraryFileOps.rm`）便于测试。
+
+Cleanup 语义（精确区分，不用「所有失败均由 finally 清理」的绝对表述）：
+
+- cleanup **attempted**：每个失败路径都会尝试清理（core 的 finally / parser 的
+  failOnce）；
+- cleanup **best-effort**：失败只记录，绝不把成功转成失败、绝不用 cleanup 错误覆盖
+  原始业务错误；
+- DB commit 成功后 cleanup 失败 → 仍返回 201/200；committed row 与 final 文件保持
+  usable；不重试 transaction；不删除 final 文件；
+- DB 未提交时 cleanup 失败 → 原始业务错误不变（不被覆盖）；
+- orphan / staging residue 可审计、不可 usable，不影响后续摄取。
+
+Multipart I/O failure model（`MultipartStagingFileOps` 可注入：mkdir/open/write/
+fsync/close/rm；生产默认 fs 同步调用）：
+
+- staging mkdir 成功、open 失败 → 稳定 `ingest_failed(500)`、best-effort 清理、
+  不进入 ffprobe、无 DB 行；
+- file `data` callback 内 write 失败 → 不允许 fs error 逃逸 EventEmitter：
+  整体 try/catch → 统一 failOnce（source/file/parser 停止、fd 最多 close 一次、
+  best-effort 清理）→ 稳定 `ingest_failed(500)`，Web 进程不崩溃；
+- fsync 失败 → 统一 failOnce、无 DB 行、staging 无残留、不返回 201；
+- close 失败 → 同 fsync（cleanup 仍执行；fd 不重试 close）；
+- `settled` 只由统一 resolveOnce/failOnce 管理；finalize 在 fsync/close 成功前不
+  设置 settled；
+- cleanup 失败 → 不覆盖原始 parser/业务错误；业务已 commit 则仍返回 success。
 
 ## 4.1 multipart streaming contract（TTS-A.R1）
 
@@ -160,7 +210,8 @@ Crash model（TTS-A.R1 修正；显式承认 SQLite 事务不能回滚 filesyste
 - 严格字段：仅 requestId（必填）、audio（必填 File）、transcript/language（可选）；
   拒绝：unknown field、多 audio、多 requestId/transcript/language、缺 audio/requestId、
   文件字段伪装成文本字段、文本字段伪装成文件、超限字段；违规 → 422 invalid_request；
-  畸形 multipart / 客户端断连 → 400 invalid_formdata（无 DB 行、staging 安全清理）；
+  畸形 multipart / 客户端断连 → 400 invalid_formdata（无 DB 行；staging best-effort
+  清理——cleanup 失败只记录，不覆盖原错误）；
 - MIME/扩展名只作 display，音频真实性由 ffprobe/ffmpeg 判定；
 - 摄取核心接收：已安全写入的 staged input path + original SHA256 + 实测 byte length +
   cleaned display filename；Buffer 输入仅保留为测试 wrapper，走同一核心函数

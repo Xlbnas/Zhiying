@@ -65,14 +65,16 @@ export interface ProbedAudio {
 }
 
 /**
- * 可注入 file-op deps（TTS-A.R1：durability 顺序/故障测试）。
+ * 可注入 file-op deps（TTS-A.R1：durability 顺序/故障测试；TTS-A.R2：cleanup 注入）。
  * rename/fsyncFile/fsyncDir 分别对应摄取事务内的 rename 与 fsync 调用点；
+ * rm 对应 staging best-effort cleanup（失败只记录，不覆盖业务结果）。
  * 注入实现可记录调用顺序或抛错以模拟 fsync 失败/崩溃窗口。
  */
 export interface VoiceLibraryFileOps {
   rename: (from: string, to: string) => void;
   fsyncFile: (absPath: string) => void;
   fsyncDir: (absDir: string) => void;
+  rm: (absPath: string) => void;
 }
 
 export interface VoiceLibraryExecDeps {
@@ -118,6 +120,7 @@ function resolveFileOps(deps: VoiceLibraryExecDeps): VoiceLibraryFileOps {
     rename: deps.fileOps?.rename ?? ((from: string, to: string) => fs.renameSync(from, to)),
     fsyncFile: deps.fileOps?.fsyncFile ?? fsyncFileSync,
     fsyncDir: deps.fileOps?.fsyncDir ?? fsyncDirSync,
+    rm: deps.fileOps?.rm ?? ((absPath: string) => fs.rmSync(absPath, {recursive: true, force: true})),
   };
 }
 
@@ -160,6 +163,78 @@ export function ensureSafeDir(absPath: string, rootAbs?: string): void {
   if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
     console.error(`[voice-library] refusing out-of-root realpath: ${real}`);
     throw new VoiceLibraryError('ingest_failed', 500, '目录 realpath 越出 voice-library 根');
+  }
+}
+
+/** staging 子目录名必须是服务端生成的 UUID（不接受任意目录名）。 */
+const STAGING_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export type CleanupStagingErrorCode =
+  | 'cleanup_path_outside_staging'
+  | 'cleanup_path_not_uuid'
+  | 'cleanup_staging_root_missing'
+  | 'cleanup_realpath_escape'
+  | 'cleanup_failed';
+
+export interface CleanupStagingResult {
+  ok: boolean;
+  errorCode?: CleanupStagingErrorCode;
+}
+
+export interface CleanupStagingOptions {
+  /** 可注入 rm 实现（测试故障注入）；默认 fs.rmSync(recursive|force)。 */
+  rm?: (absPath: string) => void;
+}
+
+/**
+ * staging best-effort cleanup（TTS-A.R2 统一入口）：
+ * - 只允许清理经过验证、位于 `{dataDir}/voice-library/.staging/<server-generated-uuid>` 的目录：
+ *   lexical 前缀、UUID shape、realpath 包含性任一不满足 → 不删除并记录错误；
+ * - 不接受任意目录；绝不删除 final 文件（final 不在 .staging 下）；
+ * - 永远不向调用方抛出（cleanup 失败只 console.error 并返回 {ok:false, errorCode}）；
+ * - 目录不存在（realpath 失败）→ 幂等视为已清理。
+ * 调用方语义：DB commit 后 cleanup 失败不得改变 created/reused 结果；
+ * 原始业务错误不得被 cleanup 错误覆盖。
+ */
+export function cleanupStagingBestEffort(
+  stagingDir: string,
+  opts: CleanupStagingOptions = {},
+): CleanupStagingResult {
+  try {
+    const stagingRootAbs = path.join(voiceLibraryRootAbs(), STAGING_DIR_NAME);
+    const abs = path.resolve(stagingDir);
+    if (!abs.startsWith(stagingRootAbs + path.sep)) {
+      console.error(`[voice-library] refusing staging cleanup outside staging root: ${abs}`);
+      return {ok: false, errorCode: 'cleanup_path_outside_staging'};
+    }
+    const rel = path.relative(stagingRootAbs, abs);
+    if (rel.length === 0 || rel.split(path.sep).length !== 1 || !STAGING_UUID_RE.test(rel)) {
+      console.error(`[voice-library] refusing staging cleanup for non-uuid path: ${abs}`);
+      return {ok: false, errorCode: 'cleanup_path_not_uuid'};
+    }
+    // realpath 包含性：中间 symlink 越界 → 拒绝；目录不存在 → 幂等视为已清理
+    let real: string;
+    try {
+      real = fs.realpathSync(abs);
+    } catch {
+      return {ok: true};
+    }
+    let realRoot: string;
+    try {
+      realRoot = fs.realpathSync(stagingRootAbs);
+    } catch {
+      return {ok: false, errorCode: 'cleanup_staging_root_missing'};
+    }
+    if (!real.startsWith(realRoot + path.sep)) {
+      console.error(`[voice-library] refusing staging cleanup escaping realpath: ${real}`);
+      return {ok: false, errorCode: 'cleanup_realpath_escape'};
+    }
+    const rm = opts.rm ?? ((p: string) => fs.rmSync(p, {recursive: true, force: true}));
+    rm(abs);
+    return {ok: true};
+  } catch (err) {
+    console.error('[voice-library] staging cleanup failed:', err);
+    return {ok: false, errorCode: 'cleanup_failed'};
   }
 }
 
@@ -487,49 +562,49 @@ export async function ingestVoiceProfileRevisionFromStaged(
   const fileOps = resolveFileOps(deps);
   const db = getDb();
 
-  // 1. 请求字段与大小早判
-  validateIngestFields({
-    requestId: input.requestId,
-    transcript: input.transcript,
-    language: input.language,
-  });
-  if (input.byteLength > MAX_REFERENCE_UPLOAD_BYTES) {
-    throw new VoiceLibraryError(
-      'file_too_large',
-      413,
-      `音频大小 ${(input.byteLength / 1024 / 1024).toFixed(1)}MB 超过上限 25MB`,
-    );
-  }
-  const profile = getVoiceProfile(input.voiceProfileId);
-  if (!profile) {
-    throw new VoiceLibraryError('profile_not_found', 404, `voice profile ${input.voiceProfileId} 不存在`);
-  }
-  if (!UUID_RE.test(input.voiceProfileId)) {
-    // 防御性：profileId 参与路径构造，必须是服务端 UUID 形状（真实 Profile 恒满足）
-    throw new VoiceLibraryError('profile_not_found', 404, `voice profile ${input.voiceProfileId} 不存在`);
-  }
-
-  // 归一化后的存储值
-  const transcript = input.transcript ? normalizeTranscript(input.transcript) : '';
-  const storedTranscript = transcript.length > 0 ? transcript : null;
-  const storedLanguage = input.language?.trim() ? input.language.trim() : null;
-  const originalFilenameDisplay = input.originalFilename
-    ? sanitizeOriginalFilename(input.originalFilename)
-    : null;
-
-  const fingerprint = computeVoiceRevisionFingerprint({
-    voiceProfileId: input.voiceProfileId,
-    originalAudioSha256: input.originalSha256,
-    transcript: storedTranscript,
-    language: storedLanguage,
-  });
-
-  // staging 目录由本函数持有：无论成败（含 reused 早退）一律清理
-  const cleanupStaging = (): void => {
-    fs.rmSync(input.stagingDir, {recursive: true, force: true});
-  };
-
+  // staging ownership（TTS-A.R2）：从函数入口第一行开始持有（parser 成功后已转移）。
+  // 所有 validation / profile lookup / UUID / fingerprint / precheck / ffprobe / ffmpeg /
+  // transaction 均位于同一个 try 内；finally 执行 best-effort staging cleanup——
+  // cleanup 永不抛错：DB commit 后 cleanup 失败不得改变 created/reused 结果，
+  // 原始业务错误不得被 cleanup 错误覆盖。
   try {
+    // 1. 请求字段与大小早判
+    validateIngestFields({
+      requestId: input.requestId,
+      transcript: input.transcript,
+      language: input.language,
+    });
+    if (input.byteLength > MAX_REFERENCE_UPLOAD_BYTES) {
+      throw new VoiceLibraryError(
+        'file_too_large',
+        413,
+        `音频大小 ${(input.byteLength / 1024 / 1024).toFixed(1)}MB 超过上限 25MB`,
+      );
+    }
+    const profile = getVoiceProfile(input.voiceProfileId);
+    if (!profile) {
+      throw new VoiceLibraryError('profile_not_found', 404, `voice profile ${input.voiceProfileId} 不存在`);
+    }
+    if (!UUID_RE.test(input.voiceProfileId)) {
+      // 防御性：profileId 参与路径构造，必须是服务端 UUID 形状（真实 Profile 恒满足）
+      throw new VoiceLibraryError('profile_not_found', 404, `voice profile ${input.voiceProfileId} 不存在`);
+    }
+
+    // 归一化后的存储值
+    const transcript = input.transcript ? normalizeTranscript(input.transcript) : '';
+    const storedTranscript = transcript.length > 0 ? transcript : null;
+    const storedLanguage = input.language?.trim() ? input.language.trim() : null;
+    const originalFilenameDisplay = input.originalFilename
+      ? sanitizeOriginalFilename(input.originalFilename)
+      : null;
+
+    const fingerprint = computeVoiceRevisionFingerprint({
+      voiceProfileId: input.voiceProfileId,
+      originalAudioSha256: input.originalSha256,
+      transcript: storedTranscript,
+      language: storedLanguage,
+    });
+
     // 2. requestId 快速预检（BEGIN IMMEDIATE；命中候选则省掉 canonicalization，但需 exact 校验）
     const precheck = db.transaction((): PrecheckResult =>
       judgeRequestId(input.voiceProfileId, input.requestId, fingerprint),
@@ -754,7 +829,8 @@ export async function ingestVoiceProfileRevisionFromStaged(
 
     return {outcome: 'created', status: 201, revision: row};
   } finally {
-    cleanupStaging();
+    // best-effort cleanup：只清理已验证的 .staging/<uuid>；永不抛错、永不覆盖业务结果
+    cleanupStagingBestEffort(input.stagingDir, {rm: fileOps.rm});
   }
 }
 
@@ -780,6 +856,7 @@ export async function ingestVoiceProfileRevision(
   input: IngestVoiceRevisionInput,
   deps: VoiceLibraryExecDeps = {},
 ): Promise<IngestVoiceRevisionOutcome> {
+  const fileOps = resolveFileOps(deps);
   // 大小早判（保持 size 预检语义：超限在 staging 写入前 413）
   if (input.audioBuffer.byteLength > MAX_REFERENCE_UPLOAD_BYTES) {
     throw new VoiceLibraryError(
@@ -794,19 +871,34 @@ export async function ingestVoiceProfileRevision(
   ensureSafeDir(rootAbs);
   ensureSafeDir(path.join(rootAbs, STAGING_DIR_NAME), rootAbs);
   const stagingDir = path.join(rootAbs, STAGING_DIR_NAME, crypto.randomUUID());
-  fs.mkdirSync(stagingDir, {mode: 0o700});
-
   const originalPath = path.join(stagingDir, 'original.bin');
-  const fd = fs.openSync(
-    originalPath,
-    fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW,
-    0o600,
-  );
+
+  // staging 写入 I/O fail-contained（TTS-A.R2）：open/write/fsync/close 任一失败 →
+  // close best-effort + cleanup best-effort + 稳定 ingest_failed（不向调用方抛原始 fs error）
+  let fd: number | null = null;
   try {
+    fs.mkdirSync(stagingDir, {mode: 0o700});
+    fd = fs.openSync(
+      originalPath,
+      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW,
+      0o600,
+    );
     fs.writeSync(fd, input.audioBuffer);
     fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
+    const closeFd = fd;
+    fd = null; // close 前标记：close 失败不再重试（fd 最多 close 一次）
+    fs.closeSync(closeFd);
+  } catch (err) {
+    try {
+      if (fd !== null) fs.closeSync(fd);
+    } catch {
+      /* ignore */
+    }
+    fd = null;
+    cleanupStagingBestEffort(stagingDir, {rm: fileOps.rm});
+    throw err instanceof VoiceLibraryError
+      ? err
+      : new VoiceLibraryError('ingest_failed', 500, '上传暂存写入失败');
   }
 
   const originalSha256 = crypto.createHash('sha256').update(input.audioBuffer).digest('hex');

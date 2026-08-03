@@ -127,6 +127,10 @@ function recordingFileOps(log: Array<{op: string; args: string[]}>): VoiceLibrar
         fs.closeSync(fd);
       }
     },
+    // cleanup rm 是 best-effort（非 durability-critical）：真实执行但不入 durability 日志
+    rm: (p) => {
+      fs.rmSync(p, {recursive: true, force: true});
+    },
   };
 }
 
