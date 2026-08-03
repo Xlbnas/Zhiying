@@ -1,9 +1,9 @@
-# TTS-C OSS 复用审计矩阵（TTS-C.0.R1 修订；只读）
+# TTS-C OSS 复用审计矩阵（TTS-C.0.R2 修订；只读）
 
-> 状态：TTS-C.0.R1 architecture closure completed；**未复制任何代码**。
+> 状态：TTS-C.0.R2 architecture closure completed；**未复制任何代码**。
 > 审计基线：inspection date **2026-08-03**；每个项目记录 **exact inspected commit SHA**（GitHub API 现场核验，非 `main+pushed_at`）。
+> R2 修正：① OpenMontage（calesthio）按真实代码重新审计（lib/checkpoint.py / tests / schemas / tools/video / pipeline_defs / README），Reject 依据 = AGPL license/integration mismatch（不再错误声称代码不存在）；② Open-Montage/OpenMontage 修正为正确 SHA `50279751590dc639d847ae909c7d592cb207ec57`；③ AGPL/NC 措辞保持谨慎（license 判断，不构成法律意见）。
 > 决策维度：`Adopt（直接引入）/ Adapter（借鉴接口或概念，重写实现）/ Reimplement（重新实现）/ Reject（不采用）`。
-> 知影约束：商业项目、本地 IndexTTS2 部署、Node.js + Python adapter、零真实 provider 测试门禁、Remotion 渲染、AGPL 商业边界敏感。
 
 ---
 
@@ -79,23 +79,23 @@
 | **exact inspected SHA** | `4eab34c5cfcccaa4f1970554928feccce73ee930`（branch `main` HEAD） |
 | inspection date | 2026-08-03 |
 | license（exact SHA） | **AGPL-3.0**（LICENSE @ exact SHA：GNU AFFERO GENERAL PUBLIC LICENSE v3，2007-11-19；spdx `AGPL-3.0`） |
-| relevant files（exact SHA） | `.agents/skills/**`（agent skill 库：大量 SKILL.md + 参考文档 + 少量脚本）；相关能力：`character-animation-qa/SKILL.md`（QA skill）、`remotion-best-practices/rules/audio.md` + `get-audio-duration.md` + `subtitles.md`（ffprobe/audio/subtitle 指南）、`hyperframes-creative/scripts/extract-audio-data.py`（audio 数据处理）、`remotion-to-hyperframes/scripts/render_diff.sh`（render diff 校验） |
-| 覆盖估计（按任务指定能力） | pre-compose validation：**低**（未见独立模块，以 skill 指南形式存在）；ffprobe：**部分**（audio skill 指南提及，无独立实现）；audio/subtitle QA：**低-中**（character-animation-qa skill + subtitles.md 指南）；checkpoints：**未发现独立 checkpoint.py**（该能力在另一个同名仓库 Open-Montage/OpenMontage 中，见下）；post-render gates：**低**（render_diff.sh 提及 diff 校验） |
-| 决策 | **Reject（AGPL 商业边界；不引入）**；仅概念参考 |
-| reason | 该仓库本质是 **AGPL-3.0 的 agent skill 参考库**（指南/文档型），非视频渲染管线实现；AGPL 若引入任何代码/脚本，知影整个服务端源码必须按 AGPL 开放（商业项目不满足）；任务指定能力（pre-compose validation/ffprobe/audio QA/checkpoints/post-render gates）在其中**无完整实现**（部分以 skill 指南存在）——不构成可 Adopt/Adapter 的代码基础 |
-| integration boundary | **无**（不引入任何代码/脚本）；仅可将"先校验后组合/渲染 diff 校验"的思路纳入自研 QA 设计 |
+| relevant files（exact SHA，真实代码读取） | `lib/checkpoint.py`（checkpoint writer/reader：stage 完成写 checkpoint、orchestrator resume、human checkpoints）、`lib/pipeline_loader.py` + `pipeline_defs/*.yaml`（13 个 pipeline manifests，get_pipeline_stages 确定性 stage 顺序）、`schemas/artifacts/*.schema.json`（20+ artifact JSON Schema：research_brief/proposal_packet/brief/script/scene_plan/asset_manifest/edit_decisions/render_report/publish_log/final_review/review/source_media_review 等）、`tools/video/video_compose.py`（VideoCompose：FFmpeg+Remotion+HyperFrames 运行时路由，governance 禁止 silent runtime swap）、`tests/lib/test_checkpoint_prerequisites.py`、`tests/lib/test_checkpoint_noncanonical_stage.py`、`tests/backlot/test_gate_scenarios.py`、`lib/delivery_promise.py`（delivery promise verification）、`lib/source_media_review.py`、`README.md` |
+| 覆盖估计（按任务指定能力，基于真实代码） | **checkpoint persistence**：高（checkpoint_{stage}.json + init_project + resume）；**canonical artifact validation**：高（`_validate_artifacts_for_stage`：status completed/awaiting_human 必须含 canonical artifact）；**JSON Schema validation**：高（jsonschema.validate + validate_artifact，20+ schemas）；**stage prerequisite enforcement**：高（valid stage 来自 pipeline manifest，非法 stage fail-closed `CheckpointValidationError`）；**human approval gates**：高（`awaiting_human` 状态 + backlot storyboard/script gates + gate scenarios 测试）；**pipeline manifests**：高（pipeline_defs/*.yaml + get_stage_order）；**pre-compose/render validation**：中（video_compose 结构化 blocker、delivery_promise 校验）；**post-render/final review**：中（render_report/publish_log/final_review artifacts）；**ffprobe/audio/subtitle 检查**：低-中（README 宣称 self-review 含 "ffprobe validation, frame sampling, audio level analysis, delivery promise verification, subtitle checks"——以指南/管线断言形式存在，未见独立 ffprobe 工具模块） |
+| 决策 | **Reject（AGPL，不引入代码）** |
+| reason | 该仓库是 **AGPL-3.0 的 agentic video production 系统**（pipeline 编排 + checkpoint/governance 体系），其 checkpoint/prerequisite/JSON Schema/gate 概念与知影的 artifacts 状态机 + commit-time fence 体系在**概念上同构**（这是有价值的交叉验证），但：① AGPL-3.0 引入任何代码（含脚本）可能带来网络服务源码提供义务及组合/衍生作品风险，知影为商业项目，决定**不引入**；② 集成形态差异大（Python pipeline orchestrator vs 知影 Node + better-sqlite3 + artifacts 表）；③ ffprobe/audio/subtitle QA 在其 README 中以 self-review 概念存在，无独立可复用实现。Reject 依据 = license/integration mismatch（**非**"代码不存在"——checkpoint.py 等真实存在） |
+| integration boundary | **无**（不引入任何代码/脚本）；概念参考：stage prerequisite + human gate + checkpoint 持久化思路（与知影 generation_runs lease/indeterminate 模式对照），全部以自研实现落地 |
 | exit/replacement | 无运行时依赖 |
-| commercial/license risk | **AGPL-3.0 高风险**：禁止复制/引入其代码或脚本（含 render_diff.sh/extract-audio-data.py）；概念参考不产生衍生作品 |
+| commercial/license risk | **AGPL-3.0 高风险**：可能触发网络服务源码提供义务（AGPL §13）及组合/衍生作品传染；知影不引入其任何代码/脚本。本结论为谨慎的 license 判断，不构成法律意见；如需正式采用任何 AGPL 组件，须经法律审查 |
 
 ### 5.1 附加记录：Open-Montage/OpenMontage（非任务指定，仅澄清）
 
 | 项 | 值 |
 |---|---|
 | source repo | https://github.com/Open-Montage/OpenMontage |
-| exact inspected SHA | `4eab34c…` 时点 branch `main` HEAD（2026-06-26；stars ≈ 91） |
+| **exact inspected SHA** | `50279751590dc639d847ae909c7d592cb207ec57`（2026-08-03 核验；**非 calesthio 的 SHA**） |
 | license | **MIT** |
-| relevant files | `lib/checkpoint.py`（checkpoint 机制） |
-| 说明 | 存在 checkpoint.py（checkpoint 概念），但整体规模小、非视频管线实现；**不以它替代任务指定目标仓库**。因与任务指定能力（pre-compose/ffprobe/QA/gates）匹配度低，同样不引入（Reject）；其 checkpoint 概念与知影 generation_runs lease/indeterminate 模式不冲突，可参考思路 |
+| relevant files | `lib/checkpoint.py` 等（结构与 calesthio 版本相似——疑似同源/镜像；以各自 exact SHA 为准） |
+| 说明 | 因与任务指定能力（pre-compose/ffprobe/QA/gates）匹配度低且为避免双来源混淆，**不引入**（Reject）；其 checkpoint 概念与知影既有 lease/indeterminate 模式不冲突，仅参考思路。不替代任务指定仓库 |
 
 ---
 
