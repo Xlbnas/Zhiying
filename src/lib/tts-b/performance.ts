@@ -8,9 +8,11 @@
  *   （exact source，禁止 current/latest 解析）。
  * - 幂等：同 requestId + 同 source 组合 → 同一 artifact（generation_runs
  *   UNIQUE(project_id, stage, request_id) + dispatch envelope 双持久状态 fail-closed）。
- * - commit-time source fence：单事务内重读 Narration Plan + Assignment 行核对 hash，
- *   并重新调用 TTS-A exact voice validator；漂移 → SOURCE_STALE / VOICE_SOURCE_INVALID，
- *   零 partial artifact。
+ * - commit-time source fence：final BEGIN IMMEDIATE 事务内、INSERT 前重新读取
+ *   exact Narration Plan 并重新运行 classifyNarrationPlanV2Candidate（同步纯 DB 读，
+ *   BEGIN IMMEDIATE 写锁关闭 outer-check 后的 drift 窗口；TTS-B.R3 P0）＋ Assignment
+ *   行 hash fence；事务外重调用 TTS-A exact voice validator（异步文件 I/O，仅作
+ *   early rejection）。漂移 → SOURCE_STALE / VOICE_SOURCE_INVALID，零 partial artifact。
  * - Web 不调用 LLM：POST 只 precheck + enqueue（202）；Worker claim 后执行。
  */
 
@@ -92,6 +94,25 @@ export function setPerformanceProviderForTest(provider: LLMProvider | null): voi
     throw new Error('setPerformanceProviderForTest 禁止在 NODE_ENV=production 下使用');
   }
   testProviderOverride = provider;
+}
+
+/**
+ * 测试注入 hook（TTS-B.R3 P0）：位于所有事务外异步校验完成之后、
+ * final BEGIN IMMEDIATE 之前同步执行。用于复现真实竞态——
+ * 「outer candidate check 已通过 → 此处 lock 新 Script V2 → 事务内
+ * 重新 classify 必须拒绝」。production 下不可用；默认 null。
+ */
+let beforeCommitTransactionForTest: (() => void) | null = null;
+
+export function setPerformanceBeforeCommitTransactionForTest(
+  hook: (() => void) | null,
+): void {
+  if (process.env.NODE_ENV === 'production' && hook !== null) {
+    throw new Error(
+      'setPerformanceBeforeCommitTransactionForTest 禁止在 NODE_ENV=production 下使用',
+    );
+  }
+  beforeCommitTransactionForTest = hook;
 }
 
 function resolveProvider(input?: LLMProvider): LLMProvider {
@@ -601,9 +622,13 @@ export async function buildNarrationPerformancePlan(input: {
       );
     }
 
-    // P0（TTS-B.R2）：commit 前重新读取 exact Narration Plan 并重新运行
-    // classifyNarrationPlanV2Candidate——locked Script V2 漂移不改 plan content_json，
-    // 单纯 hash fence 覆盖不了，必须重新 classify。只有 eligible_candidate 才允许提交。
+    // ── 事务前检查 = early rejection / optimization（TTS-B.R3）─────────────
+    // 注意：下面的 Narration candidate 快速检查、Assignment classifier、
+    // exact voice SHA/file validator 都只是快速失败路径，不是最终权威
+    // authoritative fence。最终权威判断在 final BEGIN IMMEDIATE 事务内：
+    // 重新读取 exact Narration Plan + 重新运行 classifyNarrationPlanV2Candidate
+    // （同步纯 DB 读），配合 BEGIN IMMEDIATE 写锁关闭「outer check 通过 →
+    // lock 新 Script V2 → 提交 stale artifact」的竞态窗口。
     const commitPlanRef = getNarrationPlanV2Artifact(input.projectId, content.source.narrationPlanArtifactId);
     if (!commitPlanRef) {
       throw new PerformanceError('SOURCE_STALE', 'commit 前 narration plan artifact 不可读——放弃提交（零 artifact）');
@@ -645,22 +670,65 @@ export async function buildNarrationPerformancePlan(input: {
     }
 
     const tx = db.transaction((): PerformanceArtifactRow => {
+      // ── final authoritative fence（TTS-B.R3 P0）─────────────────────────
+      // 事务内、INSERT 前同步重新读取 exact Narration Plan 并重新运行
+      // classifyNarrationPlanV2Candidate。该函数是确定性纯 DB 读（narration
+      // plan 行 + project_stages.script_v2.locked_version + exact Script V2
+      // version），无网络/LLM/文件 SHA/异步 I/O，可在 BEGIN IMMEDIATE 内执行。
+      // lockStage 同样使用 BEGIN IMMEDIATE：本事务取得写锁后，其他连接不能
+      // 在 candidate check 与 INSERT 之间提交新的 locked version——locked
+      // Script V2 漂移（不改 plan content_json）在此被权威拒绝，而不是依赖
+      // 事务外 precheck（precheck 只是 early rejection / optimization）。
+      const commitPlanRef = getNarrationPlanV2Artifact(
+        input.projectId,
+        content.source.narrationPlanArtifactId,
+      );
+      if (!commitPlanRef) {
+        throw new PerformanceError(
+          'SOURCE_STALE',
+          '事务内 narration plan artifact 不可读——放弃提交（零 artifact）',
+        );
+      }
+      if (sha256Text(commitPlanRef.artifact.content_json) !== content.source.narrationPlanContentHash) {
+        throw new PerformanceError(
+          'SOURCE_STALE',
+          '事务内 narration plan 内容 hash 漂移——放弃提交（零 artifact）',
+        );
+      }
+      const commitNarrationCandidate = classifyNarrationPlanV2Candidate(
+        input.projectId,
+        commitPlanRef.artifact,
+      );
+      if (commitNarrationCandidate.status !== 'eligible_candidate') {
+        throw new PerformanceError(
+          'SOURCE_STALE',
+          `事务内 narration plan candidate 状态=${commitNarrationCandidate.status}（${commitNarrationCandidate.statusReason ?? ''}）——locked Script V2 漂移，放弃提交（零 artifact，run 转 failed）`,
+        );
+      }
+
+      // 其余同步 source fence：Assignment exact 行 hash（事务内重读）。
       const fenceArtifact = (kind: string, artifactId: string, expectedHash: string): boolean => {
         const row = db
           .prepare('SELECT content_json FROM artifacts WHERE id = ? AND project_id = ? AND kind = ?')
           .get(artifactId, input.projectId, kind) as {content_json: string} | undefined;
         return Boolean(row) && sha256Text(row!.content_json) === expectedHash;
       };
-      const fenceOk =
-        fenceArtifact('narration_plan_v2', content.source.narrationPlanArtifactId, content.source.narrationPlanContentHash) &&
-        fenceArtifact('project_voice_assignment', content.source.projectVoiceAssignmentArtifactId, content.source.projectVoiceAssignmentContentHash);
-      if (!fenceOk) {
+      if (
+        !fenceArtifact(
+          'project_voice_assignment',
+          content.source.projectVoiceAssignmentArtifactId,
+          content.source.projectVoiceAssignmentContentHash,
+        )
+      ) {
         throw new PerformanceError(
           'SOURCE_STALE',
-          'commit 前 source 行 hash 漂移——source 在 generation 期间发生变化，放弃提交（零 artifact）',
+          '事务内 assignment 行 hash 漂移——source 在 generation 期间发生变化，放弃提交（零 artifact）',
         );
       }
 
+      // INSERT + completeGenerationRunSuccess 同事务原子；complete 以
+      // owner_token + status='running' 守卫：run 已被并发转移/终态 → 抛错 →
+      // 整个事务回滚（零 partial artifact）。
       const id = crypto.randomUUID();
       db.prepare(
         `INSERT INTO artifacts (id, project_id, kind, version, content_json, file_path, created_at)
@@ -685,6 +753,9 @@ export async function buildNarrationPerformancePlan(input: {
       }
       return artifact;
     });
+    // 测试注入 hook：位于所有事务外异步校验完成之后、BEGIN IMMEDIATE 之前
+    //（TTS-B.R3 P0；production 下 setPerformanceBeforeCommitTransactionForTest 抛错）。
+    beforeCommitTransactionForTest?.();
     const artifact = tx.immediate();
     return {
       kind: 'succeeded',
