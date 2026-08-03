@@ -436,6 +436,22 @@ BEFORE DELETE ON voice_profile_revisions
 BEGIN
   SELECT RAISE(ABORT, 'voice_profile_revisions is immutable');
 END;
+
+-- ============ TTS-B：Project Voice Assignment request envelope（仅新增，不修改以上表） ============
+-- deterministic assignment 的幂等信封：UNIQUE(project_id, request_id) 原子唯一性
+-- （单 BEGIN IMMEDIATE 内 SELECT+INSERT，无 check-then-insert 竞态）。
+-- 同 requestId + 同 (profile, revision) → 复用同一 artifact；不同 → 409。
+-- append-only；artifact_id 指向 artifacts 表 project_voice_assignment 行。
+CREATE TABLE IF NOT EXISTS voice_assignment_requests (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  request_id TEXT NOT NULL,
+  voice_profile_id TEXT NOT NULL,
+  voice_profile_revision_id TEXT NOT NULL,
+  artifact_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id, request_id)
+);
 `;
 
 // M2-A Hardening：版本号数据库级唯一约束（幂等）。
