@@ -299,6 +299,36 @@ async function exactDescriptorOrThrow(input: {
   return descriptor;
 }
 
+/**
+ * 既有 Assignment 的权威裁决（TTS-B.R2 单一 helper）：
+ * envelope source 与请求 exact source 相同 + artifact 存在 + schema 可解析 +
+ * projectId/source 自洽 + exact voice descriptor 可读 + usable = reused。
+ * envelope 指向缺失/不可解析 artifact → REQUEST_STATE_INCONSISTENT；
+ * artifact/source/voice 已不可用 → ASSIGNMENT_UNUSABLE。
+ * 入口 envelope-first 与 concurrent existing2 必须复用本 helper。
+ */
+async function adjudicateExistingAssignment(
+  projectId: string,
+  artifactId: string,
+  requestId: string,
+): Promise<{artifact: AssignmentArtifactRow; assignment: ProjectVoiceAssignmentArtifactV1}> {
+  const ref = getProjectVoiceAssignment(projectId, artifactId);
+  if (!ref) {
+    throw new AssignmentError(
+      'REQUEST_STATE_INCONSISTENT',
+      `requestId ${requestId} 的既有 envelope 指向不可读 artifact ${artifactId}（fail-closed，不重建）`,
+    );
+  }
+  const candidate = await classifyProjectVoiceAssignment(projectId, ref.artifact);
+  if (candidate.status !== 'current_candidate') {
+    throw new AssignmentError(
+      'ASSIGNMENT_UNUSABLE',
+      `requestId ${requestId} 的既有 assignment 已 ${candidate.status}（${candidate.statusReason ?? ''}）——fail-closed，不创建第二个 artifact`,
+    );
+  }
+  return {artifact: ref.artifact, assignment: ref.assignment};
+}
+
 // ── build（同步 deterministic；envelope-first + 两阶段 commit fence） ──
 
 export type BuildAssignmentResult =
@@ -347,23 +377,14 @@ export async function buildProjectVoiceAssignment(input: {
   const envResult = envelopeFirst.immediate();
 
   if (envResult.kind === 'reused') {
-    // B：同 source → exact 读取既有 artifact + source 自洽 + voice usable；
-    // archived Profile 允许 historical reuse（classify 不检查 profile.status）。
-    const ref = getProjectVoiceAssignment(input.projectId, envResult.artifactId);
-    if (!ref) {
-      throw new AssignmentError(
-        'REQUEST_STATE_INCONSISTENT',
-        `requestId ${requestId} 的既有 envelope 指向不可读 artifact ${envResult.artifactId}（fail-closed，不重建）`,
-      );
-    }
-    const candidate = await classifyProjectVoiceAssignment(input.projectId, ref.artifact);
-    if (candidate.status !== 'current_candidate') {
-      throw new AssignmentError(
-        'ASSIGNMENT_UNUSABLE',
-        `requestId ${requestId} 的既有 assignment 已 ${candidate.status}（${candidate.statusReason ?? ''}）——fail-closed，不创建第二个 artifact`,
-      );
-    }
-    return {kind: 'reused', artifact: ref.artifact, assignment: ref.assignment, reused: true};
+    // 权威裁决（复用 adjudicateExistingAssignment；archived Profile 允许 historical
+    // reuse——classify 不检查 profile.status）
+    const {artifact, assignment} = await adjudicateExistingAssignment(
+      input.projectId,
+      envResult.artifactId,
+      requestId,
+    );
+    return {kind: 'reused', artifact, assignment, reused: true};
   }
 
   // 2. 新请求：Profile 存在 + active（新请求才禁止 archived），再 exact validator
@@ -400,8 +421,13 @@ export async function buildProjectVoiceAssignment(input: {
   beforeCommitFenceForTest?.();
   const finalDescriptor = await exactDescriptorOrThrow(input);
 
-  // 3. BEGIN IMMEDIATE：事务内重读（envelope 不存在 / Profile active / revision 身份一致）
-  const tx = db.transaction((): BuildAssignmentResult => {
+  // 3. BEGIN IMMEDIATE：事务内重读（envelope 不存在 / Profile active / revision 身份一致）。
+  //    事务只做裁决标记，不在事务内声称 reused 成功——concurrent existing2 的 usable
+  //    裁决在事务后复用 adjudicateExistingAssignment（TTS-B.R2）。
+  type TxResult =
+    | {kind: 'created'; artifactId: string; artifact: AssignmentArtifactRow; assignment: ProjectVoiceAssignmentArtifactV1}
+    | {kind: 'reused-marker'; artifactId: string};
+  const tx = db.transaction((): TxResult => {
     const existing2 = db
       .prepare(
         `SELECT * FROM voice_assignment_requests
@@ -409,7 +435,8 @@ export async function buildProjectVoiceAssignment(input: {
       )
       .get(input.projectId, requestId) as AssignmentEnvelopeRow | undefined;
     if (existing2) {
-      // 另一请求已插入 envelope：same source → exact reuse；different → 409；不建第二个
+      // 另一请求已插入 envelope：same source → 仅返回 marker（usable 裁决在事务后）；
+      // different → 409；不建第二个 artifact
       if (
         existing2.voice_profile_id !== input.voiceProfileId ||
         existing2.voice_profile_revision_id !== input.voiceProfileRevisionId
@@ -419,11 +446,7 @@ export async function buildProjectVoiceAssignment(input: {
           `requestId ${requestId} 已在事务内被其他请求占用（${existing2.voice_profile_id}@${existing2.voice_profile_revision_id}）`,
         );
       }
-      const ref2 = getProjectVoiceAssignment(input.projectId, existing2.artifact_id);
-      if (!ref2) {
-        throw new AssignmentError('REQUEST_STATE_INCONSISTENT', `并发插入的 envelope 指向不可读 artifact`);
-      }
-      return {kind: 'reused', artifact: ref2.artifact, assignment: ref2.assignment, reused: true};
+      return {kind: 'reused-marker', artifactId: existing2.artifact_id};
     }
     const profileNow = getVoiceProfile(input.voiceProfileId);
     if (!profileNow) {
@@ -499,7 +522,17 @@ export async function buildProjectVoiceAssignment(input: {
     if (!artifact) {
       throw new Error(`buildProjectVoiceAssignment: inserted artifact ${artifactId} not found`);
     }
-    return {kind: 'created', artifact, assignment: content, reused: false};
+    return {kind: 'created', artifactId, artifact, assignment: content};
   });
-  return tx.immediate();
+  const txResult = tx.immediate();
+  if (txResult.kind === 'reused-marker') {
+    // concurrent existing2：事务后复用同一 authoritative helper 做 usable 裁决
+    const {artifact, assignment} = await adjudicateExistingAssignment(
+      input.projectId,
+      txResult.artifactId,
+      requestId,
+    );
+    return {kind: 'reused', artifact, assignment, reused: true};
+  }
+  return {kind: 'created', artifact: txResult.artifact, assignment: txResult.assignment, reused: false};
 }
