@@ -15,6 +15,7 @@ import {
   AssignmentError,
   listProjectVoiceAssignmentCandidates,
 } from '@/lib/tts-b/assignment';
+import {voiceUuidSchema} from '@/lib/tts-b/assignment-schema';
 import {getProject, jsonError} from '../../../_lib/shared';
 
 export const runtime = 'nodejs';
@@ -22,8 +23,9 @@ export const runtime = 'nodejs';
 const assignBodySchema = z
   .object({
     requestId: z.string().min(1),
-    voiceProfileId: z.string().min(1),
-    voiceProfileRevisionId: z.string().min(1),
+    // ID schema（TTS-B.R1 §八）：malformed → 422 invalid_request（ZodError）
+    voiceProfileId: voiceUuidSchema,
+    voiceProfileRevisionId: voiceUuidSchema,
   })
   .strict();
 
@@ -37,11 +39,11 @@ function assignmentErrorResponse(err: unknown): Response {
       err.code === 'PROFILE_NOT_FOUND' ||
       err.code === 'REVISION_NOT_FOUND'
         ? 404
-        : err.code === 'REQUEST_ID_REQUIRED'
+        : err.code === 'REQUEST_ID_REQUIRED' || err.code === 'INVALID_PROFILE_ID' || err.code === 'INVALID_REVISION_ID'
           ? 400
           : err.code === 'REQUEST_ID_INVALID'
             ? 422
-            : 409; // PROFILE_ARCHIVED / VOICE_UNUSABLE / REQUEST_ID_CONFLICT
+            : 409; // PROFILE_ARCHIVED / VOICE_UNUSABLE / REQUEST_ID_CONFLICT / REQUEST_STATE_INCONSISTENT / ASSIGNMENT_SOURCE_MISMATCH / ASSIGNMENT_UNUSABLE
     return jsonError(status, err.code, {message: err.message});
   }
   throw err;
