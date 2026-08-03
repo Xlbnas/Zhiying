@@ -24,9 +24,12 @@ export type VoiceLibraryErrorCode =
   | 'request_id_conflict'
   | 'duplicate_audio'
   | 'file_too_large'
+  | 'body_too_large'
   | 'unsupported_audio'
   | 'invalid_audio_contract'
   | 'invalid_request'
+  | 'invalid_formdata'
+  | 'revision_unusable'
   | 'ingest_failed';
 
 export class VoiceLibraryError extends Error {
@@ -105,6 +108,24 @@ export const revisionMetadataSchema = z
   .strict();
 
 export type RevisionMetadata = z.infer<typeof revisionMetadataSchema>;
+
+/**
+ * exact validator 的不可用原因（共享单一真相源，见 revisions.ts validateVoiceProfileRevisionExact）。
+ * - hash_mismatch            文件 SHA256 与 DB 不一致（既有语义）
+ * - metadata_malformed      metadata_json 无法 JSON.parse
+ * - metadata_invalid        JSON 可解析但 strict schema 拒绝（未知键/字段类型错误）
+ * - metadata_contract_mismatch  metadata 内 canonicalization/adapter 键与行不一致
+ * - contract_mismatch       provider / adapter_compatibility_key / codec / sample_rate /
+ *                           channels / duration_ms 与冻结常量不一致
+ * - fingerprint_invalid     original/canonical sha256 或 request_fingerprint 格式非法
+ */
+export type VoiceRevisionUnusableReason =
+  | 'hash_mismatch'
+  | 'metadata_malformed'
+  | 'metadata_invalid'
+  | 'metadata_contract_mismatch'
+  | 'contract_mismatch'
+  | 'fingerprint_invalid';
 
 // ---------- 序列化（API 唯一出口；绝不包含任何文件路径） ----------
 

@@ -23,6 +23,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import {execFileSync} from 'node:child_process';
 
 const TOOLS_DIR = path.resolve(process.cwd(), '.tools', 'static-ffmpeg');
 if (fs.existsSync(path.join(TOOLS_DIR, 'ffprobe'))) {
@@ -35,6 +36,7 @@ process.env.ZHIYING_DATA_DIR = DATA_DIR;
 import {closeDb, getDb, getDataDir} from '../src/lib/db';
 import {createVoiceProfile} from '../src/lib/voice-library/profiles';
 import {
+  ensureSafeDir,
   getVoiceProfileRevisionExact,
   ingestVoiceProfileRevision,
   listVoiceProfileRevisions,
@@ -214,6 +216,152 @@ async function main(): Promise<void> {
     '[E8] serializeRevision 序列化出口不含 canonical_audio_path / metadata_json（API 无绝对路径的源码依据；运行时断言见 test-tts-a-voice-library-api.ts H34）',
   );
 
+  // E9：.staging 被替换为 symlink → 外部目录 → ingest_failed，外部零写入
+  {
+    const pE9 = createVoiceProfile({displayName: 'E9 .staging symlink'});
+    fs.mkdirSync(vlRoot, {recursive: true});
+    const ext9 = path.join(dataDir, 'e9-ext');
+    fs.mkdirSync(ext9, {recursive: true});
+    fs.symlinkSync(ext9, path.join(vlRoot, '.staging'));
+    let e9Err: unknown = null;
+    try {
+      await ingestVoiceProfileRevision({
+        voiceProfileId: pE9.id,
+        requestId: 'e9-req',
+        audioBuffer: makeWav(1200, 440),
+      });
+    } catch (err) {
+      e9Err = err;
+    }
+    fs.rmSync(path.join(vlRoot, '.staging'), {force: true});
+    const ext9Files = listFilesRecursive(ext9);
+    fs.rmSync(ext9, {recursive: true, force: true});
+    ok(
+      e9Err instanceof VoiceLibraryError && e9Err.code === 'ingest_failed' &&
+        revisionCount(pE9.id) === 0 && ext9Files.length === 0,
+      '[E9] .staging 为 symlink → ingest_failed(500)，无 DB 行、外部目录零写入',
+      {ext9Files},
+    );
+  }
+
+  // E10：Profile 目录被替换为 symlink → 外部目录 → 事务回滚、无 DB 行、外部零写入
+  {
+    const pE10 = createVoiceProfile({displayName: 'E10 profile dir symlink'});
+    fs.mkdirSync(vlRoot, {recursive: true});
+    const ext10 = path.join(dataDir, 'e10-ext');
+    fs.mkdirSync(ext10, {recursive: true});
+    fs.symlinkSync(ext10, path.join(vlRoot, pE10.id));
+    let e10Err: unknown = null;
+    try {
+      await ingestVoiceProfileRevision({
+        voiceProfileId: pE10.id,
+        requestId: 'e10-req',
+        audioBuffer: makeWav(1200, 440),
+      });
+    } catch (err) {
+      e10Err = err;
+    }
+    fs.rmSync(path.join(vlRoot, pE10.id), {force: true});
+    const ext10Files = listFilesRecursive(ext10);
+    fs.rmSync(ext10, {recursive: true, force: true});
+    ok(
+      e10Err instanceof VoiceLibraryError && e10Err.code === 'ingest_failed' &&
+        revisionCount(pE10.id) === 0 && ext10Files.length === 0 && stagingEntries().length === 0,
+      '[E10] Profile 目录为 symlink → ingest_failed(500)，无 DB 行、外部零写入、staging 无残留',
+      {ext10Files},
+    );
+  }
+
+  // E11：ensureSafeDir 单元——Revision 目录 symlink / FIFO / 非目录文件 → fail-closed；正常创建放行
+  {
+    const e11Root = path.join(vlRoot, 'e11-scratch');
+    fs.mkdirSync(e11Root, {recursive: true});
+    // Revision 目录为 symlink → 外部
+    const ext11 = path.join(dataDir, 'e11-ext');
+    fs.mkdirSync(ext11, {recursive: true});
+    fs.symlinkSync(ext11, path.join(e11Root, 'rev-symlink'));
+    let e11a: unknown = null;
+    try {
+      ensureSafeDir(path.join(e11Root, 'rev-symlink'), vlRoot);
+    } catch (err) {
+      e11a = err;
+    }
+    fs.rmSync(path.join(e11Root, 'rev-symlink'), {force: true});
+    const ext11Files = listFilesRecursive(ext11);
+    fs.rmSync(ext11, {recursive: true, force: true});
+    ok(
+      e11a instanceof VoiceLibraryError && e11a.code === 'ingest_failed' && ext11Files.length === 0,
+      '[E11] Revision 目录为 symlink → ensureSafeDir fail-closed（外部零写入）',
+      {ext11Files},
+    );
+    // 中间层 symlink（e11Root 本身是 symlink）→ 拒绝
+    const ext11b = path.join(dataDir, 'e11-ext-b');
+    fs.mkdirSync(ext11b, {recursive: true});
+    const midLink = path.join(vlRoot, 'e11-mid-link');
+    fs.symlinkSync(ext11b, midLink);
+    let e11b: unknown = null;
+    try {
+      ensureSafeDir(path.join(midLink, 'nested'), vlRoot);
+    } catch (err) {
+      e11b = err;
+    }
+    fs.rmSync(midLink, {force: true});
+    const ext11bFiles = listFilesRecursive(ext11b);
+    fs.rmSync(ext11b, {recursive: true, force: true});
+    ok(
+      e11b instanceof VoiceLibraryError && e11b.code === 'ingest_failed' && ext11bFiles.length === 0,
+      '[E12] 中间目录 symlink → ensureSafeDir fail-closed（realpath 越界拦截，外部零写入）',
+      {ext11bFiles},
+    );
+    // FIFO → 非目录 → 拒绝
+    const fifoPath = path.join(e11Root, 'fifo');
+    execFileSync('mkfifo', [fifoPath]);
+    let e11c: unknown = null;
+    try {
+      ensureSafeDir(fifoPath, vlRoot);
+    } catch (err) {
+      e11c = err;
+    }
+    fs.rmSync(fifoPath, {force: true});
+    ok(
+      e11c instanceof VoiceLibraryError && e11c.code === 'ingest_failed',
+      '[E13] FIFO（非目录）→ ensureSafeDir fail-closed',
+    );
+    // 普通文件（非目录）→ 拒绝
+    const filePath = path.join(e11Root, 'plain-file');
+    fs.writeFileSync(filePath, 'x');
+    let e11d: unknown = null;
+    try {
+      ensureSafeDir(filePath, vlRoot);
+    } catch (err) {
+      e11d = err;
+    }
+    fs.rmSync(filePath, {force: true});
+    ok(
+      e11d instanceof VoiceLibraryError && e11d.code === 'ingest_failed',
+      '[E14] 普通文件（非目录）→ ensureSafeDir fail-closed',
+    );
+    // 正常创建（不存在 → 非递归 mkdir）
+    const okDir = path.join(e11Root, 'ok-new-dir');
+    ensureSafeDir(okDir, vlRoot);
+    ok(fs.statSync(okDir).isDirectory() && !fs.lstatSync(okDir).isSymbolicLink(), '[E15] 不存在目录 → ensureSafeDir 正常创建');
+    fs.rmSync(e11Root, {recursive: true, force: true});
+  }
+
+  // E13（源码）：不使用 recursive mkdir（不跨越未检查 symlink）；staging 仍 O_EXCL|O_NOFOLLOW
+  {
+    const revSrc = fs.readFileSync(path.join(srcDir, 'revisions.ts'), 'utf8');
+    const mpSrc = fs.readFileSync(path.join(srcDir, 'multipart.ts'), 'utf8');
+    ok(
+      !/mkdirSync\([^)]*recursive\s*:\s*true/.test(revSrc) && !/mkdirSync\([^)]*recursive\s*:\s*true/.test(mpSrc),
+      '[E16] 源码：无 recursive mkdir（目录建立走 ensureSafeDir 非递归）',
+    );
+    ok(
+      mpSrc.includes('O_NOFOLLOW') && mpSrc.includes('O_EXCL'),
+      '[E17] 源码：multipart staging 写入 O_CREAT|O_EXCL|O_NOFOLLOW',
+    );
+  }
+
   // ---------- G. file/DB consistency ----------
 
   // G1：staging 写入失败 → 写入失败、无 DB 行、无 staging 残留。
@@ -222,6 +370,7 @@ async function main(): Promise<void> {
   //   mode 位，chmod 注入在该环境失效；文件阻塞在所有环境确定性生效。）
   const pG1 = createVoiceProfile({displayName: 'G1 staging 写入失败'});
   fs.mkdirSync(vlRoot, {recursive: true});
+  fs.rmSync(path.join(vlRoot, '.staging'), {recursive: true, force: true}); // 清掉前面用例留下的真实 .staging
   const stagingBlocker = path.join(vlRoot, '.staging');
   fs.writeFileSync(stagingBlocker, 'blocker'); // .staging 是文件而非目录
   let g1Err: unknown = null;

@@ -484,6 +484,132 @@ END;`);
   );
   ok(goneRes.status === 404, '[H33] canonical 文件删除后 GET audio → 404（fail-closed）');
 
+  // ---------- R. 损坏 revision 不得 reused（TTS-A.R1：reused 前 exact 校验，fail-closed） ----------
+  {
+    const db = getDb();
+    const dropTrigger = (): void => {
+      db.exec('DROP TRIGGER IF EXISTS voice_profile_revisions_update_abort');
+    };
+    const restoreTrigger = (): void => {
+      db.exec(`CREATE TRIGGER IF NOT EXISTS voice_profile_revisions_update_abort
+BEFORE UPDATE ON voice_profile_revisions
+BEGIN
+  SELECT RAISE(ABORT, 'voice_profile_revisions is immutable');
+END;`);
+    };
+    const ruRows = (requestId: string): number =>
+      (db.prepare('SELECT COUNT(*) AS c FROM voice_profile_revisions WHERE voice_profile_id = ? AND request_id = ?')
+        .get(pid, requestId) as {c: number}).c;
+    const rowByReq = (requestId: string): Record<string, unknown> =>
+      db.prepare('SELECT * FROM voice_profile_revisions WHERE voice_profile_id = ? AND request_id = ?')
+        .get(pid, requestId) as Record<string, unknown>;
+    const canonicalAbsByReq = (requestId: string): string => {
+      const row = rowByReq(requestId);
+      return path.join(getDataDir(), row.canonical_audio_path as string);
+    };
+    // 建立 revision（route 摄取，真实 wav）+ 同 requestId 重试
+    async function createRu(requestId: string, freq: number): Promise<{rid: string; wav: Buffer}> {
+      const wav = makeWav(1500, freq);
+      const c = await revisionsPOST(
+        revisionFormReq(pid, {requestId, audio: {buf: wav, name: 'ru.wav'}}),
+        profileParams(pid),
+      );
+      const cBody = (await jsonOf(`R create ${requestId}`, c)) as {revision: {id: string}};
+      ok(c.status === 201, `[R0] ${requestId} 初始摄取 201`);
+      return {rid: cBody.revision.id, wav};
+    }
+    async function retryExpectUnusable(requestId: string, wav: Buffer, label: string): Promise<void> {
+      const before = ruRows(requestId);
+      const res = await revisionsPOST(
+        revisionFormReq(pid, {requestId, audio: {buf: wav, name: 'ru.wav'}}),
+        profileParams(pid),
+      );
+      const body = (await jsonOf(`R retry ${requestId}`, res)) as {error?: string};
+      ok(
+        res.status === 409 && body.error === 'revision_unusable',
+        `${label} → 同 requestId 重试 409 revision_unusable（不返回 200 reused）`,
+        {status: res.status, error: body.error},
+      );
+      ok(ruRows(requestId) === before, `${label} → 无新行产生`, {rows: ruRows(requestId)});
+    }
+
+    // 控制组：正常 usable 行 → 同 requestId 重试 200 reused
+    {
+      const {rid, wav} = await createRu('ru-control', 700);
+      const res = await revisionsPOST(
+        revisionFormReq(pid, {requestId: 'ru-control', audio: {buf: wav, name: 'ru.wav'}}),
+        profileParams(pid),
+      );
+      const body = (await jsonOf('R control reused', res)) as {outcome: string; revision: {id: string}};
+      ok(
+        res.status === 200 && body.outcome === 'reused' && body.revision.id === rid &&
+          ruRows('ru-control') === 1,
+        '[R1] 正常 usable 行：同 requestId 仍 200 reused（revisionId 不变、无新增）',
+      );
+    }
+
+    // R-A 文件缺失
+    {
+      const {wav} = await createRu('ru-missing', 710);
+      fs.rmSync(canonicalAbsByReq('ru-missing'));
+      await retryExpectUnusable('ru-missing', wav, '[R2] canonical 文件缺失');
+    }
+    // R-B hash mismatch
+    {
+      const {wav} = await createRu('ru-hash', 720);
+      fs.appendFileSync(canonicalAbsByReq('ru-hash'), Buffer.from([0x00]));
+      await retryExpectUnusable('ru-hash', wav, '[R3] hash mismatch');
+    }
+    // R-C 中间目录 symlink（revisionDir → 外部目录，含同内容 reference.wav 副本）
+    {
+      const {wav} = await createRu('ru-symlink', 730);
+      const canonicalAbs = canonicalAbsByReq('ru-symlink');
+      const extDir = path.join(getDataDir(), 'ru-ext-symlink');
+      fs.mkdirSync(extDir, {recursive: true});
+      fs.copyFileSync(canonicalAbs, path.join(extDir, 'reference.wav'));
+      fs.rmSync(path.dirname(canonicalAbs), {recursive: true, force: true});
+      fs.symlinkSync(extDir, path.dirname(canonicalAbs));
+      await retryExpectUnusable('ru-symlink', wav, '[R4] revisionDir 中间 symlink 越界');
+      fs.rmSync(path.dirname(canonicalAbs), {force: true});
+      fs.rmSync(extDir, {recursive: true, force: true});
+    }
+    // R-D..R-K：行内容契约损坏（drop trigger → UPDATE → 重试 → 还原 → 重建 trigger）
+    const contentCases: Array<{id: string; label: string; freq: number; col: string; bad: unknown; good: unknown}> = [
+      {id: 'ru-meta-mal', label: '[R5] metadata_json malformed', freq: 740, col: 'metadata_json', bad: 'not json', good: null},
+      {id: 'ru-meta-unk', label: '[R6] metadata unknown field', freq: 750, col: 'metadata_json',
+        bad: '{"canonicalizationVersion":"voice-canonical@1.0","adapterCompatibilityKey":"indextts2-adapter-registry@1","ingestedAt":"2026-01-01T00:00:00.000Z","bogus":1}', good: null},
+      {id: 'ru-provider', label: '[R7] provider mismatch', freq: 760, col: 'provider', bad: 'mock', good: null},
+      {id: 'ru-adapter', label: '[R8] adapter_compatibility_key mismatch', freq: 770, col: 'adapter_compatibility_key', bad: 'other@1', good: null},
+      {id: 'ru-codec', label: '[R9] codec mismatch', freq: 780, col: 'codec', bad: 'mp3', good: null},
+      {id: 'ru-sr', label: '[R10] sample_rate mismatch', freq: 790, col: 'sample_rate', bad: 44100, good: null},
+      {id: 'ru-ch', label: '[R11] channels mismatch', freq: 800, col: 'channels', bad: 2, good: null},
+      {id: 'ru-dur', label: '[R12] duration invalid', freq: 810, col: 'duration_ms', bad: 5, good: null},
+    ];
+    for (const c of contentCases) {
+      const {wav} = await createRu(c.id, c.freq);
+      const orig = rowByReq(c.id)[c.col];
+      dropTrigger();
+      db.prepare(`UPDATE voice_profile_revisions SET ${c.col} = ? WHERE voice_profile_id = ? AND request_id = ?`)
+        .run(c.bad, pid, c.id);
+      restoreTrigger();
+      await retryExpectUnusable(c.id, wav, c.label);
+      // 还原（用原值）并重建 trigger：恢复后同 requestId 重试应回到 200 reused
+      dropTrigger();
+      db.prepare(`UPDATE voice_profile_revisions SET ${c.col} = ? WHERE voice_profile_id = ? AND request_id = ?`)
+        .run(orig, pid, c.id);
+      restoreTrigger();
+      const res = await revisionsPOST(
+        revisionFormReq(pid, {requestId: c.id, audio: {buf: wav, name: 'ru.wav'}}),
+        profileParams(pid),
+      );
+      ok(
+        res.status === 200,
+        `${c.label} → 还原后同 requestId 重试恢复 200 reused（行可再次 usable）`,
+        {status: res.status},
+      );
+    }
+  }
+
   // ---------- 响应不包含绝对路径 ----------
   const dataDir = getDataDir();
   const leaking = jsonResponseTexts.filter((r) => r.text.includes(dataDir));

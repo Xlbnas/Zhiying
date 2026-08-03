@@ -24,7 +24,21 @@ export const CANONICAL_FILENAME = 'reference.wav';
 // 时长/大小限制（adapter 无明确限制 → 临时保守范围）
 export const MIN_REFERENCE_AUDIO_MS = 1000;
 export const MAX_REFERENCE_AUDIO_MS = 60000;
-export const MAX_REFERENCE_UPLOAD_BYTES = 25 * 1024 * 1024; // 25MB
+export const MAX_REFERENCE_UPLOAD_BYTES = 25 * 1024 * 1024; // 25MB 单文件上限
+
+// multipart 流式上传限制（TTS-A.R1：bounded streaming contract）
+// - 单文件（audio）上限即 MAX_REFERENCE_UPLOAD_BYTES（busboy fileSize limit，流式中断 → 413 file_too_large）
+// - 整个 multipart body 上限：明确固定值，略高于单文件上限（25MB 文件 + boundary/字段开销）
+//   （Content-Length 预检 + 流式实测双保险 → 413 body_too_large）
+// - 字段严格白名单：requestId / audio / transcript / language（共 4 个 part）
+// - 单文本字段上限：覆盖 transcript ≤ 4000 chars UTF-8（≤12KB）+ requestId/language 余量
+export const MAX_REFERENCE_MULTIPART_BODY_BYTES = 30 * 1024 * 1024; // 30MB
+export const MAX_MULTIPART_FIELDS = 4; // 白名单字段总数（含 audio）
+export const MAX_MULTIPART_FIELD_BYTES = 16 * 1024; // 16KB
+
+// voice-library 文件布局常量（root / staging 子目录）
+export const VOICE_LIBRARY_ROOT = 'voice-library';
+export const STAGING_DIR_NAME = '.staging';
 
 // subprocess timeout（参数数组 spawn，无 shell）
 export const FFPROBE_TIMEOUT_MS = 15000;

@@ -9,7 +9,7 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-02T12:10Z（M7.3B FROZEN；TTS-A deployed @`fed3e3d`，pending independent Review PASS；TTS-B/TTS-C not started） |
+| statusUpdatedAt | 2026-08-03T03:47Z（M7.3B FROZEN；TTS-A.R1 code changes，TTS-A **not frozen**；TTS-B/TTS-C not started） |
 | reviewedCodeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（M7.3B final code/runtime；M7.3B deployment evidence docs HEAD 为 `044ac23e2524d53f41d223c37d16619425b21182`；M7.3A frozen code 为 `aa3f814…`） |
 | productionRuntimeSHA | `fed3e3d19b4c1a0ef80e1b2822ff4e5ab8aaf798`（TTS-A 部署后容器镜像实际代码 SHA） |
 | productionHostCheckoutSHA | `fed3e3d19b4c1a0ef80e1b2822ff4e5ab8aaf798`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
@@ -297,9 +297,9 @@
 
 - **M7.3A 正式 FROZEN（独立 Review PASS）**：final code/runtime = `aa3f8145825f5a33542f54e90e661e0cccf3e692`；deployment evidence docs = `36ff32e3301f51bf054efbee029fc1e6115ad3f5`；independent Review = PASS。冻结语义见 §7。
 - **M7.3B 正式 FROZEN（独立 Review PASS）**：final code/runtime = `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`；deployment evidence docs HEAD = `044ac23e2524d53f41d223c37d16619425b21182`（§15.3）；independent Review = PASS。冻结语义见 §7「M7.3B 冻结语义」。
-- **TTS-A DEPLOYED（pending independent Review PASS）**：runtime `fed3e3d19b4c1a0ef80e1b2822ff4e5ab8aaf798`（部署证据见 §15.4）。只交付 Voice Profile / immutable Voice Profile Revision 声音库基础设施；**TTS-B/TTS-C not started**。
+- **TTS-A.R1 review closure in progress（TTS-A not frozen；TTS-B/TTS-C not started）**：独立 Review FAIL 结论下修复 7 项——① 文件 durability 先于 SQLite commit；② bounded multipart streaming（@fastify/busboy 3.2.0，25MB file / 30MB body / 严格字段）；③ multipart 字段严格性；④ 共享 exact validator（单一真相源 `validateVoiceProfileRevisionExact`）；⑤ 损坏 revision 不得 reused（409 revision_unusable）；⑥ staging/intermediate symlink 防护（ensureSafeDir）；⑦ 对应测试/文档/部署。代码见后续 commit；设计文档 `docs/TTS_A_VOICE_LIBRARY_DESIGN.md` §3/§4/§4.1/§5。
 - **Production legacy 审计（只报告，不修改）**：generated assets 19；provenance NULL 19（全为历史 legacy）；NULL + requirement_json 缺失/损坏 1；active legacy bindings 17；active bindings 指向当前 active scenes 中缺失的 requirement 10（分布于 2 个项目，均为历史绑定；未删除/重绑）。
-- 下一步：等待 TTS-A 独立 Review PASS；随后按序 TTS-B → TTS-C → narration master → ffprobe → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
+- 下一步：TTS-A.R1 部署后等待独立 Review PASS；随后按序 TTS-B → TTS-C → narration master → ffprobe → subtitle timing → timing-reconciliation@2.0 → storyboard → animatic → final render。
 
 ## 6. 尚未完成 TODO
 
@@ -428,10 +428,12 @@
 - `scripts/test-m3a-narration-plan.ts`
 - `scripts/test-m3b-tts.ts`
 - `scripts/test-m3c-subtitle-timing.ts`
-- `scripts/test-tts-a-voice-library-schema.ts`（TTS-A 新增）
-- `scripts/test-tts-a-voice-library-ingest.ts`（TTS-A 新增）
-- `scripts/test-tts-a-voice-library-api.ts`（TTS-A 新增）
-- `scripts/test-tts-a-voice-library-files.ts`（TTS-A 新增）
+- `scripts/test-tts-a-voice-library-schema.ts`（TTS-A 新增；R1 后 34 PASS）
+- `scripts/test-tts-a-voice-library-ingest.ts`（TTS-A 新增；R1 后 25 PASS）
+- `scripts/test-tts-a-voice-library-api.ts`（TTS-A 新增；R1 扩展 R 段「损坏 revision 不得 reused」后 78 PASS，KNOWN-ISSUE=0——415 不再泄漏 staging 路径，K1 自动转 PASS）
+- `scripts/test-tts-a-voice-library-files.ts`（TTS-A 新增；R1 扩展 E9-E17 symlink 防护后 23 PASS）
+- `scripts/test-tts-a-durability.ts`（TTS-A.R1 新增，30 PASS）：D1 file-op 顺序日志（rename→fsync final→fsync revisionDir→fsync profileDir→fsync root→fsync staging→commit→201）/ D2 rename 后 commit 前 fsync 失败（ingest_failed、row=0、orphan、exact null、不误判 duplicate）/ D3 INSERT 失败与 final 覆盖保护（row=0、sentinel 不被覆盖）/ D4 commit 后无 durability-critical 操作 / D5 crash model 文档措辞断言
+- `scripts/test-tts-a-multipart.ts`（TTS-A.R1 新增，31 PASS）：M1 Content-Length 预检 413（不读 body）/ M2 chunked 流式计数 413 提前中止 / M3 伪造 Content-Length / M4 单文件 >25MB 413 file_too_large / M5-M7 严格字段（双 audio、unknown、重复字段 422）/ M8 合法 multipart 201 + 无完整 Buffer 证据 / M9 parser 错误与断连（无 DB 行、staging 清理）
 - `scripts/test-llm-dispatch.ts`
 - `scripts/test-workflow-stages.ts`
 - `scripts/test-m6310-usage.ts`
