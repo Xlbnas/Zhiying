@@ -1,36 +1,49 @@
-# TTS-C 实施计划（TTS-C.0.R5 修订；runtime implementation not started）
+# TTS-C 实施计划（TTS-C.0.R6 修订；runtime implementation not started）
 
-> 状态：**TTS-C.0.R5 architecture closure completed；pending independent Review PASS；
+> 状态：**TTS-C.0.R6 architecture closure completed；pending independent Review PASS；
 > TTS-C runtime implementation not started；TTS-C.1A not started**。
-> 本计划按 TTS-C.0.R5 Review 闭环更新：① **validation finalization fencing**（`validating_reuse`/`validating_existing`
-> 的 finalization 全部为带 token/attempt/lease/candidate 条件的 fenced UPDATE，`changes=1` 必须，否则
-> `STALE_VALIDATION_OWNER` 整事务回滚零副作用；lease renewal 同样 fenced；三方竞争单数据库裁决——设计文档 §3/§5）；
-> ② **可执行 SQLite contract**（设计文档 §2 全部为可直接转 migration 的真实 SQL：CREATE TABLE / ADD COLUMN /
-> CREATE UNIQUE INDEX / CREATE TRIGGER；FK + composite FK + 状态依赖 CHECK + pair trigger；`tts_jobs` 纯增量零 rebuild；
-> 本轮已在临时目录 sqlite3 3.45.1 实证：apply / foreign_key_check / integrity_check / happy path / 43 项非法 mutation 全过）；
-> ③ **relational provenance 闭包**（composite FK `(job_id, claim_id)` / `(successful_attempt_id, job_id)` +
-> BEFORE INSERT provenance trigger + 原子成功终局 6 步顺序冻结——设计文档 §2.4/§8）；
-> ④ **crash-safe cutover protocol**（stable/candidate 双 registry view；candidate 意图与证据持久化于
-> `legacy_adapter_voice_entries` 新增列，保持 9 表；6 点 crash reconciliation 矩阵；fenced mapped_active +
-> published_usable 同事务——设计文档 §7）；⑤ **完整状态机冻结**（每表 old→new 全矩阵 + 真实 trigger SQL，
-> 消除 `* → failed` 模糊写法；published_usable 不可逆；request succeeded/reused 不混写——设计文档 §9）；
-> ⑥ **未来测试矩阵冻结**（VF-1…5 / MF-1…6 / PC-1…7 / CC-1…6 + contract validation——设计文档 §10）；
-> ⑦ **依赖 DAG 化**（§依赖顺序，与并行矩阵一致，不再是 1A→1B→1C 链）。
+> 本计划按 TTS-C.0.R6 Review 闭环更新。R6 关闭独立 Review 对 R5 的 FAIL 发现（docs-only，零 runtime/零 migration/零 schema）：
+> ① **tts_jobs legacy downgrade bypass 封死**（`trg_tts_jobs_immutable` 守卫扩为 `OLD/NEW.claim_id 任一非 NULL`；
+> `claim_id` 写后不可 NULL/不可换/不可凭空获得；TTS-C 行 `running→queued` 永远 ABORT；INSERT/UPDATE validation trigger
+> 强制 TTS-C 身份字段 NOT NULL + claim 同 identity——NULL 无法绕过 `uq_tts_jobs_active_synthesis`；claim↔job 双向一致性闭环）；
+> ② **attempt 证据 phase-aware、write-once、terminal immutable**（`trg_tga_evidence` 三层：write-once + 终态全冻结 +
+> phase window；`file_durable` 后 final path/SHA/size/codec/sr/ch/duration/response_hash/provider_request_id/usage_record_id
+> 全部不可改，不限于 phase 转移——设计文档 §2.3）；
+> ③ **artifact↔attempt 字节证据全闭包**（`trg_saa_provenance` 新增 15 项逐项比较：exact/synthesis fingerprint 与 job、
+> path/SHA/size/codec/sr/ch/duration 与 attempt、provider/model 与 attempt、canonical SHA 与 Voice Revision；
+> 内容 hash 一致性在 final success transaction 内 exact fenced reread 逐项比较——设计文档 §2.4/§8.2）；
+> ④ **request/claim 终态链接封存**（`job_id/result_artifact_id` 首次非 NULL 后不可改 + `succeeded` 后 linkage 冻结 +
+> result-link identity trigger；consumer 真相统一为 `WHERE result_artifact_id=:id`，不再经 producing claim_id 声称全量）；
+> ⑤ **materialization execution identity 完整且不可变**（`source_canonical_sha256/adapter_compatibility_key` NOT NULL +
+> write-once + 与 exact Voice Revision 自洽；destination 路径格式冻结；request link identity trigger——设计文档 §2.5/2.6）；
+> ⑥ **projection activation evidence 封存**（`adapter_compatibility_key` + `published_registry_generation/sha256` write-once；
+> file_ready_unpublished 必 NULL、registry_pending 只能首次写一次、→published_usable 必须同 generation/SHA、
+> published_usable 全不可变——设计文档 §2.7）；
+> ⑦ **legacy cutover journal 不可变**（`trg_lve_cutover_evidence` 按状态转换冻结字段写入权限；mapped_active 全冻结；
+> 旧 owner 不得原地改 candidate evidence——设计文档 §2.8）；
+> ⑧ **lease-expiry fencing 全量补齐**（validation/materialization renewal 与 cutover renewal/T5 全部
+> `AND lease >= :now`；T2/T3/T4 外部副作用前 fenced verify/renew；过期未接管 → 旧 owner 不得 renewal/finalize/新副作用——
+> 设计文档 §3.3/§5.1/§7.3/§7.4）；
+> ⑨ **可执行 SQLite contract 实证**（设计文档 §2 全部真实 SQL；临时目录 sqlite3 3.45.1：apply / foreign_key_check（空）/
+> integrity_check（ok）/ happy path 全链 / **115 项验证：111 项非法 mutation 全过 + 4 项正向控制，FAIL=0**——设计文档 §10.5）。
+> R5 的 ① validation finalization fencing ② 可执行 contract ③ relational provenance 闭包 ④ crash-safe cutover
+> ⑤ 状态机冻结 ⑥ DAG 化 由 R6 继承并强化；R6 全部阻断关闭后进入实施。
 > 每阶段：独立 migration、独立 tests、独立 Review、独立 deployment gate、不跨阶段、不产生半成品 active 状态。
 
 ---
 
-## 0. 总原则（R5 强化）
+## 0. 总原则（R6 强化）
 
 - **exact source 纪律**：全链路显式 artifact ID；禁止 current/latest/default。
 - **mutable job ≠ immutable artifact**：`tts_jobs`（mutable execution）+ `sentence_audio_artifacts`（immutable result，trigger ABORT）；regeneration = 新 job + 新 artifact + 新文件。
 - **synthesis reservation（可回收 + fenced）**：`tts_synthesis_claims` 是 active synthesis identity 的唯一 reservation（partial unique）；`validating_reuse` **Scheduler 永不 claim**；validating 阶段带独立 validation owner/lease/attempt；lease 过期 → fenced CAS 接管重验（不永久阻塞）；**finalization 必须 fenced**（§3.1 contract；`changes=0` → `STALE_VALIDATION_OWNER` 零副作用）；artifact usable 不建 job；unusable 才在 claim 保护下转 generation_pending + 恰好一个 queued job。
 - **零 subscriber 语义**：最后 subscriber 在 validating_reuse 阶段取消 → 直接取消 claim 不建 job；generation_pending/running 阶段取消 → 才置 `job.cancel_requested=1`；**不允许创建 zero-subscriber provider job**；validator/cancel/takeover 三方竞争由事务串行单裁决。
-- **共享 fan-in**：`tts_audio_requests` many-to-one → claim/job；成功/失败 fan-out 全部有效 subscriber；per-request cancel 仅 detach 该 envelope。
-- **persisted phases**：crash recovery 由 `tts_generation_attempts.execution_phase` 持久化真相驱动；**不得仅凭 status='running' 无条件 requeue**（TTS-C 行 trigger 禁止 running→queued；legacy 行隔离）。
-- **relational provenance 闭包**：artifact 的 attempt∈job∈claim 由 composite FK + BEFORE INSERT trigger 数据库级强制；content hash 一致性由 final transaction 内应用层 fenced 重读强制。
+- **共享 fan-in**：`tts_audio_requests` many-to-one → claim/job；成功/失败 fan-out 全部有效 subscriber；per-request cancel 仅 detach 该 envelope；**consumer 真相 = `WHERE result_artifact_id=:id`**（R6：producing claim_id 不是全量真相）。
+- **persisted phases**：crash recovery 由 `tts_generation_attempts.execution_phase` 持久化真相驱动；**不得仅凭 status='running' 无条件 requeue**（TTS-C 行 trigger 禁止 running→queued；legacy 行隔离）；**attempt 证据 phase-aware write-once + 终态全冻结**（R6：`trg_tga_evidence`，`file_durable` 后字节证据不可改）。
+- **relational provenance 闭包**：artifact 的 attempt∈job∈claim 由 composite FK + BEFORE INSERT trigger 数据库级强制；**artifact↔attempt 字节证据逐项一致**（R6：path/SHA/size/codec/sr/ch/duration/provider/model/canonical 全闭包）；content hash 一致性由 final transaction 内 **exact fenced reread 逐项比较**强制（R6 §8.2）。
 - **原子成功终局**：文件（temp→校验→rename→fsync）先于 DB；单 BEGIN IMMEDIATE 内按冻结顺序 attempt→artifact→job→claim→requests 原子完成；任一步失败整事务回滚（attempt 恢复 file_durable）；cancel 优先。
-- **crash-safe cutover**：stable view 与 candidate view 分离；candidate 意图/证据持久化（非进程内状态）；active SHA 与 DB 可 reconciliation；未知 SHA fail-closed。
+- **crash-safe cutover**：stable view 与 candidate view 分离；candidate 意图/证据持久化（非进程内状态）；active SHA 与 DB 可 reconciliation；未知 SHA fail-closed；**cutover journal 不可变**（R6：字段按状态转换冻结写入权限；mapped_active 全冻结；旧 owner 不得原地改 candidate evidence）。
+- **lease-expiry fencing**（R6 全量）：所有 renewal（validation/materialization/cutover）与 finalize/T5 的 WHERE 必须含 `lease >= :now`；每个外部副作用步骤（T2/T3/T4、artifact/file reader）前 fenced verify/renew（changes=1）；过期未接管 → 旧 owner 不得 renewal/finalize/新副作用。
 - **零真实 provider 门禁**：自动化测试用临时 DB + Mock provider；真实 provider 仅人工验收命令。
 - **单门禁入口**：每阶段新测试并入 `scripts/run-m7-quality-gate.sh`（suite 数递增）。
 - **部署纪律**：exact-SHA build + 镜像内 gate + backup + compose up + invariants + docs evidence commit；禁手工 sqlite3。
@@ -182,10 +195,10 @@ failed-retry/cost-usage）；**production acceptance gate**：人工验收命令
 | C.4 | ✓ | ✓ | ✓ | ✓ | ✗（master 显式构建） | ✗ |
 | C.5 | ✓ | ✓ | ✓ | ✓ | ✗ | 仅人工验收命令 |
 
-## 依赖顺序（R5 DAG，取代 R4 的 1A→1B→1C 链）
+## 依赖顺序（R6 DAG，取代 R5 的 1A→1B→1C 链）
 
 ```text
-R5 PASS
+R6 PASS
 ├─ 1A ∥ 1C            （可并行开发：不同 worktree/local branch）
 └─ 1B-prep            （adapter parser/reloader 测试骨架可并行准备）
 
@@ -200,7 +213,7 @@ C.2 PASS
 ```
 
 **建议首先实现**：**TTS-C.1A**（零音频风险、解锁 materialization、为 1B cutover 提供 DB 基础）——但 1A 未开始，
-须待本 R5 独立 Review PASS。
+须待本 R6 独立 Review PASS。
 
 ## 并行开发矩阵（冻结：并行开发，串行集成/Review/部署）
 
@@ -231,5 +244,5 @@ C.2 PASS
 7. `voice_materialization_state` 与 TTS-C.2 `tts_audio_requests` 的 envelope 实现是否统一（schema 已冻结，实现细节 1A 定）。
 
 > 注：materialization schema、request envelope、validation/cutover fencing、crash-safe cutover 协议、
-> relational provenance 闭包与全部状态机已在 `docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md`（R5）
-> 以可执行 contract 冻结，不再属于"进入 1A 后再决定"项。
+> relational provenance 闭包、attempt/materialization/cutover 证据不可变与全部状态机已在
+> `docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md`（R6）以可执行 contract 冻结，不再属于"进入 1A 后再决定"项。
