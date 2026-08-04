@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import {applyTtsC1aMigration} from './tts-c/migration';
 
 /**
  * 知影 SQLite 连接层（CONTRACT §3）
@@ -491,6 +492,8 @@ export function getDb(): Db {
   db.pragma('foreign_keys = ON');
   db.pragma('synchronous = NORMAL');
   db.exec(SCHEMA_SQL);
+  // TTS-C.1A：materialization 表（frozen §2 提取，IF NOT EXISTS 幂等）
+  applyTtsC1aMigration(db);
   // M7：为已存在表补齐 asset_resolution_state.metadata 列（幂等）
   try {
     db.exec(`ALTER TABLE asset_resolution_state ADD COLUMN metadata TEXT`);
