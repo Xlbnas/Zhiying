@@ -1,7 +1,10 @@
-# TTS-C Incremental Narration 架构设计（TTS-C.0.R13 修订，只读审计，未实现）
+# TTS-C Incremental Narration 架构设计（TTS-C.0 冻结契约；R13 独立 Review CONDITIONAL PASS 后完成归一化并正式冻结）
 
-> 状态：**TTS-C.0.R13 architecture revision completed；pending independent Review；
-> TTS-C runtime implementation not started；TTS-C.1A / 1B / 1C not started**。
+> 状态：**TTS-C.0 = FROZEN（independent Review PASS）；TTS-C runtime implementation baseline = not started；
+> TTS-C.1A / 1B / 1C not started**。
+> 冻结基线：reviewed executable contract commit `ae7a93d26614326ead70790f65de5d95a57d167e`；
+> reviewed §2 SQL SHA `c88f64ac880a0cf50519a3b5eaba724a701b93ac5acea0e9c4fbdf90dd6f50d8`；
+> freeze/docs normalization commit 见本轮新 SHA；后续阶段不得重构冻结 SQL。
 > 本文档是只读架构审计产物（R13 修订）：不修改 runtime code / schema / config / migration / compose。
 > 运行时真相以真实代码为准（审计基线 m7 @ `e8ffaac`；TTS-A final code `1460efd…`、TTS-B final code `86f7f52…` 均已 FROZEN）。
 > R9/R10/R11 独立 Review = **FAIL**（R10/R11/R12 分别关闭其 FAIL 发现）；**R12 独立 Review = FAIL**；R13 关闭其对 R12 的
@@ -837,8 +840,10 @@ BEGIN SELECT RAISE(ABORT,'tts_synthesis_claims terminal immutable'); END;
     `owner_token/lease_expires_at/result_artifact_id` 全 NULL；candidate 列可 NULL（无候选 → 直接按 unusable 走 generation_pending）；
   - `generation_pending`：validation owner **必须清空**；Worker owner 必须 NULL（job 尚未被 claim）；candidate 列清空；
   - `running`：Worker `owner_token/lease_expires_at` 有效；validation owner 清空；
-  - `succeeded`：`result_artifact_id` NOT NULL；owner/lease/validation 全清；
-  - `failed/cancelled/indeterminate`：owner/lease/validation 全清；result NULL。
+  - `succeeded`：`result_artifact_id` NOT NULL；owner/lease/validation 全清；**terminal immutable**（R13）；
+  - `failed/cancelled`：owner/lease/validation 全清；result NULL；**terminal immutable**（R13）；
+  - `indeterminate`：**保留** Worker `owner_token/lease_expires_at/validation_attempt`（非终态，可
+    renewal/takeover/exact resolve）；result NULL；validation owner 清空。
 - **状态机（R5 冻结，消除歧义）**：`validating_reuse → succeeded | generation_pending | cancelled | failed`；
   `generation_pending → running | cancelled | failed`（preflight/job 校验失败 → failed；**不允许 indeterminate**——尚无执行在飞）；
   `running → succeeded | failed | cancelled | indeterminate`；

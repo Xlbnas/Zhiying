@@ -1,7 +1,7 @@
-# TTS-C 实施计划（TTS-C.0.R13 修订；runtime implementation not started）
+# TTS-C 实施计划（TTS-C.0 冻结；TTS-C.1A 实施基线）
 
-> 状态：**TTS-C.0.R13 architecture revision completed；pending independent Review；
-> TTS-C runtime implementation not started；TTS-C.1A / 1B / 1C not started**。
+> 状态：**TTS-C.0 = FROZEN（独立 Review PASS；冻结基线 commit `ae7a93d…`、§2 SQL SHA `c88f64ac…`）；
+> TTS-C runtime implementation baseline = not started；TTS-C.1A / 1B / 1C not started**。
 > 本计划按 TTS-C.0.R13 Review 闭环更新。R13 关闭独立 Review 对 R12 的 FAIL 发现（docs-only，零 runtime/零 migration/零 schema）：
 > **P0-D**（terminal claim evidence 可篡改：R12 的 attempt fence 只保护执行期状态，generated
 > terminal（succeeded/failed/cancelled）的 `validation_attempt` 可直接 UPDATE 篡改（不推进 head、
@@ -189,7 +189,7 @@ PE-01…04（indeterminate evidence closure）。
   必须精确匹配 command 行）、
   `tts_generation_attempts`（persisted phase + 全矩阵 trigger）、
   `sentence_audio_artifacts`（immutable；**relational provenance 闭包**：composite FK + BEFORE INSERT trigger）。
-- `tts_jobs` 纯增量迁移（ADD COLUMN×8 + 3 unique index + trigger 组；零 rebuild；legacy 行 WHEN 隔离）；
+- `tts_jobs` 纯增量迁移（ADD COLUMN×10 + 3 unique index + trigger 组；零 rebuild；legacy 行 WHEN 隔离）；
   **R8-G row-state result invariant**（INSERT+全 UPDATE：succeeded⇔result_artifact_id；result artifact job/claim 一致）；
   **R8-I immutable identity seal**（narration_plan_artifact_id/narration_plan_version/payload_json/provider/
   voice_profile_id/voice_profile_revision_id 创建后不可改；payload_json 与 frozen synthesis payload fingerprint exact 对应）；

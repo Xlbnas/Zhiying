@@ -1,12 +1,12 @@
-TTS-C.0.R10 contract validation results
+TTS-C.0.R13 contract validation results
 engine                 : sqlite-cli
 engine sqlite version  : 3.45.1
 python sqlite3 version : 3.45.1
-git HEAD               : e8ffaacc1f8728dcba73dc662d873bea04e77692
+git HEAD               : ae7a93d26614326ead70790f65de5d95a57d167e
 design doc             : /home/agentvm/projects/ZhiYing/docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md
-design doc sha256      : 4236bb21328ef13e30f12b8bc6de37375334fcc1a6c77ff5a5658143598d06ca
+design doc sha256      : 8920b9464c3cf848a4ded8914a3b59fc3859bf1f112d318c1f1aad61e922f8bd
 extracted §2 sql sha256: c88f64ac880a0cf50519a3b5eaba724a701b93ac5acea0e9c4fbdf90dd6f50d8
-§2 section lines       : 260..2976
+§2 section lines       : 260..2978
 §2 sql blocks          : 13
 §2 CREATE TABLE        : 12
 §2 CREATE TRIGGER      : 112
@@ -19,7 +19,7 @@ db triggers total      : 114
 db indexes total       : 8
 foreign_key_check rows : 0
 integrity_check        : ok
-generated_at           : 2026-08-04T12:43:52.439Z
+generated_at           : 2026-08-04T13:06:08.559Z
 
 [PASS] JS-01    job queued→running 直接 UPDATE → command required ABORT
 [PASS] JS-02    claim generation_pending→running 直接 UPDATE → command required ABORT

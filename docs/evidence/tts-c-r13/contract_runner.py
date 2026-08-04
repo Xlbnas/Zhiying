@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TTS-C.0.R10 reproducible contract runner。
+"""TTS-C.0.R13 reproducible contract runner。
 
 唯一 schema 来源：final 设计文档 §2（经 extract_contract.extract_section2_sql 逐字提取）。
 双引擎：
@@ -7,7 +7,7 @@
   --engine cli     sqlite3 CLI 子进程（--sqlite-bin 指定）
 
 用法：
-  python3 docs/evidence/tts-c-r10/contract_runner.py \
+  python3 docs/evidence/tts-c-r13/contract_runner.py \
     --design docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md --engine all
 
 任一 FAIL → 非零 exit code。原始结果文件见 results-sqlite-3.45.1.txt / results-python-sqlite.txt。
@@ -619,7 +619,7 @@ def run_engine(kind, args, info, contract_sql, evidence_dir, results_dir):
             nfail += 0 if ok else 1
 
     engine_label = "python-sqlite" if kind == "python" else "sqlite-cli"
-    log.append("TTS-C.0.R10 contract validation results")
+    log.append("TTS-C.0.R13 contract validation results")
     log.append("engine                 : %s" % engine_label)
     log.append("engine sqlite version  : %s" % ver)
     log.append("python sqlite3 version : %s" % sqlite3.sqlite_version)
