@@ -1,36 +1,40 @@
-# TTS-C 实施计划（TTS-C.0.R7 修订；runtime implementation not started）
+# TTS-C 实施计划（TTS-C.0.R8 修订；runtime implementation not started）
 
-> 状态：**TTS-C.0.R7 architecture closure completed；pending independent Review PASS；
+> 状态：**TTS-C.0.R8 architecture closure completed；pending independent Review PASS；
 > TTS-C runtime implementation not started；TTS-C.1A not started**。
-> 本计划按 TTS-C.0.R7 Review 闭环更新。R7 关闭独立 Review 对 R6 的 FAIL 发现（docs-only，零 runtime/零 migration/零 schema）：
-> ① **global registry publication journal**（新增第 10 张权威表 `voice_registry_publications`，不再以"保持 9 表"为目标；
-> 8 态 + global active single-flight `uq_voice_registry_publication_active`（building/candidate_persisted/file_durable/
-> activation_pending/indeterminate）；T1 前 global reservation，T1-T5 共用同一 owner/token/lease/attempt；
-> candidate_manifest_json canonical 不可变完整描述每 key 的 emitted source/source row/reference SHA/adapter key；
-> manifest SHA 与 registry SHA 分别冻结——设计文档 §2.9/§7）；
-> ② **projection 状态与 publication attempt 分离**（`voice_materializations` 删 registry_pending，只保留
-> file_ready_unpublished/published_usable/failed/indeterminate + `published_by_publication_id`；成功 T5 单事务
-> publication→active + projection→published_usable + legacy→mapped_active；失败/indeterminate 保留 immutable evidence，
-> projection 通过新 publication row 重试——设计文档 §2.7）；
-> ③ **global cutover 一次只处理一个 frozen subject**（subject_type/subject_id 冻结；mapping_pending 必须引用
-> active publication.id；一个 active publication 最多一个 mapping_pending subject；adapter active==candidate 但 DB 未
-> T5 → 按 journal 完成整个 subject reconciliation——设计文档 §2.8/§7.4）；
-> ④ **无环 claim/job 模型**（删除 `tts_synthesis_claims.job_id`；唯一权威 = `tts_jobs.claim_id` +
-> `uq_tts_jobs_claim`；validating_reuse 无 job / generation_pending+running 恰好一个 / reuse succeeded 无 job——
-> 设计文档 §2.0/§2.2）；
-> ⑤ **tts_jobs result 与生命周期封存**（result write-once + succeeded 必须 result + 非成功状态不得 result +
-> result artifact job/claim 一致 + TTS-C DELETE 禁 + INSERT 初始状态 queued——设计文档 §2.0）；
-> ⑥ **request subscriber identity closure**（`unit_id` NOT NULL + INSERT/UPDATE claim/job link trigger +
-> result-link 覆盖 INSERT+UPDATE——设计文档 §2.1）；
-> ⑦ **initializing envelope 状态**（tar/vmr 增加 initializing：占用 (project_id, request_id)、链接全 NULL、
-> 不计 subscriber、Scheduler 不可见；initializing→waiting 同一事务完成 link——设计文档 §2.1/§2.5）；
-> ⑧ **所有新表冻结 initial INSERT state**（8 表 BEFORE INSERT trigger，terminal 直插全拒——设计文档 §2/H）；
-> ⑨ **exact voice/provider identity**（`tts_jobs.voice_profile_revision_id` + job/attempt/artifact 全链
-> profile/revision/provider 一致性——设计文档 §2.0/§2.3/§2.4）；
+> 本计划按 TTS-C.0.R8 Review 闭环更新。R8 关闭独立 Review 对 R7 的 FAIL 发现（docs-only，零 runtime/零 migration/零 schema）：
+> ① **retryable legacy publication link**（`legacy_adapter_voice_entries.pending_publication_id` 仅允许
+> T1 fill（NULL→id）与 rollback clear（id→NULL，且仅当被引用 publication 已 failed/cancelled +
+> subject 精确匹配该 legacy entry）；rollback 后允许写入新 publication.id；失败 publication evidence 由
+> journal 永久保存——设计文档 §2.8/§7.3）；
+> ② **single-source candidate evidence**（删除 lve 的 `candidate_registry_generation/candidate_registry_sha256/
+> candidate_created_at` 权威重复列；pending/current evidence 统一经 pending_publication_id → journal——§2.8）；
+> ③ **legacy projection 单一发布模型**（唯一语义：legacy_cutover publication 本身同时发布目标 projection——
+> mapped_verified 前置 mapped materialization=file_ready_unpublished；T5 原子完成 publication→active +
+> materialization→published_usable + legacy→mapped_active；§2.7/§2.8）；
+> ④ **atomic publication activation command**（新增第 11 表 `voice_registry_publication_activations` append-only
+> command：AFTER INSERT trigger 在同一 statement 内完成 fencing + subject 验证 + projection 更新 +
+> legacy entry 更新 + publication→active；不存在可独立提交的 publication active 状态；publication INSERT
+> subject 验证（materialization=file_ready_unpublished / legacy=mapped_verified / rebuild subject_id='global'）——§2.9/§2.10）；
+> ⑤ **indeterminate evidence closure**（`indeterminate_from_status` 冻结进入来源；进入 indeterminate 时已有
+> candidate/manifest/file/activation 证据 write-once 且禁止事后首补；indeterminate→active 只能用已存在证据；
+> building-before-candidate indeterminate 只能 failed/cancelled——§2.9）；
+> ⑥ **exact-one claim dispatch**（新增第 12 表 `tts_claim_generation_dispatches` append-only command：
+> 单条 INSERT 原子完成 fencing + subscriber>0 验证 + INSERT 恰好一个 queued job + claim→generation_pending；
+> generation_pending 无 dispatch command 的状态迁移 ABORT——§2.2/§2.2b）；
+> ⑦ **TTS job row-state result invariant**（INSERT + 全 UPDATE：`claim_id IS NOT NULL` 时
+> succeeded⇔result_artifact_id NOT NULL、非 succeeded⇒result NULL；result artifact job/claim 一致——§2.0）；
+> ⑧ **envelope dependency closure**（tar initializing→waiting 必须 claim_id 非 NULL + exact identity；
+> vmr initializing→waiting 必须 job_id 非 NULL + exact identity；无链接 waiting 行结构不可提交——§2.1/§2.5）；
+> ⑨ **generation & payload identity seal**（`voice_registry_publications.generation UNIQUE` + BEGIN IMMEDIATE
+> 单调分配；`tts_jobs` immutable 增 narration_plan_artifact_id/narration_plan_version/payload_json/provider/
+> voice_profile_id，payload_json 与 frozen synthesis payload fingerprint 创建时 exact 对应——§2.0/§2.9）；
 > ⑩ **可执行 SQLite contract 实证**（设计文档 §2 提取重建临时 DB sqlite3 3.45.1：apply / foreign_key_check（空）/
-> integrity_check（ok）/ happy path 全链 / crash-retry 闭环 / **139 项 mutation 验证全部 PASS（R7 新增 39 + R6 回归 100），
-> FAIL=0**——设计文档 §10.5）。
-> R6 的 validation finalization fencing、attempt 证据不可变、provenance 闭包、cutover journal、lease fencing 由 R7 继承并强化。
+> integrity_check（ok）/ happy path 全链 / crash-retry 闭环 / legacy rollback-retry 闭环 / 全部 mutation
+> 验证 PASS，FAIL=0——实测计数见设计文档 §10.5）。
+> R7 的 publication journal、projection/publication 分离、无环 claim/job、result 封存、subscriber identity、
+> initializing 状态、initial INSERT 冻结、exact voice identity，以及 R6 的 validation fencing、attempt 证据不可变、
+> provenance 闭包、cutover journal、lease fencing 由 R8 继承并强化。
 > 每阶段：独立 migration、独立 tests、独立 Review、独立 deployment gate、不跨阶段、不产生半成品 active 状态。
 
 ---
@@ -45,29 +49,33 @@
 - **persisted phases**：crash recovery 由 `tts_generation_attempts.execution_phase` 持久化真相驱动；**不得仅凭 status='running' 无条件 requeue**（TTS-C 行 trigger 禁止 running→queued；legacy 行隔离）；**attempt 证据 phase-aware write-once + 终态全冻结**（R6：`trg_tga_evidence`，`file_durable` 后字节证据不可改）。
 - **relational provenance 闭包**：artifact 的 attempt∈job∈claim 由 composite FK + BEFORE INSERT trigger 数据库级强制；**artifact↔attempt 字节证据逐项一致**（R6：path/SHA/size/codec/sr/ch/duration/provider/model/canonical 全闭包）；content hash 一致性由 final transaction 内 **exact fenced reread 逐项比较**强制（R6 §8.2）。
 - **原子成功终局**：文件（temp→校验→rename→fsync）先于 DB；单 BEGIN IMMEDIATE 内按冻结顺序 attempt→artifact→job→claim→requests 原子完成；任一步失败整事务回滚（attempt 恢复 file_durable）；cancel 优先。
-- **crash-safe cutover**：stable view 与 candidate view 分离；**global registry publication journal（R7：第 10 表
-  `voice_registry_publications`，一次一个 frozen subject，global active single-flight）**；candidate 意图/证据持久化
+- **crash-safe cutover**：stable view 与 candidate view 分离；**global registry publication journal（R8：第 10 表
+  `voice_registry_publications` + 第 11 表 atomic activation command，一次一个 frozen subject，global active
+  single-flight，activation 仅经单条原子 command）**；candidate 意图/证据持久化
   （非进程内状态）；active SHA 与 DB 可 reconciliation（按 journal subject 完成，不凭 per-key row）；未知 SHA fail-closed；
   **cutover journal 不可变**（字段按状态转换冻结写入权限；mapped_active 全冻结；旧 owner 不得原地改 candidate evidence）。
 - **lease-expiry fencing**（R6 全量 + R7 publication）：所有 renewal（validation/materialization/publication）与
   finalize/T5 的 WHERE 必须含 `lease >= :now`；每个外部副作用步骤前 fenced verify/renew（changes=1）；
   过期未接管 → 旧 owner 不得 renewal/finalize/新副作用。
-- **无环 claim/job + result 封存（R7）**：`tts_jobs.claim_id` 唯一权威（`uq_tts_jobs_claim`）；
-  TTS-C job result write-once + succeeded 必须 result + DELETE 禁；attempt/artifact 全链 voice/provider 一致。
-- **initializing + 初始状态（R7）**：tar/vmr envelope 先 `initializing`（占用 requestId、链接全 NULL、不计 subscriber），
-  `initializing → waiting` 同一事务完成 link；全部新表 BEFORE INSERT 冻结初始状态（terminal 直插全拒）。
+- **无环 claim/job + atomic dispatch + result 封存（R8）**：`tts_jobs.claim_id` 唯一权威（`uq_tts_jobs_claim`）；
+  validating_reuse→generation_pending 仅经 `tts_claim_generation_dispatches` 单条原子 command（恰好一个 queued job，
+  dispatch 失败 claim 保持 validating_reuse）；TTS-C job result row-state invariant（succeeded⇔result，INSERT+全 UPDATE）+ DELETE 禁；
+  attempt/artifact 全链 voice/provider 一致。
+- **initializing + waiting link closure（R8）**：tar/vmr envelope 先 `initializing`（占用 requestId、链接全 NULL、
+  不计 subscriber）；`initializing → waiting` 必须同一事务完成 authoritative link（tar→claim_id exact identity /
+  vmr→job_id exact identity，trigger 强制）；全部新表 BEFORE INSERT 冻结初始状态（terminal 直插全拒）。
 - **零真实 provider 门禁**：自动化测试用临时 DB + Mock provider；真实 provider 仅人工验收命令。
 - **单门禁入口**：每阶段新测试并入 `scripts/run-m7-quality-gate.sh`（suite 数递增）。
 - **部署纪律**：exact-SHA build + 镜像内 gate + backup + compose up + invariants + docs evidence commit；禁手工 sqlite3。
 
 ---
 
-## TTS-C.1A — Materialization requests/jobs/projection（实现到 `file_ready_unpublished`；R7 分离模型）
+## TTS-C.1A — Materialization requests/jobs/projection（实现到 `file_ready_unpublished`；R8 分离模型）
 
 **scope**（设计文档 §2.5–2.7/§5/§6）：
 - 三层表：`voice_materialization_requests`（project-scoped envelope：`project_id + UNIQUE(project_id, request_id)`；
-  **R7-G `initializing` 状态**：占用 requestId、链接全 NULL、不计 subscriber、initializing→waiting 同一事务完成 link；
-  R7-H INSERT 初始状态 initializing）
+  **R7-G `initializing` 状态**：占用 requestId、链接全 NULL、不计 subscriber；**R8-H waiting link closure**：
+  initializing→waiting 必须同一事务完成 exact job 链接（`waiting requires job link` trigger）；R7-H INSERT 初始状态 initializing）
   + `voice_materialization_jobs`（含 `validating_existing` unschedulable + partial unique `uq_voice_materialization_jobs_active`；
   状态依赖 CHECK 冻结所有权语义；Scheduler 只领取 `queued`；R7-H INSERT 初始状态 validating_existing）
   + `voice_materializations`（`UNIQUE(profile, revision)`；**R7-B 状态仅 file_ready_unpublished/published_usable/failed/
@@ -86,9 +94,11 @@
   materialization_id）→ COMMIT。目标路径固定 voice-root-relative（`<profile_id>/<revision_id>/reference.wav`）。
 - Worker 唯一 writer（Web 无 voice/registry 挂载、无文件写）；`/voice-config` 目录挂载。
 
-**R7 边界（1A 明确不包含）**：**不得创建半成品 registry publication**——`voice_registry_publications`（§2.9）表
-结构在 1A migration 中就位（含 global active single-flight），但 1A 不写任何 publication 行（publisher 集成属 1B）；
-projection 保持 `file_ready_unpublished` 直到 1B 的 publication 流程激活。
+**R8 边界（1A 明确不包含）**：**不得创建半成品 registry publication**——`voice_registry_publications`（§2.9）与
+`voice_registry_publication_activations`（§2.10）两张表结构在 1A migration 中就位（含 global active single-flight、
+generation UNIQUE、subject INSERT 验证、atomic activation trigger），但 1A 不写任何 publication/activation 行
+（publisher 集成属 1B）；projection 保持 `file_ready_unpublished`，**激活只能经 1B 的单条 atomic activation
+command**，1A 无任何写 `published_usable` 的路径。
 
 **tests**（设计文档 §10.2/§10.3/§10.5/§10.6 落地）：请求幂等/conflict（同 scope 同 requestId 异 source 409）；
 并发两 requestId 单 job；validating_existing Scheduler 不 copy；usable 零文件写；不可用恰好一个 queued；
@@ -106,13 +116,17 @@ initializing 不计 subscriber（SL-08）；vmat/vmr/vmjob 初始状态直插拒
 
 **scope**（设计文档 §2.8/§7）：
 - **legacy shadow + crash-safe cutover**：`legacy_adapter_voice_entries` 5 态 + cutover 列
-  （owner/lease/attempt + candidate generation/SHA/selector/created/activated）；
+  （owner/lease/attempt + **R8-A/B retryable link**：`pending_publication_id`（T1 fill / rollback clear，仅引用
+  failed/cancelled publication 才可清空）+ `candidate_source_selector` + `candidate_activated_at`；
+  **无 candidate generation/SHA 权威重复列**——pending/current evidence 统一经 pending_publication_id → journal）；
   **stable/candidate 双 view**（stable：unmapped/mapped_verified/mapping_pending → legacy，mapped_active → TTS-A，
   retired → 不输出；candidate：仅 pending key 用 TTS-A）；**每个 canonical key 恰好一个 source**（冲突 fail-closed）；
-  映射等价性验证 6 项通过才 `mapped_verified`；不伪造 TTS-A 数据。
-- **cutover 协议 T1-T5**（设计文档 §7.3）：持久化 candidate 意图（mapping_pending）→ 写 candidate registry
-  （temp/fsync/rename/dir-fsync）→ adapter reload → poll active SHA → fenced T5 事务（mapped_active +
-  published_usable，双 changes=1 必须）。
+  映射等价性验证 6 项通过才 `mapped_verified`（**R8-C 前置：mapped materialization=file_ready_unpublished**）；
+  不伪造 TTS-A 数据。
+- **cutover 协议 T1-T5**（设计文档 §7.3）：持久化 candidate 意图（mapping_pending + pending_publication_id）→
+  写 candidate registry（temp/fsync/rename/dir-fsync）→ adapter reload → poll active SHA →
+  **R8-D 单条 atomic activation command**（一条 `voice_registry_publication_activations` INSERT 原子完成
+  fencing + projection→published_usable + legacy→mapped_active + publication→active；任一 mismatch 整体 ABORT）。
 - **crash reconciliation 6 点矩阵**（设计文档 §7.4）：含 LKG 保持 legacy、stale cutover owner fenced CAS 接管、
   未知 SHA fail-closed（不 retire legacy、不错误标 published_usable）。
 - **global registry publisher**：全局发布锁 + DB 全量确定性重建 + temp/fsync/rename/dir-fsync；registry 文档含
@@ -122,7 +136,9 @@ initializing 不计 subscriber（SL-08）；vmat/vmr/vmjob 初始状态直插拒
   Docker healthcheck 视 LKG degraded 为 healthy。
 
 **tests**：真实 Python parser/reloader + mock upstream；mapping 状态机（5 态全矩阵 + 每 key 单 source 断言）；
-cutover crash 矩阵 CC-1…CC-6（设计文档 §10.4）；cutover 全等性；activation 轮询；LKG/degraded/empty 矩阵。
+cutover crash 矩阵 CC-1…CC-6（设计文档 §10.4）；cutover 全等性；activation 轮询；LKG/degraded/empty 矩阵；
+**R8 新增**（设计文档 §10.7）：LR-01…05（retryable legacy link）、PA-01…08（atomic publication activation）、
+PE-01…04（indeterminate evidence closure）。
 
 **not included**：capability compiler（1C）、TTS 合成（C.2）。
 
@@ -143,10 +159,17 @@ cutover crash 矩阵 CC-1…CC-6（设计文档 §10.4）；cutover 全等性；
 ## TTS-C.2 — Request envelope + synthesis claim + durable job + persisted attempt + immutable artifact
 
 **scope**（设计文档 §2.0–2.4/§3/§4/§8）：
-- 新表：`tts_audio_requests`、`tts_synthesis_claims`（fenced reclaimable validation：§3.1 contract + takeover CAS +
-  fenced renewal + 三方竞争单裁决）、`tts_generation_attempts`（persisted phase + 全矩阵 trigger）、
+- 新表：`tts_audio_requests`（**R8-H**：initializing→waiting 必须 exact claim 链接，`waiting requires claim link`）、
+  `tts_synthesis_claims`（fenced reclaimable validation：§3.1 contract + takeover CAS + fenced renewal + 三方竞争单裁决）、
+  **`tts_claim_generation_dispatches`（R8-F 第 12 表）**（append-only atomic dispatch command：单条 INSERT 原子完成
+  fencing + subscriber>0 + 恰好一个 queued job + claim→generation_pending；UNIQUE(claim_id)；generation_pending
+  无 dispatch 的状态迁移 ABORT）、
+  `tts_generation_attempts`（persisted phase + 全矩阵 trigger）、
   `sentence_audio_artifacts`（immutable；**relational provenance 闭包**：composite FK + BEFORE INSERT trigger）。
-- `tts_jobs` 纯增量迁移（ADD COLUMN×7 + 2 unique index + 2 trigger；零 rebuild；legacy 行 WHEN 隔离）；
+- `tts_jobs` 纯增量迁移（ADD COLUMN×7 + 2 unique index + trigger 组；零 rebuild；legacy 行 WHEN 隔离）；
+  **R8-G row-state result invariant**（INSERT+全 UPDATE：succeeded⇔result_artifact_id；result artifact job/claim 一致）；
+  **R8-I immutable identity seal**（narration_plan_artifact_id/narration_plan_version/payload_json/provider/
+  voice_profile_id/voice_profile_revision_id 创建后不可改；payload_json 与 frozen synthesis payload fingerprint exact 对应）；
   `output_path/duration_ms/audio_sha256/result_json` 降级 legacy 兼容。
 - **unschedulable reuse reservation 算法**（三阶段 + fenced finalize，设计文档 §3）；
   **validating 阶段取消语义**（§4：零 subscriber → cancelled 无 job；cancel 优先单裁决）；
@@ -155,10 +178,12 @@ cutover crash 矩阵 CC-1…CC-6（设计文档 §10.4）；cutover 全等性；
 - **原子成功终局 6 步顺序**（§8.2；任一失败整事务回滚，attempt 恢复 file_durable；无部分成功；cancel 优先）；
 - fingerprint 三分离实现。
 
-**tests**（设计文档 §10.1/§10.3/§10.5 落地）：VF-1…5（fencing/接管/续租/三方竞争）；reuse reservation 竞态
+**tests**（设计文档 §10.1/§10.3/§10.5/§10.7 落地）：VF-1…5（fencing/接管/续租/三方竞争）；reuse reservation 竞态
 （Scheduler provider=0；usable 零新 job；damaged 恰好一个 queued）；fan-in/fan-out/单请求取消矩阵；
 PC-1…7（provenance ABORT 矩阵）；phase recovery 矩阵；原子终局（五者一致 + 回滚恢复 file_durable）；
-attempt trigger（immutable/phase 禁倒退/终态无出边）；非法状态组合 CHECK；fingerprint 矩阵；零真实 provider。
+attempt trigger（immutable/phase 禁倒退/终态无出边）；非法状态组合 CHECK；fingerprint 矩阵；零真实 provider；
+**R8 新增**：CJ-09…13（exact-one atomic dispatch）、EN-01…05（envelope waiting link closure）、
+JR-01…05（job row-state result invariant）。
 
 **not included**：preview/selection（C.3）、manifest/master（C.4）、subtitle timing v2（C.5）。
 
@@ -215,10 +240,10 @@ failed-retry/cost-usage）；**production acceptance gate**：人工验收命令
 | C.4 | ✓ | ✓ | ✓ | ✓ | ✗（master 显式构建） | ✗ |
 | C.5 | ✓ | ✓ | ✓ | ✓ | ✗ | 仅人工验收命令 |
 
-## 依赖顺序（R7 DAG，取代 R5 的 1A→1B→1C 链）
+## 依赖顺序（R8 DAG，取代 R5 的 1A→1B→1C 链）
 
 ```text
-R7 PASS
+R8 PASS
 ├─ 1A ∥ 1C            （可并行开发：不同 worktree/local branch）
 └─ 1B-prep            （adapter parser/reloader 测试骨架可并行准备）
 
@@ -233,7 +258,7 @@ C.2 PASS
 ```
 
 **建议首先实现**：**TTS-C.1A**（零音频风险、解锁 materialization、为 1B cutover 提供 DB 基础）——但 1A 未开始，
-须待本 R7 独立 Review PASS。
+须待本 R8 独立 Review PASS。
 
 ## 并行开发矩阵（冻结：并行开发，串行集成/Review/部署）
 
@@ -265,4 +290,4 @@ C.2 PASS
 
 > 注：materialization schema、request envelope、validation/cutover fencing、crash-safe cutover 协议、
 > relational provenance 闭包、attempt/materialization/cutover 证据不可变与全部状态机已在
-> `docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md`（R7）以可执行 contract 冻结，不再属于"进入 1A 后再决定"项。
+> `docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md`（R8）以可执行 contract 冻结，不再属于"进入 1A 后再决定"项。

@@ -1,66 +1,79 @@
-# TTS-C Incremental Narration 架构设计（TTS-C.0.R7 修订，只读审计，未实现）
+# TTS-C Incremental Narration 架构设计（TTS-C.0.R8 修订，只读审计，未实现）
 
-> 状态：**TTS-C.0.R7 architecture closure completed；pending independent Review PASS；
+> 状态：**TTS-C.0.R8 architecture closure completed；pending independent Review PASS；
 > TTS-C runtime implementation not started；TTS-C.1A not started**。
-> 本文档是只读架构审计产物（R7 修订）：不修改 runtime code / schema / config / migration / compose。
+> 本文档是只读架构审计产物（R8 修订）：不修改 runtime code / schema / config / migration / compose。
 > 运行时真相以真实代码为准（审计基线 m7 @ `7f86322`；TTS-A final code `1460efd…`、TTS-B final code `86f7f52…` 均已 FROZEN）。
-> R7 关闭 ChatGPT 独立 Review 对 R6 的 FAIL 发现（全部 docs-only，零 runtime/零 migration/零 schema 变更）：
-> ① **global registry publication journal**（新增第 10 张权威表 `voice_registry_publications`，不再以"保持 9 表"为目标：
-> generation/subject_type/subject_id/stable+candidate registry SHA/candidate manifest（canonical 不可变完整描述每 key 的
-> emitted source、source row id、reference SHA、adapter key）/manifest SHA/publisher_schema_version/status/owner/lease/attempt/
-> file_durable_at/activation_requested_at/activated_at/failed_at/error 全列；8 态（building/candidate_persisted/file_durable/
-> activation_pending/active/failed/indeterminate/cancelled）；**DB 级 global active single-flight**（`uq_voice_registry_publication_active
-> ON ((1)) WHERE status IN (building,candidate_persisted,file_durable,activation_pending,indeterminate)`）；
-> T1 前先取得 global publication reservation，T1-T5 共用同一 global owner/token/lease/attempt，不是只在 T2 文件写阶段取进程锁）；
-> ② **projection 状态与 publication attempt 分离**（`voice_materializations` 只记录 immutable canonical file projection：
-> file_ready_unpublished/published_usable/failed/indeterminate；**删除 registry_pending**——消除 R6 的
-> registry_pending→failed + registry proof write-once 导致的 repair 不可达矛盾；成功 T5 单事务：
-> publication→active + projection→published_usable + projection.published_by_publication_id=publication.id +
-> legacy entry→mapped_active（如 subject 是 legacy cutover）；失败/indeterminate 的 attempt 保留为 immutable evidence，
-> projection 通过**新的 publication row** 重试，旧 evidence 不覆盖不清除）；
-> ③ **global cutover 一次只处理一个 frozen subject**（subject_type=materialization_publish|legacy_cutover|registry_rebuild +
-> subject_id 冻结；一个 attempt 只改变一个 canonical voice key，其余 key 由 stable view 确定性复制；
-> `legacy_adapter_voice_entries.mapping_pending` 必须引用 exact active `voice_registry_publication.id`；
-> 一个 active publication 最多一个 mapping_pending subject；candidate registry 全局激活在 publication+subject legacy row+
-> projection 同一 T5 事务完成；adapter active SHA==candidate SHA 但 DB 未 T5 → 按 publication journal 完成整个 subject
-> 的 reconciliation，不得只凭任意 per-key row 猜测）；
-> ④ **无环 claim/job 模型**（删除 `tts_synthesis_claims.job_id`；唯一权威 relation = `tts_jobs.claim_id` +
-> `uq_tts_jobs_claim UNIQUE(claim_id) WHERE claim_id IS NOT NULL`；claim 的 job = `SELECT * FROM tts_jobs WHERE claim_id=?`；
-> validating_reuse→无 job、generation_pending/running→恰好一个 job（job INSERT 要求 claim 已 generation_pending/running，
-> claim→running 要求 job 已存在）、reuse succeeded→无 job、一个 claim 永远不能有两个 job）；
-> ⑤ **tts_jobs result 与 TTS-C 生命周期封存**（result_artifact_id 首次非 NULL 后不可改；succeeded 必须 result 非 NULL；
-> queued/running/failed/cancelled/indeterminate 不得伪装成功 result；result artifact 的 job_id/claim_id 必须等于当前 job；
-> `trg_tts_jobs_delete_tts_c` 禁删 TTS-C 行（legacy 行兼容保留）；TTS-C job INSERT 初始状态只能 queued）；
-> ⑥ **request → claim/job subscriber identity closure**（`tts_audio_requests.unit_id` NOT NULL；INSERT+UPDATE trigger 强制
-> request.claim_id 的 claim 同 project/unit/final fingerprint/variant；request.job_id 非 NULL 时 job.claim_id==request.claim_id
-> 且 project/unit/exact/synthesis/final fingerprint/variant 全等；result artifact identity trigger 同时覆盖 INSERT 与
-> UPDATE OF result_artifact_id，不得只覆盖 UPDATE）；
-> ⑦ **envelope initializing 状态**（`tts_audio_requests` 与 `voice_materialization_requests` 增加 `initializing`：
-> 只占用 (project_id, request_id)，claim/job/result/materialization 链接必须 NULL，不计 active subscriber，Scheduler 不可见；
-> initializing→waiting 必须在同一事务完成 exact claim/job identity link；crash 前回滚不产生 committed initializing；
-> 推荐不允许长期 committed initializing）；
-> ⑧ **所有新表冻结 initial INSERT state**（8 表 BEFORE INSERT trigger：request→initializing、claim→validating_reuse、
-> attempt→created、vmr→initializing、vmjob→validating_existing、vmat→file_ready_unpublished、lve→unmapped、
-> vrp→building；禁止直接 INSERT terminal state，从根源关闭 INSERT 绕过）；
-> ⑨ **TTS job exact voice/provider identity**（新增 `tts_jobs.voice_profile_revision_id`（exact revision ID，legacy 行 NULL 兼容）；
-> TTS-C job 必须 profile/revision exact pair + provider==revision.provider；attempt.provider==job.provider；
-> artifact voice_profile/revision/provider 与 job/attempt/Voice Revision 逐项一致）；
+> R7 独立 Review = **FAIL**；R8 关闭其对 R7 的 FAIL 发现（全部 docs-only，零 runtime/零 migration/零 schema 变更）：
+> ① **retryable legacy publication link**（`legacy_adapter_voice_entries.pending_publication_id` 不再是严格 write-once：
+> `mapped_verified → mapping_pending`（T1）允许 NULL→publication.id 首次写入；`mapping_pending → mapped_verified`（rollback）
+> **仅当** referenced publication 为 `legacy_cutover` + subject_id=本 entry + status IN (failed,cancelled) 才允许清 NULL
+> 并同时清理 candidate projection 字段；重试允许从 NULL 写入**新的** publication.id；id→其他 id 非法替换一律 ABORT；
+> 旧 publication evidence 由 `voice_registry_publications` 永久保存，legacy 行不保留已失败的 pending ID）；
+> ② **single-source candidate evidence**（从 `legacy_adapter_voice_entries` **删除** `candidate_registry_generation /
+> candidate_registry_sha256 / candidate_created_at` 三个权威重复字段——`voice_registry_publications` 是唯一全局 journal，
+> legacy pending/current evidence 统一经 `pending_publication_id → voice_registry_publications` 取得；仅保留
+> `candidate_source_selector='tts_a'` 与 `candidate_activated_at` 两个过程标记，不再复制 publication generation/SHA，
+> 消除跨表同步依赖）；
+> ③ **legacy cutover projection 语义唯一化**（冻结为**单一模型**：`legacy_cutover` publication 本身同时发布目标
+> projection——`mapped_verified` 前置要求 mapped materialization = `file_ready_unpublished`；legacy_cutover T5 原子完成
+> publication→active + mapped projection→published_usable + legacy entry→mapped_active；`trg_vmat_publish` 同时接受
+> `materialization_publish`（subject_id=materialization.id）与 `legacy_cutover`（subject_id=legacy entry.id、
+> legacy.mapped_voice_materialization_id=materialization.id）两种 subject；**废弃**"projection 必须预先 published_usable"
+> 的混用模型）；
+> ④ **atomic publication activation command**（新增第 11 张权威表 `voice_registry_publication_activations`
+> （append-only command）：activation = **一条 INSERT statement**，AFTER INSERT trigger 在同一 SQLite statement 内
+> 顺序完成 fenced 验证（owner/token/attempt/lease/observed SHA）→ 按 subject_type 验证 exact subject → 更新 projection →
+> 更新 legacy entry（如适用）→ 最后 publication→active；任一步 RAISE(ABORT) 则整条 statement 回滚，**不存在可独立提交的
+> publication active 状态**（`activation_pending→active` 与 `indeterminate→active` 必须存在匹配 activation command 行，
+> 直接 UPDATE 一律 ABORT）；publication INSERT 增加 subject 验证：materialization_publish → file_ready_unpublished
+> materialization；legacy_cutover → mapped_verified legacy entry 且 mapped materialization=file_ready_unpublished；
+> registry_rebuild → subject_id 必须严格 ='global'）；
+> ⑤ **indeterminate evidence closure**（`voice_registry_publications` 新增 `indeterminate_from_status`：进入
+> indeterminate 时必须等于来源状态且 write-once；indeterminate 期间 candidate/manifest/file_durable_at/
+> activation_requested_at 全部冻结（**禁止事后首次补写**）；`indeterminate → active` 仅允许
+> `indeterminate_from_status='activation_pending'` 且 candidate 证据已完整存在，只能填 confirmed `activated_at`，
+> 且同样必须经 activation command；building/candidate 阶段进入的 indeterminate **不得 resolve active**，只能
+> failed/cancelled）；
+> ⑥ **exact-one claim dispatch**（新增第 12 张权威表 `tts_claim_generation_dispatches`（append-only command，
+> `UNIQUE(claim_id)`）：unusable finalize = **一条 INSERT statement**，AFTER INSERT trigger 同一 statement 内
+> fenced 验证 validating_reuse owner/token/attempt/lease/candidate + 验证 active subscriber>0 + INSERT 恰好一个
+> queued job + claim→generation_pending 清 validation owner/candidate；`validating_reuse→generation_pending`
+> 无 dispatch command 行一律 ABORT（只改 claim 后 COMMIT 结构上不可能）；TTS-C job INSERT 必须匹配 dispatch
+> command（claim_id+job_id）；第二次 dispatch 同 claim → UNIQUE ABORT。冻结不变量：validating_reuse→0 job、
+> generation_pending→恰好 1 job、running→恰好 1 job、reuse succeeded→0 job、generated 终态→恰好 1 job）；
+> ⑦ **TTS job result row-state invariant**（替换仅监听 `UPDATE OF status` 的旧 trigger：BEFORE INSERT + BEFORE UPDATE
+> 全列 invariant——`claim_id IS NOT NULL` 时 `status='succeeded' ⇔ result_artifact_id IS NOT NULL`、
+> `status!='succeeded' ⇒ result_artifact_id IS NULL`；running/queued/failed 状态单独 SET result_artifact_id 一律
+> ABORT；result artifact 的 job_id/claim_id 必须等于当前 job 的校验保留）；
+> ⑧ **envelope dependency closure**（`tts_audio_requests`：`initializing → waiting` 必须 `claim_id` 非 NULL 且 exact
+> claim identity trigger 通过（job_id 可 NULL，validating/reuse 阶段）；CHECK 强化 waiting/running/indeterminate ⇒
+> claim_id NOT NULL。`voice_materialization_requests`：`initializing → waiting` 必须 `job_id` 非 NULL 且 job
+> profile/revision identity trigger 通过；CHECK 强化 waiting/running/indeterminate ⇒ job_id NOT NULL。
+> 不再允许无 claim/job 的 committed waiting 行）；
+> ⑨ **journal 与 job identity seal**（`voice_registry_publications.generation` 增加 **UNIQUE**——单调分配必须在
+> `BEGIN IMMEDIATE` 下读取 max(generation)+1；`tts_jobs` TTS-C 行 immutable 字段补充 `narration_plan_artifact_id /
+> narration_plan_version / payload_json / provider / voice_profile_id`（`voice_profile_revision_id` 已有 write-once）；
+> `payload_json` 必须在 job 创建时与 frozen `synthesis_payload_fingerprint` exact 对应（应用层同事务验证，SQL 不可计算），
+> 创建后不可改）；
 > ⑩ **可执行 SQLite contract 实证**（§2 全部为可直接转 migration 的真实 SQL，临时目录 sqlite3 3.45.1 实证：
-> schema apply / foreign_key_check（空）/ integrity_check（ok）/ happy path 全链（synthesis+reuse+materialization+
-> publication journal+cutover）/ crash-retry 闭环（failed publication→新 attempt→成功→A/B evidence 保留）/
-> **139 项 mutation 验证：R7 新增 39 项（RP-01…12/CJ-01…08/SL-01…08/VI-01…04）+ R6 回归 100 项（含 INIT 1-6），全部按预期
-> ABORT 或 fencing changes=0，FAIL=0**；临时 SQL/DB 不入仓库）。
-> R5/R6 的 validation finalization fencing、可执行 contract、relational provenance 闭包、attempt 证据不可变、
-> cutover journal、lease-expiry fencing 由 R7 继承并强化；R6 被独立 Review 判 FAIL 的 9 项阻断全部关闭。
+> schema apply / foreign_key_check（空）/ integrity_check（ok）/ happy path 全链 / crash-retry 闭环 /
+> legacy failed→rollback→新 publication→成功 / materialization atomic activation / legacy atomic activation /
+> claim atomic dispatch / mutation 验证全量——逐项计数见 §10.5；临时 SQL/DB 不入仓库）。
+> R5/R6/R7 的 validation finalization fencing、可执行 contract、relational provenance 闭包、attempt 证据不可变、
+> cutover journal、lease-expiry fencing、global publication journal、无环 claim/job 关系由 R8 继承并强化；
+> R7 被独立 Review 判 FAIL 的 9 项阻断（A-I）全部关闭。
 
 ---
 
 ## 0. 本文档是唯一权威 schema contract（R7 起完全可执行）
 
-最终表 10 张：`tts_audio_requests`、`tts_synthesis_claims`、`tts_jobs`（现有表纯增量迁移）、
+最终表 12 张：`tts_audio_requests`、`tts_synthesis_claims`、`tts_jobs`（现有表纯增量迁移）、
 `tts_generation_attempts`、`sentence_audio_artifacts`、`voice_materialization_requests`、
 `voice_materialization_jobs`、`voice_materializations`、`legacy_adapter_voice_entries`、
-**`voice_registry_publications`（R7 新增第 10 表：global registry publication journal）**。
+`voice_registry_publications`（global registry publication journal）、
+**`voice_registry_publication_activations`（R8 新增第 11 表：append-only atomic activation command）**、
+**`tts_claim_generation_dispatches`（R8 新增第 12 表：append-only exact-one claim dispatch command）**。
 §2 每个表给出**可直接转成 migration 的完整 SQL**（实施者逐字转写，不得跨历史 commit 拼接、不得改写约束语义）。
 
 **SQLite 执行规则（实证于 sqlite3 3.45.1，临时目录验证，不入仓库）**：
@@ -111,11 +124,12 @@
 
 ---
 
-## 2. 最终 schema（10 表，可执行 contract）
+## 2. 最终 schema（12 表，可执行 contract）
 
 > 以下 SQL 已在临时目录（sqlite3 3.45.1）完整套用 + `PRAGMA foreign_key_check` / `integrity_check` 通过，
-> 并经 **139 项 mutation 验证实证**（R7 新增 39 项 + R6 回归 100 项：每项触发预期 CHECK/trigger/FK/UNIQUE 失败或
-> fencing `changes=0`，FAIL=0）+ happy path 全链 + crash-retry 闭环——详见 §10.5。验证副本与临时 DB 不入仓库。
+> 并经 mutation 验证实证（R8 新增矩阵 + R5/R6/R7 全量回归：每项触发预期 CHECK/trigger/FK/UNIQUE 失败或
+> fencing `changes=0`，逐项计数见 §10.5）+ happy path 全链 + crash-retry 闭环 + legacy rollback→retry 闭环 +
+> materialization/legacy atomic activation + claim atomic dispatch——详见 §10.5。验证副本与临时 DB 不入仓库。
 > §2 代码块的可执行语句已从本文档提取重建临时 DB 并重跑全部验证（与临时 contract 语句级一致，注释不计）。
 
 ### 2.0 `tts_jobs` 迁移（纯 ADD COLUMN + INDEX + TRIGGER；零 rebuild）
@@ -147,6 +161,9 @@ CREATE UNIQUE INDEX uq_tts_jobs_claim ON tts_jobs (claim_id) WHERE claim_id IS N
 
 -- 3) TTS-C 不可变字段 trigger（WHEN 守卫含 OLD 侧：legacy 行双向 NULL 不受影响；
 --    TTS-C 行 claim_id 写后不可 NULL、不可换、不可从 legacy 反向获得；身份字段不可改；
+--    R8-I 补充 narration_plan_artifact_id / narration_plan_version / payload_json / provider /
+--    voice_profile_id 全不可改（payload_json 创建时必须与 frozen synthesis_payload_fingerprint
+--    exact 对应——应用层同事务验证，SQL 不可计算）；
 --    voice_profile_revision_id 与 result_artifact_id 首次非 NULL 后不可改；succeeded/failed/cancelled/indeterminate 终态冻结）
 CREATE TRIGGER trg_tts_jobs_immutable BEFORE UPDATE ON tts_jobs
 WHEN (OLD.claim_id IS NOT NULL OR NEW.claim_id IS NOT NULL) AND (
@@ -156,6 +173,11 @@ WHEN (OLD.claim_id IS NOT NULL OR NEW.claim_id IS NOT NULL) AND (
   OR OLD.synthesis_payload_fingerprint IS NOT NEW.synthesis_payload_fingerprint
   OR OLD.final_tts_input_fingerprint IS NOT NEW.final_tts_input_fingerprint
   OR OLD.generation_variant_id IS NOT NEW.generation_variant_id
+  OR OLD.narration_plan_artifact_id IS NOT NEW.narration_plan_artifact_id
+  OR OLD.narration_plan_version IS NOT NEW.narration_plan_version
+  OR OLD.payload_json IS NOT NEW.payload_json
+  OR OLD.provider IS NOT NEW.provider
+  OR OLD.voice_profile_id IS NOT NEW.voice_profile_id
   OR (OLD.voice_profile_revision_id IS NOT NULL AND NEW.voice_profile_revision_id IS NOT OLD.voice_profile_revision_id)
   OR (OLD.result_artifact_id IS NOT NULL AND NEW.result_artifact_id IS NOT OLD.result_artifact_id)
   OR (OLD.status IN ('succeeded','failed','cancelled','indeterminate') AND (
@@ -173,8 +195,9 @@ WHEN (OLD.claim_id IS NOT NULL OR NEW.claim_id IS NOT NULL)
   OR (OLD.status='indeterminate' AND NEW.status IN ('succeeded','failed','cancelled')))
 BEGIN SELECT RAISE(ABORT,'tts_jobs invalid transition'); END;
 
--- 5) TTS-C 行 INSERT/UPDATE validation（R6-A 继承 + R7-CJ-01/H/I：
---    初始状态只能 queued；claim 必须已 generation_pending/running（validating_reuse 下插 job 直接拒绝）；
+-- 5) TTS-C 行 INSERT/UPDATE validation（R6-A 继承 + R7-CJ-01/H/I + R8-F：
+--    初始状态只能 queued；TTS-C job 必须由 matching dispatch command 创建
+--    （tts_claim_generation_dispatches.claim_id+job_id 精确匹配——应用直接 INSERT 一律 ABORT）；
 --    voice_profile_id/revision_id exact pair 且 provider == revision.provider；
 --    身份字段 NULL 一律 ABORT——不得用 NULL 绕过 uq_tts_jobs_active_synthesis）
 CREATE TRIGGER trg_tts_jobs_claim_validation BEFORE INSERT ON tts_jobs
@@ -197,10 +220,9 @@ BEGIN
                         AND c.generation_variant_id=NEW.generation_variant_id);
   SELECT RAISE(ABORT,'tts_jobs initial state queued required')
     WHERE NEW.status IS NOT 'queued';
-  SELECT RAISE(ABORT,'tts_jobs claim not in generation state')
-    WHERE NOT EXISTS (SELECT 1 FROM tts_synthesis_claims c
-                      WHERE c.id=NEW.claim_id
-                        AND c.status IN ('generation_pending','running'));
+  SELECT RAISE(ABORT,'tts_jobs dispatch command required')
+    WHERE NOT EXISTS (SELECT 1 FROM tts_claim_generation_dispatches d
+                      WHERE d.claim_id=NEW.claim_id AND d.job_id=NEW.id);
   SELECT RAISE(ABORT,'tts_jobs voice revision pair mismatch')
     WHERE NOT EXISTS (SELECT 1 FROM voice_profile_revisions r
                       WHERE r.id=NEW.voice_profile_revision_id
@@ -227,8 +249,21 @@ BEGIN
                         AND c.generation_variant_id=NEW.generation_variant_id);
 END;
 
--- 6) R7-E：TTS-C job result 封存（succeeded 必须 result 非 NULL；queued/running/failed/cancelled/indeterminate
---    不得伪装成功 result；result artifact 的 job_id/claim_id 必须等于当前 job）
+-- 6) R8-G：TTS-C job result row-state invariant（对 INSERT 与所有 UPDATE 生效，不只监听 UPDATE OF status：
+--    claim_id IS NOT NULL 时 status='succeeded' ⇔ result_artifact_id IS NOT NULL；
+--    status!='succeeded' ⇒ result_artifact_id IS NULL；
+--    running/queued/failed 状态单独 SET result_artifact_id 一律 ABORT）
+CREATE TRIGGER trg_tts_jobs_result_invariant BEFORE INSERT ON tts_jobs
+WHEN NEW.claim_id IS NOT NULL AND (
+     (NEW.status='succeeded' AND NEW.result_artifact_id IS NULL)
+  OR (NEW.status IS NOT 'succeeded' AND NEW.result_artifact_id IS NOT NULL))
+BEGIN SELECT RAISE(ABORT,'tts_jobs result status invariant violated'); END;
+CREATE TRIGGER trg_tts_jobs_result_invariant_update BEFORE UPDATE ON tts_jobs
+WHEN NEW.claim_id IS NOT NULL AND (
+     (NEW.status='succeeded' AND NEW.result_artifact_id IS NULL)
+  OR (NEW.status IS NOT 'succeeded' AND NEW.result_artifact_id IS NOT NULL))
+BEGIN SELECT RAISE(ABORT,'tts_jobs result status invariant violated'); END;
+-- R7-E 保留：result artifact 的 job_id/claim_id 必须等于当前 job
 CREATE TRIGGER trg_tts_jobs_result BEFORE UPDATE OF result_artifact_id ON tts_jobs
 WHEN NEW.claim_id IS NOT NULL AND NEW.result_artifact_id IS NOT NULL
 BEGIN
@@ -238,14 +273,6 @@ BEGIN
                         AND a.job_id=NEW.id
                         AND a.claim_id=NEW.claim_id);
 END;
-CREATE TRIGGER trg_tts_jobs_result_state BEFORE UPDATE OF status ON tts_jobs
-WHEN NEW.claim_id IS NOT NULL AND NEW.status='succeeded'
-  AND NEW.result_artifact_id IS NULL
-BEGIN SELECT RAISE(ABORT,'tts_jobs succeeded requires result artifact'); END;
-CREATE TRIGGER trg_tts_jobs_result_forbid BEFORE UPDATE OF status ON tts_jobs
-WHEN NEW.claim_id IS NOT NULL AND NEW.status IN ('queued','running','failed','cancelled','indeterminate')
-  AND NEW.result_artifact_id IS NOT NULL
-BEGIN SELECT RAISE(ABORT,'tts_jobs non-success status must not carry result artifact'); END;
 
 -- 7) R7-E：TTS-C job DELETE 禁（legacy 行不受影响）
 CREATE TRIGGER trg_tts_jobs_delete_tts_c BEFORE DELETE ON tts_jobs
@@ -257,18 +284,24 @@ BEGIN SELECT RAISE(ABORT,'tts_jobs tts-c delete forbidden'); END;
 - **TTS-C 行语义（R6-A 继承）**：`claim_id` 在 INSERT 时写入后**永不可变**（不可 NULL、不可换、legacy 行不可凭空获得）；
   `originating_request_id / exact_source_fingerprint / synthesis_payload_fingerprint / final_tts_input_fingerprint /
   generation_variant_id` 写后不可改；`project_id / unit_id / narration_plan_artifact_id` 必须完整（身份字段 NULL → ABORT）。
-- **R7-D 无环 claim/job 模型**：**`tts_synthesis_claims` 不再有 `job_id` 列**；唯一权威 relation =
+- **R7-D 无环 claim/job 模型 + R8-F exact-one dispatch**：**`tts_synthesis_claims` 不再有 `job_id` 列**；唯一权威 relation =
   `tts_jobs.claim_id`（`uq_tts_jobs_claim` 保证一个 claim 最多一个 job）；
   claim 的 job = `SELECT * FROM tts_jobs WHERE claim_id = claim.id`（commit 后恒一致，无"第二边"可忘写）。
-  保证：`validating_reuse` claim → 无 job（job INSERT 要求 claim 已 generation_pending/running）；
-  `generation_pending/running` generated claim → 恰好一个 job（同上 + uq；claim→running 时 job 必须已存在）；
-  reuse `succeeded` claim → 无 job（succeeded 不在 job INSERT 允许状态）；一个 claim 永远不能有两个 job。
+  保证：`validating_reuse` claim → 无 job（TTS-C job INSERT 必须匹配 `tts_claim_generation_dispatches`
+  command 行（claim_id+job_id），应用直接 INSERT 一律 ABORT）；`generation_pending/running` generated claim →
+  恰好一个 job（dispatch trigger 同一 statement 内建 job + 转 claim；claim→running 时 job 必须已存在；
+  同 claim 第二次 dispatch → `UNIQUE(claim_id)` ABORT）；reuse `succeeded` claim → 无 job；
+  一个 claim 永远不能有两个 job；generated 终态 claim 恒有恰好一个 job（DELETE 禁）。
 - **R7-I exact voice/provider identity**：TTS-C job 必须 `voice_profile_revision_id`（exact revision ID，legacy 行
   NULL 兼容）；`voice_profile_id/revision_id` exact pair 且 `provider == revision.provider`（INSERT pair trigger 强制）；
   voice identity 创建后不可改；`attempt.provider == job.provider`（§2.3）；`artifact` voice/provider 与
   job/attempt/revision 逐项一致（§2.4）。
-- **R7-E result 封存**：`result_artifact_id` 首次非 NULL 后不可改；`succeeded` 必须带 result；非成功状态不得携带 result；
-  result artifact 必须 `job_id == job.id AND claim_id == job.claim_id`。
+- **R8-I job identity seal**：TTS-C 行 `narration_plan_artifact_id / narration_plan_version / payload_json /
+  provider / voice_profile_id` 创建后全不可改（immutable trigger）；`payload_json` 必须在创建时与 frozen
+  `synthesis_payload_fingerprint` exact 对应（应用层同事务重算比较，SQL 不可表达；创建后两者均不可改）。
+- **R8-G result row-state invariant**：`result_artifact_id` 首次非 NULL 后不可改；**row-state invariant 对 INSERT 与
+  所有 UPDATE 生效**（不只 `UPDATE OF status`）：`succeeded ⇔ result IS NOT NULL`、非 succeeded ⇒ result IS NULL
+  （running/queued/failed 单独写 result 一律 ABORT）；result artifact 必须 `job_id == job.id AND claim_id == job.claim_id`。
 - Scheduler 只 claim `status='queued'` 且 `claim.status IN ('generation_pending','running')` 的 job；**`validating_reuse` 阶段无 queued job**。
 - 依赖顺序说明：`tts_jobs` 的 `claim_id`/`result_artifact_id` FK 指向后建表——SQLite 允许前向 FK 引用（运行时解析），
   但 migration 应先建新表再执行 §2.0（或同 migration 内先 CREATE 后 ALTER）。
@@ -297,7 +330,8 @@ CREATE TABLE tts_audio_requests (
   UNIQUE (project_id, request_id),
   CHECK (
        (status='initializing' AND claim_id IS NULL AND job_id IS NULL AND result_artifact_id IS NULL)
-    OR (status IN ('waiting','running','indeterminate') AND result_artifact_id IS NULL)
+    OR (status IN ('waiting','running','indeterminate')
+        AND result_artifact_id IS NULL AND claim_id IS NOT NULL)
     OR (status='succeeded' AND result_artifact_id IS NOT NULL)
     OR (status IN ('failed','cancelled') AND result_artifact_id IS NULL))
 );
@@ -328,6 +362,11 @@ WHEN OLD.status IS NOT NEW.status AND NOT (
   OR (OLD.status='running' AND NEW.status IN ('succeeded','failed','cancelled','indeterminate'))
   OR (OLD.status='indeterminate' AND NEW.status IN ('succeeded','failed','cancelled')))
 BEGIN SELECT RAISE(ABORT,'tts_audio_requests invalid transition'); END;
+-- R8-H：initializing → waiting 必须已链接 exact claim（job_id 可 NULL：validating/reuse 阶段尚无 job；
+-- claim identity 由 trg_tar_claim_link_update 同事务强制；无 claim 的 committed waiting 行结构上不可能）
+CREATE TRIGGER trg_tar_waiting_link BEFORE UPDATE OF status ON tts_audio_requests
+WHEN OLD.status='initializing' AND NEW.status='waiting' AND NEW.claim_id IS NULL
+BEGIN SELECT RAISE(ABORT,'tts_audio_requests waiting requires claim link'); END;
 CREATE TRIGGER trg_tar_delete_abort BEFORE DELETE ON tts_audio_requests
 BEGIN SELECT RAISE(ABORT,'tts_audio_requests delete forbidden'); END;
 -- R7-F：claim 链接 identity closure（INSERT + UPDATE；request 的 project/unit/final fingerprint/variant
@@ -423,11 +462,13 @@ BEGIN
 END;
 ```
 
-- **initializing 语义（R7-G）**：`initializing` 只负责占用 `(project_id, request_id)`（UNIQUE）；`claim_id/job_id/
+- **initializing 语义（R7-G + R8-H）**：`initializing` 只负责占用 `(project_id, request_id)`（UNIQUE）；`claim_id/job_id/
   result_artifact_id` 必须全 NULL（CHECK）；**不计入 active subscriber**（active subscriber 只统计
   `status IN ('waiting','running')`）；Scheduler 不可见；`initializing → waiting` 必须在同一事务内完成 exact
   claim/job identity link（Phase 1 单事务：INSERT initializing → 创建/读取 claim/job → 链接 exact identity →
-  initializing→waiting → COMMIT）；crash 前 transaction 回滚不产生 committed initializing；
+  initializing→waiting → COMMIT）——**R8-H：`waiting` 必须 `claim_id` 非 NULL（`trg_tar_waiting_link` + CHECK
+  双重强制；job_id 可 NULL，validating/reuse 阶段尚无 job），无 claim 的 committed waiting 行结构上不可能**；
+  crash 前 transaction 回滚不产生 committed initializing；
   **推荐不允许长期 committed initializing**（异常清理走 `initializing → cancelled/failed`）。
 - `succeeded` 必须带 `result_artifact_id`；`failed/cancelled` **不得伪装成功 result**（CHECK 强制 NULL）。
 - **终态链接封存（R6-D 继承）**：`claim_id` / `job_id` / `result_artifact_id` 各自**首次非 NULL 后不可改**；`succeeded` 后
@@ -499,6 +540,12 @@ CREATE TRIGGER trg_tsc_running_job BEFORE UPDATE OF status ON tts_synthesis_clai
 WHEN NEW.status='running' AND OLD.status IS NOT NEW.status
   AND NOT EXISTS (SELECT 1 FROM tts_jobs j WHERE j.claim_id=NEW.id)
 BEGIN SELECT RAISE(ABORT,'tts_synthesis_claims running requires exactly one job'); END;
+-- R8-F/CJ-09：validating_reuse→generation_pending 必须由 dispatch command 驱动
+-- （dispatch trigger 在同一 statement 内先建 job 再转 claim；只改 claim 后 COMMIT 结构上不可能）
+CREATE TRIGGER trg_tsc_generation_pending_dispatch BEFORE UPDATE OF status ON tts_synthesis_claims
+WHEN OLD.status='validating_reuse' AND NEW.status='generation_pending'
+  AND NOT EXISTS (SELECT 1 FROM tts_claim_generation_dispatches d WHERE d.claim_id=NEW.id)
+BEGIN SELECT RAISE(ABORT,'tts_synthesis_claims generation_pending requires dispatch command'); END;
 CREATE TRIGGER trg_tsc_immutable BEFORE UPDATE ON tts_synthesis_claims
 WHEN OLD.project_id IS NOT NEW.project_id OR OLD.unit_id IS NOT NEW.unit_id
   OR OLD.final_tts_input_fingerprint IS NOT NEW.final_tts_input_fingerprint
@@ -544,15 +591,102 @@ END;
   `generation_pending → running | cancelled | failed`（preflight/job 校验失败 → failed；**不允许 indeterminate**——尚无执行在飞）；
   `running → succeeded | failed | cancelled | indeterminate`；
   `indeterminate → succeeded | failed | cancelled`（显式 resolve，不回 generation_pending/running）。
-- **R7-D 无环 job 关系（替代 R6 的 job_id 双向字段）**：本表**没有 `job_id` 列**；claim 的 job 唯一真相 =
-  `SELECT * FROM tts_jobs WHERE claim_id = claim.id`（§2.0 `uq_tts_jobs_claim` 保证最多一个）。
-  不变量：`validating_reuse` → 无 job（§2.0 job INSERT 要求 claim 已 generation_pending/running，实证 CJ-01）；
-  `generation_pending/running` → 恰好一个 job（job INSERT 允许状态 + `running` 必须已有 job（`trg_tsc_running_job`）+
-  uq 最多一个，实证 CJ-03）；reuse `succeeded` → 无 job（实证 CJ-04）；一个 claim 永远不能有两个 job（实证 CJ-02）。
-  **commit 后一致性不再依赖"应用在同一事务记得写第二边"**——单边 relation 恒一致。
+- **R7-D 无环 job 关系 + R8-F exact-one dispatch（替代 R6 的 job_id 双向字段）**：本表**没有 `job_id` 列**；
+  claim 的 job 唯一真相 = `SELECT * FROM tts_jobs WHERE claim_id = claim.id`（§2.0 `uq_tts_jobs_claim` 保证最多一个）。
+  不变量：`validating_reuse` → 无 job（§2.0 job INSERT 必须匹配 dispatch command，实证 CJ-01）；
+  `generation_pending` → 恰好一个 job（唯一入口 = §2.2b dispatch command 同一 statement 建 job + 转 claim；
+  无 dispatch 行直接转 generation_pending 一律 ABORT（`trg_tsc_generation_pending_dispatch`，实证 CJ-09））；
+  `running` → 恰好一个 job（`trg_tsc_running_job` + uq，实证 CJ-03）；
+  reuse `succeeded` → 无 job（实证 CJ-04）；generated `succeeded/failed/cancelled/indeterminate` → 恰好一个 job
+  （job DELETE 禁，实证 CJ-13）；一个 claim 永远不能有两个 job（实证 CJ-02 + CJ-12）。
+  **commit 后一致性不再依赖"应用在同一事务记得写第二边"**——单边 relation 恒一致，dispatch 单一 statement 原子。
 - **终态链接封存（R6-D 继承）**：`result_artifact_id` **首次非 NULL 后不可改**；`succeeded` 后 result/status linkage
   全部不可改（实证 IS-12b）。
 - **authoritative**：active synthesis identity 唯一真相（partial unique 覆盖 validating/generation_pending/running/indeterminate）。
+
+### 2.2b `tts_claim_generation_dispatches`（第 12 表：append-only exact-one dispatch command；R8-F）
+
+> unusable finalize（validating_reuse → generation_pending + 恰好一个 queued job）的**唯一入口**。
+> 应用执行**一条 INSERT statement**；AFTER INSERT trigger 在同一 SQLite statement 内完成全部状态更新——
+> 任一验证失败 RAISE(ABORT) 则整条 statement 回滚：claim 保持 `validating_reuse`、无 job、无 dispatch 行。
+> 不再允许"UPDATE claim → generation_pending"+"INSERT job"两条可独立提交的应用语句作为唯一约束。
+
+```sql
+CREATE TABLE tts_claim_generation_dispatches (
+  id TEXT PRIMARY KEY,
+  claim_id TEXT NOT NULL REFERENCES tts_synthesis_claims(id) ON DELETE RESTRICT,
+  job_id TEXT NOT NULL,
+  validation_owner_token TEXT NOT NULL,
+  validation_attempt INTEGER NOT NULL,
+  candidate_artifact_id TEXT,
+  candidate_artifact_metadata_hash TEXT,
+  project_id TEXT NOT NULL,
+  unit_id TEXT NOT NULL,
+  narration_plan_artifact_id TEXT NOT NULL,
+  narration_plan_version INTEGER NOT NULL,
+  provider TEXT NOT NULL,
+  voice_profile_id TEXT NOT NULL,
+  voice_profile_revision TEXT NOT NULL,
+  voice_profile_revision_id TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  originating_request_id TEXT,
+  exact_source_fingerprint TEXT NOT NULL,
+  synthesis_payload_fingerprint TEXT NOT NULL,
+  final_tts_input_fingerprint TEXT NOT NULL,
+  generation_variant_id TEXT NOT NULL DEFAULT 'default',
+  created_at TEXT NOT NULL,
+  UNIQUE (claim_id)
+);
+-- R8-F：AFTER INSERT 原子 dispatch（同一 SQLite statement 内 1→4 顺序执行；任一步 ABORT 整条回滚）
+CREATE TRIGGER trg_tcgd_dispatch AFTER INSERT ON tts_claim_generation_dispatches
+BEGIN
+  -- 1) fenced 验证 validating_reuse owner/token/attempt/lease/candidate（IS 语义；不命中 = STALE_VALIDATION_OWNER）
+  SELECT RAISE(ABORT,'tts_claim_generation_dispatches fencing mismatch')
+    WHERE NOT EXISTS (SELECT 1 FROM tts_synthesis_claims c
+                      WHERE c.id=NEW.claim_id AND c.status='validating_reuse'
+                        AND c.validation_owner_token=NEW.validation_owner_token
+                        AND c.validation_attempt=NEW.validation_attempt
+                        AND c.validation_lease_expires_at >= NEW.created_at
+                        AND c.candidate_artifact_id IS NEW.candidate_artifact_id
+                        AND c.candidate_artifact_metadata_hash IS NEW.candidate_artifact_metadata_hash);
+  -- 2) active subscriber > 0（zero-subscriber provider job 禁止）
+  SELECT RAISE(ABORT,'tts_claim_generation_dispatches zero subscriber')
+    WHERE NOT EXISTS (SELECT 1 FROM tts_audio_requests r
+                      WHERE r.claim_id=NEW.claim_id AND r.status IN ('waiting','running'));
+  -- 3) INSERT 恰好一个 queued job（全部冻结身份字段来自 command 行；job 侧 trigger 复核
+  --    claim identity / dispatch 匹配 / 初始状态 queued / voice exact pair）
+  INSERT INTO tts_jobs (id, project_id, narration_plan_artifact_id, narration_plan_version, unit_id,
+    provider, voice_profile_id, voice_profile_revision, voice_profile_revision_id, status, payload_json,
+    queued_at, claim_id, originating_request_id, exact_source_fingerprint, synthesis_payload_fingerprint,
+    final_tts_input_fingerprint, generation_variant_id)
+  VALUES (NEW.job_id, NEW.project_id, NEW.narration_plan_artifact_id, NEW.narration_plan_version, NEW.unit_id,
+    NEW.provider, NEW.voice_profile_id, NEW.voice_profile_revision, NEW.voice_profile_revision_id, 'queued',
+    NEW.payload_json, NEW.created_at, NEW.claim_id, NEW.originating_request_id, NEW.exact_source_fingerprint,
+    NEW.synthesis_payload_fingerprint, NEW.final_tts_input_fingerprint, NEW.generation_variant_id);
+  -- 4) claim → generation_pending + 清 validation owner/candidate（trg_tsc_generation_pending_dispatch
+  --    验证本 command 行存在；CHECK 复核 generation_pending 所有权语义）
+  UPDATE tts_synthesis_claims
+  SET status='generation_pending', validation_owner_token=NULL, validation_lease_expires_at=NULL,
+      candidate_artifact_id=NULL, candidate_artifact_metadata_hash=NULL, updated_at=NEW.created_at
+  WHERE id=NEW.claim_id AND status='validating_reuse';
+  SELECT RAISE(ABORT,'tts_claim_generation_dispatches claim update failed')
+    WHERE changes()=0;
+END;
+CREATE TRIGGER trg_tcgd_update_abort BEFORE UPDATE ON tts_claim_generation_dispatches
+BEGIN SELECT RAISE(ABORT,'tts_claim_generation_dispatches is immutable'); END;
+CREATE TRIGGER trg_tcgd_delete_abort BEFORE DELETE ON tts_claim_generation_dispatches
+BEGIN SELECT RAISE(ABORT,'tts_claim_generation_dispatches delete forbidden'); END;
+```
+
+- **exact-one 不变量（R8-F 冻结）**：`validating_reuse` → 0 job；`generation_pending` → 恰好 1 个
+  queued/running/terminal job；`running` → 恰好 1 job；reuse `succeeded` → 0 job；generated
+  `succeeded/failed/cancelled/indeterminate` → 恰好 1 job（job DELETE 禁 + dispatch `UNIQUE(claim_id)`）。
+- **单 commit boundary**：dispatch INSERT statement 成功 ⇔ claim=generation_pending 且恰好一个 queued job 同时
+  持久化；job INSERT 失败（如 job id 冲突/trigger ABORT）→ 整条 statement 回滚，claim 保持 validating_reuse
+  （实证 CJ-11）；同 claim 第二次 dispatch → `UNIQUE(claim_id)` ABORT（实证 CJ-12）。
+- **append-only evidence**：dispatch command 行永久保存（job 身份字段快照 = 创建时冻结值；UPDATE/DELETE 禁）；
+  `payload_json` 与 job `synthesis_payload_fingerprint` 的 exact 对应在 dispatch 前由应用层同事务重算验证
+  （SQL 不可计算 fingerprint）。
 
 ### 2.3 `tts_generation_attempts`（persisted execution phase）
 
@@ -890,8 +1024,9 @@ CREATE TABLE voice_materialization_requests (
   CHECK (
        (status='initializing' AND job_id IS NULL AND materialization_id IS NULL)
     OR (status IN ('succeeded','reused') AND materialization_id IS NOT NULL)
-    OR (status IN ('waiting','running','failed','cancelled','indeterminate')
-        AND materialization_id IS NULL))
+    OR (status IN ('waiting','running','indeterminate')
+        AND materialization_id IS NULL AND job_id IS NOT NULL)
+    OR (status IN ('failed','cancelled') AND materialization_id IS NULL))
 );
 -- R7-H：初始状态 initializing
 CREATE TRIGGER trg_vmr_initial BEFORE INSERT ON voice_materialization_requests
@@ -927,6 +1062,11 @@ WHEN OLD.status IS NOT NEW.status AND NOT (
   OR (OLD.status='running' AND NEW.status IN ('succeeded','failed','cancelled','indeterminate'))
   OR (OLD.status='indeterminate' AND NEW.status IN ('succeeded','failed','cancelled')))
 BEGIN SELECT RAISE(ABORT,'voice_materialization_requests invalid transition'); END;
+-- R8-H：initializing → waiting 必须已链接 exact job（job profile/revision identity 由
+-- trg_vmr_job_link_update 同事务强制；无 job 的 committed waiting 行结构上不可能）
+CREATE TRIGGER trg_vmr_waiting_link BEFORE UPDATE OF status ON voice_materialization_requests
+WHEN OLD.status='initializing' AND NEW.status='waiting' AND NEW.job_id IS NULL
+BEGIN SELECT RAISE(ABORT,'voice_materialization_requests waiting requires job link'); END;
 CREATE TRIGGER trg_vmr_delete_abort BEFORE DELETE ON voice_materialization_requests
 BEGIN SELECT RAISE(ABORT,'voice_materialization_requests delete forbidden'); END;
 -- R6-E：job/materialization 链接 identity 校验（与 request 的 profile/revision 一致；
@@ -970,9 +1110,10 @@ END;
 ```
 
 - **requestId scope = (project_id, request_id)**；同 scope 同 requestId：same exact profile/revision/assignment/source → replay；different identity → 409 `REQUEST_ID_CONFLICT`；
-- **initializing 语义（R7-G，与 §2.1 对称）**：只占用 `(project_id, request_id)`；`job_id/materialization_id` 必须 NULL；
-  不计 subscriber、Scheduler 不可见；`initializing → waiting` 同一事务完成 exact link；crash 前回滚不产生 committed
-  initializing；推荐不允许长期 committed initializing（清理走 `initializing → cancelled/failed`）。
+- **initializing 语义（R7-G + R8-H，与 §2.1 对称）**：只占用 `(project_id, request_id)`；`job_id/materialization_id` 必须 NULL；
+  不计 subscriber、Scheduler 不可见；`initializing → waiting` 同一事务完成 exact link——**R8-H：`waiting` 必须
+  `job_id` 非 NULL（`trg_vmr_waiting_link` + CHECK 双重强制），无 job 的 committed waiting 行结构上不可能**；
+  crash 前回滚不产生 committed initializing；推荐不允许长期 committed initializing（清理走 `initializing → cancelled/failed`）。
 - **终态语义（R5 冻结，禁止混写）**：existing projection 复用 → **`reused`**（`waiting → reused`，无 running）；
   新复制成功 → **`succeeded`**（`waiting/running → succeeded`，共享 job fan-out 时 envelope 可从 waiting 直接 succeeded）；
   两者都必须带 `materialization_id`；`failed/cancelled` 不得带 `materialization_id`（CHECK 强制，不得伪装成功）；
@@ -1162,18 +1303,28 @@ WHEN OLD.status IS NOT NEW.status AND NOT (
   OR (OLD.status='failed'                 AND NEW.status IN ('file_ready_unpublished'))
   OR (OLD.status='indeterminate'          AND NEW.status IN ('file_ready_unpublished','failed')))
 BEGIN SELECT RAISE(ABORT,'voice_materializations invalid transition'); END;
--- R7-B：published_usable 必须由 active publication 激活（subject 匹配 + generation/SHA 一致）
+-- R8-C/D：published_usable 必须经 atomic activation command（`voice_registry_publication_activations`）
+-- 激活——同时接受两种 subject：materialization_publish（subject_id=本 projection）与 legacy_cutover
+--（subject_id=legacy entry.id 且其 mapped_voice_materialization_id=本 projection）；
+-- generation/SHA 与 publication 逐项一致；直接 UPDATE（无 command 行）一律 ABORT
 CREATE TRIGGER trg_vmat_publish BEFORE UPDATE OF status ON voice_materializations
 WHEN NEW.status='published_usable' AND OLD.status IS NOT NEW.status
 BEGIN
   SELECT RAISE(ABORT,'voice_materializations publication link mismatch')
     WHERE NOT EXISTS (SELECT 1 FROM voice_registry_publications p
+                      JOIN voice_registry_publication_activations a
+                        ON a.publication_id=p.id
                       WHERE p.id=NEW.published_by_publication_id
-                        AND p.status='active'
-                        AND p.subject_type='materialization_publish'
-                        AND p.subject_id=NEW.id
+                        AND p.status IN ('activation_pending','indeterminate')
                         AND p.generation=NEW.published_registry_generation
-                        AND p.candidate_registry_sha256=NEW.published_registry_sha256);
+                        AND p.candidate_registry_sha256=NEW.published_registry_sha256
+                        AND a.observed_active_registry_sha256=NEW.published_registry_sha256
+                        AND (
+                             (p.subject_type='materialization_publish' AND p.subject_id=NEW.id)
+                          OR (p.subject_type='legacy_cutover'
+                              AND EXISTS (SELECT 1 FROM legacy_adapter_voice_entries l
+                                          WHERE l.id=p.subject_id
+                                            AND l.mapped_voice_materialization_id=NEW.id))));
 END;
 CREATE TRIGGER trg_vmat_delete_abort BEFORE DELETE ON voice_materializations
 BEGIN SELECT RAISE(ABORT,'voice_materializations delete forbidden'); END;
@@ -1188,11 +1339,17 @@ BEGIN SELECT RAISE(ABORT,'voice_materializations delete forbidden'); END;
   `indeterminate → file_ready_unpublished | failed`（exact 重验后显式 resolve）；
   **`published_usable` 不可逆（无出边）——已发布 projection 不再被重新发布**（新 global generation 中 stable view
   从已发布状态确定性复制，旧 published evidence 保留，实证 RP-08）。
-- **activation evidence 封存（R7-B/R6-F）**：`adapter_compatibility_key` / `published_registry_generation` /
-  `published_registry_sha256` / `published_by_publication_id` 全部 write-once；`published_usable` 后
-  profile/revision/source SHA/path/compatibility/generation/SHA/publication link **全部不可变**（实证 IS-14a/b/c/e）。
-  `published_usable` 必须由 `published_by_publication_id` 指向的 **status='active' 且 subject_type='materialization_publish'
-  + subject_id=本 projection + generation/SHA 一致** 的 publication 激活（`trg_vmat_publish`，实证 RP-06 原子 reconciliation）。
+- **activation evidence 封存（R8-C/D 取代 R7-B/R6-F 的"先 active 后 projection"模型）**：`adapter_compatibility_key` /
+  `published_registry_generation` / `published_registry_sha256` / `published_by_publication_id` 全部 write-once；
+  `published_usable` 后 profile/revision/source SHA/path/compatibility/generation/SHA/publication link
+  **全部不可变**（实证 IS-14a/b/c/e）。
+  `published_usable` 必须经 `published_by_publication_id` 指向的 publication 的 **atomic activation command**
+  （`voice_registry_publication_activations`，§2.10）激活：command trigger 在同一 statement 内先更新 projection、
+  最后才置 publication active——因此 `trg_vmat_publish` 验证的是"存在匹配 activation command 行 + publication 处于
+  activation_pending/indeterminate + generation/SHA 一致 + subject 匹配"；subject 匹配同时接受
+  `materialization_publish`（subject_id=本 projection）与 `legacy_cutover`（subject_id=legacy entry 且其
+  `mapped_voice_materialization_id`=本 projection）两种（R8-C 单一模型：**legacy_cutover publication 本身同时发布
+  目标 projection**，废弃"projection 必须预先 published_usable"的混用模型）；无 command 行的直接 UPDATE 一律 ABORT。
 - **失败重试（R7-B）**：publication attempt 失败/indeterminate → projection 保持 file_ready_unpublished 不卡死 →
   **创建新的 publication row**（新 generation）重试；旧 attempt evidence 不覆盖不清除（实证 RP-01/RP-02 + crash-retry 闭环）。
 - **published_usable 的文件损坏 repair**：不转移状态——新 materialization job 的 validator 比对 DB 证据与文件，
@@ -1219,38 +1376,27 @@ CREATE TABLE legacy_adapter_voice_entries (
   mapped_voice_materialization_id TEXT REFERENCES voice_materializations(id) ON DELETE SET NULL,
   pending_publication_id TEXT REFERENCES voice_registry_publications(id) ON DELETE RESTRICT,
   retired_at TEXT,
-  candidate_registry_generation INTEGER,
-  candidate_registry_sha256 TEXT CHECK (candidate_registry_sha256 IS NULL OR
-    (length(candidate_registry_sha256)=64 AND candidate_registry_sha256 NOT GLOB '*[^0-9a-f]*')),
   candidate_source_selector TEXT CHECK (candidate_source_selector IS NULL OR
     candidate_source_selector IN ('legacy','tts_a')),
-  candidate_created_at TEXT,
   candidate_activated_at TEXT,
   UNIQUE (voice_profile_key, voice_revision_key),
   CHECK (
        (mapping_status='unmapped'
         AND retired_at IS NULL AND mapped_voice_materialization_id IS NULL
         AND pending_publication_id IS NULL
-        AND candidate_registry_generation IS NULL AND candidate_registry_sha256 IS NULL
-        AND candidate_source_selector IS NULL AND candidate_created_at IS NULL
-        AND candidate_activated_at IS NULL)
+        AND candidate_source_selector IS NULL AND candidate_activated_at IS NULL)
     OR (mapping_status='mapped_verified'
         AND retired_at IS NULL AND mapped_voice_materialization_id IS NOT NULL
         AND pending_publication_id IS NULL
-        AND candidate_registry_generation IS NULL AND candidate_registry_sha256 IS NULL
-        AND candidate_source_selector IS NULL AND candidate_created_at IS NULL
-        AND candidate_activated_at IS NULL)
+        AND candidate_source_selector IS NULL AND candidate_activated_at IS NULL)
     OR (mapping_status='mapping_pending'
         AND retired_at IS NULL AND mapped_voice_materialization_id IS NOT NULL
         AND pending_publication_id IS NOT NULL
-        AND candidate_registry_generation IS NOT NULL AND candidate_registry_sha256 IS NOT NULL
-        AND candidate_source_selector='tts_a' AND candidate_created_at IS NOT NULL
-        AND candidate_activated_at IS NULL)
+        AND candidate_source_selector='tts_a' AND candidate_activated_at IS NULL)
     OR (mapping_status='mapped_active'
         AND retired_at IS NULL AND mapped_voice_materialization_id IS NOT NULL
-        AND candidate_registry_generation IS NOT NULL AND candidate_registry_sha256 IS NOT NULL
-        AND candidate_source_selector='tts_a' AND candidate_created_at IS NOT NULL
-        AND candidate_activated_at IS NOT NULL)
+        AND pending_publication_id IS NOT NULL
+        AND candidate_source_selector='tts_a' AND candidate_activated_at IS NOT NULL)
     OR (mapping_status='retired'
         AND retired_at IS NOT NULL))
 );
@@ -1267,7 +1413,13 @@ WHEN OLD.voice_profile_key IS NOT NEW.voice_profile_key
   OR OLD.source_registry_sha256 IS NOT NEW.source_registry_sha256
   OR OLD.imported_at IS NOT NEW.imported_at
   OR (OLD.retired_at IS NOT NULL AND NEW.retired_at IS NOT OLD.retired_at)
-  OR (OLD.pending_publication_id IS NOT NULL AND NEW.pending_publication_id IS NOT OLD.pending_publication_id)
+  -- R8-A：pending_publication_id 仅允许 T1 fill（mapped_verified→mapping_pending，NULL→id）
+  -- 与 rollback clear（mapping_pending→mapped_verified，id→NULL）；id→其他 id 非法替换一律 ABORT
+  OR (OLD.pending_publication_id IS NOT NEW.pending_publication_id
+      AND NOT (OLD.mapping_status='mapped_verified' AND NEW.mapping_status='mapping_pending'
+               AND OLD.pending_publication_id IS NULL)
+      AND NOT (OLD.mapping_status='mapping_pending' AND NEW.mapping_status='mapped_verified'
+               AND NEW.pending_publication_id IS NULL))
 BEGIN SELECT RAISE(ABORT,'legacy_adapter_voice_entries immutable field'); END;
 CREATE TRIGGER trg_lve_transition BEFORE UPDATE OF mapping_status ON legacy_adapter_voice_entries
 WHEN OLD.mapping_status IS NOT NEW.mapping_status AND NOT (
@@ -1276,8 +1428,19 @@ WHEN OLD.mapping_status IS NOT NEW.mapping_status AND NOT (
   OR (OLD.mapping_status='mapping_pending' AND NEW.mapping_status IN ('mapped_active','mapped_verified'))
   OR (OLD.mapping_status='mapped_active'   AND NEW.mapping_status IN ('retired')))
 BEGIN SELECT RAISE(ABORT,'legacy_adapter_voice_entries invalid transition'); END;
--- R7-C：mapping_pending 必须引用 exact active legacy_cutover publication（单 subject 冻结；
--- global single-flight 保证一个 active publication 最多一个 mapping_pending subject）
+-- R8-C：unmapped → mapped_verified 前置：mapped materialization 必须 file_ready_unpublished
+--（legacy_cutover publication 本身同时发布目标 projection——单一模型，不接受已发布 projection）
+CREATE TRIGGER trg_lve_mapped_verified BEFORE UPDATE OF mapping_status ON legacy_adapter_voice_entries
+WHEN OLD.mapping_status='unmapped' AND NEW.mapping_status='mapped_verified'
+BEGIN
+  SELECT RAISE(ABORT,'legacy_adapter_voice_entries mapped materialization not file_ready_unpublished')
+    WHERE NOT EXISTS (SELECT 1 FROM voice_materializations m
+                      WHERE m.id=NEW.mapped_voice_materialization_id
+                        AND m.status='file_ready_unpublished');
+END;
+-- R7-C + R8-B：mapping_pending 必须引用 exact active legacy_cutover publication（单 subject 冻结；
+-- global single-flight 保证一个 active publication 最多一个 mapping_pending subject；
+-- candidate generation/SHA/manifest evidence 单一权威 = publication 行，本行不再复制）
 CREATE TRIGGER trg_lve_publication_link BEFORE UPDATE OF mapping_status ON legacy_adapter_voice_entries
 WHEN NEW.mapping_status='mapping_pending' AND OLD.mapping_status IS NOT NEW.mapping_status
 BEGIN
@@ -1286,80 +1449,102 @@ BEGIN
                       WHERE p.id=NEW.pending_publication_id
                         AND p.status IN ('building','candidate_persisted','file_durable','activation_pending','indeterminate')
                         AND p.subject_type='legacy_cutover'
-                        AND p.subject_id=NEW.id
-                        AND p.generation=NEW.candidate_registry_generation
-                        AND (NEW.candidate_registry_sha256 IS NULL OR p.candidate_registry_sha256 IS NULL
-                             OR p.candidate_registry_sha256=NEW.candidate_registry_sha256));
+                        AND p.subject_id=NEW.id);
 END;
+-- R8-A：rollback（mapping_pending → mapped_verified）仅当 referenced publication 已 failed/cancelled；
+-- 必须同事务清 pending_publication_id + candidate projection 字段；旧 publication evidence 由
+-- voice_registry_publications 永久保存（不需要本行保留已失败的 pending ID）；重试 = 新 publication.id 从 NULL 写入
+CREATE TRIGGER trg_lve_rollback BEFORE UPDATE OF mapping_status ON legacy_adapter_voice_entries
+WHEN OLD.mapping_status='mapping_pending' AND NEW.mapping_status='mapped_verified'
+BEGIN
+  SELECT RAISE(ABORT,'legacy_adapter_voice_entries rollback publication not failed')
+    WHERE NOT EXISTS (SELECT 1 FROM voice_registry_publications p
+                      WHERE p.id=OLD.pending_publication_id
+                        AND p.subject_type='legacy_cutover'
+                        AND p.subject_id=NEW.id
+                        AND p.status IN ('failed','cancelled'));
+  SELECT RAISE(ABORT,'legacy_adapter_voice_entries rollback must clear pending evidence')
+    WHERE NEW.pending_publication_id IS NOT NULL
+       OR NEW.candidate_source_selector IS NOT NULL
+       OR NEW.candidate_activated_at IS NOT NULL;
+END;
+-- R8-D：mapping_pending → mapped_active 必须经 atomic activation command（同一 statement 内
+-- command trigger 先更新 projection/legacy，最后才置 publication active）；直接 UPDATE 一律 ABORT
+CREATE TRIGGER trg_lve_activation BEFORE UPDATE OF mapping_status ON legacy_adapter_voice_entries
+WHEN OLD.mapping_status='mapping_pending' AND NEW.mapping_status='mapped_active'
+  AND NOT EXISTS (SELECT 1 FROM voice_registry_publication_activations a
+                  WHERE a.publication_id=NEW.pending_publication_id
+                    AND a.activated_at IS NEW.candidate_activated_at)
+BEGIN SELECT RAISE(ABORT,'legacy_adapter_voice_entries activation command required'); END;
 CREATE TRIGGER trg_lve_delete_abort BEFORE DELETE ON legacy_adapter_voice_entries
 BEGIN SELECT RAISE(ABORT,'legacy_adapter_voice_entries delete forbidden'); END;
--- R6-G（R7 版）：cutover journal 不可变（mapped target write-once；candidate evidence 仅允许
+-- R6-G（R8 版）：cutover journal 不可变（mapped target write-once；candidate_source_selector 仅允许
 -- T1 fill（mapped_verified→mapping_pending）与 rollback clear（mapping_pending→mapped_verified）；
--- candidate_activated_at 仅允许 T5 fill（mapping_pending→mapped_active）；mapped_active 全冻结；
--- 旧 owner 不得原地改 candidate evidence——cutover 所有权已移入 publication 表（§2.9），本行不再有 owner/attempt 列）
+-- candidate_activated_at 仅允许 T5 fill（mapping_pending→mapped_active，经 activation command）；
+-- mapped_active 全冻结；旧 owner 不得原地改 candidate evidence——cutover 所有权已移入 publication
+-- 表（§2.9），本行不再有 owner/attempt 列，也不再复制 publication generation/SHA（R8-B））
 CREATE TRIGGER trg_lve_cutover_evidence BEFORE UPDATE ON legacy_adapter_voice_entries
 WHEN (
   -- mapped target write-once（一旦 set 不可换/不可清）
   (OLD.mapped_voice_materialization_id IS NOT NULL
    AND NEW.mapped_voice_materialization_id IS NOT OLD.mapped_voice_materialization_id)
-  -- candidate evidence write-once：非 T1 fill / 非 rollback clear 的任意增改删一律 ABORT
-  OR NOT (OLD.mapping_status='mapped_verified' AND NEW.mapping_status='mapping_pending')
-     AND NOT (OLD.mapping_status='mapping_pending' AND NEW.mapping_status='mapped_verified')
-     AND (
-        (OLD.candidate_registry_generation IS NOT NULL AND NEW.candidate_registry_generation IS NOT OLD.candidate_registry_generation)
-     OR (OLD.candidate_registry_sha256 IS NOT NULL AND NEW.candidate_registry_sha256 IS NOT OLD.candidate_registry_sha256)
-     OR (OLD.candidate_source_selector IS NOT NULL AND NEW.candidate_source_selector IS NOT OLD.candidate_source_selector)
-     OR (OLD.candidate_created_at IS NOT NULL AND NEW.candidate_created_at IS NOT OLD.candidate_created_at)
-     OR (NEW.candidate_registry_generation IS NOT NULL AND OLD.candidate_registry_generation IS NULL)
-     OR (NEW.candidate_registry_sha256 IS NOT NULL AND OLD.candidate_registry_sha256 IS NULL)
-     OR (NEW.candidate_source_selector IS NOT NULL AND OLD.candidate_source_selector IS NULL)
-     OR (NEW.candidate_created_at IS NOT NULL AND OLD.candidate_created_at IS NULL)
-     )
-  -- candidate_activated_at：仅允许 T5 fill（mapping_pending→mapped_active）与 rollback clear
+  -- candidate_source_selector：仅 T1 fill / rollback clear；其余增改删一律 ABORT
+  OR (NEW.candidate_source_selector IS NOT OLD.candidate_source_selector
+      AND NOT (OLD.mapping_status='mapped_verified' AND NEW.mapping_status='mapping_pending')
+      AND NOT (OLD.mapping_status='mapping_pending' AND NEW.mapping_status='mapped_verified'
+               AND NEW.candidate_source_selector IS NULL))
+  -- candidate_activated_at：仅允许 T5 fill（mapping_pending→mapped_active）
   OR (NEW.candidate_activated_at IS NOT OLD.candidate_activated_at
-      AND NOT (OLD.mapping_status='mapping_pending'
-               AND NEW.mapping_status IN ('mapped_active','mapped_verified')))
-  -- mapped_active 终态：mapping target 与全部 candidate evidence 冻结
+      AND NOT (OLD.mapping_status='mapping_pending' AND NEW.mapping_status='mapped_active'))
+  -- mapped_active 终态：mapping target、publication link 与全部 candidate 标记冻结
   OR (OLD.mapping_status='mapped_active' AND (
         NEW.mapped_voice_materialization_id IS NOT OLD.mapped_voice_materialization_id
-     OR NEW.candidate_registry_generation IS NOT OLD.candidate_registry_generation
-     OR NEW.candidate_registry_sha256 IS NOT OLD.candidate_registry_sha256
+     OR NEW.pending_publication_id IS NOT OLD.pending_publication_id
      OR NEW.candidate_source_selector IS NOT OLD.candidate_source_selector
-     OR NEW.candidate_created_at IS NOT OLD.candidate_created_at
      OR NEW.candidate_activated_at IS NOT OLD.candidate_activated_at))
 )
 BEGIN SELECT RAISE(ABORT,'legacy_adapter_voice_entries cutover evidence immutable'); END;
 ```
 
-- **cutover 证据列（R5 journal 保留）**：candidate 意图与证据按 key 持久化在本行
-  （`candidate_registry_generation/candidate_registry_sha256/candidate_source_selector/candidate_created_at/
-  candidate_activated_at`）；**`pending_publication_id` 是 mapping_pending 的权威 publication 引用（R7-C）**；
-  **cutover owner/lease/attempt 已移入 `voice_registry_publications`（§2.9）——T1-T5 共用同一 global owner/token/lease/attempt**。
-- **mapping 状态机（R5 冻结）**：`unmapped → mapped_verified | retired`；
+- **cutover 证据列（R8-B 冻结）**：**candidate generation/SHA/manifest 的单一权威 = `voice_registry_publications` 行**
+  （唯一全局 journal）；本行只保留两个过程标记 `candidate_source_selector='tts_a'` / `candidate_activated_at`，
+  **已删除 `candidate_registry_generation / candidate_registry_sha256 / candidate_created_at` 权威重复字段**——
+  legacy pending/current evidence 统一经 `pending_publication_id → voice_registry_publications` 取得，不再复制
+  publication generation/SHA，不存在跨表同步依赖；**`pending_publication_id` 是 mapping_pending/mapped_active 的
+  权威 publication 引用（R7-C + R8-A）**；**cutover owner/lease/attempt 已移入 `voice_registry_publications`
+  （§2.9）——T1-T5 共用同一 global owner/token/lease/attempt**。
+- **mapping 状态机（R5 冻结 + R8-A rollback 可达）**：`unmapped → mapped_verified | retired`；
   `mapped_verified → mapping_pending | retired`；
-  `mapping_pending → mapped_active | mapped_verified`（candidate 失败/过期 → 清证据回退，允许安全重试）；
+  `mapping_pending → mapped_active | mapped_verified`（后者 = referenced publication 已 failed/cancelled 后的
+  清证据回退——**rollback 不再是不可达状态**：`pending_publication_id` 从 NULL 写入（T1）、仅在 publication
+  failed/cancelled 时清 NULL（rollback）、重试允许写入新的 publication.id；旧 failed/cancelled publication
+  evidence 在 journal 永久保存）；
   `mapped_active → retired`；`retired` 终态；
-- **publication 引用（R7-C 冻结）**：`mapping_pending` 必须 `pending_publication_id` 指向 **active（非终态）且
-  subject_type='legacy_cutover' + subject_id=本 entry + generation 一致** 的 publication（`trg_lve_publication_link`）；
+- **publication 引用（R7-C + R8-A 冻结）**：`mapping_pending` 必须 `pending_publication_id` 指向 **active（非终态）且
+  subject_type='legacy_cutover' + subject_id=本 entry** 的 publication（`trg_lve_publication_link`）；
   由于 global active single-flight，**一个 active publication 最多一个 mapping_pending subject**（第二个 key 在第一个
-  publication active 时无法进入 mapping_pending，实证 RP-04）；`pending_publication_id` 首次非 NULL 后不可改。
-- **journal 字段写入权限（R6-G 冻结，R7 版 `trg_lve_cutover_evidence`）**：
+  publication active 时无法进入 mapping_pending，实证 RP-04）；`pending_publication_id` 仅允许 T1 fill 与
+  rollback clear，**id→其他 id 非法替换一律 ABORT**（`trg_lve_immutable`，实证 LR-05）；
+  rollback 必须 referenced publication `status IN (failed,cancelled)` 且 subject 匹配（`trg_lve_rollback`，
+  实证 LR-02）；`mapped_active` 保留 `pending_publication_id` 指向激活它的 active publication（provenance link）。
+- **journal 字段写入权限（R6-G 冻结，R8 版 `trg_lve_cutover_evidence`）**：
   `speaker_name` / `reference_asset_path_or_safe_projection` 等 import 字段**一旦导入不可变**（immutable trigger）；
   `mapped_voice_materialization_id` **write-once**（一旦 set 不可换/不可清）；
   以下字段只允许在冻结的唯一状态转换中写入：
 
   | 转换 | 允许写入 |
   |---|---|
-  | `unmapped → mapped_verified` | `mapped_voice_materialization_id`（首次） |
-  | `mapped_verified → mapping_pending`（T1） | `pending_publication_id` + candidate generation/SHA/selector/created_at（首次） |
-  | `mapping_pending → mapped_verified`（rollback） | 清理本次 candidate evidence（+ pending_publication_id 随 publication 终态保留） |
-  | `mapping_pending → mapped_active`（T5） | 仅 `candidate_activated_at`（保留其余 candidate evidence 不变） |
-  | `mapped_active`（同状态/终态） | mapping target 与 candidate evidence 全不可变 |
+  | `unmapped → mapped_verified` | `mapped_voice_materialization_id`（首次；前置：mapped materialization 必须 `file_ready_unpublished`，R8-C） |
+  | `mapped_verified → mapping_pending`（T1） | `pending_publication_id`（NULL→publication.id 首次）+ `candidate_source_selector='tts_a'` |
+  | `mapping_pending → mapped_verified`（rollback） | 清 `pending_publication_id`（→NULL）+ 清 `candidate_source_selector`（前提：referenced publication failed/cancelled，R8-A） |
+  | `mapping_pending → mapped_active`（T5） | 仅 `candidate_activated_at`（必须经 atomic activation command，R8-D；`pending_publication_id` 保留指向 active publication） |
+  | `mapped_active`（同状态/终态） | mapping target、publication link 与 candidate 标记全不可变 |
 
-  任何非上述转换的 candidate evidence 增改删（含 **mapping_pending 内旧 owner 原地改写**、mapped_active 内修改）
-  一律 ABORT（实证 IS-15a/b/c/d/e/f/g/h）。
-- `mapped_active` 必须有 `mapped_voice_materialization_id` + candidate 证据 + `candidate_activated_at`（CHECK 强制）；
-  `retired` 必须有 `retired_at`；非 retired 的 `retired_at` 必须 NULL；`retired_at` write-once；
+  任何非上述转换的 candidate 标记增改删（含 **mapping_pending 内旧 owner 原地改写**、mapped_active 内修改）
+  一律 ABORT（实证 IS-15a/b/c/d/e/f/g/h + LR-05）。
+- `mapped_active` 必须有 `mapped_voice_materialization_id` + `pending_publication_id` + `candidate_source_selector='tts_a'` +
+  `candidate_activated_at`（CHECK 强制）；`retired` 必须有 `retired_at`；非 retired 的 `retired_at` 必须 NULL；
+  `retired_at` write-once；
 - 不伪造 TTS-A 数据（不写 voice_profiles/revisions）；DELETE 禁（append-only provenance）。
 
 ### 2.9 `voice_registry_publications`（第 10 表：global registry publication journal；R7-A）
@@ -1371,7 +1556,7 @@ BEGIN SELECT RAISE(ABORT,'legacy_adapter_voice_entries cutover evidence immutabl
 ```sql
 CREATE TABLE voice_registry_publications (
   id TEXT PRIMARY KEY,
-  generation INTEGER NOT NULL,
+  generation INTEGER NOT NULL UNIQUE,
   subject_type TEXT NOT NULL CHECK (subject_type IN
     ('materialization_publish','legacy_cutover','registry_rebuild')),
   subject_id TEXT NOT NULL,
@@ -1386,6 +1571,8 @@ CREATE TABLE voice_registry_publications (
   status TEXT NOT NULL CHECK (status IN
     ('building','candidate_persisted','file_durable','activation_pending',
      'active','failed','indeterminate','cancelled')),
+  indeterminate_from_status TEXT CHECK (indeterminate_from_status IS NULL OR
+    indeterminate_from_status IN ('building','candidate_persisted','file_durable','activation_pending')),
   owner_token TEXT,
   lease_expires_at TEXT,
   attempt INTEGER NOT NULL DEFAULT 0,
@@ -1403,25 +1590,29 @@ CREATE TABLE voice_registry_publications (
         AND candidate_registry_sha256 IS NULL AND candidate_manifest_json IS NULL
         AND candidate_manifest_sha256 IS NULL
         AND file_durable_at IS NULL AND activation_requested_at IS NULL
-        AND activated_at IS NULL AND failed_at IS NULL)
+        AND activated_at IS NULL AND failed_at IS NULL
+        AND indeterminate_from_status IS NULL)
     OR (status='candidate_persisted'
         AND owner_token IS NOT NULL AND lease_expires_at IS NOT NULL AND attempt >= 1
         AND candidate_registry_sha256 IS NOT NULL AND candidate_manifest_json IS NOT NULL
         AND candidate_manifest_sha256 IS NOT NULL
         AND file_durable_at IS NULL AND activation_requested_at IS NULL
-        AND activated_at IS NULL AND failed_at IS NULL)
+        AND activated_at IS NULL AND failed_at IS NULL
+        AND indeterminate_from_status IS NULL)
     OR (status='file_durable'
         AND owner_token IS NOT NULL AND lease_expires_at IS NOT NULL AND attempt >= 1
         AND candidate_registry_sha256 IS NOT NULL AND candidate_manifest_json IS NOT NULL
         AND candidate_manifest_sha256 IS NOT NULL
         AND file_durable_at IS NOT NULL AND activation_requested_at IS NULL
-        AND activated_at IS NULL AND failed_at IS NULL)
+        AND activated_at IS NULL AND failed_at IS NULL
+        AND indeterminate_from_status IS NULL)
     OR (status='activation_pending'
         AND owner_token IS NOT NULL AND lease_expires_at IS NOT NULL AND attempt >= 1
         AND candidate_registry_sha256 IS NOT NULL AND candidate_manifest_json IS NOT NULL
         AND candidate_manifest_sha256 IS NOT NULL
         AND file_durable_at IS NOT NULL AND activation_requested_at IS NOT NULL
-        AND activated_at IS NULL AND failed_at IS NULL)
+        AND activated_at IS NULL AND failed_at IS NULL
+        AND indeterminate_from_status IS NULL)
     OR (status='active'
         AND owner_token IS NULL AND lease_expires_at IS NULL
         AND candidate_registry_sha256 IS NOT NULL AND candidate_manifest_json IS NOT NULL
@@ -1432,7 +1623,7 @@ CREATE TABLE voice_registry_publications (
         AND owner_token IS NULL AND lease_expires_at IS NULL
         AND failed_at IS NOT NULL AND error_code IS NOT NULL AND activated_at IS NULL)
     OR (status='indeterminate' AND owner_token IS NULL AND lease_expires_at IS NULL
-        AND activated_at IS NULL)
+        AND activated_at IS NULL AND indeterminate_from_status IS NOT NULL)
     OR (status='cancelled' AND owner_token IS NULL AND lease_expires_at IS NULL
         AND activated_at IS NULL))
 );
@@ -1445,7 +1636,27 @@ WHERE status IN ('building','candidate_persisted','file_durable','activation_pen
 CREATE TRIGGER trg_vrp_initial BEFORE INSERT ON voice_registry_publications
 WHEN NEW.status IS NOT 'building'
 BEGIN SELECT RAISE(ABORT,'voice_registry_publications initial state building required'); END;
--- R7-A：identity/evidence write-once + 终态（active/failed/cancelled）全冻结
+-- R8-D：publication subject INSERT 验证（materialization_publish → file_ready_unpublished
+-- materialization；legacy_cutover → mapped_verified legacy entry 且 mapped materialization
+-- = file_ready_unpublished（R8-C 单一模型）；registry_rebuild → subject_id 严格 ='global'）
+CREATE TRIGGER trg_vrp_subject BEFORE INSERT ON voice_registry_publications
+BEGIN
+  SELECT RAISE(ABORT,'voice_registry_publications subject invalid')
+    WHERE (NEW.subject_type='materialization_publish'
+           AND NOT EXISTS (SELECT 1 FROM voice_materializations m
+                           WHERE m.id=NEW.subject_id AND m.status='file_ready_unpublished'))
+       OR (NEW.subject_type='legacy_cutover'
+           AND NOT EXISTS (SELECT 1 FROM legacy_adapter_voice_entries l
+                           JOIN voice_materializations m
+                             ON m.id=l.mapped_voice_materialization_id
+                           WHERE l.id=NEW.subject_id
+                             AND l.mapping_status='mapped_verified'
+                             AND m.status='file_ready_unpublished'))
+       OR (NEW.subject_type='registry_rebuild' AND NEW.subject_id IS NOT 'global');
+END;
+-- R7-A + R8-E：identity/evidence write-once + 终态（active/failed/cancelled）全冻结 +
+-- indeterminate 期间 candidate/manifest/file/activation evidence 冻结（禁止事后首次补写）+
+-- indeterminate_from_status write-once
 CREATE TRIGGER trg_vrp_immutable BEFORE UPDATE ON voice_registry_publications
 WHEN OLD.generation IS NOT NEW.generation
   OR OLD.subject_type IS NOT NEW.subject_type
@@ -1455,6 +1666,13 @@ WHEN OLD.generation IS NOT NEW.generation
   OR (OLD.candidate_registry_sha256 IS NOT NULL AND NEW.candidate_registry_sha256 IS NOT OLD.candidate_registry_sha256)
   OR (OLD.candidate_manifest_json IS NOT NULL AND NEW.candidate_manifest_json IS NOT OLD.candidate_manifest_json)
   OR (OLD.candidate_manifest_sha256 IS NOT NULL AND NEW.candidate_manifest_sha256 IS NOT OLD.candidate_manifest_sha256)
+  OR (OLD.indeterminate_from_status IS NOT NULL AND NEW.indeterminate_from_status IS NOT OLD.indeterminate_from_status)
+  OR (OLD.status='indeterminate' AND (
+        NEW.candidate_registry_sha256 IS NOT OLD.candidate_registry_sha256
+     OR NEW.candidate_manifest_json IS NOT OLD.candidate_manifest_json
+     OR NEW.candidate_manifest_sha256 IS NOT OLD.candidate_manifest_sha256
+     OR NEW.file_durable_at IS NOT OLD.file_durable_at
+     OR NEW.activation_requested_at IS NOT OLD.activation_requested_at))
   OR (OLD.status IN ('active','failed','cancelled') AND (
         NEW.candidate_registry_sha256 IS NOT OLD.candidate_registry_sha256
      OR NEW.candidate_manifest_json IS NOT OLD.candidate_manifest_json
@@ -1467,14 +1685,29 @@ WHEN OLD.generation IS NOT NEW.generation
      OR NEW.error_message IS NOT OLD.error_message
      OR NEW.status IS NOT OLD.status))
 BEGIN SELECT RAISE(ABORT,'voice_registry_publications immutable field'); END;
--- R7-A：状态机（failed/cancelled 终态 evidence；indeterminate 显式 resolve；重试 = 新 row）
+-- R8-E：进入 indeterminate 时必须记录来源状态（= OLD.status；立即 write-once）
+CREATE TRIGGER trg_vrp_indeterminate_entry BEFORE UPDATE OF status ON voice_registry_publications
+WHEN NEW.status='indeterminate' AND OLD.status IS NOT 'indeterminate'
+  AND NEW.indeterminate_from_status IS NOT OLD.status
+BEGIN SELECT RAISE(ABORT,'voice_registry_publications indeterminate origin required'); END;
+-- R7-A + R8-D/E：状态机（failed/cancelled 终态 evidence；indeterminate 显式 resolve；重试 = 新 row；
+-- active 只能经 atomic activation command——activation_pending→active 与
+-- indeterminate(from=activation_pending)→active 必须存在匹配 command 行，直接 UPDATE 一律 ABORT；
+-- building/candidate 阶段进入的 indeterminate 不得 resolve active）
 CREATE TRIGGER trg_vrp_transition BEFORE UPDATE OF status ON voice_registry_publications
 WHEN OLD.status IS NOT NEW.status AND NOT (
-     (OLD.status='building'          AND NEW.status IN ('candidate_persisted','failed','cancelled','indeterminate'))
+     (OLD.status='building'           AND NEW.status IN ('candidate_persisted','failed','cancelled','indeterminate'))
   OR (OLD.status='candidate_persisted' AND NEW.status IN ('file_durable','failed','cancelled','indeterminate'))
-  OR (OLD.status='file_durable'      AND NEW.status IN ('activation_pending','failed','cancelled','indeterminate'))
-  OR (OLD.status='activation_pending' AND NEW.status IN ('active','failed','cancelled','indeterminate'))
-  OR (OLD.status='indeterminate'     AND NEW.status IN ('active','failed','cancelled')))
+  OR (OLD.status='file_durable'        AND NEW.status IN ('activation_pending','failed','cancelled','indeterminate'))
+  OR (OLD.status='activation_pending'  AND NEW.status IN ('failed','cancelled','indeterminate'))
+  OR (OLD.status='indeterminate'       AND NEW.status IN ('failed','cancelled'))
+  OR (NEW.status='active'
+      AND (OLD.status='activation_pending'
+           OR (OLD.status='indeterminate' AND OLD.indeterminate_from_status='activation_pending'))
+      AND EXISTS (SELECT 1 FROM voice_registry_publication_activations a
+                  WHERE a.publication_id=NEW.id
+                    AND a.observed_active_registry_sha256 IS NEW.candidate_registry_sha256
+                    AND a.activated_at IS NEW.activated_at)))
 BEGIN SELECT RAISE(ABORT,'voice_registry_publications invalid transition'); END;
 CREATE TRIGGER trg_vrp_delete_abort BEFORE DELETE ON voice_registry_publications
 BEGIN SELECT RAISE(ABORT,'voice_registry_publications delete forbidden'); END;
@@ -1489,12 +1722,32 @@ BEGIN SELECT RAISE(ABORT,'voice_registry_publications delete forbidden'); END;
 - **candidate manifest（R7-A）**：`candidate_manifest_json` 是 canonical、不可变、完整描述该 generation 中**每个
   canonical key** 的 emitted source 类型、source row/materialization ID、reference SHA、adapter key；
   `candidate_manifest_sha256`（manifest 自身哈希）与 `candidate_registry_sha256`（registry 文件 SHA）**分别冻结**。
-- **状态机（R7-A）**：`building → candidate_persisted | failed | cancelled | indeterminate`；
+- **状态机（R7-A + R8-D/E）**：`building → candidate_persisted | failed | cancelled | indeterminate`；
   `candidate_persisted → file_durable | failed | cancelled | indeterminate`；
   `file_durable → activation_pending | failed | cancelled | indeterminate`；
   `activation_pending → active | failed | cancelled | indeterminate`；
   `indeterminate → active | failed | cancelled`（显式 resolve）；`failed/cancelled` 终态（immutable evidence，
   **重试 = 新 publication row**，旧 evidence 不覆盖不清除，实证 RP-01/RP-02）。
+  **R8-D**：`active` 的两个入边（`activation_pending→active` 与 `indeterminate(from=activation_pending)→active`）
+  **必须存在匹配的 `voice_registry_publication_activations` command 行**（observed SHA==candidate SHA 且
+  activated_at 一致）——activation 由 command trigger 在同一 statement 内完成，**不存在可独立提交的
+  publication active 状态**（实证 PA-01）。
+  **R8-E**：进入 `indeterminate` 必须立即写入 `indeterminate_from_status = 来源状态`（write-once）；
+  indeterminate 期间 candidate SHA/manifest/file_durable_at/activation_requested_at **全部冻结**（含禁止
+  NULL→value 首次补写，实证 PE-02）；`indeterminate → active` 仅允许 `indeterminate_from_status='activation_pending'`
+  且 candidate 证据已完整存在（只能填 confirmed `activated_at`）；building/candidate 阶段进入的 indeterminate
+  **不得 resolve active**，只能 failed/cancelled（实证 PE-03/PE-04）。
+- **R8-I generation seal**：`generation` **UNIQUE**（`CREATE TABLE` 内约束）——单调分配必须在
+  `BEGIN IMMEDIATE` 下 `SELECT COALESCE(MAX(generation),0)+1` 取得，重复 generation 直接 UNIQUE ABORT（实证 PA-08）。
+- **R8-D subject INSERT 验证**（`trg_vrp_subject`）：`materialization_publish` → subject_id 必须是
+  `file_ready_unpublished` materialization；`legacy_cutover` → subject_id 必须是 `mapped_verified` legacy entry
+  且其 mapped materialization = `file_ready_unpublished`；`registry_rebuild` → subject_id 必须严格 ='global'
+  （实证 PA-06/PA-07）。
+- **成功 T5 = 单一 atomic activation command（R8-D，取代 R7-B/C 的应用依次 UPDATE）**：
+  `INSERT INTO voice_registry_publication_activations (...)` 一条 statement——AFTER INSERT trigger 同一
+  statement 内完成 fenced 验证 + projection→published_usable（published_by_publication_id +
+  generation/SHA 一次写入）+ legacy entry→mapped_active（如 subject 是 legacy_cutover）+ 最后
+  publication→active；任一步失败整条 statement 回滚，**无部分提交**（§2.10/§7.3 T5）。
 - **lease fencing（R6-H 迁移到 publication）**：renewal / T5 finalize 的 WHERE 必须
   `AND owner_token=:token AND attempt=:attempt AND lease_expires_at >= :now`；过期未接管 → 旧 owner 不得
   renewal/finalize/新外部副作用（实证 RP-11/RP-12）；takeover CAS 按 `lease_expires_at < :now` attempt+1 换主。
@@ -1502,10 +1755,116 @@ BEGIN SELECT RAISE(ABORT,'voice_registry_publications delete forbidden'); END;
   （`subject_type='materialization_publish'`：subject_id = voice_materializations.id；
   `subject_type='legacy_cutover'`：subject_id = legacy_adapter_voice_entries.id；
   `subject_type='registry_rebuild'`：subject_id = 'global'，纯重建无新 key）；其余 key 由 stable view 确定性复制。
-- **成功 T5 单事务（R7-B/C）**：`publication → active` + `projection → published_usable`（published_by_publication_id
-  + generation/SHA 一次写入）+ `legacy entry → mapped_active`（如 subject 是 legacy_cutover）——三者原子，
-  changes=1 必须（§7.3 T5）。
 - DELETE 禁（append-only journal）。
+
+### 2.10 `voice_registry_publication_activations`（第 11 表：append-only atomic activation command；R8-D）
+
+> publication activation（T5 / crash reconciliation case 3 / activation_indeterminate resolve）的**唯一入口**。
+> 应用执行**一条 INSERT statement**；AFTER INSERT trigger 在同一 SQLite statement 内完成全部状态更新——
+> 任一步 RAISE(ABORT) 则整条 statement 回滚：publication 保持 activation_pending/indeterminate，
+> projection/legacy 零变化。**不存在可独立提交的 publication active 状态**。
+
+```sql
+CREATE TABLE voice_registry_publication_activations (
+  id TEXT PRIMARY KEY,
+  publication_id TEXT NOT NULL REFERENCES voice_registry_publications(id) ON DELETE RESTRICT,
+  owner_token TEXT,
+  attempt INTEGER NOT NULL,
+  observed_active_registry_sha256 TEXT NOT NULL CHECK
+    (length(observed_active_registry_sha256)=64 AND observed_active_registry_sha256 NOT GLOB '*[^0-9a-f]*'),
+  activated_at TEXT NOT NULL,
+  resolution_evidence TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE (publication_id)
+);
+-- R8-D：AFTER INSERT 原子激活（同一 SQLite statement 内 1→4 顺序执行；任一步 ABORT 整条回滚）
+CREATE TRIGGER trg_vrpa_activate AFTER INSERT ON voice_registry_publication_activations
+BEGIN
+  -- 1) fenced 验证 owner/token/attempt/lease/observed SHA（activation_pending 在飞）
+  --    或 activation_indeterminate resolve（owner 已清；from=activation_pending；只允许
+  --    使用已存在的 candidate 证据 + 填 confirmed activated_at / resolution evidence）
+  SELECT RAISE(ABORT,'voice_registry_publication_activations fencing mismatch')
+    WHERE NOT EXISTS (SELECT 1 FROM voice_registry_publications p
+                      WHERE p.id=NEW.publication_id
+                        AND p.candidate_registry_sha256=NEW.observed_active_registry_sha256
+                        AND ((p.status='activation_pending'
+                              AND p.owner_token IS NEW.owner_token
+                              AND p.attempt=NEW.attempt
+                              AND p.lease_expires_at >= NEW.activated_at)
+                          OR (p.status='indeterminate'
+                              AND p.indeterminate_from_status='activation_pending'
+                              AND NEW.owner_token IS NULL)));
+  -- 2) materialization_publish：projection → published_usable（file_ready_unpublished 前置）
+  UPDATE voice_materializations
+  SET status='published_usable',
+      published_registry_generation=(SELECT generation FROM voice_registry_publications
+                                     WHERE id=NEW.publication_id),
+      published_registry_sha256=NEW.observed_active_registry_sha256,
+      published_by_publication_id=NEW.publication_id,
+      updated_at=NEW.activated_at
+  WHERE (SELECT subject_type FROM voice_registry_publications WHERE id=NEW.publication_id)='materialization_publish'
+    AND id=(SELECT subject_id FROM voice_registry_publications WHERE id=NEW.publication_id)
+    AND status='file_ready_unpublished';
+  SELECT RAISE(ABORT,'voice_registry_publication_activations materialization subject mismatch')
+    WHERE (SELECT subject_type FROM voice_registry_publications WHERE id=NEW.publication_id)='materialization_publish'
+      AND changes()=0;
+  -- 3) legacy_cutover：mapped projection → published_usable + legacy entry → mapped_active（R8-C 单一模型）
+  UPDATE voice_materializations
+  SET status='published_usable',
+      published_registry_generation=(SELECT generation FROM voice_registry_publications
+                                     WHERE id=NEW.publication_id),
+      published_registry_sha256=NEW.observed_active_registry_sha256,
+      published_by_publication_id=NEW.publication_id,
+      updated_at=NEW.activated_at
+  WHERE (SELECT subject_type FROM voice_registry_publications WHERE id=NEW.publication_id)='legacy_cutover'
+    AND id=(SELECT mapped_voice_materialization_id FROM legacy_adapter_voice_entries
+            WHERE id=(SELECT subject_id FROM voice_registry_publications WHERE id=NEW.publication_id))
+    AND status='file_ready_unpublished';
+  SELECT RAISE(ABORT,'voice_registry_publication_activations legacy projection mismatch')
+    WHERE (SELECT subject_type FROM voice_registry_publications WHERE id=NEW.publication_id)='legacy_cutover'
+      AND changes()=0;
+  UPDATE legacy_adapter_voice_entries
+  SET mapping_status='mapped_active', candidate_activated_at=NEW.activated_at
+  WHERE (SELECT subject_type FROM voice_registry_publications WHERE id=NEW.publication_id)='legacy_cutover'
+    AND id=(SELECT subject_id FROM voice_registry_publications WHERE id=NEW.publication_id)
+    AND mapping_status='mapping_pending'
+    AND pending_publication_id=NEW.publication_id;
+  SELECT RAISE(ABORT,'voice_registry_publication_activations legacy subject mismatch')
+    WHERE (SELECT subject_type FROM voice_registry_publications WHERE id=NEW.publication_id)='legacy_cutover'
+      AND changes()=0;
+  -- 4) publication → active（最后；trg_vrp_transition 验证本 command 行存在）
+  UPDATE voice_registry_publications
+  SET status='active', owner_token=NULL, lease_expires_at=NULL,
+      activated_at=NEW.activated_at, updated_at=NEW.activated_at
+  WHERE id=NEW.publication_id
+    AND candidate_registry_sha256=NEW.observed_active_registry_sha256
+    AND ((status='activation_pending'
+          AND owner_token IS NEW.owner_token AND attempt=NEW.attempt
+          AND lease_expires_at >= NEW.activated_at)
+      OR (status='indeterminate' AND indeterminate_from_status='activation_pending'));
+  SELECT RAISE(ABORT,'voice_registry_publication_activations publication update failed')
+    WHERE changes()=0;
+END;
+CREATE TRIGGER trg_vrpa_update_abort BEFORE UPDATE ON voice_registry_publication_activations
+BEGIN SELECT RAISE(ABORT,'voice_registry_publication_activations is immutable'); END;
+CREATE TRIGGER trg_vrpa_delete_abort BEFORE DELETE ON voice_registry_publication_activations
+BEGIN SELECT RAISE(ABORT,'voice_registry_publication_activations delete forbidden'); END;
+```
+
+- **原子性（R8-D 冻结）**：activation INSERT statement 成功 ⇔ publication=active + projection=published_usable
+  （如适用）+ legacy=mapped_active（如适用）同时持久化；任一 subject mismatch / fencing 不命中 / changes=0 /
+  trigger ABORT → 整条 statement 回滚（实证 PA-02/PA-03/PA-04/PA-05）。
+- **subject 语义（R8-C 冻结，唯一模型）**：`materialization_publish` → 更新 subject projection；
+  `legacy_cutover` → 同时更新 mapped projection 与 legacy entry（publication 本身发布目标 projection；
+  legacy entry 不能激活其他 projection——projection 必须等于 entry.mapped_voice_materialization_id，实证 PA-05）；
+  `registry_rebuild` → 无 subject 更新，仅 publication→active。
+- **append-only evidence**：command 行永久保存（owner/attempt/observed SHA/activated_at/resolution_evidence；
+  UPDATE/DELETE 禁；`UNIQUE(publication_id)` 保证一个 publication 至多一次成功 activation——已 active 后
+  第二次 INSERT 必因 fencing 不命中 ABORT）。
+- **indeterminate resolve 专用语义（R8-E）**：`owner_token` 填 NULL、`attempt` 填 journal 当前 attempt、
+  `resolution_evidence` 记录裁决依据；只允许 `indeterminate_from_status='activation_pending'` 且 observed SHA ==
+  已持久化 candidate SHA——不得首次填写 candidate manifest/SHA/file_durable_at（immutable trigger indeterminate
+  冻结段强制）。
 
 ---
 
@@ -1542,34 +1901,32 @@ WHERE id=:claim_id AND status='validating_reuse'
 -- changes=1 必须；同事务内随后 fan-out 全部未取消 subscriber（§4）
 ```
 
-**unusable（→ generation_pending + 恰好一个 queued job）**（R7-D 顺序：claim 先转 generation_pending，再 INSERT job——
-job INSERT 要求 claim 已 `generation_pending/running`，validating_reuse 下插 job 直接 ABORT（CJ-01））：
+**unusable（→ generation_pending + 恰好一个 queued job）**（R8-F：**单一 atomic dispatch command**——不再允许
+"UPDATE claim → generation_pending" + "INSERT job" 两条可独立提交的应用语句作为唯一约束）：
 
 ```sql
--- 同事务内：
--- 1) fenced UPDATE claim → generation_pending（R7 无 job_id 列；先转状态）
-UPDATE tts_synthesis_claims
-SET status='generation_pending',
-    validation_owner_token=NULL, validation_lease_expires_at=NULL,
-    candidate_artifact_id=NULL, candidate_artifact_metadata_hash=NULL,
-    updated_at=:now
-WHERE id=:claim_id AND status='validating_reuse'
-  AND validation_owner_token=:token AND validation_attempt=:attempt
-  AND validation_lease_expires_at >= :now
-  AND candidate_artifact_id IS :candidate_artifact_id
-  AND candidate_artifact_metadata_hash IS :candidate_metadata_hash;
--- changes=1 必须
--- 2) 再 INSERT tts_jobs（status='queued', claim_id=:claim_id, 冻结指纹/variant + voice_profile_revision_id）
-INSERT INTO tts_jobs (id, project_id, narration_plan_artifact_id, narration_plan_version, unit_id,
-  provider, voice_profile_id, voice_profile_revision, voice_profile_revision_id, status, payload_json,
-  queued_at, claim_id, originating_request_id, exact_source_fingerprint, synthesis_payload_fingerprint,
-  final_tts_input_fingerprint, generation_variant_id)
-VALUES (:job_id, :project_id, :narration_plan_artifact_id, :narration_plan_version, :unit_id,
-  :provider, :voice_profile_id, :voice_profile_revision, :voice_profile_revision_id, 'queued',
-  :payload_json, :now, :claim_id, :originating_request_id, :exact_source_fingerprint,
-  :synthesis_payload_fingerprint, :final_tts_input_fingerprint, :generation_variant_id);
--- job 侧 trigger 校验：claim 存在且 identity 一致 + claim.status IN ('generation_pending','running')
---   + voice profile/revision exact pair + provider==revision.provider + 初始状态 queued
+-- 一条 INSERT statement（同一 BEGIN IMMEDIATE 内）：
+INSERT INTO tts_claim_generation_dispatches
+  (id, claim_id, job_id, validation_owner_token, validation_attempt,
+   candidate_artifact_id, candidate_artifact_metadata_hash,
+   project_id, unit_id, narration_plan_artifact_id, narration_plan_version,
+   provider, voice_profile_id, voice_profile_revision, voice_profile_revision_id,
+   payload_json, originating_request_id, exact_source_fingerprint,
+   synthesis_payload_fingerprint, final_tts_input_fingerprint, generation_variant_id, created_at)
+VALUES (:dispatch_id, :claim_id, :job_id, :token, :attempt,
+   :candidate_artifact_id, :candidate_metadata_hash,
+   :project_id, :unit_id, :narration_plan_artifact_id, :narration_plan_version,
+   :provider, :voice_profile_id, :voice_profile_revision, :voice_profile_revision_id,
+   :payload_json, :originating_request_id, :exact_source_fingerprint,
+   :synthesis_payload_fingerprint, :final_tts_input_fingerprint, :generation_variant_id, :now);
+-- §2.2b AFTER INSERT trigger 在同一 statement 内原子完成：
+--   1) fenced 验证 validating_reuse owner/token/attempt/lease/candidate（不命中 → ABORT = STALE_VALIDATION_OWNER）
+--   2) 验证 active subscriber > 0
+--   3) INSERT 恰好一个 queued job（job 侧 trigger 复核 claim identity / dispatch 匹配 /
+--      初始状态 queued / voice profile+revision exact pair / provider==revision.provider）
+--   4) claim → generation_pending + 清 validation owner/candidate
+-- 任一步失败 → 整条 INSERT statement 回滚：claim 保持 validating_reuse、无 job、无 dispatch 行（CJ-11）
+-- 同 claim 第二次 dispatch → UNIQUE(claim_id) ABORT（CJ-12）
 ```
 
 **零 subscriber（→ cancelled，无 job）**：同 WHERE 的 fenced UPDATE 置 `status='cancelled'` 并清空
@@ -1630,7 +1987,7 @@ SQLite 写锁串行化，**最终只有一个数据库裁决**：
 ```text
 零 subscriber            → claim=cancelled，无 job，释放 active unique
 有 subscriber + usable   → claim=succeeded + result_artifact_id，全部未取消 envelope succeeded（reused）
-有 subscriber + unusable → claim=generation_pending + 恰好一个 queued job
+有 subscriber + unusable → claim=generation_pending + 恰好一个 queued job（单一 atomic dispatch command，§2.2b）
 stale validator          → 永远零副作用（无 claim/job/request 改动、无 job、无 fan-out、无文件写）
 ```
 
@@ -1655,7 +2012,7 @@ Phase 3 fenced 重读在同一事务内统计 active subscriber（`status IN ('w
 ```text
 active subscriber = 0 → claim cancelled（fenced UPDATE §3.1）+ 不创建 tts_job + 释放 active unique
 active subscriber > 0 + usable → succeeded + fan-out（同事务 UPDATE 全部未取消 envelope）
-active subscriber > 0 + unusable → generation_pending + 恰好一个 queued job
+active subscriber > 0 + unusable → generation_pending + 恰好一个 queued job（单一 atomic dispatch command，§2.2b）
 ```
 
 规则：
@@ -1811,11 +2168,13 @@ candidate registry view（publication 期间 publisher 构建的候选）：
   改用新 candidate source；其余 key 由 stable view 确定性复制
 ```
 
-- **`mapping_pending` 不再是"普通 registry 仍按 legacy"的模糊态**：它持久化了 candidate 意图
-  （`candidate_registry_generation/candidate_registry_sha256/candidate_source_selector/candidate_created_at`）
-  与 **`pending_publication_id` 权威引用**（指向 active `voice_registry_publications`，§2.8）；
-  **cutover 所有权（owner/token/lease/attempt）移入 publication 表**（§2.9，T1-T5 共用同一 global owner）；
-  stable view 仍输出 legacy（旧 voice 不丢），candidate view 对该 key 使用 TTS-A；
+- **`mapping_pending` 不再是"普通 registry 仍按 legacy"的模糊态**：它持久化了 candidate 意图标记
+  （`candidate_source_selector='tts_a'`）与 **`pending_publication_id` 权威引用**（指向 active
+  `voice_registry_publications`，§2.8）——**candidate generation/SHA/manifest 的单一权威是 publication 行
+  （R8-B），legacy 行不再复制**；**cutover 所有权（owner/token/lease/attempt）移入 publication 表**
+  （§2.9，T1-T5 共用同一 global owner）；stable view 仍输出 legacy（旧 voice 不丢），
+  candidate view 对该 key 使用 TTS-A；publication failed/cancelled → legacy rollback 回 mapped_verified
+  并清 pending link（R8-A），重试引用新 publication.id；
 - **每个 canonical key 在任一 registry（stable 或 candidate）中恰好一个 source**：
   由 `UNIQUE(voice_profile_key, voice_revision_key)` + **DB 级 global active single-flight**
   （`uq_voice_registry_publication_active`，§2.9）+ 上表确定性选择规则共同保证
@@ -1825,26 +2184,30 @@ candidate registry view（publication 期间 publisher 构建的候选）：
   任意 per-key row 不能裁决全局 active SHA 的 reconciliation）——registry 激活的唯一 journal 是
   `voice_registry_publications`。禁止用进程内状态伪装闭环。
 
-### 7.2 Mapping 等价性（`unmapped → mapped_verified` 前置，沿用 R4）
+### 7.2 Mapping 等价性（`unmapped → mapped_verified` 前置，沿用 R4 + R8-C）
 
 canonical voice key、reference SHA-256、speaker identity/name policy、adapter compatibility key、
 reference file containment、codec/sample-rate/channels——全项一致才允许 mapped_verified
 （同事务设置 `mapped_voice_materialization_id`）。
+**R8-C 前置**：mapped materialization 必须 `status='file_ready_unpublished'`（`trg_lve_mapped_verified`）——
+legacy_cutover publication 本身同时发布目标 projection（单一模型），不接受已发布 projection。
 
-### 7.3 Crash-safe cutover 协议（R7：publication journal 版本）
+### 7.3 Crash-safe cutover 协议（R8：publication journal + atomic activation command 版本）
 
 ```text
 T1 BEGIN IMMEDIATE（global reservation + subject 冻结）：
-   先 INSERT voice_registry_publications（status='building', generation（单调递增）,
+   先 INSERT voice_registry_publications（status='building', generation（BEGIN IMMEDIATE 下
+     SELECT COALESCE(MAX(generation),0)+1 单调分配；UNIQUE 强制，重复直接 ABORT）,
      subject_type, subject_id, stable_registry_sha256, publisher_schema_version,
      owner_token=新 UUID, lease_expires_at=now+PUBLICATION_LEASE_MS, attempt=1）
-   —— global active single-flight 保证全系统最多一个 active publication（第二个 T1 → UNIQUE ABORT）
+   —— global active single-flight 保证全系统最多一个 active publication（第二个 T1 → UNIQUE ABORT）；
+      §2.9 trg_vrp_subject 验证 exact subject（materialization=file_ready_unpublished /
+      legacy=mapped_verified 且 mapped projection=file_ready_unpublished / rebuild=global）
    如 subject 是 legacy_cutover：同事务 UPDATE legacy_adapter_voice_entries
      mapping_status='mapping_pending', pending_publication_id=:publication_id,
-     candidate_registry_generation=:generation, candidate_registry_sha256=:candidate_sha,
-     candidate_source_selector='tts_a', candidate_created_at=:now
-     （candidate SHA 由确定性构建算法在写入前计算——先构建内存镜像、算 SHA、再持久化意图；
-       §2.8 trg_lve_publication_link 校验 publication 存在 + subject 匹配 + generation 一致）
+     candidate_source_selector='tts_a'
+     （candidate generation/SHA/manifest 由确定性构建算法计算后只写入 publication 行（R8-B 单一权威），
+       legacy 行不再复制；§2.8 trg_lve_publication_link 校验 publication 存在 + active + subject 匹配）
 T1.5 fenced verify/renew lease（每个外部副作用步骤前必须）：
    UPDATE voice_registry_publications
    SET lease_expires_at=:now_plus_lease, updated_at=:now
@@ -1858,30 +2221,21 @@ T3 adapter reload（mtime/inode/size 检测 → 原子加载 → swap；失败�
    文件 durable 后 UPDATE publication → file_durable（file_durable_at）；仅当前 owner 可执行）
 T4 poll /health：activeRegistrySha256 == persisted candidate_registry_sha256
    （轮询前 UPDATE publication → activation_pending（activation_requested_at）；仅当前 owner 可执行）
-T5 BEGIN IMMEDIATE（fenced；含 `lease_expires_at >= :now`；candidate registry 全局激活原子完成）：
-   UPDATE voice_registry_publications
-   SET status='active', owner_token=NULL, lease_expires_at=NULL, activated_at=:now, updated_at=:now
-   WHERE id=:publication_id AND status='activation_pending'
-     AND owner_token=:token AND attempt=:attempt
-     AND lease_expires_at >= :now
-     AND candidate_registry_sha256=:observed_active_sha;
-   -- changes=1 必须
-   -- 如 subject 是 materialization_publish：
-   UPDATE voice_materializations
-   SET status='published_usable', updated_at=:now,
-       published_registry_generation=:generation,
-       published_registry_sha256=:observed_active_sha,
-       published_by_publication_id=:publication_id
-   WHERE id=:subject_id AND status='file_ready_unpublished';
-   -- changes=1 必须；§2.7 trg_vmat_publish 校验 publication active + subject/generation/SHA 一致
-   -- 如 subject 是 legacy_cutover：
-   UPDATE legacy_adapter_voice_entries
-   SET mapping_status='mapped_active', candidate_activated_at=:now
-   WHERE id=:subject_id AND mapping_status='mapping_pending'
-     AND pending_publication_id=:publication_id;
-   -- changes=1 必须
-COMMIT
--- 任一 changes=0 → 整事务回滚，按 §7.4 case 3/5 处理
+T5（R8-D 单一 atomic activation command；不再允许应用依次 UPDATE publication/projection/legacy）：
+   INSERT INTO voice_registry_publication_activations
+     (id, publication_id, owner_token, attempt, observed_active_registry_sha256,
+      activated_at, created_at)
+   VALUES (:activation_id, :publication_id, :token, :attempt, :observed_active_sha, :now, :now);
+   -- §2.10 AFTER INSERT trigger 在同一 SQLite statement 内原子完成：
+   --   1) fenced 验证 owner/token/attempt/lease >= now/observed SHA == persisted candidate SHA
+   --   2) 按 subject_type 验证 exact subject 并更新：
+   --      materialization_publish → projection published_usable（generation/SHA/published_by 一次写入）
+   --      legacy_cutover → mapped projection published_usable + legacy entry mapped_active（R8-C）
+   --      registry_rebuild → 无 subject 更新
+   --   3) publication → active（清 owner/lease，activated_at）
+   -- 任一步失败（fencing 不命中 / subject mismatch / changes=0 / trigger ABORT）
+   --   → 整条 INSERT statement 回滚：publication 保持 activation_pending，projection/legacy 零变化，
+   --     按 §7.4 case 3/5 处理；不存在可独立提交的 publication active 状态
 ```
 
 **Publication lease renewal（仅当前 owner 可续租）**：
@@ -1894,10 +2248,11 @@ WHERE id=:publication_id AND status IN ('building','candidate_persisted','file_d
 -- 旧 owner / 错误 attempt / 过期未接管 → changes=0（续租失败，零副作用）
 ```
 
-**stale owner external-side-effect 规则（R6-H 迁移到 publication）**：lease 已过期但尚未 takeover → 旧 owner 不得
-renewal（changes=0）、不得执行 T2/T3/T4 任何新的外部副作用（registry 写 / adapter reload / health poll）、不得 T5
-finalize（WHERE 含 `>= :now` → changes=0）；旧 owner 即使完成了过期期间的 registry 写 / reload / poll I/O，
-也不得提交数据库终局（T5 双 changes=1 全部不命中）。实证 RP-11/RP-12。
+**stale owner external-side-effect 规则（R6-H 迁移到 publication，R8-D activation command 版）**：lease 已过期但尚未
+takeover → 旧 owner 不得 renewal（changes=0）、不得执行 T2/T3/T4 任何新的外部副作用（registry 写 / adapter
+reload / health poll）、不得 T5——旧 owner 的 activation command INSERT 必因 fenced 验证不命中
+（owner_token/attempt 不匹配或 `lease_expires_at >= activated_at` 不成立）整条 ABORT；旧 owner 即使完成了
+过期期间的 registry 写 / reload / poll I/O，也不得提交数据库终局。实证 RP-11/RP-12。
 
 ### 7.4 Crash reconciliation（publisher/Worker 启动或接管时执行；按 publication journal 完成整个 subject）
 
@@ -1909,14 +2264,21 @@ case 2  registry durable（candidate_persisted/file_durable），adapter 尚未 
         磁盘 registry SHA == persisted candidate SHA、active SHA == stable SHA
         → 触发 reload，续 T3；不重建、不改 DB。
 case 3  adapter active SHA == persisted candidate SHA，publication 尚未 active（DB 未 T5）：
-        → 按 publication journal 完成**整个 subject** 的 T5 原子 reconciliation
-          （publication → active + projection → published_usable + legacy → mapped_active，
-          同一 fenced 事务；不得只根据任意一个 per-key row 猜测——journal 的 subject 是唯一裁决源）。
+        → 按 publication journal 完成**整个 subject** 的 T5 原子 reconciliation——INSERT 同一条
+          activation command（observed SHA = persisted candidate SHA；lease 过期先按 case 6 takeover）：
+          command trigger 同一 statement 内 publication → active + projection → published_usable +
+          legacy → mapped_active；不得只根据任意一个 per-key row 猜测——journal 的 subject 是唯一裁决源；
+          activation 已在飞但 DB 未提交（activation_indeterminate）→ 以 owner_token=NULL 的 resolve
+          command 使用**已存在的** candidate 证据完成（R8-E，不得补写 candidate 证据）。
 case 4  T5 事务已提交（publication active）：
-        → 无需动作（active + published_usable + mapped_active 已持久；重启幂等）。
+        → 无需动作（active + published_usable + mapped_active 已持久；重启幂等；重复 activation
+          command 因 fencing 不命中 ABORT）。
 case 5  candidate reload 失败，adapter 保持 LKG（active SHA != candidate SHA）：
         → stable legacy 不丢（stable view 未变）；projection 保持 file_ready_unpublished；
-          publication 保留 candidate 证据按指数退避重试 T3，或 fenced cancelled 后新 row 重试 T1。
+          publication 保留 candidate 证据按指数退避重试 T3，或 fenced failed/cancelled 后：
+          legacy_cutover subject → legacy entry rollback 回 mapped_verified（清 pending link +
+          candidate 标记，R8-A `trg_lve_rollback` 验证 publication failed/cancelled），
+          再以**新的 publication row** 重试 T1（legacy 重新 mapping_pending 引用新 publication.id）。
 case 6  publication owner lease 过期：
         → 新 owner fenced CAS 接管：
           UPDATE voice_registry_publications
@@ -1925,7 +2287,8 @@ case 6  publication owner lease 过期：
           WHERE id=:publication_id AND status IN ('building','candidate_persisted','file_durable','activation_pending')
             AND lease_expires_at < :now;
           -- changes=1 才接管；接管后按 case 1-5 重估继续；
-          -- 旧 owner 的 renewal / T2-T4 外部副作用 / T5 finalize 全部 changes=0（R7，见 §7.3）
+          -- 旧 owner 的 renewal（changes=0）/ T2-T4 外部副作用 / T5 activation command
+          -- （fencing 不命中整条 ABORT）全部失效（R8，见 §7.3）
 ```
 
 **crash reconciliation 期间的 lease 纪律**：publisher/Worker 在 case 1-5 的每个外部副作用步骤
@@ -2011,6 +2374,7 @@ succeeded / failed / cancelled → （终态，无出边）
 
 `initializing` 只占用 (project_id, request_id)；claim/job/result 链接必须 NULL；不计 active subscriber（只统计
 waiting/running）；Scheduler 不可见；推荐不允许长期 committed initializing（清理走 cancelled/failed）。
+**R8-H**：`initializing → waiting` 必须 `claim_id` 非 NULL（trigger + CHECK 双强制；job_id 可 NULL）。
 
 ### 9.2 `tts_synthesis_claims`
 
@@ -2024,6 +2388,9 @@ succeeded / failed / cancelled → （终态，无出边）
 
 queued/preflight failure 传播：job `queued → failed/cancelled` 时同事务 claim `generation_pending → failed/cancelled`。
 **R7-D**：`running` 必须已有 job（`trg_tsc_running_job`，`SELECT * FROM tts_jobs WHERE claim_id=?` 恒最多一个）。
+**R8-F**：`validating_reuse → generation_pending` 只能经 `tts_claim_generation_dispatches` atomic dispatch command
+（同一 statement 建恰好一个 queued job + 转 claim；无 command 行直接转换一律 ABORT；同 claim 第二次 dispatch
+UNIQUE ABORT）。
 
 ### 9.3 `tts_jobs`（仅 TTS-C 行，`claim_id IS NOT NULL`；legacy 行不受限）
 
@@ -2035,8 +2402,10 @@ succeeded / failed / cancelled → （终态，无出边）
 ```
 
 TTS-C **无 running → queued requeue**（stale running → indeterminate → 显式 resolve；与 legacy `recoverStaleTtsJobs` 隔离）。
-**R7-E**：TTS-C job INSERT 初始状态只能 `queued`；`succeeded` 必须 `result_artifact_id` 非 NULL；非成功状态不得携带
-result；`result_artifact_id` 首次非 NULL 后不可改；TTS-C 行 DELETE 禁。
+**R8-G**：TTS-C job INSERT 初始状态只能 `queued`；**result row-state invariant 对 INSERT 与所有 UPDATE 生效**——
+`succeeded ⇔ result_artifact_id IS NOT NULL`、非 succeeded ⇒ result IS NULL（running/queued/failed 单独写 result
+一律 ABORT）；`result_artifact_id` 首次非 NULL 后不可改；TTS-C 行 DELETE 禁。
+**R8-I**：`narration_plan_artifact_id / narration_plan_version / payload_json / provider / voice_profile_id` 创建后不可改。
 
 ### 9.4 `tts_generation_attempts`
 
@@ -2062,6 +2431,7 @@ succeeded / reused / failed / cancelled → （终态，无出边）
 ```
 
 `reused` 仅来自 waiting（existing projection）；`succeeded` 仅表示新复制成功（含共享 job fan-out waiting→succeeded）；禁止混写。
+**R8-H**：`initializing → waiting` 必须 `job_id` 非 NULL 且 job profile/revision identity 通过（trigger + CHECK 双强制）。
 
 ### 9.6 `voice_materialization_jobs`
 
@@ -2093,13 +2463,17 @@ registry 激活意图/证据全部移入 `voice_registry_publications`（§9.10�
 ```text
 unmapped        → mapped_verified | retired
 mapped_verified → mapping_pending | retired
-mapping_pending → mapped_active | mapped_verified   # 后者=candidate 失败/过期清证据回退，允许安全重试
+mapping_pending → mapped_active | mapped_verified   # 后者=referenced publication failed/cancelled 后
+                                                    # 清 pending link + candidate 标记回退（R8-A），允许安全重试
 mapped_active   → retired
 retired         → （终态，无出边）
 ```
 
-**R7-C**：`mapping_pending` 必须 `pending_publication_id` 指向 active `legacy_cutover` publication（§2.8）；
-cutover 所有权（owner/lease/attempt）在 publication 表（§9.10），本行不再有 owner 列。
+**R7-C + R8-A/B/D**：`mapping_pending` 必须 `pending_publication_id` 指向 active `legacy_cutover` publication（§2.8）；
+cutover 所有权（owner/lease/attempt）在 publication 表（§9.10），本行不再有 owner 列；candidate generation/SHA
+单一权威 = publication 行（本行不复制）；`pending_publication_id` 仅 T1 fill / rollback clear（id→id 替换 ABORT）；
+`mapped_active` 只能经 atomic activation command 进入，并保留 `pending_publication_id` 指向激活它的 active
+publication；`unmapped → mapped_verified` 前置 mapped materialization = `file_ready_unpublished`（R8-C）。
 
 ### 9.9 所有权语义汇总（CHECK 强制；R5 冻结）
 
@@ -2110,7 +2484,7 @@ cutover 所有权（owner/lease/attempt）在 publication 表（§9.10），本�
 | running | 必须清空 | **有效** | 单 Worker |
 | succeeded / failed / cancelled / indeterminate | 必须清空 | 必须清空 | 终态/待 resolve |
 
-### 9.10 `voice_registry_publications`（R7-A 新增）
+### 9.10 `voice_registry_publications`（R7-A 新增；R8-D/E 强化）
 
 ```text
 building            → candidate_persisted | failed | cancelled | indeterminate
@@ -2124,6 +2498,10 @@ active             → （终态，无出边；activation evidence 全冻结）
 
 global active single-flight 覆盖 building/candidate_persisted/file_durable/activation_pending/indeterminate
 （`uq_voice_registry_publication_active`）——任意时刻全系统最多一个 active publication。
+**R8-D**：`active` 入边必须存在匹配 `voice_registry_publication_activations` command 行（直接 UPDATE 一律 ABORT）。
+**R8-E**：进入 indeterminate 必须写 `indeterminate_from_status`；indeterminate 期间 candidate/manifest/file/activation
+证据冻结；`indeterminate → active` 仅允许 from=`activation_pending` 且经 resolve command（owner_token=NULL）。
+**R8-I**：`generation` UNIQUE，BEGIN IMMEDIATE 下单调分配。
 
 ---
 
@@ -2136,7 +2514,7 @@ global active single-flight 覆盖 building/candidate_persisted/file_durable/act
 | VF-1 A lease expires → B takeover → A finalize rejected | claim=validating_reuse(A, attempt=1)，candidate usable | B takeover CAS；A fenced finalize | takeover changes=1；A finalize changes=0 → STALE_VALIDATION_OWNER；claim/job/request/文件零变化 |
 | VF-2 A renew after B takeover → changes=0 | 同 VF-1 接管后 | A renewal（旧 token/attempt） | renewal changes=0；lease 不被旧 owner 延长 |
 | VF-3 B finalize usable → exactly one reuse result | B 持有（attempt=2） | B fenced finalize | changes=1；claim=succeeded；零新 job；全部未取消 envelope succeeded 且指向同一 artifact |
-| VF-4 B finalize unusable → exactly one queued job | B 持有，candidate damaged | B fenced finalize + INSERT job | 恰好一个 queued job；claim=generation_pending；partial unique 不冲突 |
+| VF-4 B finalize unusable → exactly one queued job | B 持有，candidate damaged | B atomic dispatch command INSERT（§2.2b） | 恰好一个 queued job；claim=generation_pending（同一 statement 原子）；partial unique 不冲突 |
 | VF-5 A/B/last-cancel 三方竞争 | A validating、B takeover、最后 subscriber cancel 并发 | 三事务交错全序排列 | §3.4 不变量：零 subscriber→cancelled 无 job；有 subscriber+usable→reused；有 subscriber+unusable→恰好一个 queued job；stale 零副作用；无 orphan job |
 
 ### 10.2 Materialization fencing（`scripts/test-tts-c-materialization-fencing.ts`）
@@ -2168,7 +2546,7 @@ global active single-flight 覆盖 building/candidate_persisted/file_durable/act
 |---|---|---|
 | CC-1 | publication building/candidate_persisted 后、registry 写入前 | 恢复重发布同 SHA candidate 或 fenced cancelled 后新 row 重试；legacy voice 不丢；key 恰好一个 source |
 | CC-2 | candidate registry fsync 后、adapter reload 前 | 磁盘 SHA==persisted candidate → 续 reload；不重建；legacy 不丢 |
-| CC-3 | adapter activation 后、T5 DB commit 前 | active SHA==candidate → 按 publication journal 完成整个 subject 的 T5 原子 reconciliation（publication active + projection published_usable + legacy mapped_active，幂等） |
+| CC-3 | adapter activation 后、T5 DB commit 前 | active SHA==candidate → 按 publication journal INSERT 同一条 activation command 完成整个 subject 的原子 reconciliation（command trigger 同一 statement：publication active + projection published_usable + legacy mapped_active；重启幂等，重复 command fencing ABORT） |
 | CC-4 | T5 事务进行中（注入回滚/崩溃） | 整事务回滚：不得半 mapped_active；legacy 不丢；projection 不错误标 published_usable |
 | CC-5 | reload 失败，adapter LKG | active SHA!=candidate → stable legacy 保持 emitted；projection 保持 file_ready_unpublished；publication 证据保留可重试 |
 | CC-6 | publication owner lease 过期 | fenced CAS 接管（changes=1）；旧 owner renewal/finalize changes=0；状态可 reconciliation |
@@ -2176,47 +2554,51 @@ global active single-flight 覆盖 building/candidate_persisted/file_durable/act
 每个 CC 测试必须断言：legacy voice 不丢失；canonical key 恰好一个 source；active SHA 与 DB state 可 reconciliation；
 不得错误标 published_usable；reconciliation 以 publication journal（subject）为唯一裁决源，不凭任意 per-key row 猜测。
 
-### 10.5 SQLite contract validation（R7 已执行的 docs-only 验证；runtime 阶段纳入 gate）
+### 10.5 SQLite contract validation（R8 已执行的 docs-only 验证；runtime 阶段纳入 gate）
 
-临时目录（sqlite3 3.45.1）：schema apply（10 表）→ `PRAGMA foreign_key_check`（空）→ `PRAGMA integrity_check`（ok）→
-happy path（synthesis 全链 + reuse fan-in + materialization 全链 + **publication journal 全流程** + cutover 全链 +
-legacy requeue 正向控制）→ **crash-retry 闭环（failed publication A → 新 attempt B 全流程成功 → A/B evidence 均保留、
-active 无泄漏）** → **139 项 mutation 验证全部按预期（FAIL=0）**：
+临时目录（sqlite3 3.45.1）：**直接从最终设计文档 §2 提取全部可执行 SQL**（12 表：含第 11 表
+`voice_registry_publication_activations` 与第 12 表 `tts_claim_generation_dispatches`）重建临时 DB →
+schema apply → `PRAGMA foreign_key_check`（空）→ `PRAGMA integrity_check`（ok）→ happy path →
+mutation 矩阵 → **294 项断言全部按预期（FAIL=0）**：
 
-- **R7 新增 39 项**：
-  - **RP-01…12（registry publication journal）12 项**：RP-01 failed 后可创建新 attempt（A failed→B building）、
-    RP-02 failed evidence 保留不可改、RP-03/03b 两个并发 T1 只有一个 global active publication（同/异 subject 均 UNIQUE ABORT）、
-    RP-04 第二个 key 不得在第一个 publication active 时进入 mapping_pending（publication link mismatch）、
-    RP-05 crash after candidate fsync → journal 恢复（file_durable→active）、RP-06 adapter 已激活 DB 未 T5 →
-    journal 原子 reconciliation（T5 fenced changes=1 + projection published_usable）、RP-08 new global generation 后旧
-    published projection evidence 保留、**RP-09 vrp 初始状态非 building 直接 INSERT**、RP-10 active 后改 evidence（终态冻结）、
-    RP-11 过期 publication owner renewal changes=0、RP-12 过期 publication owner finalize changes=0；
-  - **CJ-01…08（claim/job 无环模型）11 项**：CJ-01 validating_reuse claim 下插 queued job（claim not in generation state）、
-    CJ-02 同一 claim 第二个 job（uq_tts_jobs_claim UNIQUE）、CJ-03 generated claim 恰好一个 job（查询=1）、
-    CJ-03b claim→running 无 job（running requires exactly one job）、CJ-04 reuse claim 无 job（查询=0）、
-    CJ-04b claim 无 job_id 列（no such column）、CJ-05 succeeded job result NULL、CJ-06 succeeded job 替换 result artifact
-    （result link trigger）、CJ-07 删除 TTS-C job、CJ-08/08b legacy job delete/requeue 兼容；
-  - **SL-01…08（subscriber link closure）10 项**：SL-01 cross-project、SL-02 cross-unit、SL-03 fingerprint/variant mismatch、
-    SL-04 request.job_id 属其他 claim、SL-04b 一致则允许、SL-05 错误 request 不污染 active subscriber count、
-    **SL-06 direct INSERT succeeded request（request 初始状态 initializing 拦截）**、
-    **SL-07 result identity INSERT bypass（CHECK 拦截）**、SL-08 initializing 不计 subscriber + 链接必须 NULL（SL-08b）；
-  - **VI-01…04（exact voice/provider identity）6 项**：VI-01 job profile/revision pair mismatch、VI-02 job provider 与
-    revision provider 不同、VI-02b voice_profile_revision_id 缺失、VI-03 attempt provider 与 job 不同、
-    VI-04 artifact voice 与 job 不同、VI-04b artifact provider 与 job/attempt 不同；
-- **R6 回归 100 项（适配 R7 schema，含 INIT 1-6 初始状态直插回归）**：IS-01/01b/02/02b/03a/b/04a/b/c（tts_jobs seal；
-  IS-04d job-link 因 job_id 列删除由 CJ 取代）、IS-05（10 字段 attempt evidence）、IS-06…09（artifact provenance 15 项）、
-  IS-10/11/11b/12b/d/e（终态链接；IS-12a/c 因 job_id 列删除由 CJ-04 取代）、IS-13（vmjob）、IS-14a/b/c/e
-  （vmat published_usable 封存；IS-14d registry_pending 由 RP-01 取代）、IS-15a/b/c/d/f（lve journal；
-  IS-15e mapping_pending 原地改写由 RP-04 覆盖）、IS-16/16b/e + IS-17/17b（validation lease fencing；
-  IS-18/19 cutover lease 由 RP-11/12 取代）、IS-20（consumer truth）、SM1-9（9 表状态机）、DEL1-10（9 表 DELETE + vrp）、
-  PC1-7、CHK1-5/8/9（CHK8 改 vrp registry SHA 格式）、PAIR1-3、UNIQ1-3、
-  **INIT 1-6（claim→validating_reuse、attempt→created、vmjob→validating_existing、vmat→file_ready_unpublished、
-  lve→unmapped、vmr→initializing 初始状态直插拒绝）**；
-- **正向控制**：IS-20 reuse consumer 真相查询（`WHERE result_artifact_id=:id` 得全部 2 个 consumer；producing
-  `claim_id` 只得 1 个）、legacy requeue/delete 兼容、SL-04b 合法链接。
+- **happy path 45 项**：synthesis 全链（validating_reuse → **CJ-10 单条 atomic dispatch** → 恰好一个 queued job →
+  running → attempt → artifact → 原子成功终局）；reuse fan-in（IS-20 consumer 真相 + CJ-04 reuse 无 job）；
+  materialization 全链（EN-04 vmr exact job link + durability fan-out）；**PA-02 materialization atomic activation**
+  （一条 activation command 原子完成 publication=active + projection=published_usable）；
+  **PA-03 legacy cutover atomic activation**（一条 command 原子完成 publication + mapped projection + legacy=mapped_active）；
+  registry_rebuild；**crash-retry 闭环**（failed publication A → 新 attempt B 全流程成功 → A/B evidence 均保留、
+  active 无泄漏）；**legacy failed→rollback→新 publication→成功闭环**（LR-01 rollback 清 pending link /
+  LR-03 引用新 publication.id / LR-04 旧 failed evidence 不变）；**PE-04 activation_indeterminate 用已存在
+  candidate 证据 resolve active**；legacy requeue 正向控制；
+- **R8 新增矩阵 65 项**：
+  - **LR（retryable legacy link）**：LR-02/02b referenced publication 非 failed/cancelled 时 rollback ABORT、
+    LR-05/05b pending publication ID 非法替换 ABORT（LR-01/03/04 见 happy path 闭环）；
+  - **PA（atomic publication activation）8 项**：PA-01 publication 单独 activation_pending→active ABORT、
+    PA-04/04b subject 被抢占整条 statement 回滚、PA-05 legacy publication 不能激活其他 projection、
+    PA-06/06b subject 不存在 INSERT ABORT、PA-07 rebuild subject_id≠'global' ABORT、PA-08 duplicate generation
+    UNIQUE ABORT（PA-02/03 见 happy path）；
+  - **PE（evidence closure）8 项**：PE-01/01b lve 无 candidate generation/SHA 列（no such column，单一权威）、
+    PE-02/02b/02c indeterminate 期间首补 candidate SHA/manifest/file_durable_at ABORT、PE-03/03b/03c
+    building-before-candidate indeterminate → active ABORT（只能 failed/cancelled）（PE-04 见 happy path）；
+  - **CJ-09…13（exact-one dispatch）6 项**：CJ-09 只 UPDATE claim→generation_pending 无 dispatch ABORT、
+    CJ-11 dispatch 内 job INSERT 失败整条回滚（claim 保持 validating_reuse）、CJ-12 同 claim 第二次 dispatch
+    UNIQUE ABORT、CJ-13/13b generated 终态仍恰好一个 job（CJ-10 见 happy path）；
+  - **EN（envelope closure）7 项**：EN-01 tar→waiting 无 claim ABORT、EN-02 tar→waiting exact claim PASS、
+    EN-03 vmr→waiting 无 job ABORT、EN-05/05b waiting 清链接 CHECK/immutable ABORT（EN-04 见 happy path）；
+  - **JR（job result row-state invariant）5 项**：JR-01 running / JR-02 queued / JR-03 failed 单独 SET result
+    全 ABORT、JR-04 status=succeeded+exact result 同一更新 PASS、JR-05 succeeded 后替换 result ABORT；
+- **R7 回归 47 项（适配 R8 dispatch/activation 语义）**：RP-02/02b/03/03b/04/05/09/10/10b/11/12
+  （publication journal 负向；RP-01/06/07/08 由 R8 闭环覆盖）、CJ-01…07（无环 claim/job；CJ-01 现在=
+  dispatch command required、CJ-05 现在= result status invariant violated）、SL-01…08b（subscriber link
+  closure）、VI-01…04b（exact voice/provider identity）；
+- **R6 回归 137 项（适配 R8 schema）**：IS-01…20（tts_jobs seal / attempt evidence / artifact provenance /
+  终态链接 / vmjob / vmat 封存 / lve journal / validation lease fencing / consumer truth）、SM1-9、
+  DEL1-12b（12 表 DELETE 禁 + activation command immutable）、PC1-7、CHK1-5/8/9、PAIR1-3、UNIQ1-4、
+  INIT1-7（初始状态直插全拒）。
 
-每个反例的预期错误文本或 `changes=0` 已在本轮临时 runner 中逐一断言（错误文本为 trigger/CHECK/FK/UNIQUE 冻结消息）。
-**设计文档 §2 代码块的可执行语句已提取重建临时 DB 并重跑全部验证（语句级一致，注释不计）**。临时 SQL/DB 未入仓库。
+每个反例的预期错误文本或 `changes=0` 已在本轮临时 runner 中逐一断言（错误文本为 trigger/CHECK/FK/UNIQUE/NOT NULL
+冻结消息；同表多 trigger 按创建逆序触发，消息以实证为准）。**设计文档 §2 代码块的可执行语句已提取重建临时 DB
+并重跑全部验证（语句级一致，注释不计）**。临时 SQL/DB 未入仓库。
 
 ### 10.6 R7 新增验证矩阵（runtime 阶段纳入 gate）
 
@@ -2226,15 +2608,15 @@ active 无泄漏）** → **139 项 mutation 验证全部按预期（FAIL=0）**
 | RP-02 | failed attempt 改 error_code/candidate | immutable ABORT（evidence 保留） |
 | RP-03 | 两个并发 T1（同/异 subject） | 恰好一个 active publication（UNIQUE ABORT）；global single-flight |
 | RP-04 | 第一个 publication active 时第二个 key 进 mapping_pending | publication link mismatch ABORT；一个 active publication 最多一个 mapping_pending subject |
-| RP-05 | crash after candidate fsync（file_durable） | journal 恢复：fenced → activation_pending → active |
-| RP-06 | crash after adapter activation before T5 | journal 原子 reconciliation：publication active + projection published_usable（同事务 changes=1） |
+| RP-05 | crash after candidate fsync（file_durable） | journal 恢复：fenced → activation_pending → 单条 activation command → active |
+| RP-06 | crash after adapter activation before T5 | journal 原子 reconciliation：单条 activation command 同一 statement 完成 publication active + projection published_usable |
 | RP-07 | active registry 不得含 DB stable view 未提交的第二个 key | candidate manifest 只含 frozen subject；第二个 key 无法并发发布（RP-03/04 覆盖） |
 | RP-08 | 新 global generation（registry_rebuild） | 旧 published projection evidence（generation/SHA/published_by）保留不变 |
-| CJ-01 | validating_reuse claim 下 INSERT queued job | claim not in generation state ABORT |
+| CJ-01 | validating_reuse claim 下 INSERT queued job（无 dispatch 行） | dispatch command required ABORT（R8-F 取代 R7 的 generation-state 检查） |
 | CJ-02 | 同一 claim 第二个 job | uq_tts_jobs_claim UNIQUE ABORT |
 | CJ-03 | generated claim（generation_pending/running/succeeded） | 恰好一个 job（`WHERE claim_id=?` count=1） |
 | CJ-04 | reuse succeeded claim | 无 job（count=0）；claim 无 job_id 列 |
-| CJ-05 | succeeded job result NULL | succeeded requires result artifact ABORT |
+| CJ-05 | succeeded job result NULL | result status invariant violated ABORT（R8-G row-state invariant） |
 | CJ-06 | succeeded job 替换 result artifact | result link / immutable ABORT |
 | CJ-07 | 删除 TTS-C job | tts-c delete forbidden ABORT |
 | CJ-08 | legacy job delete/requeue | 兼容不受影响（claim_id NULL 行） |
@@ -2245,15 +2627,81 @@ active 无泄漏）** → **139 项 mutation 验证全部按预期（FAIL=0）**
 | SL-07 | INSERT 带 result_artifact_id（bypass） | CHECK 拦截（initializing 链接必须 NULL） |
 | SL-08 | initializing 行 | 不计 active subscriber（count 只统计 waiting/running）；链接必须 NULL；Scheduler 不可见 |
 | VI-01/02 | job profile/revision pair、provider 与 revision 不同 | voice revision pair mismatch ABORT |
-| VI-02b | job voice_profile_revision_id 缺失 | claim identity required ABORT |
+| VI-02b | dispatch voice_profile_revision_id 缺失 | NOT NULL constraint ABORT（结构不可提交） |
 | VI-03 | attempt provider 与 job 不同 | provider mismatch ABORT |
 | VI-04 | artifact voice/provider 与 job/attempt/revision 不同 | job voice profile mismatch / job provider mismatch ABORT |
+
+### 10.7 R8 新增验证矩阵（runtime 阶段纳入 gate）
+
+**Legacy retry（R8-A）**
+
+| 测试 | mutation / 步骤 | 断言 |
+|---|---|---|
+| LR-01 | publication failed → legacy mapping_pending → mapped_verified rollback（清 pending_publication_id + candidate_source_selector） | rollback 成功；entry=mapped_verified；pending/selector 全 NULL |
+| LR-02 | referenced publication 非 failed/cancelled（building/active/indeterminate）时 rollback | `rollback publication not failed` ABORT；entry 保持 mapping_pending |
+| LR-03 | rollback 后同 entry 新 publication → mapped_verified → mapping_pending（写入新 publication.id）→ 全流程激活 | T1 fill 允许（NULL→新 id）；最终 mapped_active；两次 publication evidence 均在 journal |
+| LR-04 | rollback + 重试全程 | 旧 failed publication evidence（status/error/candidate SHA）不变（immutable） |
+| LR-05 | mapping_pending 内 pending_publication_id → 其他 publication id（不清 NULL 直接替换） | `immutable field` ABORT（仅允许 T1 fill 与 rollback clear） |
+
+**Publication atomic activation（R8-D/C）**
+
+| 测试 | mutation / 步骤 | 断言 |
+|---|---|---|
+| PA-01 | publication 单独 UPDATE activation_pending→active（无 command 行） | `invalid transition` ABORT；不存在可独立提交的 active |
+| PA-02 | materialization_publish：一条 activation command INSERT | 同一 statement 原子完成 publication=active + projection=published_usable（generation/SHA/published_by 一次写入） |
+| PA-03 | legacy_cutover：一条 activation command INSERT | 同一 statement 原子完成 publication=active + mapped projection=published_usable + legacy=mapped_active（candidate_activated_at） |
+| PA-04 | activation command 的 subject 已被抢占（projection 非 file_ready_unpublished / legacy 非 mapping_pending） | subject mismatch ABORT；整条 statement 回滚：publication/projection/legacy 全不变 |
+| PA-05 | legacy_cutover publication 尝试激活非 mapped 的其他 projection | `trg_vmat_publish` link mismatch ABORT（legacy 只能激活 entry.mapped_voice_materialization_id） |
+| PA-06 | publication INSERT 引用不存在的 subject（materialization/legacy id 不存在） | `subject invalid` ABORT（INSERT 即拒） |
+| PA-07 | registry_rebuild 的 subject_id != 'global' | `subject invalid` ABORT |
+| PA-08 | 两个 publication 相同 generation | `UNIQUE` ABORT（generation UNIQUE） |
+
+**Evidence closure（R8-E/B）**
+
+| 测试 | mutation / 步骤 | 断言 |
+|---|---|---|
+| PE-01 | legacy 行写入与 publication 不同的 candidate 证据（试图复制 generation/SHA 列） | 列不存在（`no such column`）——单一权威 = publication 行，无跨表同步面 |
+| PE-02 | publication indeterminate 期间首次补写 candidate_registry_sha256 / manifest / file_durable_at | `immutable field` ABORT（indeterminate 证据冻结，禁止事后补造） |
+| PE-03 | building 阶段（candidate 未持久化）进入 indeterminate → resolve active | `invalid transition` ABORT（from != activation_pending；只能 failed/cancelled） |
+| PE-04 | activation_indeterminate 用已存在 candidate 证据 + resolve command（owner_token=NULL）→ active | PASS：publication=active + projection/legacy 同步激活；仅新增 activated_at/resolution_evidence |
+
+**Claim/job exact-one（R8-F）**
+
+| 测试 | mutation / 步骤 | 断言 |
+|---|---|---|
+| CJ-09 | 只把 claim UPDATE 成 generation_pending 后 COMMIT（无 dispatch 行） | `generation_pending requires dispatch command` ABORT（结构上不可能） |
+| CJ-10 | atomic dispatch command INSERT | 同一 statement：claim=generation_pending + 恰好一个 queued job + validation owner/candidate 清空 |
+| CJ-11 | dispatch 内 job INSERT 失败（job id 冲突） | 整条 statement 回滚：claim 保持 validating_reuse、无 job、无 dispatch 行 |
+| CJ-12 | 同 claim 第二次 dispatch command | `UNIQUE(claim_id)` ABORT |
+| CJ-13 | generated claim 走到 succeeded/failed/cancelled/indeterminate | 仍恰好一个 job（`WHERE claim_id=?` count=1；job DELETE 禁） |
+
+**Envelope closure（R8-H）**
+
+| 测试 | mutation / 步骤 | 断言 |
+|---|---|---|
+| EN-01 | tar initializing→waiting 无 claim_id | `waiting requires claim link` ABORT |
+| EN-02 | tar initializing→waiting + exact claim（同事务链接） | PASS；waiting 行 claim_id 非 NULL |
+| EN-03 | vmr initializing→waiting 无 job_id | `waiting requires job link` ABORT |
+| EN-04 | vmr initializing→waiting + exact job（同事务链接） | PASS；waiting 行 job_id 非 NULL |
+| EN-05 | waiting envelope 清掉 claim/job 链接（制造无 authoritative dependency 的 waiting） | CHECK/immutable ABORT——waiting/running/indeterminate 必须持 claim_id（tar）/ job_id（vmr） |
+
+**Job result row-state invariant（R8-G）**
+
+| 测试 | mutation / 步骤 | 断言 |
+|---|---|---|
+| JR-01 | running job 单独 SET result_artifact_id | `result status invariant violated` ABORT |
+| JR-02 | queued job 单独 SET result_artifact_id | `result status invariant violated` ABORT |
+| JR-03 | failed job 单独 SET result_artifact_id | `result status invariant violated` ABORT |
+| JR-04 | running→succeeded 同一 UPDATE 携带 exact result artifact | PASS（result artifact job/claim identity trigger 同步通过） |
+| JR-05 | succeeded 后替换 result_artifact_id | `immutable field` ABORT（result write-once） |
+
+全部 R5/R6/R7 mutation（IS/SM/DEL/PC/CHK/PAIR/UNIQ/INIT/RP/CJ-01…08/SL/VI）必须在新 contract 上回归。
 
 ---
 
 ## 11. 并行开发规则（见实施计划；此处为设计依据）
 
-- R7 PASS 后：1A 与 1C 可并行开发（不同本地 worktree/local branch）；1B 的 adapter parser/reloader 测试骨架可并行准备；
+- R8 PASS 后：1A 与 1C 可并行开发（不同本地 worktree/local branch）；1B 的 adapter parser/reloader 测试骨架可并行准备；
   1B publisher integration 等 1A PASS；C.2 等 1A+1B+1C 全部 PASS；C.2 PASS 后 C.3→C.4→C.5 runtime 串行。
 - Git：不推阶段 remote branch；单一 integrator 拥有 m7；agent 返回独立 commit SHA；integrator 按序 cherry-pick；
   **每个 exact SHA 单独 typecheck/build/tests/Review/deploy**；禁止一次合并多个未 Review lane。
