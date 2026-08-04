@@ -48,7 +48,7 @@
 > ⑩ **可执行 SQLite contract 实证**（§2 全部为可直接转 migration 的真实 SQL，临时目录 sqlite3 3.45.1 实证：
 > schema apply / foreign_key_check（空）/ integrity_check（ok）/ happy path 全链（synthesis+reuse+materialization+
 > publication journal+cutover）/ crash-retry 闭环（failed publication→新 attempt→成功→A/B evidence 保留）/
-> **139 项 mutation 验证：R7 新增 39 项（RP-01…12/CJ-01…08/SL-01…08/VI-01…04/INIT）+ R6 回归 100 项，全部按预期
+> **139 项 mutation 验证：R7 新增 39 项（RP-01…12/CJ-01…08/SL-01…08/VI-01…04）+ R6 回归 100 项（含 INIT 1-6），全部按预期
 > ABORT 或 fencing changes=0，FAIL=0**；临时 SQL/DB 不入仓库）。
 > R5/R6 的 validation finalization fencing、可执行 contract、relational provenance 闭包、attempt 证据不可变、
 > cutover journal、lease-expiry fencing 由 R7 继承并强化；R6 被独立 Review 判 FAIL 的 9 项阻断全部关闭。
@@ -2185,32 +2185,33 @@ active 无泄漏）** → **139 项 mutation 验证全部按预期（FAIL=0）**
 
 - **R7 新增 39 项**：
   - **RP-01…12（registry publication journal）12 项**：RP-01 failed 后可创建新 attempt（A failed→B building）、
-    RP-02 failed evidence 保留不可改、RP-03 两个并发 T1 只有一个 global active publication（同/异 subject 均 UNIQUE ABORT）、
+    RP-02 failed evidence 保留不可改、RP-03/03b 两个并发 T1 只有一个 global active publication（同/异 subject 均 UNIQUE ABORT）、
     RP-04 第二个 key 不得在第一个 publication active 时进入 mapping_pending（publication link mismatch）、
     RP-05 crash after candidate fsync → journal 恢复（file_durable→active）、RP-06 adapter 已激活 DB 未 T5 →
     journal 原子 reconciliation（T5 fenced changes=1 + projection published_usable）、RP-08 new global generation 后旧
-    published projection evidence 保留、RP-09 初始状态非 building 直接 INSERT、RP-10 active 后改 evidence（终态冻结）、
+    published projection evidence 保留、**RP-09 vrp 初始状态非 building 直接 INSERT**、RP-10 active 后改 evidence（终态冻结）、
     RP-11 过期 publication owner renewal changes=0、RP-12 过期 publication owner finalize changes=0；
-  - **CJ-01…08（claim/job 无环模型）9 项**：CJ-01 validating_reuse claim 下插 queued job（claim not in generation state）、
+  - **CJ-01…08（claim/job 无环模型）11 项**：CJ-01 validating_reuse claim 下插 queued job（claim not in generation state）、
     CJ-02 同一 claim 第二个 job（uq_tts_jobs_claim UNIQUE）、CJ-03 generated claim 恰好一个 job（查询=1）、
-    CJ-04 reuse claim 无 job（查询=0）、CJ-04b claim 无 job_id 列（no such column）、CJ-05 succeeded job result NULL、
-    CJ-06 succeeded job 替换 result artifact（result link trigger）、CJ-07 删除 TTS-C job、CJ-08 legacy job delete/requeue 兼容；
-  - **SL-01…08（subscriber link closure）9 项**：SL-01 cross-project、SL-02 cross-unit、SL-03 fingerprint/variant mismatch、
+    CJ-03b claim→running 无 job（running requires exactly one job）、CJ-04 reuse claim 无 job（查询=0）、
+    CJ-04b claim 无 job_id 列（no such column）、CJ-05 succeeded job result NULL、CJ-06 succeeded job 替换 result artifact
+    （result link trigger）、CJ-07 删除 TTS-C job、CJ-08/08b legacy job delete/requeue 兼容；
+  - **SL-01…08（subscriber link closure）10 项**：SL-01 cross-project、SL-02 cross-unit、SL-03 fingerprint/variant mismatch、
     SL-04 request.job_id 属其他 claim、SL-04b 一致则允许、SL-05 错误 request 不污染 active subscriber count、
-    SL-06 direct INSERT succeeded request、SL-07 result identity INSERT bypass（CHECK 拦截）、SL-08 initializing 不计
-    subscriber + 链接必须 NULL；
+    **SL-06 direct INSERT succeeded request（request 初始状态 initializing 拦截）**、
+    **SL-07 result identity INSERT bypass（CHECK 拦截）**、SL-08 initializing 不计 subscriber + 链接必须 NULL（SL-08b）；
   - **VI-01…04（exact voice/provider identity）6 项**：VI-01 job profile/revision pair mismatch、VI-02 job provider 与
     revision provider 不同、VI-02b voice_profile_revision_id 缺失、VI-03 attempt provider 与 job 不同、
     VI-04 artifact voice 与 job 不同、VI-04b artifact provider 与 job/attempt 不同；
-  - **INIT 1-6（初始状态 trigger）6 项**：request→initializing、claim→validating_reuse、attempt→created、vmjob→
-    validating_existing、vmat→file_ready_unpublished、lve→unmapped、vmr→initializing、vrp→building（terminal 直插全拒）；
-- **R6 回归 100 项（适配 R7 schema）**：IS-01/01b/02/02b/03a/b/04a/b/c（tts_jobs seal；IS-04d job-link 因 job_id 列删除
-  由 CJ 取代）、IS-05（10 字段 attempt evidence）、IS-06…09（artifact provenance 15 项）、IS-10/11/11b/12b/d/e
-  （终态链接；IS-12a/c 因 job_id 列删除由 CJ-04 取代）、IS-13（vmjob）、IS-14a/b/c/e（vmat published_usable 封存；
-  IS-14d registry_pending 由 RP-01 取代）、IS-15a/b/c/d/f（lve journal；IS-15e mapping_pending 原地改写由 RP-04 覆盖）、
-  IS-16/16b/e + IS-17/17b（validation lease fencing；IS-18/19 cutover lease 由 RP-11/12 取代）、IS-20（consumer truth）、
-  SM1-9（9 表状态机）、DEL1-10（9 表 DELETE + vrp）、PC1-7、CHK1-5/8/9（CHK8 改 vrp registry SHA 格式）、
-  PAIR1-3、UNIQ1-3、INIT 全表初始状态回归；
+- **R6 回归 100 项（适配 R7 schema，含 INIT 1-6 初始状态直插回归）**：IS-01/01b/02/02b/03a/b/04a/b/c（tts_jobs seal；
+  IS-04d job-link 因 job_id 列删除由 CJ 取代）、IS-05（10 字段 attempt evidence）、IS-06…09（artifact provenance 15 项）、
+  IS-10/11/11b/12b/d/e（终态链接；IS-12a/c 因 job_id 列删除由 CJ-04 取代）、IS-13（vmjob）、IS-14a/b/c/e
+  （vmat published_usable 封存；IS-14d registry_pending 由 RP-01 取代）、IS-15a/b/c/d/f（lve journal；
+  IS-15e mapping_pending 原地改写由 RP-04 覆盖）、IS-16/16b/e + IS-17/17b（validation lease fencing；
+  IS-18/19 cutover lease 由 RP-11/12 取代）、IS-20（consumer truth）、SM1-9（9 表状态机）、DEL1-10（9 表 DELETE + vrp）、
+  PC1-7、CHK1-5/8/9（CHK8 改 vrp registry SHA 格式）、PAIR1-3、UNIQ1-3、
+  **INIT 1-6（claim→validating_reuse、attempt→created、vmjob→validating_existing、vmat→file_ready_unpublished、
+  lve→unmapped、vmr→initializing 初始状态直插拒绝）**；
 - **正向控制**：IS-20 reuse consumer 真相查询（`WHERE result_artifact_id=:id` 得全部 2 个 consumer；producing
   `claim_id` 只得 1 个）、legacy requeue/delete 兼容、SL-04b 合法链接。
 

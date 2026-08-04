@@ -562,15 +562,15 @@ A/B evidence 均保留、active 无泄漏、A evidence 不可改）→ **139 项
 - **R7 新增 39 项**：RP-01…12（registry publication journal：failed 后新 attempt / failed evidence 不可改 /
   两个并发 T1 只有一个 global active publication（同/异 subject 均 UNIQUE ABORT）/ 第二个 key 不得在第一个 publication
   active 时进 mapping_pending / crash after candidate fsync journal 恢复 / adapter 已激活 DB 未 T5 journal 原子
-  reconciliation / new global generation 后旧 published projection evidence 保留 / 初始状态非 building 直插 /
+  reconciliation / new global generation 后旧 published projection evidence 保留 / vrp 初始状态非 building 直插 /
   active 后改 evidence / 过期 publication owner renewal 与 finalize changes=0）、CJ-01…08（claim/job 无环：
-  validating_reuse 下插 job / 同一 claim 第二个 job UNIQUE / generated claim 恰好一个 job / reuse claim 无 job /
-  claim 无 job_id 列 / succeeded job result NULL / succeeded job 替换 result / 删除 TTS-C job / legacy delete+requeue 兼容）、
-  SL-01…08（subscriber link closure：cross-project/cross-unit/fingerprint mismatch / request.job_id 属其他 claim /
-  错误 request 不污染 active subscriber count / direct INSERT succeeded / result identity INSERT bypass / initializing
-  不计 subscriber）、VI-01…04（exact voice/provider identity：job pair mismatch / job provider 与 revision 不同 /
-  voice_profile_revision_id 缺失 / attempt provider 与 job 不同 / artifact voice 与 provider 与 job 不同）、
-  INIT 1-6（8 表初始状态直插全拒）；
+  validating_reuse 下插 job / 同一 claim 第二个 job UNIQUE / generated claim 恰好一个 job / claim→running 无 job /
+  reuse claim 无 job / claim 无 job_id 列 / succeeded job result NULL / succeeded job 替换 result / 删除 TTS-C job /
+  legacy delete+requeue 兼容）、SL-01…08（subscriber link closure：cross-project/cross-unit/fingerprint mismatch /
+  request.job_id 属其他 claim / 错误 request 不污染 active subscriber count / request 初始状态直插拦截 /
+  result identity INSERT bypass / initializing 不计 subscriber）、VI-01…04（exact voice/provider identity：job pair mismatch /
+  job provider 与 revision 不同 / voice_profile_revision_id 缺失 / attempt provider 与 job 不同 / artifact voice 与
+  provider 与 job 不同）；
 - **R6 回归 100 项（适配 R7 schema）**：IS-01/02/03/04（tts_jobs seal）、IS-05（attempt evidence 10 字段）、
   IS-06…09（artifact provenance 15 项）、IS-10/11/12（终态链接）、IS-13（vmjob）、IS-14（vmat published_usable 封存）、
   IS-15（lve journal）、IS-16/17（validation lease fencing）、IS-20（consumer truth）、SM1-9 / DEL1-10 / PC1-7 /
