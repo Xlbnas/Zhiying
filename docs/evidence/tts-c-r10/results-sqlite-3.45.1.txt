@@ -1,0 +1,118 @@
+TTS-C.0.R10 contract validation results
+engine                 : sqlite-cli
+engine sqlite version  : 3.45.1
+python sqlite3 version : 3.45.1
+git HEAD               : f1b3b931d0be9b73a95a558c641777a1c2fb30d5
+design doc             : /home/agentvm/projects/ZhiYing/docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md
+design doc sha256      : e9729fe6f4d9cc3f9609197cdaa52cbd044ed4e73fa8233e5fcff14f41bf3a07
+extracted §2 sql sha256: aac8070bf86e08dc1acbd63091f42559b1796ca2f50726827a9fbc277f509b4f
+§2 section lines       : 201..2480
+§2 sql blocks          : 13
+§2 CREATE TABLE        : 12
+§2 CREATE TRIGGER      : 96
+§2 CREATE UNIQUE INDEX : 7
+§2 ALTER TABLE         : 8
+contract tables (12 new + tts_jobs migrated = 13): legacy_adapter_voice_entries,sentence_audio_artifacts,tts_audio_requests,tts_claim_generation_dispatches,tts_generation_attempts,tts_job_execution_transitions,tts_synthesis_claims,voice_materialization_jobs,voice_materialization_requests,voice_materializations,voice_registry_publication_activations,voice_registry_publications
+missing base parents (fixture-provided): artifacts,projects,voice_profile_revisions,voice_profiles
+db tables total        : 17
+db triggers total      : 98
+db indexes total       : 8
+foreign_key_check rows : 0
+integrity_check        : ok
+generated_at           : 2026-08-04T10:26:13.916Z
+
+[PASS] JS-01    job queued→running 直接 UPDATE → command required ABORT
+[PASS] JS-02    claim generation_pending→running 直接 UPDATE → command required ABORT
+[PASS] JS-03    worker claim command → claim/job 同时 running（R9 P0-1 修复）
+[PASS] JS-04    worker claim command 建立双侧 owner/lease/attempt/claimed_at/heartbeat
+[PASS] JS-05    并发第二 worker_claim → ABORT，恰好一个 running owner
+[PASS] JS-06    running→succeeded 第二条 command 全链 PASS（R9 P0-2 修复）
+[PASS] JS-07    running→failed 第二条 command → PASS
+[PASS] JS-08    running→cancelled 第二条 command → PASS
+[PASS] JS-09    running→indeterminate 保留双侧 owner/lease
+[PASS] JS-10    indeterminate→failed 第三条 command → PASS
+[PASS] JS-11    duplicate transition_request_id → UNIQUE 拒绝
+[PASS] JS-11b   完全相同 transition replay → 语义 UNIQUE/状态 ABORT
+[PASS] JS-12    同 job 多阶段 command 连续提交且 evidence 全保留
+[PASS] JS-13    succeeded result artifact identity 不匹配 → ABORT
+[PASS] JS-14    中间步骤失败整条 command statement 回滚
+[PASS] JS-15    from-state 任一不匹配 → ABORT
+[PASS] JS-16    expired running owner → fencing ABORT
+[PASS] JS-17    execution takeover 后旧 owner ABORT / 新 owner PASS
+[PASS] LC-01    路径 A publish_and_cutover 全链 PASS
+[PASS] LC-02    路径 B cutover_existing 全链 PASS（R9 P0-3 修复）
+[PASS] LC-03    cutover_existing 不重写 projection publication evidence
+[PASS] LC-04    情况1 mapped_verified 后普通 publish → blocked ABORT
+[PASS] LC-05    情况2 publication 先完成后 cutover_existing 映射允许
+[PASS] LC-06    情况3 在飞 publication + 映射竞争确定性裁决
+[PASS] LC-07    错误 mapping_mode/subject_type 组合 → ABORT
+[PASS] LC-08    activation 指向错误 entry 状态 → ABORT + 回滚
+[PASS] LC-09    failed publication rollback → mapped_verified（mode 保留）
+[PASS] LC-10    rollback 后新 publication → PASS
+[PASS] LC-11    retired 不占活跃唯一位，新 entry 可再映射
+[PASS] LC-12    第二个活跃 mapping 同 projection → ABORT
+[PASS] TF-01    publication lease 过期 + 回填 activated_at → fencing ABORT
+[PASS] TF-02    publication lease 过期 + 回填 created_at → fencing ABORT
+[PASS] TF-03    validation lease 过期 + 回填 dispatch.created_at → fencing ABORT
+[PASS] TF-04    worker_claim lease <= DB_NOW → ownership conflict ABORT
+[PASS] TF-05    lease 未过期 + exact token/attempt → dispatch/activation/worker_claim PASS
+[PASS] TF-06    takeover 后旧 owner 回填时间 → ABORT
+[PASS] TF-07    边界：fence <= 含等值 / 过期 < 严格 / renewal >= 含等值
+[PASS] TF-08    lease=now-1ms 过期；julianday 截断漂移 ∈ {-1,0}
+[PASS] IE-01    building→indeterminate 同步写 candidate SHA → seal ABORT
+[PASS] IE-02    building→indeterminate 同步写 manifest → seal ABORT
+[PASS] IE-03    candidate_persisted→indeterminate 同步写 file_durable_at → seal ABORT
+[PASS] IE-04    file_durable→indeterminate 同步写 activation_requested_at → seal ABORT
+[PASS] IE-05    进入 indeterminate 清除已有证据 → seal ABORT
+[PASS] IE-06    exact source-shape 不变进入 → PASS
+[PASS] IE-06b   indeterminate_from_status 谎称来源 → origin required ABORT
+[PASS] IE-07    resolve attempt 不匹配 → fencing ABORT
+[PASS] IE-08a   resolve attempt=0 → CHECK ABORT
+[PASS] IE-08b   resolve attempt 负数 → CHECK ABORT
+[PASS] IE-09    resolve resolution_evidence NULL → ABORT
+[PASS] IE-10    resolve resolution_evidence_hash NULL → ABORT
+[PASS] IE-11    resolve owner_token 非法非 NULL → CHECK ABORT
+[PASS] IE-12    observed SHA ≠ persisted candidate SHA → fencing ABORT
+[PASS] IE-13    exact attempt/evidence reconciliation → PASS（active + projection 发布）
+[PASS] IE-14    indeterminate 期间补写 evidence → immutable ABORT
+[PASS] VI-05    TTS-C job 修改 voice_profile_revision(/_id) → ABORT（实证消息）
+[PASS] VI-06    revision ID 与 revision number 不一致 → compat ABORT + dispatch 回滚
+[PASS] VI-07    CAST(revision_number AS TEXT) 格式边界（'01'/'1.0'/空格全拒）
+[PASS] VI-07b   revision_number=10 → '10' exact 匹配
+[PASS] VI-08    legacy 行不受限 + 不得反向获得 claim_id
+[PASS] PA-01    publication 单独 UPDATE →active（无 command）→ ABORT
+[PASS] PA-04    activation subject 已抢占/replay → ABORT
+[PASS] PA-06    publication 引用不存在 subject → subject invalid
+[PASS] PA-07    registry_rebuild subject_id 校验 + 全链 PASS
+[PASS] GN-01    generation 重复 → UNIQUE ABORT
+[PASS] GN-02    generation NULL → NOT NULL ABORT
+[PASS] CJ-09    claim 单独 →generation_pending（无 dispatch）→ ABORT
+[PASS] CJ-10    atomic dispatch：claim+恰好一个 job+清 validation 证据
+[PASS] CJ-11    dispatch 内 job INSERT 失败 → 整条回滚
+[PASS] CJ-12    同 claim 第二次 dispatch → UNIQUE ABORT
+[PASS] CJ-13    终态仍恰好一个 job；job DELETE 禁
+[PASS] JR-01    running job 单独 SET result → invariant ABORT
+[PASS] JR-02    queued job 单独 SET result → invariant ABORT
+[PASS] JR-03    failed job 单独 SET result → ABORT
+[PASS] JR-05    succeeded 后替换 result → immutable ABORT
+[PASS] EN-01    tar initializing→waiting 无 claim → ABORT
+[PASS] EN-02    tar waiting + exact claim → PASS
+[PASS] EN-03    vmr initializing→waiting 无 job → ABORT
+[PASS] EN-04    vmr waiting + exact job → PASS
+[PASS] EN-05    waiting 清 claim 链接 → ABORT
+[PASS] SM-01    materialization_publish + cutover_existing → ABORT
+[PASS] SM-02    legacy_cutover_publish + cutover_existing → ABORT
+[PASS] SM-03    legacy_cutover_existing + publish_and_cutover → ABORT
+[PASS] SM-04    cutover_existing 但 projection 未发布 → ABORT
+[PASS] SM-05    registry_rebuild + 非 none mode → ABORT
+[PASS] ET-01    publication INSERT created_at 未来 → ABORT
+[PASS] ET-02    publication UPDATE activated_at 未来 → ABORT
+[PASS] ET-03    claim INSERT validation_started_at 未来 → ABORT
+[PASS] LR-01    rollback 清 pending/selector；旧 evidence 保留
+[PASS] PE-03    building 来源 indeterminate → 直接 active → ABORT
+[PASS] RP-11    publication lease 过期旧 owner renewal → changes=0
+[PASS] RP-12    valid renewal changes=1；wrong token changes=0
+
+TOTAL=91 PASS=91 FAIL=0 SKIP=0
+EA-01 runner final FAIL=0: YES
+EA-03 PASS+FAIL+SKIP = TOTAL: YES
