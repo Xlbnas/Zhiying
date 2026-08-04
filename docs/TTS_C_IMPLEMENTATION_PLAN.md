@@ -1,40 +1,56 @@
-# TTS-C 实施计划（TTS-C.0.R8 修订；runtime implementation not started）
+# TTS-C 实施计划（TTS-C.0.R9 修订；runtime implementation not started）
 
-> 状态：**TTS-C.0.R8 architecture closure completed；pending independent Review PASS；
+> 状态：**TTS-C.0.R9 architecture closure completed；pending independent Review PASS；
 > TTS-C runtime implementation not started；TTS-C.1A not started**。
-> 本计划按 TTS-C.0.R8 Review 闭环更新。R8 关闭独立 Review 对 R7 的 FAIL 发现（docs-only，零 runtime/零 migration/零 schema）：
-> ① **retryable legacy publication link**（`legacy_adapter_voice_entries.pending_publication_id` 仅允许
-> T1 fill（NULL→id）与 rollback clear（id→NULL，且仅当被引用 publication 已 failed/cancelled +
-> subject 精确匹配该 legacy entry）；rollback 后允许写入新 publication.id；失败 publication evidence 由
-> journal 永久保存——设计文档 §2.8/§7.3）；
-> ② **single-source candidate evidence**（删除 lve 的 `candidate_registry_generation/candidate_registry_sha256/
-> candidate_created_at` 权威重复列；pending/current evidence 统一经 pending_publication_id → journal——§2.8）；
-> ③ **legacy projection 单一发布模型**（唯一语义：legacy_cutover publication 本身同时发布目标 projection——
-> mapped_verified 前置 mapped materialization=file_ready_unpublished；T5 原子完成 publication→active +
-> materialization→published_usable + legacy→mapped_active；§2.7/§2.8）；
-> ④ **atomic publication activation command**（新增第 11 表 `voice_registry_publication_activations` append-only
-> command：AFTER INSERT trigger 在同一 statement 内完成 fencing + subject 验证 + projection 更新 +
-> legacy entry 更新 + publication→active；不存在可独立提交的 publication active 状态；publication INSERT
-> subject 验证（materialization=file_ready_unpublished / legacy=mapped_verified / rebuild subject_id='global'）——§2.9/§2.10）；
-> ⑤ **indeterminate evidence closure**（`indeterminate_from_status` 冻结进入来源；进入 indeterminate 时已有
-> candidate/manifest/file/activation 证据 write-once 且禁止事后首补；indeterminate→active 只能用已存在证据；
-> building-before-candidate indeterminate 只能 failed/cancelled——§2.9）；
-> ⑥ **exact-one claim dispatch**（新增第 12 表 `tts_claim_generation_dispatches` append-only command：
-> 单条 INSERT 原子完成 fencing + subscriber>0 验证 + INSERT 恰好一个 queued job + claim→generation_pending；
-> generation_pending 无 dispatch command 的状态迁移 ABORT——§2.2/§2.2b）；
-> ⑦ **TTS job row-state result invariant**（INSERT + 全 UPDATE：`claim_id IS NOT NULL` 时
-> succeeded⇔result_artifact_id NOT NULL、非 succeeded⇒result NULL；result artifact job/claim 一致——§2.0）；
-> ⑧ **envelope dependency closure**（tar initializing→waiting 必须 claim_id 非 NULL + exact identity；
-> vmr initializing→waiting 必须 job_id 非 NULL + exact identity；无链接 waiting 行结构不可提交——§2.1/§2.5）；
-> ⑨ **generation & payload identity seal**（`voice_registry_publications.generation UNIQUE` + BEGIN IMMEDIATE
-> 单调分配；`tts_jobs` immutable 增 narration_plan_artifact_id/narration_plan_version/payload_json/provider/
-> voice_profile_id，payload_json 与 frozen synthesis payload fingerprint 创建时 exact 对应——§2.0/§2.9）；
-> ⑩ **可执行 SQLite contract 实证**（设计文档 §2 提取重建临时 DB sqlite3 3.45.1：apply / foreign_key_check（空）/
-> integrity_check（ok）/ happy path 全链 / crash-retry 闭环 / legacy rollback-retry 闭环 / 全部 mutation
-> 验证 PASS，FAIL=0——实测计数见设计文档 §10.5）。
-> R7 的 publication journal、projection/publication 分离、无环 claim/job、result 封存、subscriber identity、
-> initializing 状态、initial INSERT 冻结、exact voice identity，以及 R6 的 validation fencing、attempt 证据不可变、
-> provenance 闭包、cutover journal、lease fencing 由 R8 继承并强化。
+> 本计划按 TTS-C.0.R9 Review 闭环更新。R9 关闭独立 Review 对 R8 的 FAIL 发现（docs-only，零 runtime/零 migration/零 schema）：
+> ① **database-time lease fencing**（所有 lease 列统一 INTEGER epoch milliseconds：validation/worker
+> lease_expires_at_epoch_ms；权限判断时间 = SQLite DB 当前时间 `DB_NOW_MS = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)`，
+> trigger 内 SELECT 计算；`DB_NOW_MS <= lease_expires_at_epoch_ms` 即 owner 仍有权限；
+> 业务 evidence 时间（activated_at / file_durable_at / activation_requested_at / failed_at / validation_started_at）
+> 保持 ISO 8601 文本但被冻结不得晚于 `DB_NOW_ISO`；
+> fence 比较在 activation / dispatch / execution / renewal / takeover 全部 trigger 内 SELECT 计算，
+> **不再**使用 caller-supplied `NEW.activated_at` / `NEW.created_at` / `NEW.observed_at`——
+> §0/§2.2/§2.2b/§2.6/§2.9/§2.10）；
+> ② **indeterminate entry evidence seal**（`voice_registry_publications` BEFORE UPDATE
+> `trg_vrp_indeterminate_seal`：进入 indeterminate 的同一次 UPDATE 不得增删 evidence；
+> `trg_vrp_indeterminate_shape`：OLD evidence shape 必须与 OLD.status 匹配——
+> §2.9）；
+> ③ **indeterminate exact-attempt resolution**（`voice_registry_publication_activations` 增加
+> `CHECK (attempt >= 1)` + `activation_mode` 双态（normal_owner_finalize / indeterminate_reconciliation）
+> + `resolution_evidence` + `resolution_evidence_hash`；resolve 时 `owner_token=NULL` +
+> `attempt = publication.attempt` exact + `indeterminate_from_status='activation_pending'` +
+> observed SHA = persisted candidate SHA——§2.10）；
+> ④ **legacy cutover reachable：subject_mode 双路径**（`voice_registry_publications` 新增
+> `subject_mode` 列 + 拆分 `subject_type`：`materialization_publish` /
+> `legacy_cutover_publish`（publish_and_cutover）/ `legacy_cutover_existing`（cutover_existing）/
+> `registry_rebuild`；`legacy_cutover_existing` 路径让已 published_usable projection 可被
+> legacy mapping 收尾——避免 `mapped_verified + published_usable` 死路；
+> 一对多由 `UNIQUE(mapped_voice_materialization_id) WHERE NOT NULL` 强制（一对一模式）——§2.8/§2.9）；
+> ⑤ **materialization_publish 与 legacy mapping 互斥冻结**（publication INSERT 时
+> `materialization_publish` subject 不允许被 legacy 已 mapped_verified/mapping_pending 引用——
+> `materialization_publish blocked by legacy mapping` ABORT；legacy 走
+> `legacy_cutover_publish` 或 `legacy_cutover_existing`——§2.9）；
+> ⑥ **atomic claim/job execution coupling**（新增第 13 表 `tts_job_execution_transitions`
+> append-only command：`UNIQUE(job_id)` + `UNIQUE(claim_id)`；单条 INSERT 原子同步
+> claim/job status/owner/lease/heartbeat/result artifact；
+> 直接 UPDATE job/claim.status 出 queued/generation_pending 一律 ABORT（`trg_tjs_command_required` /
+> `trg_tsc_command_required`）——§2.2c）；
+> ⑦ **voice identity compatibility freeze**（`tts_jobs.voice_profile_revision` legacy 兼容通道
+> TTS-C 行 INSERT + UPDATE 由 `trg_tts_jobs_revision_compat` 强制
+> `CAST(voice_profile_revisions.revision_number AS TEXT)=voice_profile_revision` 一致；
+> immutable trigger 把它纳入写后冻结列——§2.0）；
+> ⑧ **journal identity seal + generation uniqueness**（继承 R8：`voice_registry_publications.generation`
+> DB-level UNIQUE；DB 仅保证唯一性，单调分配由应用层 `BEGIN IMMEDIATE` 序列化协议保证——schema 注释明确
+> 不维护 sequence，不混称——§2.9）；
+> ⑨ **可执行 SQLite contract 实证**（§2 全部为可直接转 migration 的真实 SQL，临时目录 sqlite3 3.45.1
+> + Python sqlite3 实证：schema apply / foreign_key_check（空）/ integrity_check（ok）/ happy path
+> 全链 / crash-retry 闭环 / legacy failed→rollback→新 publication→成功 / **legacy_cutover_publish +
+> legacy_cutover_existing 双路径** / claim atomic dispatch / **claim/job atomic execution coupling** /
+> mutation 验证全量 360 项——逐项计数见设计文档 §10.5；临时 SQL/DB 不入仓库）。
+> R7/R8 的 publication journal、projection/publication 分离、无环 claim/job、result 封存、subscriber identity、
+> initializing 状态、initial INSERT 冻结、exact voice identity、validation fencing、attempt 证据不可变、
+> provenance 闭包、cutover journal、lease fencing 由 R9 继承并强化；
+> R8 被独立 Review 判 FAIL 的 9 项阻断（A-I）全部关闭。
 > 每阶段：独立 migration、独立 tests、独立 Review、独立 deployment gate、不跨阶段、不产生半成品 active 状态。
 
 ---
@@ -240,10 +256,10 @@ failed-retry/cost-usage）；**production acceptance gate**：人工验收命令
 | C.4 | ✓ | ✓ | ✓ | ✓ | ✗（master 显式构建） | ✗ |
 | C.5 | ✓ | ✓ | ✓ | ✓ | ✗ | 仅人工验收命令 |
 
-## 依赖顺序（R8 DAG，取代 R5 的 1A→1B→1C 链）
+## 依赖顺序（R9 DAG，取代 R5/R8 的 1A→1B→1C 链）
 
 ```text
-R8 PASS
+R9 PASS
 ├─ 1A ∥ 1C            （可并行开发：不同 worktree/local branch）
 └─ 1B-prep            （adapter parser/reloader 测试骨架可并行准备）
 
@@ -251,14 +267,18 @@ R8 PASS
 → 1B publisher integration（依赖 1A 的 DB projection + legacy cutover 表）
 
 1A + 1B + 1C PASS
-→ C.2（claim/fan-in/persisted phases 依赖三者 schema 齐备）
+→ C.2（claim/fan-in/persisted phases + execution_transitions 依赖三者 schema 齐备）
 
 C.2 PASS
 → C.3 → C.4 → C.5（runtime 串行；仅 schema/mock/test planning 可提前并行）
 ```
 
+更新 1A/1B/C.2 schema 边界以采用 R9 contract（epoch_ms lease + DB_NOW_MS fence + indeterminate entry
+evidence seal + activation_mode + resolution_evidence_hash + subject_mode 双路径 +
+execution_transitions atomic command + voice_revision compat closure）。
+
 **建议首先实现**：**TTS-C.1A**（零音频风险、解锁 materialization、为 1B cutover 提供 DB 基础）——但 1A 未开始，
-须待本 R8 独立 Review PASS。
+须待本 R9 独立 Review PASS。
 
 ## 并行开发矩阵（冻结：并行开发，串行集成/Review/部署）
 
