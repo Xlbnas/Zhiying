@@ -134,27 +134,27 @@ jobs:
         id: contract
         run: |
           set -o pipefail
-          python3 docs/evidence/tts-c-r12/contract_runner.py \
+          python3 docs/evidence/tts-c-r13/contract_runner.py \
             --design docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md \
             --sqlite-bin sqlite3 \
             --engine all \
-            --results-dir /tmp/ttsc-r11-ci | tee /tmp/ttsc-r11-console.log
+            --results-dir /tmp/ttsc-r13-ci | tee /tmp/ttsc-r13-console.log
 
       - name: 双引擎一致性校验（test ID / TOTAL/PASS/FAIL/SKIP / design SHA / SQL SHA）
         run: |
-          python3 docs/evidence/tts-c-r12/verify_engines.py \
-            /tmp/ttsc-r11-ci/results-python-sqlite.txt \
-            /tmp/ttsc-r11-ci/results-sqlite-3.45.1.txt
+          python3 docs/evidence/tts-c-r13/verify_engines.py \
+            /tmp/ttsc-r13-ci/results-python-sqlite.txt \
+            /tmp/ttsc-r13-ci/results-sqlite-3.45.1.txt
 
       - name: SHA 与 current checkout 一致性（EA-05）
         run: |
           python3 - <<'EOF'
           import sys, hashlib
-          sys.path.insert(0, "docs/evidence/tts-c-r12")
+          sys.path.insert(0, "docs/evidence/tts-c-r13")
           from extract_contract import extract_section2_sql
           cur = extract_section2_sql("docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md")["sha256"]
           rec = None
-          for line in open("/tmp/ttsc-r11-ci/results-python-sqlite.txt", encoding="utf-8"):
+          for line in open("/tmp/ttsc-r13-ci/results-python-sqlite.txt", encoding="utf-8"):
               if line.startswith("extracted §2 sql sha256"):
                   rec = line.split(":", 1)[1].strip()
           if rec != cur:
@@ -169,15 +169,15 @@ jobs:
         with:
           name: tts-c-contract-gate-${{ github.sha }}
           path: |
-            /tmp/ttsc-r11-ci/results-*.txt
-            /tmp/ttsc-r11-console.log
+            /tmp/ttsc-r13-ci/results-*.txt
+            /tmp/ttsc-r13-console.log
           if-no-files-found: ignore
 
       - name: Write job summary
         if: always()
         run: |
-          PY_RESULTS=/tmp/ttsc-r11-ci/results-python-sqlite.txt
-          CLI_RESULTS=/tmp/ttsc-r11-ci/results-sqlite-3.45.1.txt
+          PY_RESULTS=/tmp/ttsc-r13-ci/results-python-sqlite.txt
+          CLI_RESULTS=/tmp/ttsc-r13-ci/results-sqlite-3.45.1.txt
           TOTAL=$(grep -E '^TOTAL=' "$PY_RESULTS" | tail -1)
           PY_VER=$(grep -E '^python sqlite3 version' "$PY_RESULTS" | tail -1 | cut -d: -f2 | xargs)
           CLI_VER=$(grep -E '^engine sqlite version' "$CLI_RESULTS" | tail -1 | cut -d: -f2 | xargs)
