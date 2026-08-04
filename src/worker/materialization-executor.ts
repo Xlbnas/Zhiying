@@ -1,28 +1,32 @@
 /**
- * TTS-C.1A Worker materialization executor（唯一文件 writer）。
+ * TTS-C.1A.R1 Worker materialization executor（唯一文件 writer）。
  *
- * 执行顺序（frozen durability 协议）：
- *   fenced reread（executor 入口由 scheduler claim 保证 running）→
- *   exact Revision reread（TTS-A validator）→ Assignment/source reread →
- *   open source no-follow → 同目录 staging temp 写入 → copy bytes →
- *   fsync temp → 校验（SHA/size/regular/WAV/pcm_s16le/mono/48000/duration）→
+ * 执行顺序（frozen durability 协议 + R1 加固）：
+ *   fenced 确认持有（execution handle exact）→ exact Revision reread → Assignment/source reread →
+ *   heartbeat loop 启动（每 interval 续租；changes=0 → ownershipLost 停止副作用）→
+ *   source open（O_RDONLY|O_NOFOLLOW + fstat regular）→ 同目录 staging temp（O_CREAT|O_EXCL|O_NOFOLLOW）
+ *   → copy bytes → fsync temp → 校验（SHA/size/regular/WAV/pcm_s16le/mono/48000/duration）→
  *   rename temp→final → fsync final → fsync parent dir →
- *   BEGIN IMMEDIATE fenced 终局（workerFinalizeMaterialization）。
- * 任一 durability 步骤失败 → 不返回成功；cleanup best-effort 不覆盖原始错误。
+ *   BEGIN IMMEDIATE fenced 终局（workerFinalizeMaterialization：execution handle exact +
+ *   commit-time exact source fence：Revision DB metadata + 每个 active request Assignment source
+ *   + final evidence 逐项比较）。
+ * 关键步骤前（source open / temp 写 / rename / final DB）显式 fenced heartbeat/verify；
+ * 任一 durability 步骤失败 → 不返回成功；确定性错误且仍持有 handle → 立即 fenced failed + fan-out
+ * （不等 lease 自然过期）；ownershipLost 后不再产生文件副作用。
  */
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import {getDb} from '../lib/db';
-import {getMaterializationJob} from '../lib/tts-c/materialization';
+import {getMaterializationJob, workerFinalizeMaterialization, failMaterializationJobFenced, type MaterializationExecutionHandle} from '../lib/tts-c/materialization';
 import {validateVoiceProfileRevisionExact} from '../lib/voice-library/revisions';
-import {getProjectVoiceAssignment, classifyProjectVoiceAssignment} from '../lib/tts-b/assignment';
 import {
   destinationAbsolutePath,
   stagingTempPath,
   materializationRootAbs,
+  ensureDestinationParentSafe,
+  OPEN_FLAGS,
 } from '../lib/tts-c/paths';
-import {workerFinalizeMaterialization} from '../lib/tts-c/materialization';
 import {
   MATERIALIZATION_HEARTBEAT_INTERVAL_MS,
   MATERIALIZATION_EXECUTION_LEASE_MS,
@@ -32,6 +36,7 @@ import {probeAudio, sha256FileBytes} from '../lib/tts-c/audio-probe';
 export interface MaterializationExecutorContext {
   log: (...args: unknown[]) => void;
   isShuttingDown?: () => boolean;
+  shutdownSignal?: AbortSignal;
 }
 
 export interface MaterializationExecutorDeps {
@@ -39,45 +44,62 @@ export interface MaterializationExecutorDeps {
   sha256File?: (absPath: string) => Promise<string>;
   heartbeatMs?: number;
   leaseMs?: number;
+  /** 测试注入：heartbeat loss 回调 */
+  onHeartbeatLoss?: () => void;
 }
 
-/** 心跳续约（lease 丢失 → 返回 false；executor 应中止）。 */
-export async function heartbeatMaterializationJob(
-  jobId: string,
-  ownerToken: string,
-  attempt: number,
-  deps: {leaseMs?: number; heartbeatMs?: number},
-): Promise<boolean> {
-  const db = getDb();
-  const leaseMs = deps.leaseMs ?? MATERIALIZATION_EXECUTION_LEASE_MS;
-  const res = db
-    .prepare(
-      `UPDATE voice_materialization_jobs
-       SET lease_expires_at_epoch_ms = ?, heartbeat_at = ?, updated_at = ?
-       WHERE id = ? AND status = 'running'
-         AND owner_token = ? AND attempt = ?
-         AND (CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)) <= lease_expires_at_epoch_ms`,
-    )
-    .run(Date.now() + leaseMs, new Date().toISOString(), new Date().toISOString(), jobId, ownerToken, attempt);
-  return res.changes === 1;
-}
-
-export interface RunMaterializationJobInput {
-  jobId: string;
-  ownerToken: string;
-  attempt: number;
+function dbNowSql(): string {
+  return `CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)`;
 }
 
 export async function runMaterializationJob(
-  input: RunMaterializationJobInput,
+  handle: MaterializationExecutionHandle,
   ctx: MaterializationExecutorContext,
   deps: MaterializationExecutorDeps = {},
 ): Promise<void> {
   const {log} = ctx;
   const shaImpl = deps.sha256File ?? sha256FileBytes;
   const heartbeatMs = deps.heartbeatMs ?? MATERIALIZATION_HEARTBEAT_INTERVAL_MS;
+  const leaseMs = deps.leaseMs ?? MATERIALIZATION_EXECUTION_LEASE_MS;
 
   let tempPath: string | null = null;
+  let ownershipLost = false;
+  let heartbeatTimer: NodeJS.Timeout | null = null;
+
+  /** fenced heartbeat/verify：exact handle；changes=0 → ownershipLost（调用方停止后续副作用）。 */
+  const verifyExecutionLease = (): boolean => {
+    if (ownershipLost) return false;
+    if (ctx.isShuttingDown?.()) {
+      ownershipLost = true;
+      return false;
+    }
+    const db = getDb();
+    const now = Date.now();
+    const res = db
+      .prepare(
+        `UPDATE voice_materialization_jobs
+         SET lease_expires_at_epoch_ms = ?, heartbeat_at = ?, updated_at = ?
+         WHERE id = ? AND status = 'running'
+           AND owner_token = ? AND attempt = ?
+           AND (${dbNowSql()}) <= lease_expires_at_epoch_ms`,
+      )
+      .run(now + leaseMs, new Date().toISOString(), new Date().toISOString(), handle.jobId, handle.ownerToken, handle.attempt);
+    if (res.changes !== 1) {
+      ownershipLost = true;
+      stopHeartbeat();
+      deps.onHeartbeatLoss?.();
+      return false;
+    }
+    return true;
+  };
+
+  const stopHeartbeat = (): void => {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  };
+
   const cleanupTemp = async (): Promise<void> => {
     if (tempPath) {
       try {
@@ -90,41 +112,96 @@ export async function runMaterializationJob(
   };
 
   try {
-    const job = getMaterializationJob(input.jobId);
-    if (!job || job.status !== 'running') {
-      log(`materialization job ${input.jobId} 不在 running（可能已接管/取消），跳过`);
+    // 1) fenced 确认仍持有（claim 后可能已被接管/回收）
+    if (!verifyExecutionLease()) {
+      log(`materialization job ${handle.jobId} 已失去执行权，跳过`);
       return;
     }
-    if (job.owner_token !== input.ownerToken || job.attempt !== input.attempt) {
-      log(`materialization job ${input.jobId} owner/attempt 不匹配，跳过`);
+    // 只读 job 信息（不作为凭据；凭据 = handle）
+    const job = getMaterializationJob(handle.jobId);
+    if (!job || job.status !== 'running') {
+      log(`materialization job ${handle.jobId} 不在 running，跳过`);
+      return;
+    }
+    if (job.owner_token !== handle.ownerToken || job.attempt !== handle.attempt) {
+      log(`materialization job ${handle.jobId} owner/attempt 与 handle 不匹配，跳过`);
       return;
     }
 
-    // 1) exact Revision reread（TTS-A 单一真相源）
+    // 2) exact Revision reread（TTS-A 单一真相源）+ Assignment/source reread
     const descriptor = await validateVoiceProfileRevisionExact(job.voice_profile_id, job.voice_profile_revision_id);
     if (!descriptor || !descriptor.usable) {
-      throw new Error(`materialization job ${input.jobId} source unusable: ${descriptor?.unusableReason ?? 'identity failed'}`);
+      throw new Error(`materialization job ${handle.jobId} source unusable: ${descriptor?.unusableReason ?? 'identity failed'}`);
     }
-    // 2) Assignment/source reread（source SHA 与 job 冻结值一致）
     if (descriptor.actualSha256 !== job.source_canonical_sha256) {
-      throw new Error(`materialization job ${input.jobId} source sha256 与 job 冻结值不一致`);
+      throw new Error(`materialization job ${handle.jobId} source sha256 与 job 冻结值不一致`);
     }
+    const revisionEvidence = {
+      voiceProfileId: job.voice_profile_id,
+      voiceProfileRevisionId: job.voice_profile_revision_id,
+      canonicalAudioSha256: descriptor.actualSha256,
+      adapterCompatibilityKey: descriptor.row.adapter_compatibility_key,
+      provider: descriptor.row.provider,
+      fileSize: descriptor.fileSize,
+    };
     const sourceAbs = descriptor.canonicalAudioAbsolutePath;
-    // 3) open source no-follow（lstat 已在 TTS-A validator 校验非 symlink；此处防御性复查）
-    const st = await fs.lstat(sourceAbs);
-    if (st.isSymbolicLink() || !st.isFile()) throw new Error('source 非 regular file');
-    const sourceSize = st.size;
 
-    // 4) 目标目录 + staging temp（同目录保证 rename 原子）
+    // 3) heartbeat loop 启动（shutdown signal 中止）
+    if (ctx.shutdownSignal) {
+      ctx.shutdownSignal.addEventListener('abort', () => {
+        ownershipLost = true;
+        stopHeartbeat();
+      }, {once: true});
+    }
+    heartbeatTimer = setInterval(() => {
+      try {
+        if (!verifyExecutionLease()) {
+          log(`materialization job ${handle.jobId} heartbeat 续租失败（lease 丢失）`);
+        }
+      } catch (err) {
+        log(`materialization job ${handle.jobId} heartbeat 异常: ${err instanceof Error ? err.message : String(err)}`);
+        ownershipLost = true;
+        stopHeartbeat();
+      }
+    }, heartbeatMs);
+    heartbeatTimer.unref?.();
+
+    // 4) 关键步骤前 fenced verify（source open 前）
+    if (!verifyExecutionLease()) {
+      log(`materialization job ${handle.jobId} source open 前 lease 丢失，中止`);
+      return;
+    }
+    // 5) source open：O_RDONLY|O_NOFOLLOW（真实 no-follow）+ fstat 必须 regular（不依赖 lstat→open 两步）
+    let srcFh: fsSync.promises.FileHandle;
+    try {
+      srcFh = await fs.open(sourceAbs, OPEN_FLAGS.readNoFollow);
+    } catch (err) {
+      throw new Error(`source open 失败（no-follow）: ${(err as NodeJS.ErrnoException)?.code ?? String(err)}`);
+    }
+    let sourceSize: number;
+    try {
+      const st = await srcFh.stat();
+      if (!st.isFile()) throw new Error('source 非 regular file（opened fd）');
+      sourceSize = st.size;
+    } finally {
+      // 内容读取在 temp 写入阶段用同一 fd
+    }
+
+    // 6) 目标目录 containment（P0-3：root realpath + 逐级 lstat + parent realpath）
     const rootAbs = materializationRootAbs();
     const finalAbs = destinationAbsolutePath(job.destination_voice_root_relative_path);
+    const {realRoot, realParent} = await ensureDestinationParentSafe(rootAbs, job.destination_voice_root_relative_path);
     const dirAbs = path.dirname(finalAbs);
-    await fs.mkdir(dirAbs, {recursive: true});
     tempPath = stagingTempPath(finalAbs);
-    const srcFh = await fs.open(sourceAbs, 'r');
+
+    // 7) temp 写入：O_CREAT|O_EXCL|O_WRONLY|O_NOFOLLOW（temp 写前 fenced verify）
+    if (!verifyExecutionLease()) {
+      log(`materialization job ${handle.jobId} temp 写入前 lease 丢失，中止`);
+      return;
+    }
     let tmpFh: fsSync.promises.FileHandle | null = null;
     try {
-      tmpFh = await fs.open(tempPath, 'wx');
+      tmpFh = await fs.open(tempPath, OPEN_FLAGS.tempCreate);
       const buf = Buffer.alloc(1024 * 1024);
       let pos = 0;
       for (;;) {
@@ -132,6 +209,7 @@ export async function runMaterializationJob(
         if (bytesRead === 0) break;
         await tmpFh.write(buf.subarray(0, bytesRead));
         pos += bytesRead;
+        // 长 copy 期间 heartbeat 由 interval 覆盖；此处不再额外读 DB
       }
       // 8) fsync temp
       await tmpFh.sync();
@@ -162,10 +240,21 @@ export async function runMaterializationJob(
       throw new Error(`WAV 契约不匹配: ${JSON.stringify(probe)}`);
     }
 
-    // 10) rename temp→final；11) fsync final；12) fsync parent dir
+    // 10) rename 前 fenced verify + parent containment 复核（rename 前后）
+    if (!verifyExecutionLease()) {
+      log(`materialization job ${handle.jobId} rename 前 lease 丢失，中止`);
+      return;
+    }
+    const {realParent: realParentBefore} = await ensureDestinationParentSafe(rootAbs, job.destination_voice_root_relative_path);
+    if (realParentBefore !== realParent) throw new Error('rename 前 parent containment 漂移');
     await fs.rename(tempPath, finalAbs);
     tempPath = null;
-    const finalFh = await fs.open(finalAbs, 'r');
+    const {realParent: realParentAfter} = await ensureDestinationParentSafe(rootAbs, job.destination_voice_root_relative_path);
+    if (realParentAfter !== realParent || realParentAfter !== realRoot + path.sep + job.destination_voice_root_relative_path.split('/').slice(0, 2).join(path.sep)) {
+      throw new Error('rename 后 parent containment 漂移');
+    }
+    // 11) fsync final（O_RDONLY|O_NOFOLLOW）；12) fsync parent dir
+    const finalFh = await fs.open(finalAbs, OPEN_FLAGS.readNoFollow);
     try {
       await finalFh.sync();
     } finally {
@@ -178,22 +267,42 @@ export async function runMaterializationJob(
       await dirFh.close();
     }
 
-    // 13-17) BEGIN IMMEDIATE fenced 终局
+    // 13) final DB transaction 前 fenced verify（commit fence）
+    if (!verifyExecutionLease()) {
+      log(`materialization job ${handle.jobId} final commit 前 lease 丢失，中止`);
+      return;
+    }
+    // 14-17) BEGIN IMMEDIATE fenced 终局（commit-time exact source fence 在事务内逐项重读）
     const result = workerFinalizeMaterialization({
-      jobId: input.jobId,
-      sourceAbsPath: sourceAbs,
-      sourceSha256: actualSha,
-      sourceSize,
+      handle,
+      finalRelativePath: job.destination_voice_root_relative_path,
+      finalSha256: actualSha,
+      finalSize: sourceSize,
       codec: probe.codec,
       sampleRate: probe.sampleRate,
       channels: probe.channels,
       durationMs: probe.durationMs,
+      revisionEvidence,
     });
-    log(`materialization job ${input.jobId} succeeded（projection=${result.projectionId}，requests=${result.requestsUpdated}）`);
+    log(`materialization job ${handle.jobId} succeeded（projection=${result.projectionId}，requests=${result.requestsUpdated}）`);
   } catch (err) {
     await cleanupTemp();
-    // durability 关键步骤失败 → 不返回成功；job 状态由 recover/接管路径处理
-    log(`materialization job ${input.jobId} failed: ${err instanceof Error ? err.message : String(err)}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`materialization job ${handle.jobId} failed: ${msg}`);
+    // 确定性错误且仍持有 exact handle（lease 未丢）→ 立即 fenced failed + fan-out，不等 lease 过期
+    if (!ownershipLost) {
+      const failed = failMaterializationJobFenced(handle, 'MATERIALIZATION_FAILED', msg, getDb());
+      if (failed) {
+        log(`materialization job ${handle.jobId} 已 fenced failed + requests fan-out`);
+      } else {
+        log(`materialization job ${handle.jobId} 无法 fenced failed（lease 已丢/被接管），交由 recovery`);
+      }
+    }
     throw err;
+  } finally {
+    stopHeartbeat();
   }
 }
+
+// 保持既有导出兼容（tests 引用）
+export {sha256FileBytes};

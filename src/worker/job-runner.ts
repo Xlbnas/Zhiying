@@ -113,16 +113,9 @@ export async function executeClaimedJob(
   }
   if (claimed.type === 'voice_materialization') {
     // TTS-C.1A：durable materialization（非 GPU/LLM；不占用任何资源 lease；
-    // 不调用 IndexTTS2；不创建 TTS job）
-    const job = claimed.job;
-    if (job.owner_token === null || job.attempt === undefined) {
-      log(`materialization job ${job.id} 缺 owner/attempt（claim 异常），跳过`);
-      return;
-    }
-    await runMaterializationJob(
-      {jobId: job.id, ownerToken: job.owner_token, attempt: job.attempt},
-      ctx,
-    );
+    // 不调用 IndexTTS2；不创建 TTS job）。P0-2：使用 claim 返回的 exact execution handle。
+    const handle = claimed.handle;
+    await runMaterializationJob(handle, ctx);
     return;
   }
   // render（默认分支）：M7.3A.3 透传 scheduler claim 的 production_gpu lease，

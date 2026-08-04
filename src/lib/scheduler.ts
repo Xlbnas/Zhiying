@@ -18,6 +18,7 @@ import {
 } from './workflow/resource-classes';
 import type {AssetGenerationJobRow} from './assets/generation-jobs';
 import type {VoiceMaterializationJobRow} from './tts-c/materialization';
+import type {MaterializationExecutionHandle} from './tts-c/materialization';
 import {MATERIALIZATION_EXECUTION_LEASE_MS} from './tts-c/constants';
 
 /**
@@ -44,7 +45,7 @@ export type ClaimedJob =
   | {type: 'tts'; job: TtsJobRow; resourceClass: ResourceClass; resourceLease?: ResourceLeaseMeta}
   | {type: 'dispatch'; job: DispatchJobRow; resourceClass: ResourceClass}
   | {type: 'asset_generation'; job: AssetGenerationJobRow; resourceClass: ResourceClass; resourceLease?: ResourceLeaseMeta}
-  | {type: 'voice_materialization'; job: VoiceMaterializationJobRow; resourceClass: ResourceClass};
+  | {type: 'voice_materialization'; job: VoiceMaterializationJobRow; resourceClass: ResourceClass; handle: MaterializationExecutionHandle};
 
 /** 资源感知 claim 选项（M7）。 */
 export interface ClaimOptions {
@@ -254,7 +255,15 @@ export function claimNextAnyJob(workerId: string, opts?: ClaimOptions): ClaimedJ
             .run(ownerToken, leaseExpires, at, at, next.id);
           if (res.changes === 0) continue;
           const job = getMaterializationJobById(next.id);
-          return job ? {type: 'voice_materialization', job, resourceClass} : null;
+          if (!job) continue;
+          // P0-2：claim 返回 exact execution handle（executor/final 全程使用，禁止重读借用）
+          const handle: MaterializationExecutionHandle = {
+            jobId: job.id,
+            ownerToken: job.owner_token!,
+            attempt: job.attempt,
+            leaseExpiresAtEpochMs: job.lease_expires_at_epoch_ms!,
+          };
+          return {type: 'voice_materialization', job, resourceClass, handle};
         }
         const res = db
           .prepare(CLAIM_UPDATE_SQL[next.type])

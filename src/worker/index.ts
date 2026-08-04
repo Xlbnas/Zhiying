@@ -22,6 +22,7 @@ import {runBundlePhase, runWithCleanup} from './render-bundle-phase';
 import {describeRenderPerfConfig, loadRenderPerfConfig} from '@/lib/render/render-config';
 import {probeNvencSupport} from '@/lib/render/nvenc';
 import {recoverStaleTtsJobs} from '@/lib/tts-jobs';
+import {recoverExpiredMaterializationJobs} from '@/lib/tts-c/materialization';
 import {recordJobComputeUsage, snapshotComputeStart} from '@/lib/usage/compute';
 import {recoverStaleAssetGenerationJobs} from '@/lib/assets/generation-jobs';
 import {releaseExpiredLeases} from '@/lib/resources/leases';
@@ -707,6 +708,12 @@ async function main(): Promise<void> {
   const recoveredAssetGen = recoverStaleAssetGenerationJobs(STALE_TIMEOUT_MS);
   if (recoveredAssetGen.indeterminate > 0) {
     log(`finalized ${recoveredAssetGen.indeterminate} stale asset generation job(s) → indeterminate`);
+  }
+  // TTS-C.1A.R1：独立 materialization recovery sweep（不依赖新 HTTP request；
+  // expired running → 按 final file 状态裁决 succeeded/failed/indeterminate）
+  const recoveredMaterialization = await recoverExpiredMaterializationJobs(10);
+  if (recoveredMaterialization > 0) {
+    log(`recovered ${recoveredMaterialization} expired materialization job(s)`);
   }
   const expiredLeases = releaseExpiredLeases(STALE_TIMEOUT_MS);
   if (expiredLeases > 0) {
