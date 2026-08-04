@@ -22,7 +22,7 @@ import {runBundlePhase, runWithCleanup} from './render-bundle-phase';
 import {describeRenderPerfConfig, loadRenderPerfConfig} from '@/lib/render/render-config';
 import {probeNvencSupport} from '@/lib/render/nvenc';
 import {recoverStaleTtsJobs} from '@/lib/tts-jobs';
-import {recoverExpiredMaterializationJobs} from '@/lib/tts-c/materialization';
+import {MaterializationRecoveryController} from '@/lib/tts-c/recovery-controller';
 import {recordJobComputeUsage, snapshotComputeStart} from '@/lib/usage/compute';
 import {recoverStaleAssetGenerationJobs} from '@/lib/assets/generation-jobs';
 import {releaseExpiredLeases} from '@/lib/resources/leases';
@@ -102,6 +102,7 @@ function randomRenderPort(): number {
 let shuttingDown = false;
 /** 并行调度循环句柄（main 内创建；信号处理器经它 abort 全部 running 任务）。 */
 let activeLoop: ParallelLoop | null = null;
+let activeRecoveryController: MaterializationRecoveryController | null = null;
 
 function log(...args: unknown[]): void {
   console.log(`[${new Date().toISOString()}] [${WORKER_ID}]`, ...args);
@@ -709,12 +710,15 @@ async function main(): Promise<void> {
   if (recoveredAssetGen.indeterminate > 0) {
     log(`finalized ${recoveredAssetGen.indeterminate} stale asset generation job(s) → indeterminate`);
   }
-  // TTS-C.1A.R1：独立 materialization recovery sweep（不依赖新 HTTP request；
-  // expired running → 按 final file 状态裁决 succeeded/failed/indeterminate）
-  const recoveredMaterialization = await recoverExpiredMaterializationJobs(10);
-  if (recoveredMaterialization > 0) {
-    log(`recovered ${recoveredMaterialization} expired materialization job(s)`);
-  }
+  // TTS-C.1A.R2：周期 recovery controller（启动即 sweep + 固定 cadence 持续 sweep；
+  // inFlight 不重入；单 job 异常隔离；shutdown 停 timer 并等待 settle）
+  const recoveryController = new MaterializationRecoveryController({
+    intervalMs: Number(process.env.ZHIYING_MATERIALIZATION_RECOVERY_INTERVAL_MS ?? 10000),
+    limit: Number(process.env.ZHIYING_MATERIALIZATION_RECOVERY_LIMIT ?? 10),
+    log,
+  });
+  recoveryController.start();
+  activeRecoveryController = recoveryController;
   const expiredLeases = releaseExpiredLeases(STALE_TIMEOUT_MS);
   if (expiredLeases > 0) {
     log(`released ${expiredLeases} expired resource lease(s)`);
@@ -746,6 +750,11 @@ async function main(): Promise<void> {
     await sleep(loop.size() > 0 ? ACTIVE_TICK_MS : POLL_INTERVAL_MS);
   }
   activeLoop = null;
+  // TTS-C.1A.R2：停止 recovery timer 并等待 in-flight sweep settle
+  if (activeRecoveryController) {
+    await activeRecoveryController.stop();
+    activeRecoveryController = null;
+  }
   // 优雅退出：abort 已在 requestShutdown 发出，等全部 running 任务 settle
   await loop.settle();
 
