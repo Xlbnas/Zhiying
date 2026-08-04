@@ -12,6 +12,7 @@
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import {getDb, type Db} from '../db';
 import {getProjectVoiceAssignment, classifyProjectVoiceAssignment} from '../tts-b/assignment';
 import {validateVoiceProfileRevisionExact} from '../voice-library/revisions';
@@ -22,6 +23,7 @@ import {
 } from './paths';
 import {MATERIALIZATION_VALIDATION_LEASE_MS} from './constants';
 import {probeAudio, sha256FileBytes} from './audio-probe';
+import {validateMaterializedFile, MaterializedFileError, type MaterializedFileEvidence} from './materialized-file-validator';
 
 export type MaterializationErrorCode =
   | 'PROJECT_NOT_FOUND'
@@ -33,6 +35,7 @@ export type MaterializationErrorCode =
   | 'REQUEST_STATE_INCONSISTENT'
   | 'STALE_VALIDATION_OWNER'
   | 'SOURCE_STALE'
+  | 'MATERIALIZATION_UNUSABLE'
   | 'MATERIALIZATION_ALREADY_EXISTS';
 
 export class MaterializationError extends Error {
@@ -125,6 +128,13 @@ export interface MaterializationExecutionHandle {
 }
 
 const DBNOW_MS = `CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)`;
+
+export function dbNowMs(db: Db): number {
+  const row = db.prepare(`SELECT (CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)) AS n`).get() as {n: number};
+  return row.n;
+}
+
+
 
 export function nowIso(): string {
   return new Date().toISOString();
@@ -242,8 +252,32 @@ export async function resolveMaterializationSourceIdentity(
 // ── Phase 2：exact projection/file validator（事务外只读） ──
 
 export type ProjectionValidationResult =
-  | {kind: 'usable'; projection: VoiceMaterializationRow; fileSha256: string}
+  | {kind: 'usable'; projection: VoiceMaterializationRow; fileSha256: string; fileEvidence: MaterializedFileEvidence}
   | {kind: 'unusable'; reason: string};
+
+/** P0-D：Phase 2 完成后、Phase 3 前捕获的 projection/file evidence（不可伪造的绑定凭据）。 */
+export interface ValidatedProjectionEvidence {
+  projectionId: string;
+  profileId: string;
+  revisionId: string;
+  sourceSha256: string;
+  adapterCompatibilityKey: string;
+  status: string;
+  relativePath: string;
+  fileEvidence: MaterializedFileEvidence;
+  candidateMetadataHash: string | null;
+  validatedAt: string;
+}
+
+/** 测试 hook（仅测试）：Phase 2 完成后、finalize 前。 */
+export let afterProjectionValidationBeforeFinalize:
+  | ((ctx: {projectionId: string | null; validationKind: 'usable' | 'unusable'}) => Promise<void> | void)
+  | null = null;
+export function setAfterProjectionValidationBeforeFinalize(
+  fn: ((ctx: {projectionId: string | null; validationKind: 'usable' | 'unusable'}) => Promise<void> | void) | null,
+): void {
+  afterProjectionValidationBeforeFinalize = fn;
+}
 
 export async function validateExistingProjection(
   projection: VoiceMaterializationRow,
@@ -259,43 +293,33 @@ export async function validateExistingProjection(
   if (!descriptor.usable) {
     return {kind: 'unusable', reason: descriptor.unusableReason ?? 'hash_mismatch'};
   }
-  // projection 文件本身必须存在且内容 exact（设计 §5.2：文件存在 + SHA/codec/size 一致）
-  const abs = destinationAbsolutePath(projection.destination_voice_root_relative_path);
-  let st;
+  // R2：projection 文件用共享 safe final-file validator（verify 模式）——
+  // 唯一 exact file contract（fd SHA + fd WAV + inode/dev 一致），与 worker/recovery 同契约
   try {
-    st = await fs.lstat(abs);
-  } catch {
-    return {kind: 'unusable', reason: 'projection 文件不存在'};
+    const evidence = await validateMaterializedFile(
+      {
+        relativePath: projection.destination_voice_root_relative_path,
+        voiceProfileId: projection.voice_profile_id,
+        voiceProfileRevisionId: projection.voice_profile_revision_id,
+        expectedSha256: projection.source_canonical_sha256,
+        expectedSize: descriptor.fileSize,
+        expectedCodec: 'pcm_s16le',
+        expectedSampleRate: 48000,
+        expectedChannels: 1,
+        minDurationMs: 1,
+        adapterCompatibilityKey: projection.adapter_compatibility_key,
+      },
+      'verify',
+    );
+    return {
+      kind: 'usable',
+      projection,
+      fileSha256: evidence.sha256,
+      fileEvidence: evidence,
+    };
+  } catch (err) {
+    return {kind: 'unusable', reason: err instanceof Error ? err.message : String(err)};
   }
-  if (st.isSymbolicLink() || !st.isFile()) {
-    return {kind: 'unusable', reason: 'projection 非 regular file（拒绝 symlink）'};
-  }
-  if (st.size !== descriptor.fileSize) {
-    return {kind: 'unusable', reason: `projection size 不一致（${st.size} ≠ ${descriptor.fileSize}）`};
-  }
-  let fileSha256: string;
-  try {
-    fileSha256 = await sha256FileBytes(abs);
-  } catch {
-    return {kind: 'unusable', reason: 'projection 文件不可读'};
-  }
-  if (fileSha256 !== projection.source_canonical_sha256) {
-    return {kind: 'unusable', reason: `projection sha256 不一致（${fileSha256.slice(0, 12)}…）`};
-  }
-  let probe;
-  try {
-    probe = probeAudio(abs);
-  } catch {
-    return {kind: 'unusable', reason: 'projection 非可读 WAV'};
-  }
-  if (probe.codec !== 'pcm_s16le' || probe.sampleRate !== 48000 || probe.channels !== 1 || probe.durationMs <= 0) {
-    return {kind: 'unusable', reason: `projection WAV 契约不匹配: ${JSON.stringify(probe)}`};
-  }
-  return {
-    kind: 'usable',
-    projection,
-    fileSha256,
-  };
 }
 
 // ── Phase 3：fenced finalize（BEGIN IMMEDIATE；只接受 handle，不接受整行 fresh job） ──
@@ -306,6 +330,7 @@ export function finalizeValidatingJob(
   handle: ValidationLeaseHandle,
   validationResult: ProjectionValidationResult,
   db: Db = getDb(),
+  validatedEvidence?: ValidatedProjectionEvidence,
 ): FinalizeOutcome {
   const now = nowIso();
   const outcome = db.transaction((): FinalizeOutcome => {
@@ -332,7 +357,83 @@ export function finalizeValidatingJob(
     const subscribers = listActiveRequestRows(handle.jobId);
 
     if (validationResult.kind === 'usable') {
+      // P0-D：Phase 3 必须持有 Phase 2 的不可伪造 evidence（否则视为未验证）
+      if (!validatedEvidence) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'usable 结果缺少 ValidatedProjectionEvidence（Phase 2 未完成验证）', 409);
+      }
       const projection = validationResult.projection;
+      // P0-D：逐项 reread——validated evidence ↔ handle.candidate ↔ current projection row
+      if (validatedEvidence.projectionId !== handle.candidateMaterializationId) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'validated projectionId ≠ handle.candidateMaterializationId', 409);
+      }
+      if (validatedEvidence.projectionId !== projection.id) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'validated projectionId ≠ validation result projectionId', 409);
+      }
+      // current projection row 与 validated evidence 一致（逐项）
+      const currentProjection = db
+        .prepare('SELECT * FROM voice_materializations WHERE id = ?')
+        .get(projection.id) as VoiceMaterializationRow | undefined;
+      if (!currentProjection) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'projection row 不存在（Phase 2→3 期间被删）', 409);
+      }
+      const currentHash = sha256Text(JSON.stringify({id: currentProjection.id, status: currentProjection.status, sha: currentProjection.source_canonical_sha256}));
+      if (currentHash !== handle.candidateMaterializationMetadataHash) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'projection metadata hash 与 handle.candidate 不一致（漂移）', 409);
+      }
+      if (
+        currentProjection.voice_profile_id !== validatedEvidence.profileId ||
+        currentProjection.voice_profile_revision_id !== validatedEvidence.revisionId ||
+        currentProjection.source_canonical_sha256 !== validatedEvidence.sourceSha256 ||
+        currentProjection.adapter_compatibility_key !== validatedEvidence.adapterCompatibilityKey ||
+        currentProjection.status !== validatedEvidence.status ||
+        currentProjection.destination_voice_root_relative_path !== validatedEvidence.relativePath
+      ) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'projection row 与 validated evidence 不一致', 409);
+      }
+      // file evidence 仍对应当前 projection（path + SHA + inode/dev 同步复核）
+      const fileEvidence = validatedEvidence.fileEvidence;
+      if (
+        fileEvidence.relativePath !== currentProjection.destination_voice_root_relative_path ||
+        fileEvidence.sha256 !== currentProjection.source_canonical_sha256
+      ) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'file evidence 与 current projection 不一致', 409);
+      }
+      let stNow;
+      try {
+        stNow = fsSync.lstatSync(destinationAbsolutePath(currentProjection.destination_voice_root_relative_path));
+      } catch {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'projection 文件不可 stat（Phase 2→3 期间丢失）', 409);
+      }
+      if (stNow.isSymbolicLink() || stNow.dev !== Number(fileEvidence.device) || stNow.ino !== Number(fileEvidence.inode)) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'projection 文件在 Phase 2→3 期间被替换', 409);
+      }
+      // exact Revision metadata reread
+      const revisionRow = db
+        .prepare('SELECT * FROM voice_profile_revisions WHERE id = ? AND voice_profile_id = ?')
+        .get(currentProjection.voice_profile_revision_id, currentProjection.voice_profile_id) as
+        | {canonical_audio_sha256: string; adapter_compatibility_key: string; provider: string}
+        | undefined;
+      if (
+        !revisionRow ||
+        revisionRow.canonical_audio_sha256 !== currentProjection.source_canonical_sha256 ||
+        revisionRow.adapter_compatibility_key !== currentProjection.adapter_compatibility_key
+      ) {
+        throw new MaterializationError('SOURCE_STALE', 'exact Revision metadata identity 漂移（Phase 2→3）', 409);
+      }
+      // active requests Assignment source 逐项 reread
+      for (const r of subscribers) {
+        const asg = getProjectVoiceAssignment(r.project_id, r.assignment_artifact_id);
+        if (!asg) throw new MaterializationError('SOURCE_STALE', `request ${r.request_id} assignment 不可读`, 409);
+        const src = asg.assignment.source;
+        if (
+          src.voiceProfileId !== currentProjection.voice_profile_id ||
+          src.voiceProfileRevisionId !== currentProjection.voice_profile_revision_id ||
+          src.canonicalAudioSha256 !== currentProjection.source_canonical_sha256 ||
+          src.adapterCompatibilityKey !== currentProjection.adapter_compatibility_key
+        ) {
+          throw new MaterializationError('SOURCE_STALE', `request ${r.request_id} assignment source 漂移（Phase 2→3）`, 409);
+        }
+      }
       // 零文件写：job→succeeded + active requests→reused
       const j = db
         .prepare(
@@ -388,7 +489,7 @@ export function finalizeValidatingJob(
 
 export function takeoverStaleValidatingJob(jobId: string, db: Db = getDb()): ValidationLeaseHandle | null {
   const token = crypto.randomUUID();
-  const lease = nowEpochMs() + MATERIALIZATION_VALIDATION_LEASE_MS;
+  const lease = dbNowMs(db) + MATERIALIZATION_VALIDATION_LEASE_MS;
   const res = db
     .prepare(
       `UPDATE voice_materialization_jobs
@@ -431,11 +532,11 @@ type Phase1Result =
       handle: ValidationLeaseHandle | null;
     };
 
-/** P1：existing request outcome 必须基于持久状态映射，禁止统一 reused。 */
-function existingRequestResult(
+/** P1+R2：existing request outcome 必须基于持久状态映射，禁止统一 reused。 */
+async function existingRequestResult(
   request: VoiceMaterializationRequestRow,
   identity: MaterializationSourceIdentity,
-): CreateMaterializationRequestResult {
+): Promise<CreateMaterializationRequestResult> {
   const projection = getProjection(identity.voiceProfileId, identity.voiceProfileRevisionId) ?? null;
   const job = request.job_id ? getMaterializationJob(request.job_id) : undefined;
   if (!job) throw new MaterializationError('REQUEST_STATE_INCONSISTENT', `request ${request.request_id} 无 job 关联`, 409);
@@ -443,11 +544,57 @@ function existingRequestResult(
   switch (request.status) {
     case 'succeeded':
     case 'reused': {
+      // R2：返回 reused 前必须逐项 fail-closed（§八 8 项）
       if (!request.materialization_id) {
         throw new MaterializationError('REQUEST_STATE_INCONSISTENT', `request ${request.request_id} 终态缺 materialization_id`, 409);
       }
       if (!projection) {
-        throw new MaterializationError('REQUEST_STATE_INCONSISTENT', `request ${request.request_id} 终态缺 projection`, 409);
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', `request ${request.request_id} 终态缺 projection`, 422);
+      }
+      if (projection.id !== request.materialization_id) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'request.materialization_id ≠ projection.id（链接漂移）', 422);
+      }
+      if (projection.status !== 'file_ready_unpublished' && projection.status !== 'published_usable') {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', `projection status=${projection.status} 不可 reused`, 422);
+      }
+      // exact Revision usable
+      const descriptor = await validateVoiceProfileRevisionExact(projection.voice_profile_id, projection.voice_profile_revision_id);
+      if (!descriptor || !descriptor.usable) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', `exact Revision 不可用（${descriptor?.unusableReason ?? 'identity failed'}）`, 422);
+      }
+      // exact Assignment source 仍匹配
+      const asg = getProjectVoiceAssignment(request.project_id, request.assignment_artifact_id);
+      if (!asg) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', `request ${request.request_id} assignment 不可读`, 422);
+      }
+      const src = asg.assignment.source;
+      if (
+        src.voiceProfileId !== projection.voice_profile_id ||
+        src.voiceProfileRevisionId !== projection.voice_profile_revision_id ||
+        src.canonicalAudioSha256 !== projection.source_canonical_sha256 ||
+        src.adapterCompatibilityKey !== projection.adapter_compatibility_key
+      ) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', `request ${request.request_id} assignment source 与 projection 不一致`, 422);
+      }
+      // safe file validator（verify 模式）：SHA/WAV/path 全部一致
+      try {
+        await validateMaterializedFile(
+          {
+            relativePath: projection.destination_voice_root_relative_path,
+            voiceProfileId: projection.voice_profile_id,
+            voiceProfileRevisionId: projection.voice_profile_revision_id,
+            expectedSha256: projection.source_canonical_sha256,
+            expectedSize: descriptor.fileSize,
+            expectedCodec: 'pcm_s16le',
+            expectedSampleRate: 48000,
+            expectedChannels: 1,
+            minDurationMs: 1,
+            adapterCompatibilityKey: projection.adapter_compatibility_key,
+          },
+          'verify',
+        );
+      } catch (err) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', `projection 文件不可用: ${err instanceof Error ? err.message : String(err)}`, 422);
       }
       return {...base, outcome: 'reused'};
     }
@@ -605,7 +752,7 @@ export async function createMaterializationRequest(
       // 新 job：本请求是 validation owner → handle
       const jobId = crypto.randomUUID();
       const token = crypto.randomUUID();
-      const lease = nowEpochMs() + MATERIALIZATION_VALIDATION_LEASE_MS;
+      const lease = dbNowMs(db) + MATERIALIZATION_VALIDATION_LEASE_MS;
       const destRel = destinationRelativePath(identity.voiceProfileId, identity.voiceProfileRevisionId);
       const candidateHash = existingProjection
         ? sha256Text(JSON.stringify({id: existingProjection.id, status: existingProjection.status, sha: existingProjection.source_canonical_sha256}))
@@ -659,19 +806,41 @@ export async function createMaterializationRequest(
   const r1 = tx.immediate();
 
   if (r1.kind === 'existing') {
-    return existingRequestResult(r1.request, identity);
+    return await existingRequestResult(r1.request, identity);
   }
 
   if (r1.handle) {
-    // 我是 validation owner：Phase 2（事务外只读）→ Phase 3（handle fenced finalize；
-    // Phase 2 期间 lease 被接管/过期 → finalize fenced reread 失败 → STALE，零更新）
+    // 我是 validation owner：Phase 2（事务外只读）→ hook → Phase 3（handle fenced finalize
+    // + ValidatedProjectionEvidence 逐项 reread；Phase 2 期间任何漂移 → STALE/SOURCE_STALE/
+    // MATERIALIZATION_UNUSABLE，零更新）
     const projection = getProjection(identity.voiceProfileId, identity.voiceProfileRevisionId);
     const validation: ProjectionValidationResult = projection
       ? await validateExistingProjection(projection)
       : {kind: 'unusable', reason: 'no projection yet'};
-    const outcome = finalizeValidatingJob(r1.handle, validation);
+    let validatedEvidence: ValidatedProjectionEvidence | undefined;
+    if (validation.kind === 'usable' && validation.fileEvidence) {
+      validatedEvidence = {
+        projectionId: validation.projection.id,
+        profileId: validation.projection.voice_profile_id,
+        revisionId: validation.projection.voice_profile_revision_id,
+        sourceSha256: validation.projection.source_canonical_sha256,
+        adapterCompatibilityKey: validation.projection.adapter_compatibility_key,
+        status: validation.projection.status,
+        relativePath: validation.projection.destination_voice_root_relative_path,
+        fileEvidence: validation.fileEvidence,
+        candidateMetadataHash: r1.handle.candidateMaterializationMetadataHash,
+        validatedAt: nowIso(),
+      };
+    }
+    if (afterProjectionValidationBeforeFinalize) {
+      await afterProjectionValidationBeforeFinalize({
+        projectionId: validation.kind === 'usable' ? validation.projection.id : null,
+        validationKind: validation.kind,
+      });
+    }
+    const outcome = finalizeValidatingJob(r1.handle, validation, getDb(), validatedEvidence);
     return {
-      request: r1.request,
+      request: getMaterializationRequest(projectId, requestId)!,
       job: getMaterializationJob(r1.job.id)!,
       outcome,
       projection: validation.kind === 'usable' ? validation.projection : null,
@@ -688,14 +857,8 @@ export async function createMaterializationRequest(
 export interface WorkerFinalizeInput {
   /** P0-2：execution handle（claim 时取得；final WHERE 必须 exact owner/attempt/lease） */
   handle: MaterializationExecutionHandle;
-  /** 最终文件证据（executor 实测） */
-  finalRelativePath: string;
-  finalSha256: string;
-  finalSize: number;
-  codec: string;
-  sampleRate: number;
-  channels: number;
-  durationMs: number;
+  /** P0-B：rename 后对真实 final 建立的不可伪造 evidence（禁止 temp 值冒充） */
+  evidence: MaterializedFileEvidence;
   /** 开始前 exact Revision descriptor 证据（commit 时逐项重读比对） */
   revisionEvidence: {
     voiceProfileId: string;
@@ -762,9 +925,6 @@ export function workerFinalizeMaterialization(
     if (destRel !== job.destination_voice_root_relative_path) {
       throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'destination path 漂移（与 job 冻结值不一致）', 409);
     }
-    if (input.finalRelativePath !== job.destination_voice_root_relative_path) {
-      throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'final relative path 与 job 冻结值不一致', 409);
-    }
     // 2) exact Revision DB metadata identity 重读（TTS-A row 为唯一真相）
     const revisionRow = db
       .prepare('SELECT * FROM voice_profile_revisions WHERE id = ? AND voice_profile_id = ?')
@@ -803,15 +963,21 @@ export function workerFinalizeMaterialization(
         throw new MaterializationError('SOURCE_STALE', `request ${r.request_id} assignment source 漂移（commit 前被改写）`, 409);
       }
     }
-    // 4) final evidence 逐项比较（全部字段参与，不允许 unused）
-    if (input.finalSha256 !== job.source_canonical_sha256) {
+    // 4) final evidence 逐项比较（P0-B：只有 rename 后对真实 final 建立的 evidence 可接受）
+    if (input.evidence.relativePath !== job.destination_voice_root_relative_path) {
+      throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'evidence relative path 与 job 冻结值不一致', 409);
+    }
+    if (input.evidence.sha256 !== job.source_canonical_sha256) {
       throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'final SHA 与 job 冻结值不一致', 409);
     }
-    if (input.finalSize !== input.revisionEvidence.fileSize) {
+    if (input.evidence.size !== input.revisionEvidence.fileSize) {
       throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'final size 与 revision 不一致', 409);
     }
-    if (input.codec !== 'pcm_s16le' || input.sampleRate !== 48000 || input.channels !== 1 || input.durationMs <= 0) {
-      throw new MaterializationError('REQUEST_STATE_INCONSISTENT', `final WAV 契约不匹配: ${JSON.stringify({codec: input.codec, sampleRate: input.sampleRate, channels: input.channels, durationMs: input.durationMs})}`, 409);
+    if (input.evidence.codec !== 'pcm_s16le' || input.evidence.sampleRate !== 48000 || input.evidence.channels !== 1 || input.evidence.durationMs <= 0) {
+      throw new MaterializationError('REQUEST_STATE_INCONSISTENT', `final WAV 契约不匹配: ${JSON.stringify({codec: input.evidence.codec, sampleRate: input.evidence.sampleRate, channels: input.evidence.channels, durationMs: input.evidence.durationMs})}`, 409);
+    }
+    if (!input.evidence.durabilityEstablished) {
+      throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'final evidence 未建立 durability（fsync 未完成）', 409);
     }
     // projection：INSERT 或 repair（failed/indeterminate → file_ready_unpublished）
     const existing = db
@@ -895,14 +1061,22 @@ export function failMaterializationJobFenced(
 }
 
 /**
- * 独立 recovery sweep：扫描 expired running jobs（lease < DB_NOW），按 final file 状态裁决：
- * - final file 存在且 exact（SHA + WAV 契约）：文件已 durable、DB 未 commit 的崩溃窗口 →
- *   新事务完成 projection/job/request（fenced：status='running' AND lease < DB_NOW，多 Worker 恰一裁决）；
- * - 文件缺失/损坏：job→failed + requests→failed（error_code 稳定）；
- * - 无法确定（校验异常）：job/requests→indeterminate（不冒充 success）。
+ * 独立 recovery sweep（R2 P0-C）：扫描 expired running jobs（lease < DB_NOW）。
+ * 每个 job 独立 try/catch（一个坏 job 不阻断其余、不使 Worker fatal）。
+ * 稳定裁决：
+ * - MISSING / damaged（SHA/size/WAV/containment/inode）→ failed（RECOVERY_FILE_UNAVAILABLE）；
+ * - source evidence 漂移（Revision/Assignment）→ failed（RECOVERY_SOURCE_STALE）；
+ * - FSYNC_FAILED / IO 无法确定 → indeterminate（不冒充 success）；
+ * - exact + durability 重新建立（durabilize：fsync final + dir + exact reread + fenced）→ recovered_success。
  * 返回已处理的 job 数（not_owned 不计）。
  */
-export async function recoverExpiredMaterializationJobs(limit = 10, db: Db = getDb()): Promise<number> {
+export interface MaterializationRecoveryDeps {
+  /** 测试注入（仅测试）：透传 safe file validator 的 fsync 失败注入。 */
+  fsyncFile?: (fh: import('node:fs/promises').FileHandle) => Promise<void>;
+  fsyncDir?: (fh: import('node:fs/promises').FileHandle) => Promise<void>;
+}
+
+export async function recoverExpiredMaterializationJobs(limit = 10, db: Db = getDb(), deps: MaterializationRecoveryDeps = {}): Promise<number> {
   const expired = db
     .prepare(
       `SELECT * FROM voice_materialization_jobs
@@ -912,30 +1086,94 @@ export async function recoverExpiredMaterializationJobs(limit = 10, db: Db = get
     .all(limit) as VoiceMaterializationJobRow[];
   let handled = 0;
   for (const job of expired) {
-    // final file 状态（事务外只读；fail-closed：任何异常不得冒充 success）
-    let fileState: 'ok' | 'missing' | 'damaged' | 'unknown';
     try {
-      const finalAbs = destinationAbsolutePath(job.destination_voice_root_relative_path);
-      const st = await fs.lstat(finalAbs);
-      if (st.isSymbolicLink() || !st.isFile()) {
-        fileState = 'damaged';
-      } else {
-        const sha = await sha256FileBytes(finalAbs);
-        if (sha !== job.source_canonical_sha256) {
-          fileState = 'damaged';
-        } else {
-          const probe = probeAudio(finalAbs);
-          fileState =
-            probe.codec === 'pcm_s16le' && probe.sampleRate === 48000 && probe.channels === 1 && probe.durationMs > 0
-              ? 'ok'
-              : 'damaged';
-        }
-      }
+      const verdict = await recoverOneMaterializationJob(job, db, deps);
+      if (verdict !== 'not_owned') handled++;
     } catch (err) {
-      fileState = (err as NodeJS.ErrnoException)?.code === 'ENOENT' ? 'missing' : 'unknown';
+      // 单个 job 异常只记录（不得阻断后续 job / Worker 进程）
+      console.error(`[tts-c1a recovery] job ${job.id} 异常: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+  return handled;
+}
 
-    const verdict = db.transaction((): RecoveryVerdict => {
+/** 终态裁决（fenced：status='running' AND lease < DB_NOW；多 Worker 恰一）。 */
+function finalizeRecoveredTerminal(
+  jobId: string,
+  status: 'failed' | 'indeterminate',
+  errorCode: string | null,
+  errorMessage: string,
+  db: Db,
+): RecoveryVerdict {
+  const now = nowIso();
+  return db.transaction((): RecoveryVerdict => {
+    const fresh = db
+      .prepare(
+        `SELECT * FROM voice_materialization_jobs
+         WHERE id = ? AND status = 'running'
+           AND lease_expires_at_epoch_ms < (${DBNOW_MS})`,
+      )
+      .get(jobId) as VoiceMaterializationJobRow | undefined;
+    if (!fresh) return 'not_owned';
+    db.prepare(
+      `UPDATE voice_materialization_jobs
+       SET status = ?, owner_token = NULL, lease_expires_at_epoch_ms = NULL,
+           heartbeat_at = NULL, updated_at = ?
+       WHERE id = ? AND status = 'running'`,
+    ).run(status, now, jobId);
+    db.prepare(
+      `UPDATE voice_materialization_requests
+       SET status = ?, error_code = ?, error_message = ?, updated_at = ?
+       WHERE job_id = ? AND status IN ('waiting','running')`,
+    ).run(status, errorCode, errorMessage.slice(0, 500), now, jobId);
+    return status === 'failed' ? 'failed' : 'indeterminate';
+  }).immediate();
+}
+
+/**
+ * 单个 expired running job 的 recovery（R2 P0-C）：
+ * 1) safe final validator durabilize（fd SHA + fd WAV + fsync final + dir fsync）——
+ *    不得因"文件可见且 hash 正确"就假定旧 Worker 已完成 fsync；
+ * 2) BEGIN IMMEDIATE 内 exact reread：job fenced + destination shape + Revision DB metadata
+ *    + 每个 active request Assignment source + final path inode/dev 复核（validate→commit 变化检测）；
+ * 3) projection/job/request 同事务完成。
+ */
+async function recoverOneMaterializationJob(job: VoiceMaterializationJobRow, db: Db, deps: MaterializationRecoveryDeps): Promise<RecoveryVerdict> {
+  // phase A：safe final validator（durabilize 模式——重新建立 durability）
+  let evidence: MaterializedFileEvidence;
+  try {
+    evidence = await validateMaterializedFile(
+      {
+        relativePath: job.destination_voice_root_relative_path,
+        voiceProfileId: job.voice_profile_id,
+        voiceProfileRevisionId: job.voice_profile_revision_id,
+        expectedSha256: job.source_canonical_sha256,
+        expectedCodec: 'pcm_s16le',
+        expectedSampleRate: 48000,
+        expectedChannels: 1,
+        minDurationMs: 1,
+        adapterCompatibilityKey: job.adapter_compatibility_key,
+      },
+      'durabilize',
+      deps,
+    );
+  } catch (err) {
+    if (err instanceof MaterializedFileError) {
+      if (err.code === 'MISSING') {
+        return finalizeRecoveredTerminal(job.id, 'failed', 'RECOVERY_FILE_UNAVAILABLE', 'final file missing after worker loss', db);
+      }
+      if (err.code === 'FSYNC_FAILED' || err.code === 'IO_ERROR') {
+        return finalizeRecoveredTerminal(job.id, 'indeterminate', null, `durability 无法确定: ${err.message}`, db);
+      }
+      // NOT_REGULAR/SYMLINK/SHA/SIZE/WAV/INODE_CHANGED/CONTAINMENT → damaged
+      return finalizeRecoveredTerminal(job.id, 'failed', 'RECOVERY_FILE_UNAVAILABLE', `final file damaged: ${err.message}`, db);
+    }
+    return finalizeRecoveredTerminal(job.id, 'indeterminate', null, `file 校验异常: ${err instanceof Error ? err.message : String(err)}`, db);
+  }
+
+  // phase B：exact reread + fenced 事务（commit-time source fence 与 worker 终局同契约）
+  try {
+    return db.transaction((): RecoveryVerdict => {
       const fresh = db
         .prepare(
           `SELECT * FROM voice_materialization_jobs
@@ -945,75 +1183,98 @@ export async function recoverExpiredMaterializationJobs(limit = 10, db: Db = get
         .get(job.id) as VoiceMaterializationJobRow | undefined;
       if (!fresh) return 'not_owned'; // 已被他人处理
       const now = nowIso();
-      if (fileState === 'ok') {
-        // 文件已 durable：完成 projection/job/request（不冒充 success——file 证据 exact）
-        const destRel = destinationRelativePath(fresh.voice_profile_id, fresh.voice_profile_revision_id);
-        const existing = db
-          .prepare('SELECT * FROM voice_materializations WHERE voice_profile_id = ? AND voice_profile_revision_id = ?')
-          .get(fresh.voice_profile_id, fresh.voice_profile_revision_id) as VoiceMaterializationRow | undefined;
-        let projectionId: string;
-        if (!existing) {
-          projectionId = crypto.randomUUID();
-          db.prepare(
-            `INSERT INTO voice_materializations
-               (id, voice_profile_id, voice_profile_revision_id, source_canonical_sha256,
-                adapter_compatibility_key, destination_voice_root_relative_path, status, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'file_ready_unpublished', ?, ?)`,
-          ).run(projectionId, fresh.voice_profile_id, fresh.voice_profile_revision_id,
-            fresh.source_canonical_sha256, fresh.adapter_compatibility_key, destRel, now, now);
-        } else if (existing.status === 'failed' || existing.status === 'indeterminate') {
-          projectionId = existing.id;
-          db.prepare(
-            `UPDATE voice_materializations SET status = 'file_ready_unpublished', updated_at = ? WHERE id = ?`,
-          ).run(now, existing.id);
-        } else {
-          throw new MaterializationError('MATERIALIZATION_ALREADY_EXISTS', 'recovery: projection 已存在（应走 reuse）', 409);
+      // destination shape
+      const destRel = destinationRelativePath(fresh.voice_profile_id, fresh.voice_profile_revision_id);
+      if (destRel !== fresh.destination_voice_root_relative_path || evidence.relativePath !== fresh.destination_voice_root_relative_path) {
+        throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'recovery: destination path 漂移', 409);
+      }
+      // exact Revision DB metadata identity
+      const revisionRow = db
+        .prepare('SELECT * FROM voice_profile_revisions WHERE id = ? AND voice_profile_id = ?')
+        .get(fresh.voice_profile_revision_id, fresh.voice_profile_id) as
+        | {canonical_audio_sha256: string; adapter_compatibility_key: string; provider: string}
+        | undefined;
+      if (
+        !revisionRow ||
+        revisionRow.canonical_audio_sha256 !== fresh.source_canonical_sha256 ||
+        revisionRow.adapter_compatibility_key !== fresh.adapter_compatibility_key
+      ) {
+        throw new MaterializationError('SOURCE_STALE', 'recovery: exact Revision metadata identity 漂移', 409);
+      }
+      // 每个 active request Assignment source 逐项
+      const subscribers = listActiveRequestRows(fresh.id);
+      for (const r of subscribers) {
+        const asg = getProjectVoiceAssignment(r.project_id, r.assignment_artifact_id);
+        if (!asg) throw new MaterializationError('SOURCE_STALE', `recovery: request ${r.request_id} assignment 不可读`, 409);
+        const src = asg.assignment.source;
+        if (
+          src.voiceProfileId !== fresh.voice_profile_id ||
+          src.voiceProfileRevisionId !== fresh.voice_profile_revision_id ||
+          src.canonicalAudioSha256 !== fresh.source_canonical_sha256 ||
+          src.adapterCompatibilityKey !== fresh.adapter_compatibility_key
+        ) {
+          throw new MaterializationError('SOURCE_STALE', `recovery: request ${r.request_id} assignment source 漂移`, 409);
         }
-        db.prepare(
-          `UPDATE voice_materialization_jobs
-           SET status = 'succeeded', owner_token = NULL, lease_expires_at_epoch_ms = NULL,
-               heartbeat_at = NULL, updated_at = ?
-           WHERE id = ? AND status = 'running'`,
-        ).run(now, fresh.id);
-        db.prepare(
-          `UPDATE voice_materialization_requests
-           SET status = 'succeeded', materialization_id = ?, updated_at = ?
-           WHERE job_id = ? AND status IN ('waiting','running')`,
-        ).run(projectionId, now, fresh.id);
-        return 'recovered_success';
       }
-      if (fileState === 'missing' || fileState === 'damaged') {
-        db.prepare(
-          `UPDATE voice_materialization_jobs
-           SET status = 'failed', owner_token = NULL, lease_expires_at_epoch_ms = NULL,
-               heartbeat_at = NULL, updated_at = ?
-           WHERE id = ? AND status = 'running'`,
-        ).run(now, fresh.id);
-        db.prepare(
-          `UPDATE voice_materialization_requests
-           SET status = 'failed', error_code = 'RECOVERY_FILE_UNAVAILABLE', error_message = ?, updated_at = ?
-           WHERE job_id = ? AND status IN ('waiting','running')`,
-        ).run(fileState === 'missing' ? 'final file missing after worker loss' : 'final file damaged after worker loss', now, fresh.id);
-        return 'failed';
+      // file evidence 逐项 + validate→commit 变化检测（事务内同步复核 inode/dev）
+      if (evidence.sha256 !== fresh.source_canonical_sha256 || !evidence.durabilityEstablished) {
+        throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'recovery: evidence 与 job 冻结值不一致/未 durable', 409);
       }
-      // unknown：无法确定 → indeterminate（不冒充 success/failed）
+      const finalAbsNow = destinationAbsolutePath(fresh.destination_voice_root_relative_path);
+      const stNow = fsSync.lstatSync(finalAbsNow);
+      if (stNow.isSymbolicLink() || stNow.dev !== Number(evidence.device) || stNow.ino !== Number(evidence.inode)) {
+        throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'recovery: final file 在 validate 后被替换', 409);
+      }
+      // projection：INSERT 或 repair（failed/indeterminate → file_ready_unpublished）
+      const existing = db
+        .prepare('SELECT * FROM voice_materializations WHERE voice_profile_id = ? AND voice_profile_revision_id = ?')
+        .get(fresh.voice_profile_id, fresh.voice_profile_revision_id) as VoiceMaterializationRow | undefined;
+      let projectionId: string;
+      if (!existing) {
+        projectionId = crypto.randomUUID();
+        db.prepare(
+          `INSERT INTO voice_materializations
+             (id, voice_profile_id, voice_profile_revision_id, source_canonical_sha256,
+              adapter_compatibility_key, destination_voice_root_relative_path, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'file_ready_unpublished', ?, ?)`,
+        ).run(projectionId, fresh.voice_profile_id, fresh.voice_profile_revision_id,
+          fresh.source_canonical_sha256, fresh.adapter_compatibility_key, destRel, now, now);
+      } else if (existing.status === 'failed' || existing.status === 'indeterminate') {
+        projectionId = existing.id;
+        db.prepare(
+          `UPDATE voice_materializations SET status = 'file_ready_unpublished', updated_at = ? WHERE id = ?`,
+        ).run(now, existing.id);
+      } else {
+        throw new MaterializationError('MATERIALIZATION_ALREADY_EXISTS', 'recovery: projection 已存在（应走 reuse）', 409);
+      }
       db.prepare(
         `UPDATE voice_materialization_jobs
-         SET status = 'indeterminate', owner_token = NULL, lease_expires_at_epoch_ms = NULL,
+         SET status = 'succeeded', owner_token = NULL, lease_expires_at_epoch_ms = NULL,
              heartbeat_at = NULL, updated_at = ?
          WHERE id = ? AND status = 'running'`,
       ).run(now, fresh.id);
       db.prepare(
         `UPDATE voice_materialization_requests
-         SET status = 'indeterminate', updated_at = ?
+         SET status = 'succeeded', materialization_id = ?, updated_at = ?
          WHERE job_id = ? AND status IN ('waiting','running')`,
-      ).run(now, fresh.id);
-      return 'indeterminate';
+      ).run(projectionId, now, fresh.id);
+      return 'recovered_success';
     }).immediate();
-    if (verdict !== 'not_owned') handled++;
+  } catch (err) {
+    if (err instanceof MaterializationError && err.code === 'SOURCE_STALE') {
+      return finalizeRecoveredTerminal(job.id, 'failed', 'RECOVERY_SOURCE_STALE', err.message, db);
+    }
+    if (err instanceof MaterializationError && err.code === 'MATERIALIZATION_ALREADY_EXISTS') {
+      return 'not_owned'; // 已有 usable projection：不再重复裁决
+    }
+    // validate→commit 变化 / REQUEST_STATE_INCONSISTENT → failed（文件不再可信）
+    if (err instanceof MaterializationError && err.code === 'REQUEST_STATE_INCONSISTENT') {
+      return finalizeRecoveredTerminal(job.id, 'failed', 'RECOVERY_FILE_UNAVAILABLE', err.message, db);
+    }
+    return finalizeRecoveredTerminal(job.id, 'indeterminate', null, `recovery 裁决异常: ${err instanceof Error ? err.message : String(err)}`, db);
   }
-  return handled;
 }
+
 
 // ── 序列化（redaction：禁止输出任何 path） ──
 
