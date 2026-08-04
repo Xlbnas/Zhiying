@@ -117,7 +117,7 @@ run_suite "m71-tts" npx tsx scripts/test-m71-tts.ts
 run_suite "m3b-tts" npx tsx scripts/test-m3b-tts.ts
 run_suite "m3c-subtitle-timing" npx tsx scripts/test-m3c-subtitle-timing.ts
 
-# 8. TTS-C.1A materialization 7 套（Durable Voice Materialization Foundation）
+# 8. TTS-C.1A materialization 套件（Durable Voice Materialization Foundation + R1 加固）
 run_suite "tts-c1a-migration" npx tsx scripts/test-tts-c1a-migration.ts
 run_suite "tts-c1a-schema" npx tsx scripts/test-tts-c1a-materialization-schema.ts
 run_suite "tts-c1a-api" npx tsx scripts/test-tts-c1a-materialization-api.ts
@@ -125,6 +125,13 @@ run_suite "tts-c1a-worker" npx tsx scripts/test-tts-c1a-materialization-worker.t
 run_suite "tts-c1a-durability" npx tsx scripts/test-tts-c1a-materialization-durability.ts
 run_suite "tts-c1a-concurrency" npx tsx scripts/test-tts-c1a-materialization-concurrency.ts
 run_suite "tts-c1a-files" npx tsx scripts/test-tts-c1a-materialization-files.ts
+# TTS-C.1A.R1 新增 6 套（validation ownership / worker fencing / recovery / path security / request concurrency / compose mounts）
+run_suite "tts-c1a-validation-ownership" npx tsx scripts/test-tts-c1a-validation-ownership.ts
+run_suite "tts-c1a-worker-fencing" npx tsx scripts/test-tts-c1a-worker-fencing.ts
+run_suite "tts-c1a-recovery" npx tsx scripts/test-tts-c1a-recovery.ts
+run_suite "tts-c1a-path-security" npx tsx scripts/test-tts-c1a-path-security.ts
+run_suite "tts-c1a-request-concurrency" npx tsx scripts/test-tts-c1a-request-concurrency.ts
+run_suite "tts-c1a-compose-mounts" npx tsx scripts/test-tts-c1a-compose-mounts.ts
 
 echo "QUALITY_GATE_RESULT=PASS"
 echo "QUALITY_GATE_SHA=$GATE_SHA"

@@ -22,11 +22,7 @@ async function claimAndRun(fx_: C1aFixture, requestId: string, deps: Parameters<
   const claimed = claimNextAnyJob('dur-worker');
   if (!claimed || claimed.type !== 'voice_materialization') return {outcome: 'err', err: new Error('claim failed')};
   try {
-    await runMaterializationJob(
-      {jobId: claimed.job.id, ownerToken: claimed.job.owner_token!, attempt: claimed.job.attempt},
-      {log: () => undefined},
-      deps,
-    );
+    await runMaterializationJob(claimed.handle, {log: () => undefined}, deps);
     return {outcome: 'ok'};
   } catch (e) {
     return {outcome: 'err', err: e};
@@ -43,35 +39,38 @@ async function claimAndRun(fx_: C1aFixture, requestId: string, deps: Parameters<
   });
   ok(r1.outcome === 'err', 'temp 校验失败 → 不返回成功', r1.outcome);
   const db = getDb();
-  const j1 = db.prepare("SELECT status FROM voice_materialization_jobs WHERE voice_profile_id=? AND voice_profile_revision_id=? AND status='running'").all(fx.profileId, fx.revisionId);
-  ok(j1.length >= 0, '失败不提交 success（无 file_ready 由 worker 注入路径产生）');
-  // 模拟 Worker 失联（崩溃后 lease 自然过期）：把 running job lease 置为过去。
-  // 随后 dur-2 的 request 走 fenced 恢复：running(lease 过期)→failed → 新建 validating
-  // → 无 projection → unusable + subscriber>0 → queued → Worker claim → 正常 copy。
-  const expired = db
-    .prepare(
-      `UPDATE voice_materialization_jobs
-       SET lease_expires_at_epoch_ms = ?
-       WHERE voice_profile_id=? AND voice_profile_revision_id=? AND status='running'`,
-    )
-    .run(Date.now() - 1000, fx.profileId, fx.revisionId);
-  ok(expired.changes === 1, '失联恢复前置：running job lease 置为过期', expired.changes);
+  // R1：确定性 executor 错误且仍持有 exact handle → 立即 fenced failed + requests fan-out（不等 lease 过期）
+  const j1 = db.prepare("SELECT status FROM voice_materialization_jobs WHERE voice_profile_id=? AND voice_profile_revision_id=? AND status='failed'").all(fx.profileId, fx.revisionId);
+  ok(j1.length === 1, '确定性错误 → 立即 fenced failed（非 running 滞留）', j1.length);
+  const r1Req = db.prepare("SELECT status FROM voice_materialization_requests WHERE project_id=? AND request_id='dur-1'").get(fx.projectId) as {status: string} | undefined;
+  ok(r1Req?.status === 'failed', '失败请求 fan-out → failed', r1Req?.status);
+  const matCount = (db.prepare('SELECT count(*) c FROM voice_materializations').get() as {c: number}).c;
+  ok(matCount === 0, '失败不创建 projection', matCount);
 
-  // 2) 真实成功路径（对照；经失联恢复循环后正常 copy）
+  // 2) 真实成功路径（对照；新 request 自建 envelope → queued → Worker copy）
   const r2 = await claimAndRun(fx, 'dur-2');
-  ok(r2.outcome === 'ok', '正常路径成功（失联恢复对照）', r2.outcome);
+  ok(r2.outcome === 'ok', '正常路径成功（失败后新请求恢复对照）', r2.outcome);
   const projOk = db
     .prepare("SELECT * FROM voice_materializations WHERE voice_profile_id=? AND voice_profile_revision_id=? AND status='file_ready_unpublished'")
     .get(fx.profileId, fx.revisionId);
   ok(!!projOk, '恢复后 projection = file_ready_unpublished', projOk ?? null);
 
-  // 3) DB final 事务失败注入：workerFinalizeMaterialization 用错误 jobId → STALE 错误，
+  // 3) DB final 事务失败注入：workerFinalizeMaterialization 用伪造 handle（no-such-job）→ STALE 错误，
   //    不产生 false success
   try {
     workerFinalizeMaterialization({
-      jobId: 'no-such-job',
-      sourceAbsPath: 'x', sourceSha256: 'a'.repeat(64), sourceSize: 1,
+      handle: {jobId: 'no-such-job', ownerToken: 'x', attempt: 1, leaseExpiresAtEpochMs: Date.now() + 60000},
+      finalRelativePath: `${fx.profileId}/${fx.revisionId}/reference.wav`,
+      finalSha256: 'a'.repeat(64), finalSize: 1,
       codec: 'pcm_s16le', sampleRate: 48000, channels: 1, durationMs: 100,
+      revisionEvidence: {
+        voiceProfileId: fx.profileId,
+        voiceProfileRevisionId: fx.revisionId,
+        canonicalAudioSha256: 'a'.repeat(64),
+        adapterCompatibilityKey: 'indextts2-adapter-registry@1',
+        provider: 'indextts2',
+        fileSize: 1,
+      },
     });
     ok(false, 'final DB 失败注入 → 抛错', 'no error');
   } catch (e) {

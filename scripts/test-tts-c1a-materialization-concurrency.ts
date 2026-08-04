@@ -59,11 +59,8 @@ let fx: C1aFixture;
   // 3) fan-in 到实际执行：claim + Worker copy → 4 个 request 全部 succeeded + 同一 projection
   const claimed = claimNextAnyJob('cc-worker');
   ok(claimed !== null && claimed.type === 'voice_materialization' && claimed.job.id === a.job.id, 'claim fan-in job', claimed?.type);
-  const cvm = claimed as {type: 'voice_materialization'; job: {id: string; owner_token: string | null; attempt: number}};
-  await runMaterializationJob(
-    {jobId: cvm.job.id, ownerToken: cvm.job.owner_token!, attempt: cvm.job.attempt},
-    {log: () => undefined},
-  );
+  const cvm = claimed as {type: 'voice_materialization'; job: {id: string; owner_token: string | null; attempt: number; lease_expires_at_epoch_ms: number | null}; handle: {jobId: string; ownerToken: string; attempt: number; leaseExpiresAtEpochMs: number}};
+  await runMaterializationJob(cvm.handle, {log: () => undefined});
   const proj = getProjection(fx.profileId, fx.revisionId);
   ok(proj !== undefined && proj.status === 'file_ready_unpublished', 'fan-in 执行后 projection=file_ready_unpublished', proj?.status);
   const reqs = db
@@ -118,7 +115,15 @@ let fx: C1aFixture;
      VALUES (?, ?, ?, 'validating_existing', 'v-o', ?, 1, ?, 'indextts2-adapter-registry@1', ?, ?, ?)`,
   ).run(orphanJob, fx.profileId, rev3Row.id, Date.now() + 60000, rev3Sha, `${fx.profileId}/${rev3Row.id}/reference.wav`, new Date().toISOString(), new Date().toISOString());
   const oj = getMaterializationJob(orphanJob)!;
-  const oc = finalizeValidatingJob(oj, {kind: 'unusable', reason: 'no projection'});
+  const ojHandle: import('../src/lib/tts-c/materialization').ValidationLeaseHandle = {
+    jobId: oj.id,
+    validationOwnerToken: oj.validation_owner_token!,
+    validationAttempt: oj.validation_attempt,
+    validationLeaseExpiresAtEpochMs: oj.validation_lease_expires_at_epoch_ms!,
+    candidateMaterializationId: oj.candidate_materialization_id,
+    candidateMaterializationMetadataHash: oj.candidate_materialization_metadata_hash,
+  };
+  const oc = finalizeValidatingJob(ojHandle, {kind: 'unusable', reason: 'no projection'});
   ok(oc === 'cancelled', 'zero subscriber → cancelled（不 queue）', oc);
 
   // 7) stale validating job：lease 过期 → takeover（attempt+1）→ 新 owner finalize OK；
@@ -132,15 +137,24 @@ let fx: C1aFixture;
      VALUES (?, ?, ?, 'validating_existing', 'old-owner', ?, 1, ?, 'indextts2-adapter-registry@1', ?, ?, ?)`,
   ).run(staleJob, fx.profileId, rev3Row.id, Date.now() - 1000, rev3Sha, `${fx.profileId}/${rev3Row.id}/reference.wav`, new Date().toISOString(), new Date().toISOString());
   const sj = getMaterializationJob(staleJob)!;
-  ok(takeoverStaleValidatingJob(sj), 'stale lease → takeover CAS 成功');
+  const winnerHandle = takeoverStaleValidatingJob(sj.id);
+  ok(winnerHandle !== null, 'stale lease → takeover CAS 成功（赢家得到 handle）', winnerHandle);
   const sj2 = getMaterializationJob(staleJob)!;
   ok(sj2.validation_attempt === 2 && sj2.validation_owner_token !== 'old-owner', 'takeover attempt+1 + 换 owner', sj2.validation_attempt);
-  // 新 owner finalize（unusable + 无 subscriber → cancelled）
-  const freshOutcome = finalizeValidatingJob(sj2, {kind: 'unusable', reason: 'x'});
+  // 新 owner finalize（unusable + 无 subscriber → cancelled；凭据 = handle）
+  const freshOutcome = finalizeValidatingJob(winnerHandle!, {kind: 'unusable', reason: 'x'});
   ok(freshOutcome === 'cancelled', '新 owner finalize 成功（zero subscriber → cancelled）', freshOutcome);
-  // 旧 owner finalize → STALE（changes=0，不得放行）
+  // 旧 owner finalize → STALE（旧 handle 凭据，不得放行）
+  const oldHandle: import('../src/lib/tts-c/materialization').ValidationLeaseHandle = {
+    jobId: sj.id,
+    validationOwnerToken: 'old-owner',
+    validationAttempt: 1,
+    validationLeaseExpiresAtEpochMs: sj.validation_lease_expires_at_epoch_ms!,
+    candidateMaterializationId: sj.candidate_materialization_id,
+    candidateMaterializationMetadataHash: sj.candidate_materialization_metadata_hash,
+  };
   try {
-    finalizeValidatingJob({...sj, validation_owner_token: 'old-owner', validation_attempt: 1}, {kind: 'unusable', reason: 'x'});
+    finalizeValidatingJob(oldHandle, {kind: 'unusable', reason: 'x'});
     ok(false, '旧 owner finalize → 抛 STALE', 'no error');
   } catch (e) {
     ok(e instanceof MaterializationError && e.code === 'STALE_VALIDATION_OWNER', '旧 owner finalize changes=0 → STALE_VALIDATION_OWNER', e);

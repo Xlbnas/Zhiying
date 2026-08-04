@@ -34,14 +34,11 @@ let fx: C1aFixture;
   //    此处 job 已 queued；scheduler claim
   const claimed = claimNextAnyJob('test-worker');
   ok(claimed !== null && claimed.type === 'voice_materialization' && claimed.job.id === jobId, 'scheduler claim queued materialization job', claimed?.type);
-  const claimedVm = claimed as {type: 'voice_materialization'; job: {id: string; status: string; owner_token: string | null; attempt: number}};
+  const claimedVm = claimed as {type: 'voice_materialization'; job: {id: string; status: string; owner_token: string | null; attempt: number}; handle: {jobId: string; ownerToken: string; attempt: number; leaseExpiresAtEpochMs: number}};
   ok(claimedVm.job.status === 'running' && claimedVm.job.owner_token !== null, 'claim 后 running + owner');
 
-  // 3) Worker durable copy 执行
-  await runMaterializationJob(
-    {jobId, ownerToken: claimedVm.job.owner_token!, attempt: claimedVm.job.attempt},
-    {log: () => undefined},
-  );
+  // 3) Worker durable copy 执行（P0-2：使用 claim 返回的 exact execution handle）
+  await runMaterializationJob(claimedVm.handle, {log: () => undefined});
   const proj = getProjection(fx.profileId, fx.revisionId);
   ok(proj !== undefined && proj.status === 'file_ready_unpublished', 'projection=file_ready_unpublished', proj?.status);
   const finalAbs = destinationAbsolutePath(proj!.destination_voice_root_relative_path);
@@ -162,12 +159,9 @@ let fx: C1aFixture;
   ).run(cancelJob2, new Date().toISOString(), cancelReq2);
   const c5 = claimNextAnyJob('test-worker');
   ok(c5 !== null && c5.type === 'voice_materialization' && c5.job.id === cancelJob2, 'running 期 job 正常 claim', c5?.type);
-  const c5job = c5 as {type: 'voice_materialization'; job: {id: string; owner_token: string | null; attempt: number}};
+  const c5job = c5 as {type: 'voice_materialization'; job: {id: string; owner_token: string | null; attempt: number}; handle: {jobId: string; ownerToken: string; attempt: number; leaseExpiresAtEpochMs: number}};
   db2.prepare("UPDATE voice_materialization_jobs SET cancel_requested=1 WHERE id=?").run(cancelJob2);
-  await runMaterializationJob(
-    {jobId: cancelJob2, ownerToken: c5job.job.owner_token!, attempt: c5job.job.attempt},
-    {log: () => undefined},
-  );
+  await runMaterializationJob(c5job.handle, {log: () => undefined});
   const jCancel2 = getMaterializationJob(cancelJob2);
   ok(jCancel2?.status === 'cancelled', 'running 期 cancel_requested → Worker cancelled', jCancel2?.status);
   const orphanProj = getProjection(fx.profileId, revOrphanRow.id);
