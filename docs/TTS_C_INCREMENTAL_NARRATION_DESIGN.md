@@ -1,10 +1,19 @@
-# TTS-C Incremental Narration 架构设计（TTS-C.0.R10 修订，只读审计，未实现）
+# TTS-C Incremental Narration 架构设计（TTS-C.0.R11 修订，只读审计，未实现）
 
-> 状态：**TTS-C.0.R10 architecture revision completed；pending independent Review；
+> 状态：**TTS-C.0.R11 architecture revision completed；pending independent Review；
 > TTS-C runtime implementation not started；TTS-C.1A / 1B / 1C not started**。
-> 本文档是只读架构审计产物（R10 修订）：不修改 runtime code / schema / config / migration / compose。
-> 运行时真相以真实代码为准（审计基线 m7 @ `f1b3b931`；TTS-A final code `1460efd…`、TTS-B final code `86f7f52…` 均已 FROZEN）。
-> R9 独立 Review = **FAIL**；R10 关闭其对 R9 的 FAIL 发现（全部 docs-only，零 runtime/零 migration/零 schema 变更）：
+> 本文档是只读架构审计产物（R11 修订）：不修改 runtime code / schema / config / migration / compose。
+> 运行时真相以真实代码为准（审计基线 m7 @ `7c7bd54`；TTS-A final code `1460efd…`、TTS-B final code `86f7f52…` 均已 FROZEN）。
+> R9 独立 Review = **FAIL**（R10 关闭 R9 FAIL 发现）；**R10 独立 Review = FAIL**；R11 关闭其对 R10 的
+> FAIL 发现（全部 docs-only，零 runtime/零 migration/零 schema 变更）：
+> **P0-A**（owner/lease/attempt 无唯一原子入口：R10 只保护 status，`owner_token / lease /
+> validation_attempt / claimed_by / claimed_at / heartbeat_at / attempt / started_at / finished_at`
+> 仍可被两条无 command 的应用 UPDATE 直接改写，claim/job owner 可 split、attempt 可伪造）、
+> **P0-B**（`queued/generation_pending → failed/cancelled` 状态边存在但无合法 command，不可达）、
+> **P1-A**（runner 无真实事务能力：PyEngine 每次 exec 自动 commit、CLI 每次新进程，无法测试
+> BEGIN IMMEDIATE 跨语句回滚）、**P1-B**（27-suite M7 gate 不含 TTS-C contract，CI 未真正绑定
+> contract）。R10 已实证正确的部分（database-time fencing、indeterminate seal/resolve、双路径 cutover、
+> worker_claim/state_transition 生命周期、voice identity、dispatch/activation 原子性）全部保留不回退：
 > **P0-1**（execution transition 第一条 command 因 owner 死锁永不可执行）、**P0-2**（`UNIQUE(job_id)`/
 > `UNIQUE(claim_id)` 阻断完整生命周期）、**P0-3**（`legacy_cutover_existing` 不可达）、
 > **P1-1**（360 证据口径不可追溯且与实施报告 23/29 矛盾）、**P1-2**（retired entry 实际仍占活跃唯一位，
@@ -79,7 +88,7 @@
 > **state_transition**（`running/indeterminate → succeeded/failed/cancelled/indeterminate`，
 > owner fencing：`claim.owner_token = job.claimed_by = command.worker_owner_token` +
 > claim lease >= DB_NOW_MS + 双侧 attempt exact；`→indeterminate` 保留双侧 owner/lease 供
-> resolve fence 与 §3.6 execution takeover CAS，终态清空）；
+> resolve fence 与 §3.6 execution takeover（R11 起为 execution_takeover command），终态清空）；
 > 幂等模型：`transition_request_id UNIQUE` + 语义防重
 > `UNIQUE(job_id, from_job_status, to_job_status, worker_attempt)`——同一 job 的多阶段 command
 > （`queued→running→succeeded/…`）可连续写入，完全相同的 replay 唯一拒绝，**不再使用**全生命周期
@@ -195,6 +204,47 @@ DB_NOW_ISO = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 ### 1.4 IndexTTS2 Adapter（`server.py`）
 
 - `/v1/synthesize` 仅 `text + voiceProfile@voiceRevision + useRandom=false + emotion='none'`；registry 启动加载一次；拒绝 `voices=[]`；containment + `_check_voice`；materialization API 不存在。
+
+### 1.5 官方实现对照（R11 只读参考审计）
+
+编码前对 SQLite / Temporal / BullMQ 的**官方文档与官方仓库**做只读对照，只为 owner/lease fencing、
+same-state renewal/takeover、append-only transition evidence、prestart cancellation/failure、crash
+recovery 找借鉴点。不引入任何新依赖，不做分布式改造。
+
+**SQLite（官方 [Transaction](https://www.sqlite.org/lang_transaction.html) /
+[CREATE TRIGGER](https://www.sqlite.org/lang_createtrigger.html)）**
+
+- 借鉴：`BEGIN IMMEDIATE` 立即取写锁、单写者串行化（§3.4 三方竞争依赖此）；`RAISE(ABORT,...)`
+  在 trigger 内终止当前 statement（同 statement 内已做变更随该 statement 回滚，触发整条 command
+  INSERT 原子性）；`UPDATE OF col` 触发器只在该列出现在 SET 子句时触发（per-column fence 基础）；
+  FOR EACH ROW 仅行级 trigger；3.45.1 下 `RAISE` 消息必须是字符串字面量（本文档冻结规则一致）。
+- 不兼容/边界：`RAISE(ABORT)` 只回滚当前 statement，不回滚整个显式事务——应用多语句事务
+  （§8.2 原子成功终局）任一步失败必须显式 `ROLLBACK` 整事务（冻结流程已含）；`BEGIN` 不嵌套
+  （同事务内二次 BEGIN 报错，测试必须用单一 BEGIN IMMEDIATE）。
+
+**Temporal（官方 [Activity Heartbeats](https://docs.temporal.io/encyclopedia/activity-heartbeats) 语义）**
+
+- 借鉴：长时间 Activity 必须周期 heartbeat，错过 heartbeatTimeout 即视为失联可被重试——等价于知影
+  lease 过期 + `execution_takeover`（attempt+1）；heartbeat 只延长 lease、不改变 task 身份。
+- 不兼容：Temporal 用事件溯源 + 全局 history 服务 + workflow 确定性重放；知影是单机 SQLite 行级
+  状态 + `BEGIN IMMEDIATE` 原子多行更新，无需事件溯源。未采用。
+
+**BullMQ（官方 [Worker Stalling](https://docs.bullmq.io/guide/workers/worker-stalling) /
+[Lock Renewal](https://docs.bullmq.io/guide/workers/workers#stalled-jobs) 语义）**
+
+- 借鉴：worker 持锁（lockDuration 默认 30s）必须周期性续锁（`updateProgress`/`extendLock`），
+  锁过期 → stall 检测把 job 移回 waiting 或（超 maxStalledCount）failed——等价于知影
+  `lease_renewal`（续租）与 lease 过期裁决；"只有 stalled 事件没有 stalled 状态"——知影改用显式
+  `indeterminate` 状态 + 显式 resolve/takeover，不自动 requeue。
+- 不兼容：BullMQ 用 Redis 分布式锁 + 乐观锁脚本，stall 后 job 回 waiting 自动重跑——知影 TTS-C
+  **禁止 running→queued requeue**（触发器级），失联走 `indeterminate`（保留 owner 供 fence）+
+  lease 过期后 `execution_takeover`（attempt+1）或显式 resolve。未采用自动回队。
+
+**采纳结论**：owner/lease/attempt 的一切变化收敛到单表 append-only command（每行 = 一次原子
+transition evidence），由 SQLite 同 statement 原子性替代分布式锁；heartbeat/renewal 只动
+lease+heartbeat 不动状态；takeover 必须 attempt+1 换 owner；prestart 取消/失败走显式 command 不留
+不可达边。不引入 Temporal/BullMQ 依赖。
+
 
 ---
 
@@ -396,8 +446,8 @@ BEGIN
            AND r.voice_profile_id=NEW.voice_profile_id);
 END;
 
--- 9) R10 ⑥：claim/job 状态迁移必须经 tts_job_execution_transitions atomic command（双 command 语义）；
---    `trg_tjs_command_required` 与 `trg_tsc_command_required` 在 §2.2c 集中定义（避免重复）。
+-- 9) R11 ⑥：claim/job 状态与 owner 字段迁移必须经 tts_job_execution_transitions atomic command（五类 command 语义）；
+--    `trg_tjs_command_required` / `trg_tsc_command_required` / per-column fence 在 §2.2c 集中定义（避免重复）。
 ```
 
 - 现有列保留；`output_path/duration_ms/audio_sha256/result_json` legacy 兼容（TTS-C 不写不读为 authoritative）。
@@ -424,10 +474,14 @@ END;
   `CAST(revision_number AS TEXT)=voice_profile_revision` 一致；immutable trigger 把它纳入
   `voice_profile_revision` 写后冻结列；不允许 `voice_profile_revision_id = A, voice_profile_revision = B` 漂移
   （VI-05/VI-06 实证）。
-- **R10 ⑥ claim/job execution coupling**：TTS-C 行任何 status 迁移必须经 `tts_job_execution_transitions`
-  command INSERT（§2.2c：worker_claim 建立 ownership / state_transition owner fencing），
-  `trg_tjs_command_required` 精确匹配（from,to）command 行、直接 UPDATE 一律 ABORT；
-  result_artifact_id 写后不可改、status↔result row-state invariant 同步关闭。
+- **R11 ⑥ claim/job execution coupling + owner command closure**：TTS-C 行任何 status 迁移与
+  执行期 owner 字段（claim `owner_token/lease/validation_attempt`、job
+  `claimed_by/claimed_at/heartbeat_at/attempt/started_at/finished_at/error_*`）必须经
+  `tts_job_execution_transitions` command INSERT（§2.2c：worker_claim / lease_renewal /
+  execution_takeover / prestart_terminal / state_transition），`trg_tjs_command_required` /
+  `trg_tsc_command_required` 精确匹配（from,to）command 行、per-column fence 精确匹配本变更，
+  任何直接 UPDATE 一律 ABORT；result_artifact_id 写后不可改、status↔result row-state invariant
+  同步关闭。
 - **R8-G result row-state invariant**：`result_artifact_id` 首次非 NULL 后不可改；**row-state invariant 对 INSERT 与
   所有 UPDATE 生效**（不只 `UPDATE OF status`）：`succeeded ⇔ result IS NOT NULL`、非 succeeded ⇒ result IS NULL
   （running/queued/failed 单独写 result 一律 ABORT）；result artifact 必须 `job_id == job.id AND claim_id == job.claim_id`。
@@ -656,8 +710,9 @@ CREATE TABLE tts_synthesis_claims (
     OR (status IN ('failed','cancelled') AND result_artifact_id IS NULL
         AND owner_token IS NULL AND lease_expires_at_epoch_ms IS NULL
         AND validation_owner_token IS NULL AND validation_lease_expires_at_epoch_ms IS NULL)
-    -- R10 ⑥：indeterminate 保留 Worker owner/lease（resolve command 的 owner fencing 与
-    -- §3.6 execution takeover CAS 的 lease 比对都依赖在飞 owner；终态才清空）
+    -- R11 ⑥：indeterminate 保留 Worker owner/lease（lease_renewal / execution_takeover /
+    -- state_transition resolve 的 fence 都依赖在飞 owner；只有 succeeded/failed/cancelled
+    -- 三终态才清空）
     OR (status='indeterminate' AND result_artifact_id IS NULL
         AND owner_token IS NOT NULL AND lease_expires_at_epoch_ms IS NOT NULL
         AND validation_owner_token IS NULL AND validation_lease_expires_at_epoch_ms IS NULL))
@@ -681,7 +736,8 @@ CREATE TRIGGER trg_tsc_generation_pending_dispatch BEFORE UPDATE OF status ON tt
 WHEN OLD.status='validating_reuse' AND NEW.status='generation_pending'
   AND NOT EXISTS (SELECT 1 FROM tts_claim_generation_dispatches d WHERE d.claim_id=NEW.id)
 BEGIN SELECT RAISE(ABORT,'tts_synthesis_claims generation_pending requires dispatch command'); END;
--- R10 ⑥：generation_pending→running 必须经 worker_claim command；终态/indeterminate 必须经
+-- R11 ⑥：generation_pending→running 必须经 worker_claim command；generation_pending→failed/cancelled
+-- 必须经 prestart_terminal command；终态/indeterminate 必须经
 -- state_transition command 驱动；trg_tsc_command_required 在 §2.2c 集中定义（避免重复）
 -- R9 ①：evidence 时间（validation_started_at / updated_at）不得明显晚于 DB 当前时间
 CREATE TRIGGER trg_tsc_evidence_time BEFORE INSERT ON tts_synthesis_claims
@@ -837,7 +893,7 @@ BEGIN SELECT RAISE(ABORT,'tts_claim_generation_dispatches delete forbidden'); EN
   `payload_json` 与 job `synthesis_payload_fingerprint` 的 exact 对应在 dispatch 前由应用层同事务重算验证
   （SQL 不可计算 fingerprint）。
 
-### 2.2c `tts_job_execution_transitions`（第 13 表：append-only atomic claim/job execution coupling command；R10 ⑥ 重写）
+### 2.2c `tts_job_execution_transitions`（第 13 表：append-only atomic claim/job execution coupling command；R11 ⑥ 重写）
 
 > claim 与 job 的状态/所有权**唯一同步入口**。应用执行**一条 INSERT statement**；AFTER INSERT trigger 在同一
 > SQLite statement 内完成验证 + claim/job 同步 UPDATE——任一验证失败 RAISE(ABORT) 则整条 statement
@@ -845,40 +901,59 @@ BEGIN SELECT RAISE(ABORT,'tts_claim_generation_dispatches delete forbidden'); EN
 > 或 `UPDATE tts_synthesis_claims SET status=...`（出 `generation_pending`/`running`/`indeterminate`）
 > 一律 ABORT（`trg_tjs_command_required` / `trg_tsc_command_required`）。
 >
-> **R10 修复 R9 P0-1/P0-2**：R9 的 fence 要求 `claim.owner_token = command.worker_owner_token`，但
-> `generation_pending` 的 CHECK 强制 owner 为 NULL——第一条 command 永不可执行；且 `UNIQUE(job_id)` /
-> `UNIQUE(claim_id)` 使一个 job 全生命周期只能记录一条 command，正常 `→running→terminal` 两条无法写入。
-> R10 显式拆分两类 command 语义（`command_kind`），不得混用：
+> **R11 修复 R10 遗留 P0**：R10 只保护 status 变化——`owner_token / lease / validation_attempt /
+> claimed_by / claimed_at / heartbeat_at / attempt / started_at / finished_at` 等 same-status
+> mutation 仍可被应用两条无 command 的 UPDATE 直接改写（claim/job owner 可被 split、attempt 可被伪造）。
+> R11 冻结：**双侧 owner/lease/attempt 的一切建立、续租、接管、终结都只能经本表 command**；
+> 新增 per-column 直接修改 fence trigger（§2.2c 末）；`command_kind` 扩展为五类互斥语义：
 >
 > - **worker_claim（首次 ownership establishment）**：`claim generation_pending（owner NULL）+ job queued
->   （claimed_by NULL）→ 双侧 running`。不验证"旧 owner 相等"（旧 owner 尚不存在）；验证双方无 owner、
->   exact relation、双侧当前状态、command lease > DB_NOW_MS、attempt 与 claim 共享单调 attempt 通道
->   （`validation_attempt`）一致；一条 statement 同步写入 `claim.owner_token/lease` 与
->   `job.claimed_by/claimed_at/heartbeat_at/attempt/started_at`。
-> - **state_transition（后续 owner fencing）**：`running/indeterminate → succeeded/failed/cancelled/
->   indeterminate`。验证 `claim.owner_token = job.claimed_by = command.worker_owner_token`、
->   claim lease >= DB_NOW_MS、双侧 attempt = command.worker_attempt、双侧 exact from 状态。
->   `→indeterminate` **保留**双侧 owner/lease（供 resolve fence 与 execution takeover）；终态
->   （succeeded/failed/cancelled）清空双侧 owner/lease。
+>   （claimed_by NULL）→ 双侧 running`。验证双方无 owner、exact relation、双侧当前状态、
+>   command lease > DB_NOW_MS、attempt = `claim.validation_attempt`；一条 statement 同步写入
+>   `claim.owner_token/lease` 与 `job.claimed_by/claimed_at/heartbeat_at/attempt/started_at`。
+> - **lease_renewal（same-status 续租）**：`running→running` 或 `indeterminate→indeterminate`（claim/job 双侧）。
+>   验证 `claim.owner_token = job.claimed_by = command.worker_owner_token`（当前 owner exact）、
+>   双侧 attempt = command.worker_attempt、当前 claim lease >= DB_NOW_MS、新 lease > 当前 lease、
+>   新 lease > DB_NOW_MS、heartbeat_at 不早于旧 heartbeat_at；一条 statement 原子更新
+>   `claim.lease_expires_at_epoch_ms/updated_at` + `job.heartbeat_at`。同一 attempt 可多次续租
+>   （同 `transition_request_id` 不重复）。
+> - **execution_takeover（same-status 接管）**：`running→running` 或 `indeterminate→indeterminate`。
+>   验证旧双侧 owner exact 且 == 旧 owner（`claim.owner_token = job.claimed_by`）、
+>   `command.worker_owner_token != 旧 owner`、旧 claim lease < DB_NOW_MS（已过期）、
+>   `command.worker_attempt = 旧 attempt + 1`、新 lease > DB_NOW_MS；一条 statement 原子更新
+>   `claim.owner_token/lease/validation_attempt` + `job.claimed_by/claimed_at/heartbeat_at/attempt`。
+>   **不得**用两条应用 UPDATE 模拟（§3.6 的旧 CAS 模板作废）。
+> - **prestart_terminal（Worker claim 前终结）**：`claim generation_pending + job queued →
+>   双侧 failed/cancelled`。验证 exact relation、双侧无 Worker owner（owner/lease/claimed_* 全 NULL）、
+>   attempt = `claim.validation_attempt`、`result_artifact_id NULL`；`failed` 必须
+>   `error_code NOT NULL`；`cancelled` 必须 `reason` 或 `error_code` 之一非 NULL。用途冻结：
+>   Worker claim 前静态 preflight/config 失败、dispatch 后 active subscriber=0、Scheduler 明确裁决
+>   无需启动 Provider 的取消。**不得用于**：已 running 的 Worker、Provider 已调用、indeterminate resolve。
+> - **state_transition（running/indeterminate → 终态/indeterminate，owner fencing）**：验证
+>   `claim.owner_token = job.claimed_by = command.worker_owner_token`、claim lease >= DB_NOW_MS、
+>   双侧 attempt exact、双侧 exact from 状态；`→indeterminate` 保留双侧 owner/lease；
+>   终态（succeeded/failed/cancelled）清空双侧 owner/lease。
 >
-> 关闭的不对称状态（分裂状态结构上不可提交）：
+> 关闭的不对称/分裂状态（结构上不可提交）：
 > - job `queued→running` 单独提交（claim 仍 `generation_pending`）→ ABORT；
 > - claim `generation_pending→running` 单独提交（job 仍 `queued`）→ ABORT；
-> - job `running→succeeded/failed/cancelled/indeterminate`，claim 仍 `running` → ABORT；
-> - claim 终态 + job `running`、或 job 终态 + claim `running` → ABORT（command_required 覆盖全部
->   TTS-C 状态迁移，不仅 queued 出口）；
+> - running 状态只改 claim owner（不改 job owner）→ per-column fence ABORT（JS-18）；
+> - running 状态只改 job owner/attempt（不改 claim）→ per-column fence ABORT（JS-19）；
+> - running 状态只更新 job heartbeat、claim lease 不更新 → per-column fence ABORT（JS-20）；
+> - terminal（succeeded/failed/cancelled）后重新写 owner/claimed_by/heartbeat → fence + immutable ABORT（JS-21）；
 > - 终态两侧 succeeded 携带不同 result_artifact_id → ABORT。
 
 ```sql
 CREATE TABLE tts_job_execution_transitions (
   id TEXT PRIMARY KEY,
-  -- R10：caller 幂等键（完全相同的 transition replay 唯一拒绝；每次新的 logical transition 必须新 id）
+  -- caller 幂等键（完全相同的 transition replay 唯一拒绝；每次新的 logical transition 必须新 id）
   transition_request_id TEXT NOT NULL UNIQUE,
   job_id TEXT NOT NULL,
   claim_id TEXT NOT NULL,
-  -- R10：两类 command 显式分态（不得混用首次 ownership establishment 与后续 owner fencing）
-  command_kind TEXT NOT NULL CHECK (command_kind IN ('worker_claim','state_transition')),
-  -- 显式四状态冻结（trigger 复核两侧真实 old state；状态对必须相等——分裂状态不可提交）
+  -- R11：五类 command 显式互斥分态（每类携带本类证据字段，禁止混带他类字段——表 CHECK 强制）
+  command_kind TEXT NOT NULL CHECK (command_kind IN
+    ('worker_claim','lease_renewal','execution_takeover','prestart_terminal','state_transition')),
+  -- 显式四状态冻结（trigger 复核两侧真实 old state；分裂状态不可提交）
   from_claim_status TEXT NOT NULL CHECK (from_claim_status IN
     ('generation_pending','running','indeterminate')),
   to_claim_status TEXT NOT NULL CHECK (to_claim_status IN
@@ -886,42 +961,96 @@ CREATE TABLE tts_job_execution_transitions (
   from_job_status TEXT NOT NULL CHECK (from_job_status IN ('queued','running','indeterminate')),
   to_job_status TEXT NOT NULL CHECK (to_job_status IN
     ('running','succeeded','failed','cancelled','indeterminate')),
-  -- Worker identity（worker_claim：要建立的 owner；state_transition：fence 比对的 owner）
-  worker_owner_token TEXT NOT NULL,
-  worker_lease_expires_at_epoch_ms INTEGER NOT NULL,
+  -- Worker identity：worker_claim/execution_takeover = 新 owner；lease_renewal/state_transition = 当前
+  -- owner（fence 比对）；prestart_terminal = NULL（无 owner）。fence 一律双侧比对。
+  worker_owner_token TEXT,
+  -- 新 lease：worker_claim/lease_renewal/execution_takeover 必填；prestart/state_transition NULL
+  worker_lease_expires_at_epoch_ms INTEGER,
   worker_attempt INTEGER NOT NULL CHECK (worker_attempt >= 1),
-  -- 仅 worker_claim 必填（ownership establishment 证据；evidence 时间不得晚于 DB 当前时间）
+  -- worker_claim/execution_takeover 必填（ownership/接管证据）；lease_renewal 仅 heartbeat_at 必填；
+  -- prestart/state_transition 全 NULL
   claimed_at TEXT,
   heartbeat_at TEXT,
-  -- 仅 succeeded 必填；终态两侧必须同 artifact
+  -- 仅 state_transition succeeded 必填；非 succeeded 禁
   result_artifact_id TEXT,
   error_code TEXT,
   error_message TEXT,
   reason TEXT,
   activated_at TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  -- R10：语义防重（同一 job 的不同生命周期阶段可连续写入；同阶段同 attempt 的完全相同
-  -- transition replay 唯一拒绝；不再使用全生命周期 UNIQUE(job_id)/UNIQUE(claim_id)——R9 P0-2）
-  UNIQUE (job_id, from_job_status, to_job_status, worker_attempt),
+  -- R11 五类互斥 shape CHECK（同一 command 不得混带他类证据字段）
   CHECK (
        (command_kind='worker_claim'
         AND from_claim_status='generation_pending' AND to_claim_status='running'
         AND from_job_status='queued' AND to_job_status='running'
+        AND worker_owner_token IS NOT NULL
+        AND worker_lease_expires_at_epoch_ms IS NOT NULL
         AND claimed_at IS NOT NULL AND heartbeat_at IS NOT NULL
-        AND result_artifact_id IS NULL)
+        AND result_artifact_id IS NULL AND error_code IS NULL
+        AND error_message IS NULL AND reason IS NULL)
+    OR (command_kind='lease_renewal'
+        AND from_claim_status=to_claim_status AND from_claim_status IN ('running','indeterminate')
+        AND from_job_status=to_job_status AND from_job_status IN ('running','indeterminate')
+        AND worker_owner_token IS NOT NULL
+        AND worker_lease_expires_at_epoch_ms IS NOT NULL
+        AND claimed_at IS NULL
+        AND heartbeat_at IS NOT NULL
+        AND result_artifact_id IS NULL AND error_code IS NULL
+        AND error_message IS NULL AND reason IS NULL)
+    OR (command_kind='execution_takeover'
+        AND from_claim_status=to_claim_status AND from_claim_status IN ('running','indeterminate')
+        AND from_job_status=to_job_status AND from_job_status IN ('running','indeterminate')
+        AND worker_owner_token IS NOT NULL
+        AND worker_lease_expires_at_epoch_ms IS NOT NULL
+        AND claimed_at IS NOT NULL AND heartbeat_at IS NOT NULL
+        AND result_artifact_id IS NULL AND error_code IS NULL
+        AND error_message IS NULL AND reason IS NULL)
+    OR (command_kind='prestart_terminal'
+        AND from_claim_status='generation_pending'
+        AND to_claim_status IN ('failed','cancelled')
+        AND from_job_status='queued'
+        AND to_job_status=to_claim_status
+        AND worker_owner_token IS NULL
+        AND worker_lease_expires_at_epoch_ms IS NULL
+        AND claimed_at IS NULL AND heartbeat_at IS NULL
+        AND result_artifact_id IS NULL
+        AND ((to_claim_status='failed' AND error_code IS NOT NULL)
+             OR (to_claim_status='cancelled' AND (reason IS NOT NULL OR error_code IS NOT NULL))))
     OR (command_kind='state_transition'
         AND from_claim_status=from_job_status
         AND to_claim_status=to_job_status
         AND from_claim_status IN ('running','indeterminate')
         AND to_claim_status IN ('succeeded','failed','cancelled','indeterminate')
         AND NOT (from_claim_status='indeterminate' AND to_claim_status='indeterminate')
-        AND ((to_claim_status='succeeded' AND result_artifact_id IS NOT NULL)
-             OR (to_claim_status IS NOT 'succeeded' AND result_artifact_id IS NULL))))
+        AND worker_owner_token IS NOT NULL
+        AND worker_lease_expires_at_epoch_ms IS NULL
+        AND claimed_at IS NULL AND heartbeat_at IS NULL
+        AND ((to_claim_status='succeeded' AND result_artifact_id IS NOT NULL
+              AND error_code IS NULL AND error_message IS NULL AND reason IS NULL)
+             OR (to_claim_status IN ('failed','cancelled','indeterminate')
+                 AND result_artifact_id IS NULL
+                 AND ((to_claim_status='failed' AND error_code IS NOT NULL)
+                      OR (to_claim_status IN ('cancelled','indeterminate')
+                          AND (reason IS NOT NULL OR error_code IS NOT NULL)))))))
 );
--- R10 ⑥：AFTER INSERT 原子状态耦合（同一 SQLite statement 内 1→7 顺序执行；任一步 ABORT 整条回滚）
+-- R11：语义防重（同一 job 不同生命周期阶段可连续写入；同阶段同 attempt 的完全相同 replay 唯一拒绝；
+-- lease_renewal 允许同一 attempt 多次（仅 transition_request_id 幂等）；takeover 每个新 attempt 至多一次）
+CREATE UNIQUE INDEX uq_tjet_claim_replay
+  ON tts_job_execution_transitions (job_id, from_job_status, to_job_status, worker_attempt)
+  WHERE command_kind='worker_claim';
+CREATE UNIQUE INDEX uq_tjet_prestart_replay
+  ON tts_job_execution_transitions (job_id, from_job_status, to_job_status, worker_attempt)
+  WHERE command_kind='prestart_terminal';
+CREATE UNIQUE INDEX uq_tjet_state_replay
+  ON tts_job_execution_transitions (job_id, from_job_status, to_job_status, worker_attempt)
+  WHERE command_kind='state_transition';
+CREATE UNIQUE INDEX uq_tjet_takeover_attempt
+  ON tts_job_execution_transitions (job_id, worker_attempt)
+  WHERE command_kind='execution_takeover';
+-- R11 ⑥：AFTER INSERT 原子状态耦合（同一 SQLite statement 内 1→9 顺序执行；任一步 ABORT 整条回滚）
 CREATE TRIGGER trg_tjet_execute AFTER INSERT ON tts_job_execution_transitions
 BEGIN
-  -- 1) job.claim_id == claim.id exact relation + 两侧 exact old state
+  -- 1) job.claim_id == claim.id exact relation + 双侧 exact old state
   SELECT RAISE(ABORT,'tts_job_execution_transitions job claim mismatch')
     WHERE NOT EXISTS (SELECT 1 FROM tts_jobs j
                       WHERE j.id=NEW.job_id
@@ -930,7 +1059,7 @@ BEGIN
        OR NOT EXISTS (SELECT 1 FROM tts_synthesis_claims c
                       WHERE c.id=NEW.claim_id
                         AND c.status=NEW.from_claim_status);
-  -- 2) worker_claim：首次 ownership establishment——双方必须无 owner；command lease 必须 > DB_NOW_MS
+  -- 2) worker_claim：双方必须无 owner；command lease 必须 > DB_NOW_MS；attempt 与 claim 一致
   SELECT RAISE(ABORT,'tts_job_execution_transitions ownership conflict')
     WHERE NEW.command_kind='worker_claim'
       AND (EXISTS (SELECT 1 FROM tts_synthesis_claims c
@@ -942,12 +1071,59 @@ BEGIN
                           OR j.heartbeat_at IS NOT NULL))
         OR NEW.worker_lease_expires_at_epoch_ms
            <= (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)));
-  -- 3) worker_claim：attempt 必须与 claim 共享单调 attempt 通道（validation_attempt）一致
   SELECT RAISE(ABORT,'tts_job_execution_transitions attempt mismatch')
     WHERE NEW.command_kind='worker_claim'
       AND NOT EXISTS (SELECT 1 FROM tts_synthesis_claims c
                       WHERE c.id=NEW.claim_id AND c.validation_attempt=NEW.worker_attempt);
-  -- 4) state_transition：owner fencing（双侧 token exact + claim lease >= DB_NOW_MS + 双侧 attempt exact）
+  -- 3) lease_renewal：当前 owner 双侧 exact + 双侧 attempt exact + 旧 lease >= DB_NOW +
+  --    新 lease > 旧 lease + 新 lease > DB_NOW + heartbeat 不早于旧 heartbeat
+  SELECT RAISE(ABORT,'tts_job_execution_transitions worker fencing mismatch')
+    WHERE NEW.command_kind='lease_renewal'
+      AND (NOT EXISTS (SELECT 1 FROM tts_synthesis_claims c
+                       WHERE c.id=NEW.claim_id
+                         AND c.owner_token=NEW.worker_owner_token
+                         AND c.validation_attempt=NEW.worker_attempt
+                         AND c.lease_expires_at_epoch_ms >=
+                             (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))
+                         AND NEW.worker_lease_expires_at_epoch_ms > c.lease_expires_at_epoch_ms
+                         AND NEW.worker_lease_expires_at_epoch_ms >
+                             (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)))
+        OR NOT EXISTS (SELECT 1 FROM tts_jobs j
+                       WHERE j.id=NEW.job_id
+                         AND j.claimed_by=NEW.worker_owner_token
+                         AND j.attempt=NEW.worker_attempt
+                         AND NEW.heartbeat_at >= COALESCE(j.heartbeat_at,'1970-01-01T00:00:00.000Z')));
+  -- 4) execution_takeover：旧 owner 双侧 exact（claim.owner_token=job.claimed_by）且非 NULL、
+  --    新 owner 必须不同、旧 lease < DB_NOW_MS（已过期）、attempt=旧+1、新 lease > DB_NOW_MS
+  SELECT RAISE(ABORT,'tts_job_execution_transitions worker fencing mismatch')
+    WHERE NEW.command_kind='execution_takeover'
+      AND (NOT EXISTS (SELECT 1 FROM tts_synthesis_claims c
+                       WHERE c.id=NEW.claim_id
+                         AND c.owner_token IS NOT NULL
+                         AND c.validation_attempt=NEW.worker_attempt-1
+                         AND c.lease_expires_at_epoch_ms <
+                             (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))
+                         AND NEW.worker_owner_token IS NOT c.owner_token
+                         AND NEW.worker_lease_expires_at_epoch_ms >
+                             (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)))
+        OR NOT EXISTS (SELECT 1 FROM tts_jobs j
+                       WHERE j.id=NEW.job_id
+                         AND j.claimed_by IS NOT NULL
+                         AND j.attempt=NEW.worker_attempt-1
+                         AND j.claimed_by IS NOT NEW.worker_owner_token));
+  -- 5) prestart_terminal：双侧无 Worker owner；attempt 与 claim 一致
+  SELECT RAISE(ABORT,'tts_job_execution_transitions ownership conflict')
+    WHERE NEW.command_kind='prestart_terminal'
+      AND (EXISTS (SELECT 1 FROM tts_synthesis_claims c
+                   WHERE c.id=NEW.claim_id
+                     AND (c.owner_token IS NOT NULL OR c.lease_expires_at_epoch_ms IS NOT NULL))
+        OR EXISTS (SELECT 1 FROM tts_jobs j
+                   WHERE j.id=NEW.job_id
+                     AND (j.claimed_by IS NOT NULL OR j.claimed_at IS NOT NULL
+                          OR j.heartbeat_at IS NOT NULL))
+        OR NOT EXISTS (SELECT 1 FROM tts_synthesis_claims c
+                       WHERE c.id=NEW.claim_id AND c.validation_attempt=NEW.worker_attempt));
+  -- 6) state_transition：owner fencing（双侧 token exact + claim lease >= DB_NOW_MS + 双侧 attempt exact）
   SELECT RAISE(ABORT,'tts_job_execution_transitions worker fencing mismatch')
     WHERE NEW.command_kind='state_transition'
       AND (NOT EXISTS (SELECT 1 FROM tts_synthesis_claims c
@@ -960,50 +1136,64 @@ BEGIN
                        WHERE j.id=NEW.job_id
                          AND j.claimed_by=NEW.worker_owner_token
                          AND j.attempt=NEW.worker_attempt));
-  -- 5) result artifact job/claim identity 双绑定（仅 succeeded；表 CHECK 已强制必填/禁填）
+  -- 7) result artifact job/claim identity 双绑定（仅 succeeded；表 CHECK 已强制必填/禁填）
   SELECT RAISE(ABORT,'tts_job_execution_transitions result artifact identity mismatch')
     WHERE NEW.to_job_status='succeeded'
       AND NOT EXISTS (SELECT 1 FROM sentence_audio_artifacts a
                       WHERE a.id=NEW.result_artifact_id
                         AND a.job_id=NEW.job_id
                         AND a.claim_id=NEW.claim_id);
-  -- 6) UPDATE claim（worker_claim 建立 owner/lease；终态清空；indeterminate 保留 owner/lease 供
-  --    resolve fence 与 execution takeover CAS；CHECK 复核各状态所有权语义）
+  -- 8) UPDATE claim（按 kind 分派：establish / renew / takeover / prestart-clear / terminal-clear）
   UPDATE tts_synthesis_claims
   SET status=NEW.to_claim_status,
-      owner_token=(CASE WHEN NEW.command_kind='worker_claim' THEN NEW.worker_owner_token
-                        WHEN NEW.to_claim_status IN ('succeeded','failed','cancelled') THEN NULL
-                        ELSE owner_token END),
-      lease_expires_at_epoch_ms=(CASE WHEN NEW.command_kind='worker_claim'
-                        THEN NEW.worker_lease_expires_at_epoch_ms
-                        WHEN NEW.to_claim_status IN ('succeeded','failed','cancelled') THEN NULL
-                        ELSE lease_expires_at_epoch_ms END),
+      owner_token=(CASE
+        WHEN NEW.command_kind IN ('worker_claim','execution_takeover') THEN NEW.worker_owner_token
+        WHEN NEW.command_kind IN ('prestart_terminal','state_transition')
+             AND NEW.to_claim_status IN ('succeeded','failed','cancelled') THEN NULL
+        ELSE owner_token END),
+      lease_expires_at_epoch_ms=(CASE
+        WHEN NEW.command_kind IN ('worker_claim','lease_renewal','execution_takeover')
+             THEN NEW.worker_lease_expires_at_epoch_ms
+        WHEN NEW.command_kind IN ('prestart_terminal','state_transition')
+             AND NEW.to_claim_status IN ('succeeded','failed','cancelled') THEN NULL
+        ELSE lease_expires_at_epoch_ms END),
+      validation_attempt=(CASE WHEN NEW.command_kind='execution_takeover'
+                               THEN NEW.worker_attempt ELSE validation_attempt END),
       result_artifact_id=(CASE WHEN NEW.to_claim_status='succeeded' THEN NEW.result_artifact_id
                                ELSE result_artifact_id END),
       updated_at=NEW.activated_at
   WHERE id=NEW.claim_id AND status=NEW.from_claim_status;
   SELECT RAISE(ABORT,'tts_job_execution_transitions claim update failed')
     WHERE changes()=0;
-  -- 7) UPDATE job（worker_claim 建立 claimed_by/claimed_at/heartbeat_at/attempt/started_at；
-  --    终态清空 claimed_*；indeterminate 保留 claimed_by 供 resolve fence）
+  -- 9) UPDATE job（按 kind 分派；终态清空 claimed_*；indeterminate 保留 claimed_by 供 fence）
   UPDATE tts_jobs
   SET status=NEW.to_job_status,
-      claimed_by=(CASE WHEN NEW.command_kind='worker_claim' THEN NEW.worker_owner_token
-                       WHEN NEW.to_job_status IN ('succeeded','failed','cancelled') THEN NULL
-                       ELSE claimed_by END),
-      claimed_at=(CASE WHEN NEW.command_kind='worker_claim' THEN NEW.claimed_at
-                       WHEN NEW.to_job_status IN ('succeeded','failed','cancelled') THEN NULL
-                       ELSE claimed_at END),
-      heartbeat_at=(CASE WHEN NEW.command_kind='worker_claim' THEN NEW.heartbeat_at
-                       WHEN NEW.to_job_status IN ('succeeded','failed','cancelled') THEN NULL
-                       ELSE heartbeat_at END),
-      attempt=(CASE WHEN NEW.command_kind='worker_claim' THEN NEW.worker_attempt ELSE attempt END),
+      claimed_by=(CASE
+        WHEN NEW.command_kind IN ('worker_claim','execution_takeover') THEN NEW.worker_owner_token
+        WHEN NEW.command_kind IN ('prestart_terminal','state_transition')
+             AND NEW.to_job_status IN ('succeeded','failed','cancelled') THEN NULL
+        ELSE claimed_by END),
+      claimed_at=(CASE
+        WHEN NEW.command_kind IN ('worker_claim','execution_takeover') THEN NEW.claimed_at
+        WHEN NEW.command_kind IN ('prestart_terminal','state_transition')
+             AND NEW.to_job_status IN ('succeeded','failed','cancelled') THEN NULL
+        ELSE claimed_at END),
+      heartbeat_at=(CASE
+        WHEN NEW.command_kind IN ('worker_claim','lease_renewal','execution_takeover')
+             THEN NEW.heartbeat_at
+        WHEN NEW.command_kind IN ('prestart_terminal','state_transition')
+             AND NEW.to_job_status IN ('succeeded','failed','cancelled') THEN NULL
+        ELSE heartbeat_at END),
+      attempt=(CASE WHEN NEW.command_kind IN ('worker_claim','execution_takeover')
+                    THEN NEW.worker_attempt ELSE attempt END),
       started_at=(CASE WHEN NEW.command_kind='worker_claim' THEN NEW.claimed_at ELSE started_at END),
       result_artifact_id=(CASE WHEN NEW.to_job_status='succeeded' THEN NEW.result_artifact_id
                                ELSE result_artifact_id END),
-      error_code=(CASE WHEN NEW.to_job_status IN ('failed','cancelled','indeterminate')
+      error_code=(CASE WHEN NEW.to_job_status='succeeded' THEN NULL
+                       WHEN NEW.to_job_status IN ('failed','cancelled','indeterminate')
                        THEN NEW.error_code ELSE error_code END),
-      error_message=(CASE WHEN NEW.to_job_status IN ('failed','cancelled','indeterminate')
+      error_message=(CASE WHEN NEW.to_job_status='succeeded' THEN NULL
+                       WHEN NEW.to_job_status IN ('failed','cancelled','indeterminate')
                        THEN NEW.error_message ELSE error_message END),
       finished_at=(CASE WHEN NEW.to_job_status IN ('succeeded','failed','cancelled')
                        THEN NEW.activated_at ELSE finished_at END)
@@ -1024,9 +1214,9 @@ WHEN NEW.activated_at > (SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now'))
   OR (NEW.heartbeat_at IS NOT NULL
       AND NEW.heartbeat_at > (SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')))
 BEGIN SELECT RAISE(ABORT,'tts_job_execution_transitions evidence timestamp in future'); END;
--- R10 ⑥：TTS-C job 任何状态迁移必须存在精确匹配（from,to）的 execution command 行——
---    直接 UPDATE 一律 ABORT（覆盖 queued 出口与 running/indeterminate 出口；command 执行期间
---    本 command 行已存在且 from/to 精确匹配，故放行；legacy 行 claim_id NULL 不受限）
+-- R11 ⑥：TTS-C job 任何状态迁移必须存在精确匹配（from,to）的 execution command 行——
+--    直接 UPDATE 一律 ABORT（command 执行期间本 command 行已存在且 from/to 精确匹配，故放行；
+--    legacy 行 claim_id NULL 不受限）
 CREATE TRIGGER trg_tjs_command_required BEFORE UPDATE OF status ON tts_jobs
 WHEN OLD.claim_id IS NOT NULL AND NEW.claim_id IS NOT NULL
   AND OLD.status IS NOT NEW.status
@@ -1034,7 +1224,7 @@ WHEN OLD.claim_id IS NOT NULL AND NEW.claim_id IS NOT NULL
                   WHERE e.job_id=NEW.id AND e.claim_id=NEW.claim_id
                     AND e.from_job_status=OLD.status AND e.to_job_status=NEW.status)
 BEGIN SELECT RAISE(ABORT,'tts_jobs state transition requires execution command'); END;
--- R10 ⑥：claim 出 generation_pending/running/indeterminate 必须存在精确匹配（from,to）的
+-- R11 ⑥：claim 出 generation_pending/running/indeterminate 必须存在精确匹配（from,to）的
 --    execution command 行（validating_reuse 出口走 §2.2b dispatch / §3.1 fenced finalize，不在此列）
 CREATE TRIGGER trg_tsc_command_required BEFORE UPDATE OF status ON tts_synthesis_claims
 WHEN OLD.status IN ('generation_pending','running','indeterminate')
@@ -1043,31 +1233,161 @@ WHEN OLD.status IN ('generation_pending','running','indeterminate')
                   WHERE e.claim_id=NEW.id
                     AND e.from_claim_status=OLD.status AND e.to_claim_status=NEW.status)
 BEGIN SELECT RAISE(ABORT,'tts_synthesis_claims state transition requires execution command'); END;
+-- R11：双侧 owner/lease/attempt 直接修改 fence（执行期 claim；validating_reuse 走 §3.1/§3.2
+-- 的 validation 通道不在此列）。每个字段只允许经"精确匹配本变更"的 command 行写入——
+-- 值必须与 command 行对应字段相等（BEFORE trigger 在 command AFTER INSERT 之前求值，
+-- command 行已存在于同一 statement，NEW 值与 command 字段逐一比对）；
+-- 无 command / 值不匹配 → ABORT。
+CREATE TRIGGER trg_tsc_owner_command BEFORE UPDATE OF owner_token ON tts_synthesis_claims
+WHEN OLD.status IN ('generation_pending','running','indeterminate')
+  AND OLD.owner_token IS NOT NEW.owner_token
+  AND NOT EXISTS (SELECT 1 FROM tts_job_execution_transitions e
+                  WHERE e.claim_id=NEW.id
+                    AND ((e.command_kind IN ('worker_claim','execution_takeover')
+                          AND e.worker_owner_token IS NEW.owner_token)
+                      OR (e.command_kind='state_transition'
+                          AND e.to_claim_status IN ('succeeded','failed','cancelled')
+                          AND NEW.owner_token IS NULL)))
+BEGIN SELECT RAISE(ABORT,'tts_synthesis_claims owner requires execution command'); END;
+CREATE TRIGGER trg_tsc_lease_command BEFORE UPDATE OF lease_expires_at_epoch_ms ON tts_synthesis_claims
+WHEN OLD.status IN ('generation_pending','running','indeterminate')
+  AND OLD.lease_expires_at_epoch_ms IS NOT NEW.lease_expires_at_epoch_ms
+  AND NOT EXISTS (SELECT 1 FROM tts_job_execution_transitions e
+                  WHERE e.claim_id=NEW.id
+                    AND ((e.command_kind IN ('worker_claim','lease_renewal','execution_takeover')
+                          AND e.worker_lease_expires_at_epoch_ms IS NEW.lease_expires_at_epoch_ms)
+                      OR (e.command_kind='state_transition'
+                          AND e.to_claim_status IN ('succeeded','failed','cancelled')
+                          AND NEW.lease_expires_at_epoch_ms IS NULL)))
+BEGIN SELECT RAISE(ABORT,'tts_synthesis_claims lease requires execution command'); END;
+CREATE TRIGGER trg_tsc_attempt_command BEFORE UPDATE OF validation_attempt ON tts_synthesis_claims
+WHEN OLD.status IN ('generation_pending','running','indeterminate')
+  AND OLD.validation_attempt IS NOT NEW.validation_attempt
+  AND NOT EXISTS (SELECT 1 FROM tts_job_execution_transitions e
+                  WHERE e.claim_id=NEW.id
+                    AND e.command_kind='execution_takeover'
+                    AND e.worker_attempt IS NEW.validation_attempt
+                    AND e.worker_attempt IS OLD.validation_attempt+1)
+BEGIN SELECT RAISE(ABORT,'tts_synthesis_claims attempt requires execution command'); END;
+CREATE TRIGGER trg_tjs_claimedby_command BEFORE UPDATE OF claimed_by ON tts_jobs
+WHEN OLD.claim_id IS NOT NULL AND NEW.claim_id IS NOT NULL
+  AND OLD.claimed_by IS NOT NEW.claimed_by
+  AND NOT EXISTS (SELECT 1 FROM tts_job_execution_transitions e
+                  WHERE e.job_id=NEW.id AND e.claim_id=NEW.claim_id
+                    AND ((e.command_kind IN ('worker_claim','execution_takeover')
+                          AND e.worker_owner_token IS NEW.claimed_by)
+                      OR (e.command_kind='state_transition'
+                          AND e.to_job_status IN ('succeeded','failed','cancelled')
+                          AND NEW.claimed_by IS NULL)))
+BEGIN SELECT RAISE(ABORT,'tts_jobs claimed_by requires execution command'); END;
+CREATE TRIGGER trg_tjs_claimedat_command BEFORE UPDATE OF claimed_at ON tts_jobs
+WHEN OLD.claim_id IS NOT NULL AND NEW.claim_id IS NOT NULL
+  AND OLD.claimed_at IS NOT NEW.claimed_at
+  AND NOT EXISTS (SELECT 1 FROM tts_job_execution_transitions e
+                  WHERE e.job_id=NEW.id AND e.claim_id=NEW.claim_id
+                    AND ((e.command_kind IN ('worker_claim','execution_takeover')
+                          AND e.claimed_at IS NEW.claimed_at)
+                      OR (e.command_kind='state_transition'
+                          AND e.to_job_status IN ('succeeded','failed','cancelled')
+                          AND NEW.claimed_at IS NULL)))
+BEGIN SELECT RAISE(ABORT,'tts_jobs claimed_at requires execution command'); END;
+CREATE TRIGGER trg_tjs_heartbeat_command BEFORE UPDATE OF heartbeat_at ON tts_jobs
+WHEN OLD.claim_id IS NOT NULL AND NEW.claim_id IS NOT NULL
+  AND OLD.heartbeat_at IS NOT NEW.heartbeat_at
+  AND NOT EXISTS (SELECT 1 FROM tts_job_execution_transitions e
+                  WHERE e.job_id=NEW.id AND e.claim_id=NEW.claim_id
+                    AND ((e.command_kind IN ('worker_claim','lease_renewal','execution_takeover')
+                          AND e.heartbeat_at IS NEW.heartbeat_at)
+                      OR (e.command_kind='state_transition'
+                          AND e.to_job_status IN ('succeeded','failed','cancelled')
+                          AND NEW.heartbeat_at IS NULL)))
+BEGIN SELECT RAISE(ABORT,'tts_jobs heartbeat_at requires execution command'); END;
+CREATE TRIGGER trg_tjs_attempt_command BEFORE UPDATE OF attempt ON tts_jobs
+WHEN OLD.claim_id IS NOT NULL AND NEW.claim_id IS NOT NULL
+  AND OLD.attempt IS NOT NEW.attempt
+  AND NOT EXISTS (SELECT 1 FROM tts_job_execution_transitions e
+                  WHERE e.job_id=NEW.id AND e.claim_id=NEW.claim_id
+                    AND ((e.command_kind='worker_claim' AND e.worker_attempt IS NEW.attempt)
+                      OR (e.command_kind='execution_takeover'
+                          AND e.worker_attempt IS NEW.attempt
+                          AND e.worker_attempt IS OLD.attempt+1)))
+BEGIN SELECT RAISE(ABORT,'tts_jobs attempt requires execution command'); END;
+CREATE TRIGGER trg_tjs_startedat_command BEFORE UPDATE OF started_at ON tts_jobs
+WHEN OLD.claim_id IS NOT NULL AND NEW.claim_id IS NOT NULL
+  AND OLD.started_at IS NOT NEW.started_at
+  AND NOT EXISTS (SELECT 1 FROM tts_job_execution_transitions e
+                  WHERE e.job_id=NEW.id AND e.claim_id=NEW.claim_id
+                    AND e.command_kind='worker_claim' AND e.claimed_at IS NEW.started_at)
+BEGIN SELECT RAISE(ABORT,'tts_jobs started_at requires execution command'); END;
+CREATE TRIGGER trg_tjs_finishedat_command BEFORE UPDATE OF finished_at ON tts_jobs
+WHEN OLD.claim_id IS NOT NULL AND NEW.claim_id IS NOT NULL
+  AND OLD.finished_at IS NOT NEW.finished_at
+  AND NOT EXISTS (SELECT 1 FROM tts_job_execution_transitions e
+                  WHERE e.job_id=NEW.id AND e.claim_id=NEW.claim_id
+                    AND e.activated_at IS NEW.finished_at
+                    AND ((e.command_kind='state_transition'
+                          AND e.to_job_status IN ('succeeded','failed','cancelled'))
+                      OR e.command_kind='prestart_terminal'))
+BEGIN SELECT RAISE(ABORT,'tts_jobs finished_at requires execution command'); END;
+CREATE TRIGGER trg_tjs_errorcode_command BEFORE UPDATE OF error_code ON tts_jobs
+WHEN OLD.claim_id IS NOT NULL AND NEW.claim_id IS NOT NULL
+  AND OLD.error_code IS NOT NEW.error_code
+  AND NOT EXISTS (SELECT 1 FROM tts_job_execution_transitions e
+                  WHERE e.job_id=NEW.id AND e.claim_id=NEW.claim_id
+                    AND ((e.command_kind='state_transition'
+                          AND e.to_job_status IN ('failed','cancelled','indeterminate')
+                          AND e.error_code IS NEW.error_code)
+                      OR (e.command_kind='state_transition'
+                          AND e.to_job_status='succeeded'
+                          AND NEW.error_code IS NULL)
+                      OR (e.command_kind='prestart_terminal'
+                          AND e.error_code IS NEW.error_code)))
+BEGIN SELECT RAISE(ABORT,'tts_jobs error_code requires execution command'); END;
+CREATE TRIGGER trg_tjs_errormsg_command BEFORE UPDATE OF error_message ON tts_jobs
+WHEN OLD.claim_id IS NOT NULL AND NEW.claim_id IS NOT NULL
+  AND OLD.error_message IS NOT NEW.error_message
+  AND NOT EXISTS (SELECT 1 FROM tts_job_execution_transitions e
+                  WHERE e.job_id=NEW.id AND e.claim_id=NEW.claim_id
+                    AND ((e.command_kind='state_transition'
+                          AND e.to_job_status IN ('failed','cancelled','indeterminate')
+                          AND e.error_message IS NEW.error_message)
+                      OR (e.command_kind='state_transition'
+                          AND e.to_job_status='succeeded'
+                          AND NEW.error_message IS NULL)
+                      OR (e.command_kind='prestart_terminal'
+                          AND e.error_message IS NEW.error_message)))
+BEGIN SELECT RAISE(ABORT,'tts_jobs error_message requires execution command'); END;
 ```
 
-- **claim/job 状态同步不变量（R10 ⑥ 冻结）**：
+- **claim/job 状态同步不变量（R11 ⑥ 冻结）**：
   - claim `generation_pending` ↔ job `queued`（唯一入口 = §2.2b dispatch command）；
-  - claim `running` ↔ job `running`（唯一入口 = §2.2c worker_claim command）；双侧 owner/lease/attempt
-    同步建立（`claim.owner_token = job.claimed_by`、`claim.lease_expires_at_epoch_ms` = command lease、
-    `claim.validation_attempt = job.attempt = command.worker_attempt`）；
+  - claim `running` ↔ job `running`（唯一入口 = §2.2c worker_claim / lease_renewal / execution_takeover /
+    state_transition）；双侧 owner/lease/attempt 恒等（`claim.owner_token = job.claimed_by`、
+    `claim.lease_expires_at_epoch_ms` 与 claim 侧一致性由 per-column fence + command 原子性共同保证、
+    `claim.validation_attempt = job.attempt`）；
   - claim `succeeded` ↔ job `succeeded` ↔ 同一 `result_artifact_id`（`sentence_audio_artifacts.job_id` 与
     `claim_id` 与当前 job/claim 全等）；终态双侧 owner/lease 清空；
-  - claim `failed/cancelled` ↔ job `failed/cancelled`（同 state_transition command；终态双侧 owner/lease 清空）；
-  - claim `indeterminate` ↔ job `indeterminate`（同 state_transition command；**保留**双侧 owner/lease/attempt，
-    供 resolve fence 与 §3.6 execution takeover CAS）；
-  - 全部 UPDATE 必须经此命令；任一直接 UPDATE 触发对应 trigger ABORT；
+  - claim `failed/cancelled` ↔ job `failed/cancelled`（state_transition 或 prestart_terminal；终态双侧
+    owner/lease 清空、error evidence 冻结）；
+  - claim `indeterminate` ↔ job `indeterminate`（state_transition；**保留**双侧 owner/lease/attempt，
+    供 renewal / takeover / resolve fence）；**indeterminate 不是终态**——只有
+    `succeeded / failed / cancelled` 三个终态清 owner/lease；
+  - 全部 UPDATE 必须经此命令；任一直接 UPDATE（status 或 owner 字段）触发对应 trigger ABORT；
 - **append-only evidence**：transition command 行永久保存（`transition_request_id` 唯一幂等键；
-  `UNIQUE(job_id, from_job_status, to_job_status, worker_attempt)` 语义防重——同一 job 的
-  `queued→running→succeeded/failed/cancelled/indeterminate→…` 多阶段 command 可连续写入，完全相同的
-  transition replay 唯一拒绝；UPDATE/DELETE 禁）；
+  按 kind 的 partial unique 语义防重——worker_claim/prestart/state_transition 同阶段同 attempt replay
+  唯一拒绝，execution_takeover 每个 attempt 至多一次，lease_renewal 同一 attempt 可多次
+  （仅 requestId 幂等）；UPDATE/DELETE 禁）；
 - **DB_NOW_MS fence**：`worker_lease_expires_at_epoch_ms` 由应用层 `now+TTL` 写入；worker_claim 要求
-  command lease > DB_NOW_MS（新 owner 必须持有有效 lease）；state_transition 要求 claim lease >= DB_NOW_MS；
-  比较由 trigger 内 SELECT 计算——caller 不得通过 `activated_at`/`claimed_at` 回填绕过；
-- **R10 ⑥ 与 §2.2b dispatch 协同**：dispatch 建 job 后由 worker_claim command 推 claim/job 至 running；
-  若 subscriber 在 dispatch 与 worker_claim 之间全部取消，worker 仍先 worker_claim 再以
-  `running→cancelled` state_transition 完成同步（`job.cancel_requested=1` 语义见 §4）；
-- **成功终局事务边界（§8.2）**：`running→succeeded` command 是原子成功终局事务内的一条 statement
-  （attempt→artifact→command→requests fan-out），不成为另一个独立事务。
+  command lease > DB_NOW_MS；lease_renewal 要求旧 lease >= DB_NOW_MS 且新 lease > 旧 lease 且
+  新 lease > DB_NOW_MS；execution_takeover 要求旧 lease < DB_NOW_MS（已过期）且新 lease > DB_NOW_MS；
+  state_transition 要求 claim lease >= DB_NOW_MS；比较由 trigger 内 SELECT 计算——caller 不得通过
+  `activated_at`/`claimed_at`/`heartbeat_at` 回填绕过；
+- **R11 ⑥ 与 §2.2b dispatch 协同**：dispatch 建 job 后由 worker_claim command 推 claim/job 至 running；
+  若 subscriber 在 dispatch 与 worker_claim 之间全部取消，或 Scheduler 裁决无需启动 Provider，
+  则由 **prestart_terminal** command 直接双侧 failed/cancelled（此前该状态边无合法 command，
+  R11 冻结可达）；
+- **成功终局事务边界（§8.2）**：`running→succeeded` state_transition command 是原子成功终局事务内的
+  一条 statement（attempt→artifact→command→requests fan-out），不成为另一个独立事务。
 
 ### 2.3 `tts_generation_attempts`（persisted execution phase）
 
@@ -2618,7 +2938,7 @@ stale validator          → 永远零副作用（无 claim/job/request 改动�
 COMMIT
 ```
 
-### 3.6 Worker claim 与 execution-phase takeover（R10 ⑥）
+### 3.6 Worker claim、lease renewal 与 execution takeover（R11 ⑥：全部经 command）
 
 **Worker claim（首次 ownership establishment）**：claim `generation_pending`（owner NULL）+ job `queued`
 （claimed_by NULL）时，Scheduler/Worker 不直接 UPDATE 任何状态——只发一条 `worker_claim` execution
@@ -2627,47 +2947,38 @@ command（§2.2c）。command 提供 `worker_owner_token`（新 UUID）、`worke
 `claimed_at` / `heartbeat_at` / `activated_at` / `created_at`；trigger 验证双方无 owner、command
 lease > DB_NOW_MS、attempt 一致后，同一 statement 内同步建立双侧 running + owner/lease/attempt。
 并发两个 worker 同时 claim：第一条 command 提交后 job 已非 `queued`，第二条的 exact-old-state
-复核（step 1）不命中 → ABORT，恰好一个 running owner。
+复核（step 1）不命中 → ABORT，恰好一个 running owner（实证 JS-05）。
 
-**Worker lease renewal（仅当前 owner）**：worker 在执行中续租，直接 fenced UPDATE（不改状态）：
+**Worker lease renewal（仅当前 owner；R11 改为 lease_renewal command，不再两条 fenced UPDATE）**：
+worker 在执行中续租，只发一条 `lease_renewal` command（§2.2c；running→running 或
+indeterminate→indeterminate）：command 提供当前 `worker_owner_token` / `worker_attempt`、
+新 lease `= DB_NOW_MS + EXECUTION_LEASE_MS`（必须 > 当前 lease）、`heartbeat_at`；trigger 验证
+`claim.owner_token = job.claimed_by = command.worker_owner_token`、双侧 attempt exact、
+旧 lease >= DB_NOW_MS、新 lease > 旧 lease 且 > DB_NOW_MS、heartbeat 不早于旧 heartbeat 后，
+同一 statement 原子更新 `claim.lease_expires_at_epoch_ms/updated_at` + `job.heartbeat_at`。
+同一 attempt 可多次续租（同 `transition_request_id` 不重复；实证 JS-22/32）；旧 owner / 错误
+attempt / lease 已过期 / heartbeat 倒退 → ABORT 整条回滚（实证 JS-16/23）。应用层不得再用
+两条无 command 的 fenced UPDATE 模拟（per-column fence ABORT，实证 JS-20）。
 
-```sql
-UPDATE tts_synthesis_claims
-SET lease_expires_at_epoch_ms=:now_plus_lease_ms, updated_at=:now_iso
-WHERE id=:claim_id AND status IN ('running','indeterminate')
-  AND owner_token=:token AND validation_attempt=:attempt
-  AND lease_expires_at_epoch_ms >= (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER));
--- changes=1 必须；同事务同步：
-UPDATE tts_jobs
-SET heartbeat_at=:now_iso
-WHERE id=:job_id AND claim_id=:claim_id AND status IN ('running','indeterminate')
-  AND claimed_by=:token AND attempt=:attempt;
--- changes=1 必须；任一 changes=0 → 整事务回滚（旧 owner / 错误 attempt / lease 已过期 → 零副作用）
-```
-
-**Execution-phase takeover CAS（running/indeterminate claim 的 lease 过期接管）**：worker 失联、
-lease 过期后，新 worker 在同一 `BEGIN IMMEDIATE` 内执行两条 fenced UPDATE 接管双侧 owner：
-
-```sql
-UPDATE tts_synthesis_claims
-SET owner_token=:new_token, lease_expires_at_epoch_ms=:now_plus_lease_ms,
-    validation_attempt=validation_attempt+1, updated_at=:now_iso
-WHERE id=:claim_id AND status IN ('running','indeterminate')
-  AND lease_expires_at_epoch_ms < (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER));
--- changes=1 才取得接管权；未过期/已终态 → changes=0 → 不接管；
-UPDATE tts_jobs
-SET claimed_by=:new_token, claimed_at=:now_iso, heartbeat_at=:now_iso, attempt=attempt+1
-WHERE claim_id=:claim_id AND status IN ('running','indeterminate')
-  AND claimed_by IS NOT NULL;
--- changes=1 必须（与 claim 侧同事务）；任一 changes=0 → 整事务回滚
-```
+**Execution takeover（running/indeterminate claim 的 lease 过期接管；R11 改为 execution_takeover
+command，替代 R10 的两条 UPDATE CAS）**：worker 失联、lease 过期后，新 worker 只发一条
+`execution_takeover` command（§2.2c；running→running 或 indeterminate→indeterminate）：command
+提供新 `worker_owner_token`（必须 != 旧 owner）、`worker_attempt = 旧 attempt + 1`、
+新 lease `= DB_NOW_MS + EXECUTION_LEASE_MS`、`claimed_at` / `heartbeat_at`；trigger 验证
+`claim.owner_token = job.claimed_by`（旧 owner 双侧 exact 且非 NULL）、旧 claim lease < DB_NOW_MS、
+新 owner 不同、attempt=旧+1、新 lease > DB_NOW_MS 后，同一 statement 原子更新
+`claim.owner_token/lease/validation_attempt` + `job.claimed_by/claimed_at/heartbeat_at/attempt`。
+**不得**用两条应用 UPDATE 模拟原子性（per-column fence 使 claim 侧先改、job 侧后改的结构上不可提交）。
 
 接管后新 owner 以 `worker_attempt = validation_attempt`（已 +1）发 state_transition command
-（含 indeterminate resolve）；旧 owner 的任何 renewal / state_transition command 因 token/attempt
-不匹配一律 ABORT（`worker fencing mismatch`，实证 JS-17）。`indeterminate` 状态保留 owner/lease
-（§2.2 claim CHECK）正是为了本 CAS 的 lease 比对与 resolve fence。
+（含 indeterminate resolve）；旧 owner 的任何 renewal / takeover / state_transition command 因
+token/attempt 不匹配一律 ABORT（`worker fencing mismatch`，实证 JS-26）。`indeterminate` 状态保留
+owner/lease（§2.2 claim CHECK）正是为了 renewal / takeover / resolve 的 fence 比对。
 
----
+**Prestart terminal（Worker claim 前终结；R11 新增可达边）**：dispatch 后、Worker claim 前，
+`queued/generation_pending → failed/cancelled` 只经 `prestart_terminal` command（§2.2c）：
+Scheduler 静态 preflight/config 失败、active subscriber=0（§4 裁决）、或明确取消不启动 Provider。
+不得用于已 running 的 Worker / Provider 已调用 / indeterminate resolve（实证 JS-27/28/29）。
 
 ## 4. Validating 阶段取消语义与 zero-subscriber race（R5 冻结）
 
@@ -2684,6 +2995,10 @@ active subscriber > 0 + unusable → generation_pending + 恰好一个 queued jo
 - 单 request cancel 仅取消该 envelope（`tts_audio_requests.status='cancelled'`，同事务检查）；
 - **最后 subscriber 在 validating_reuse 阶段取消 → 直接取消 claim**（无 job 存在，不置 cancel_requested）；
 - **最后 subscriber 在 generation_pending/running 阶段取消 → 才设置 `job.cancel_requested=1`**；
+- **dispatch 后、Worker claim 前（claim generation_pending + job queued）的取消/失败一律经
+  `prestart_terminal` command（§2.2c）双侧终结**：active subscriber=0（§4 裁决）、Scheduler 静态
+  preflight/config 失败、或明确取消不启动 Provider——不再留下无合法 command 的状态边（R11 P0-B）；
+  已 running 的 Worker / Provider 已调用 / indeterminate resolve 不得走 prestart；
 - validator finalize 与最后 cancel 竞争由事务串行裁决（§3.4）：cancel 优先——finalize 事务重读时
   active subscriber=0 → 不 reused、不建 job、claim cancelled；
 - **不允许创建 zero-subscriber provider job**。
@@ -3073,7 +3388,7 @@ COMMIT
 command 完成双侧同步（不带 result_artifact_id；failed/cancelled 清双侧 owner/lease，indeterminate
 保留）；indeterminate 的显式 resolve（`indeterminate→succeeded/failed/cancelled`）同样是一条
 state_transition command（owner fencing 依赖 indeterminate 保留的 owner/lease；lease 已过期时先经
-§3.6 execution takeover CAS 换新 owner）。
+§3.6 execution_takeover command 换新 owner）。
 
 任何一步失败（含 trigger ABORT / FK / CHECK / changes=0）→ **整事务回滚，attempt 恢复到 file_durable**；
 文件按 exact identity 留作 recoverable orphan（下轮可从 file_durable 本地恢复，不重调 provider）。
@@ -3113,15 +3428,21 @@ queued/preflight failure 传播：job `queued → failed/cancelled` 时同事务
 **R8-F**：`validating_reuse → generation_pending` 只能经 `tts_claim_generation_dispatches` atomic dispatch command
 （同一 statement 建恰好一个 queued job + 转 claim；无 command 行直接转换一律 ABORT；同 claim 第二次 dispatch
 UNIQUE ABORT）。
-**R10 ⑥**：`generation_pending → running` 必须经 `tts_job_execution_transitions` 的 **worker_claim**
-command（首次 ownership establishment：双侧同步 running + `claim.owner_token/lease` 与
-`job.claimed_by/claimed_at/heartbeat_at/attempt` 一次写入）；`running / indeterminate →
+**R11 ⑥**：`generation_pending → running` 必须经 **worker_claim** command（首次 ownership
+establishment：双侧同步 running + `claim.owner_token/lease` 与 `job.claimed_by/claimed_at/
+heartbeat_at/attempt/started_at` 一次写入）；`generation_pending → failed/cancelled` 必须经
+**prestart_terminal** command（Worker claim 前终结：双侧无 owner、attempt=claim.validation_attempt、
+failed 必带 error_code、cancelled 必带 reason/error_code）；`running / indeterminate →
 succeeded / failed / cancelled / indeterminate` 必须经 **state_transition** command（owner fencing：
 双侧 token/attempt exact + claim lease >= DB_NOW_MS；`→indeterminate` 保留双侧 owner/lease，
 终态清空；无精确匹配（from,to）command 行的直接 UPDATE 一律 ABORT）。
-**R10 ⑥**：`indeterminate` 保留 Worker owner/lease（CHECK 强制非 NULL）——供 resolve command 的
-owner fencing 与 §3.6 execution takeover CAS（lease 过期 → 新 owner 接管 attempt+1 → 新 owner
-resolve；旧 owner command 一律 fencing mismatch ABORT）。
+**R11 ⑥**：`indeterminate` **不是终态**——保留 Worker owner/lease（CHECK 强制非 NULL），可
+`lease_renewal` 续租、lease 过期可 `execution_takeover`（attempt+1 换 owner）、exact owner 可
+state_transition resolve；只有 `succeeded / failed / cancelled` 三个终态清 owner/lease。
+**R11 ⑥ 直接修改 fence**：执行期（generation_pending/running/indeterminate）claim 的
+`owner_token / lease_expires_at_epoch_ms / validation_attempt` 任何直接 UPDATE（无精确匹配
+command 行）一律 ABORT（`trg_tsc_owner_command` / `trg_tsc_lease_command` /
+`trg_tsc_attempt_command`；实证 JS-18/20）。
 
 ### 9.3 `tts_jobs`（仅 TTS-C 行，`claim_id IS NOT NULL`；legacy 行不受限）
 
@@ -3137,9 +3458,14 @@ TTS-C **无 running → queued requeue**（stale running → indeterminate → �
 `succeeded ⇔ result_artifact_id IS NOT NULL`、非 succeeded ⇒ result IS NULL（running/queued/failed 单独写 result
 一律 ABORT）；`result_artifact_id` 首次非 NULL 后不可改；TTS-C 行 DELETE 禁。
 **R8-I**：`narration_plan_artifact_id / narration_plan_version / payload_json / provider / voice_profile_id` 创建后不可改。
-**R10 ⑥**：`queued → running` 必须经 worker_claim command；`running / indeterminate → succeeded /
-failed / cancelled / indeterminate` 必须经 state_transition command（`trg_tjs_command_required` 对
-全部 TTS-C 状态迁移强制精确匹配（from,to）的 command 行，直接 UPDATE ABORT）。
+**R11 ⑥**：`queued → running` 必须经 worker_claim command；`queued → failed/cancelled` 必须经
+prestart_terminal command；`running / indeterminate → succeeded / failed / cancelled / indeterminate`
+必须经 state_transition command（`trg_tjs_command_required` 对全部 TTS-C 状态迁移强制精确匹配
+（from,to）的 command 行，直接 UPDATE ABORT）。
+**R11 ⑥ 直接修改 fence**：TTS-C job 的 `claimed_by / claimed_at / heartbeat_at / attempt /
+started_at / finished_at / error_code / error_message` 任何直接 UPDATE（无精确匹配 command 行）
+一律 ABORT（`trg_tjs_claimedby_command` 等 8 个 per-column fence；实证 JS-19/21）；终态
+（succeeded/failed/cancelled）后重新写 claimed_by/heartbeat 等被 fence + immutable 双拒绝。
 **R9 ⑦**：`voice_profile_revision`（legacy 兼容通道）创建后不可改；
 `voice_profile_revision_id ↔ voice_profile_revision` 经 `trg_tts_jobs_revision_compat` 双 trigger 双向冻结。
 
@@ -3230,7 +3556,7 @@ retired         → （终态，无出边）
 | generation_pending / queued | 必须清空 | 必须 NULL | 可被 Scheduler worker_claim |
 | running | 必须清空 | **有效** | 单 Worker |
 | succeeded / failed / cancelled | 必须清空 | 必须清空 | 终态 |
-| indeterminate | 必须清空 | **保留**（R10 ⑥：供 resolve fence 与 §3.6 takeover CAS） | 待显式 resolve |
+| indeterminate | 必须清空 | **保留**（R11 ⑥：供 renewal / takeover / resolve fence） | 待显式 resolve（非终态） |
 
 ### 9.10 `voice_registry_publications`（R7-A 新增；R8-D/E 强化）
 
@@ -3319,27 +3645,29 @@ OLD evidence shape 必须与来源状态匹配（`trg_vrp_indeterminate_shape`�
 每个 CC 测试必须断言：legacy voice 不丢失；canonical key 恰好一个 source；active SHA 与 DB state 可 reconciliation；
 不得错误标 published_usable；reconciliation 以 publication journal（subject）为唯一裁决源，不凭任意 per-key row 猜测。
 
-### 10.5 SQLite contract validation（R10 已执行的 docs-only 验证；runner 与原始输出入库；runtime 阶段纳入 gate）
+### 10.5 SQLite contract validation（R11 已执行的 docs-only 验证；runner 与原始输出入库；runtime 阶段纳入 gate）
 
-**方法（R10 修复 R9 P1-1 证据口径）**：可复跑 runner 入库 `docs/evidence/tts-c-r10/`——
+**方法（R11 证据口径，继承 R10 并强化）**：可复跑 runner 入库 `docs/evidence/tts-c-r11/`——
 `extract_contract.py` 只从本文档 §2 逐字提取全部可执行 SQL（不维护手写 schema 副本；
 既有基座表 `projects/artifacts/tts_jobs/voice_profiles/voice_profile_revisions` 按 §0 基座前提
 以最小 fixture 提供）→ 双引擎（sqlite3 CLI 3.45.1 + 当前 Python sqlite3）各自重建临时 DB →
 schema apply → `PRAGMA foreign_key_check`（空）→ `PRAGMA integrity_check`（ok）→ 对象计数
-（13 contract 表 = 12 CREATE + `tts_jobs` 迁移；96 triggers；7 unique indexes；8 ALTER ADD COLUMN）
-→ 逐测试执行并输出机器可读计数；任一 FAIL → 非零 exit。原始输出：
-`results-sqlite-3.45.1.txt` 与 `results-python-sqlite.txt`（含 git HEAD、design doc sha256、
-extracted §2 sql sha256、逐 test PASS/FAIL、总数）——结果文件来自 final commit 前最后一次成功运行。
+（13 contract 表 = 12 CREATE + `tts_jobs` 迁移；**107 triggers**；**11 unique indexes**；
+8 ALTER ADD COLUMN）→ 逐测试执行并输出机器可读计数；任一 FAIL → 非零 exit。
+**真实事务能力（R11 P1-A 修复）**：runner 提供 `Harness.tx()`——Python 引擎同一 connection
+`BEGIN IMMEDIATE` → 逐条 → COMMIT/ROLLBACK（单条 exec 不再自动提交破坏事务测试）；CLI 引擎
+同一 sqlite3 进程内 `BEGIN IMMEDIATE; …; COMMIT;`（-bail，失败后新连接验证全部回滚）。
+原始输出：`results-sqlite-3.45.1.txt` 与 `results-python-sqlite.txt`（含 git HEAD、
+design doc sha256、extracted §2 sql sha256、逐 test PASS/FAIL、总数）——结果文件来自
+final commit 前最后一次成功运行；EA-05 对 final 文档再提取验证 hash 一致。
 
 **计数（两引擎一致；逐项见 runner 原始输出）**：
 
 | 类别 | 枚举数 | 实际执行 | PASS | FAIL | NOT EXECUTED |
 |---|---|---|---|---|---|
-| R10 本轮实际执行总数 | 91 | 91 | 91 | 0 | 0 |
-| 其中：R10 新增矩阵（§10.8 JS 18 + LC 12） | 30 | 30 | 30 | 0 | 0 |
-| 其中：R9 矩阵重跑（TF 8 + IE 16 + VI 5 + SM 5 + ET 3 + GN 2） | 39 | 39 | 39 | 0 | 0 |
-| 其中：R8 回归重跑（PA 4 + CJ 5 + JR 4 + EN 5 + PE-03 + LR-01） | 20 | 20 | 20 | 0 | 0 |
-| 其中：R7 回归重跑（RP-11 + RP-12） | 2 | 2 | 2 | 0 | 0 |
+| R11 本轮实际执行总数 | 110 | 110 | 110 | 0 | 0 |
+| 其中：R11 新增矩阵（JS-18…35：直接修改 fence 12 + renewal 3 + takeover 3 + prestart 3 + shape 2 + 真实事务 2） | 25 | 25 | 25 | 0 | 0 |
+| 其中：R10 全矩阵重跑（JS-01…17、LC-01…12、TF-01…08、IE、VI、PA/CJ/JR/EN/SM/ET/GN/LR/PE/RP） | 85 | 85 | 85 | 0 | 0 |
 | 历史 R5/R6/R7/R8 其余矩阵 | 见下 | 0 | 0 | 0 | 全部 NOT EXECUTED |
 | 未来 runtime 计划（§10.1–10.4/§10.6/§10.7） | 见各节 | 0 | 0 | 0 | 全部 NOT EXECUTED |
 
@@ -3347,19 +3675,27 @@ extracted §2 sql sha256、逐 test PASS/FAIL、总数）——结果文件来�
 - **历史回归 NOT EXECUTED 清单**（本轮未重跑，不得引用为已通过）：R6 的 IS/SM/DEL/PC/CHK/PAIR/
   UNIQ/INIT 全族；R7 的 RP-02…RP-10b、CJ-01…08、SL-01…08b、VI-01…04b；R8 的 PA-02/03/05/08、
   PE-01/02/04、LR-02/03/04/05/05b、EN-05b、JR-04。这些在 runtime 阶段纳入 gate 时逐项落地。
-- **R9 证据口径作废声明**：R9 的"360 项断言 FAIL=0"不可追溯（枚举与总数矛盾、runner 未入库），
-  且其中 JS-03/LC-02 经 R9 独立 Review 与本 runner 双重证实为真实 schema 缺陷而非 fixture 问题；
-  R10 以本节可追溯计数取代之。R9 的 23/29 与 360 两套数字均不再引用。
-- **覆盖说明**：dispatch（CJ-10 等）、materialization atomic activation（TF-05）、legacy_cutover_publish
-  atomic activation（LC-01）、legacy_cutover_existing atomic activation（LC-02/03）、
-  activation_indeterminate resolve（IE-13）、worker claim → running → succeeded 全链（JS-06）、
-  running→failed/cancelled/indeterminate（JS-07/08/09）、indeterminate→failed resolve（JS-10）、
-  execution takeover（JS-17）、rollback→retry（LC-09/10、LR-01）、registry_rebuild（PA-07）、
-  crash-retry 闭环（RP-11/12 + publication failed→新 attempt 路径经 LC-10 覆盖）。
+- **R10 证据口径作废/保留声明**：R10 的 91 项结果已由 R11 全矩阵重跑覆盖（110 项含 R10 全部
+  test ID，JS-17 因 P0-A 改造为 fence 实证、其余逐项保留）；R10 的 360/23-29 口径（R9 时代）仍
+  不再引用。R10 独立 Review = FAIL（P0-A owner 唯一入口 / P0-B prestart 可达 / P1-A runner 事务 /
+  P1-B CI 绑定），本轮全部关闭。
+- **R11 关闭的 P0 实证**：same-status owner mutation 无 command 一律 ABORT（JS-18/19/20/21/24）、
+  claim/job owner/attempt 不可 split（JS-18/19/25）、renewal 原子（JS-22/23）、takeover 原子
+  （JS-26b）、第二侧失败整事务回滚（JS-23/34 真实 BEGIN IMMEDIATE）、terminal owner 不可复活
+  （JS-21）、queued/generation_pending failure/cancel 真实可达（JS-27/28/29/35）。
 - 同表多 trigger 按创建逆序触发（实证 3.45.1）：替换 result/job 链接时 link/identity trigger 可先于
-  immutable/invariant 报 ABORT（如 `result artifact job mismatch` 先于 `result status invariant
-  violated`），均为合法拒绝——§10.7 JR-01/02/03/05 的期望消息按此实证口径修正（runner 用
-  消息集合断言）。
+  immutable/invariant 报 ABORT；claim 侧 lease fence 可先于 status fence 报 `lease requires
+  execution command`——均为合法拒绝，runner 用消息集合断言。
+
+### 10.5.1 R11 关闭 R10 FAIL 时顺带发现并已修复的 contract 缺陷
+
+- **D1（R10 已修复，保留）**：`trg_tts_jobs_immutable` 误将 indeterminate 当终态冻结——R10 收窄为
+  真终态（succeeded/failed/cancelled）；R11 全文统一"只有三终态清 owner/lease"。
+- **D2（R11 新增修复）**：state_transition `→succeeded`（indeterminate resolve）时 job 侧 error 证据
+  应清空（否则 succeeded 残留旧 error_code）；R11 在 job UPDATE 中 succeeded 分支清 error 字段，
+  并同步 fence（error_code/error_message 允许 succeeded 清理分支）。
+- **D3（R11 冻结）**：prestart_terminal 终结也必须写 `finished_at`（fence 允许 prestart 分支），
+  否则 queued→failed 的 job 无完成时间证据。
 
 ### 10.5.1 R10 修复 R9 时顺带发现并已修复的 contract 缺陷
 
@@ -3465,64 +3801,55 @@ extracted §2 sql sha256、逐 test PASS/FAIL、总数）——结果文件来�
 
 全部 R5/R6/R7 mutation（IS/SM/DEL/PC/CHK/PAIR/UNIQ/INIT/RP/CJ-01…08/SL/VI）必须在新 contract 上回归。
 
-### 10.8 R10 新增验证矩阵（本轮已由 runner 实际执行；runtime 阶段纳入 gate）
+### 10.8 R11 新增验证矩阵（本轮已由 runner 实际执行；runtime 阶段纳入 gate）
 
-**Execution lifecycle（R10 ⑥；`docs/evidence/tts-c-r10/test_js.py` 实跑）**
-
-| 测试 | mutation / 步骤 | 断言（实跑结果 PASS） |
-|---|---|---|
-| JS-01 | job `queued→running` 直接 UPDATE | `tts_jobs state transition requires execution command` ABORT |
-| JS-02 | claim `generation_pending→running` 直接 UPDATE | `tts_synthesis_claims state transition requires execution command` ABORT |
-| JS-03 | worker_claim command（claim generation_pending+job queued） | PASS：同一 statement 双侧 running（R9 P0-1 修复实证） |
-| JS-04 | worker_claim 后读双侧 | PASS：claim.owner_token/lease + job.claimed_by/claimed_at/heartbeat_at/attempt/started_at 全建立，attempt=command.worker_attempt=claim.validation_attempt |
-| JS-05 | 并发第二个 worker_claim command | ABORT（exact-old-state 复核不命中），恰好一个 running owner |
-| JS-06 | dispatch→worker_claim→attempt→artifact→running→succeeded command | PASS：双侧 succeeded + 同一 result_artifact_id + 双侧 owner/lease 清空；command 行=2（R9 P0-2 修复实证） |
-| JS-07 | running→failed command | PASS：双侧 failed + owner 清空 + error evidence |
-| JS-08 | running→cancelled command | PASS：双侧 cancelled |
-| JS-09 | running→indeterminate command | PASS：双侧 indeterminate，**保留**双侧 owner/lease |
-| JS-10 | indeterminate→failed 第三条 command | PASS（含 §10.5.1 D1 修复实证）；command 行=3 |
-| JS-11 | duplicate `transition_request_id` | `UNIQUE constraint failed: …transition_request_id` |
-| JS-11b | 完全相同 transition replay（同 from/to/attempt） | 语义 UNIQUE / exact-old-state ABORT |
-| JS-12 | 同 job 多阶段 command 连读 | PASS：两条 evidence 行全保留（queued→running、running→succeeded） |
-| JS-13 | succeeded 携带他 job 的 artifact | `result artifact identity mismatch` ABORT + 回滚 |
-| JS-14 | succeeded 但 artifact 不存在 | ABORT：claim/job 保持 running、无 command 行遗留 |
-| JS-15 | from-state 与真实状态任一不符 | `job claim mismatch` ABORT |
-| JS-16 | claim lease 已过期的 running owner 发 command | `worker fencing mismatch` ABORT |
-| JS-17 | §3.6 execution takeover CAS 后 | 旧 owner command `worker fencing mismatch` ABORT；新 owner（attempt+1）command PASS |
-
-**Legacy dual path（R10 ④⑤；`test_lc.py` 实跑）**
+**Owner command closure（R11 P0-A；`docs/evidence/tts-c-r11/test_js.py` 实跑）**
 
 | 测试 | mutation / 步骤 | 断言（实跑结果 PASS） |
 |---|---|---|
-| LC-01 | 路径 A：file_ready projection → `publish_and_cutover` 全链 | PASS：一条 activation command 原子完成 publication=active + projection=published_usable + legacy=mapped_active |
-| LC-02 | 路径 B：published projection → `cutover_existing` 全链 | PASS（R9 P0-3 修复实证）：publication=active + legacy=mapped_active |
-| LC-03 | LC-02 后复读 projection | PASS：generation/SHA/published_by 全部保持旧 publication evidence（零 UPDATE） |
-| LC-04 | 情况 1：entry mapped_verified(publish_and_cutover) 后普通 materialization_publish | `subject invalid` ABORT |
-| LC-05 | 情况 2：普通 publication 完成后导入 legacy entry | PASS：`mapping_mode='cutover_existing'` → mapped_verified 允许 |
-| LC-06 | 情况 3：active-flight materialization publication 在飞 + 建 publish_and_cutover 映射 | `projection publication in flight` ABORT；publication 完成后 cutover_existing 可达 |
-| LC-07 | 错误 mapping_mode/subject_type 组合（3 例） | `mapped materialization not published_usable` / `subject invalid` ABORT |
-| LC-08 | activation 时 entry 未 mapping_pending | `legacy cutover publish subject mismatch` ABORT；projection/publication 零变化（整条回滚） |
-| LC-09 | failed publication rollback | PASS：entry=mapped_verified，pending/selector 清空，mapping_mode 保留 |
-| LC-10 | rollback 后新 publication 全链 | PASS：projection published_usable(published_by=新 publication) |
-| LC-11 | retire 活跃 entry 后新 entry 映射同一 projection | PASS：retired 保留历史 mapped ID 但不占活跃唯一位 |
-| LC-12 | 第二个活跃 legacy mapping 同 projection | `alias to same projection forbidden` ABORT（活跃一对一） |
+| JS-18 | running claim 单独改 `owner_token` | `tts_synthesis_claims owner requires execution command` ABORT（split owner 不可提交） |
+| JS-19 | running job 单独改 `claimed_by` / `attempt` | `tts_jobs claimed_by/attempt requires execution command` ABORT |
+| JS-20 | running job 只更新 `heartbeat_at`（claim lease 不更新） | `heartbeat_at requires execution command` ABORT |
+| JS-21 | terminal（succeeded）后重写 `claimed_by`/`heartbeat_at`/claim `owner_token` | fence + 表 CHECK 双拒绝 ABORT（owner 不可复活） |
+| JS-22 | `lease_renewal` command（running→running） | PASS：claim lease 原子更新 + job heartbeat 同 statement |
+| JS-23 | renewal 失败注入（新 lease 不递增 / 错误 token） | `worker fencing mismatch` ABORT：command 行、claim lease、job heartbeat 全部回滚 |
+| JS-24 | 直接改 claim `lease`（任意方向） | `lease requires execution command` ABORT（fence 覆盖延长/缩短） |
+| JS-24b | `execution_takeover` 在 lease 未过期时 | `worker fencing mismatch` ABORT |
+| JS-25 | takeover 失败注入（attempt 不连续 / 新 owner=旧 owner） | ABORT：旧 owner/attempt 双侧完全保留 |
+| JS-26b | 真实时序：lease 过期 → takeover（attempt+1）→ 新 owner transition PASS | 旧 owner renewal/transition `worker fencing mismatch` ABORT；新 owner（attempt=2）failed PASS |
+| JS-30 | 一类 command 携带他类证据字段（worker_claim+result / renewal+claimed_at / failed 无 error） | `CHECK constraint failed` ABORT |
+| JS-31 | 同一 renewal request replay | `UNIQUE constraint failed: …transition_request_id` |
+| JS-32 | 不同 renewal request、同 attempt、新 lease 递增 | PASS：两条 renewal 行保留，lease 递增 |
+| JS-35 | prestart 携带 owner 伪装（worker_owner_token 非 NULL） | `CHECK constraint failed` ABORT |
 
-**Evidence accounting（R10；runner 内校验 + 本节口径）**
+**Prestart terminal reachability（R11 P0-B）**
 
-| 测试 | 断言 |
-|---|---|
-| EA-01 | runner final FAIL=0（两引擎各自；任一 FAIL 非零 exit） |
-| EA-02 | 文档 §10.5 总数 = runner 枚举数（91；results 文件 TOTAL 与本节表一致） |
-| EA-03 | PASS+FAIL+SKIP = 总数（runner 输出行校验） |
-| EA-04 | 未执行历史回归一律 NOT EXECUTED，不计入 PASS（§10.5 清单） |
-| EA-05 | results 文件记录的 extracted §2 sql sha256 = 对 final 文档再跑 `extract_contract.py` 的 sha256 |
+| 测试 | mutation / 步骤 | 断言（实跑结果 PASS） |
+|---|---|---|
+| JS-27 | `prestart_terminal` queued/generation_pending → failed 全链 | PASS：双侧 failed、owner 字段全 NULL、error_code/finished_at 写入 |
+| JS-28 | `prestart_terminal` → cancelled 全链 | PASS：双侧 cancelled、owner 字段全 NULL |
+| JS-29 | prestart command 在 running 状态使用 | `job claim mismatch` ABORT（from 状态不匹配）+ 携带 owner 字段 shape ABORT |
+| JS-17 | R10 旧 §3.6 两条 UPDATE 模拟 takeover | per-column fence ABORT（P0-A 关闭实证） |
 
-R5/R6/R7/R8/R9 保留矩阵（TF/IE/VI/SM/ET/GN/PA/CJ/JR/EN/LR/PE/RP）本轮实跑子集见 §10.5
-计数表与 runner 原始输出；未实跑项一律 NOT EXECUTED，runtime 阶段纳入 gate 时逐项落地。
+**真实事务能力（R11 P1-A）**
+
+| 测试 | mutation / 步骤 | 断言（实跑结果 PASS） |
+|---|---|---|
+| JS-33 | `Harness.tx()`：BEGIN IMMEDIATE 内 renewal command + 后续语句 | PASS：事务提交后两侧更新可见 |
+| JS-34 | `Harness.tx()`：事务内第二条语句触发 CHECK 失败 | 整事务 ROLLBACK：command 行、claim lease、job heartbeat 全部恢复原值 |
+
+**CI contract gate（R11 P1-B）**：`.github/workflows/m7-quality-gate.yml` 新增
+`TTS-C Contract Gate` job——在 final HEAD 重新生成双引擎结果（不依赖 checked-in result 伪装执行），
+两引擎 test ID 与 TOTAL/PASS/FAIL/SKIP 完全一致（`verify_engines.py`），design/SQL SHA 与当前
+checkout 一致，FAIL>0 → workflow failure，结果上传 artifact、summary 写 contract total 与两引擎
+SQLite 版本。runtime gate 与 contract gate 分别报告，不混称。
+
+R5/R6/R7/R8/R9/R10 保留矩阵（TF/IE/VI/SM/ET/GN/PA/CJ/JR/EN/LR/PE/RP + R10 JS/LC）本轮实跑子集见
+§10.5 计数表与 runner 原始输出；未实跑项一律 NOT EXECUTED，runtime 阶段纳入 gate 时逐项落地。
 
 ## 11. 并行开发规则（见实施计划；此处为设计依据）
 
-- R10 PASS 后：1A 与 1C 可并行开发（不同本地 worktree/local branch）；1B 的 adapter parser/reloader 测试骨架可并行准备；
+- R11 PASS 后：1A 与 1C 可并行开发（不同本地 worktree/local branch）；1B 的 adapter parser/reloader 测试骨架可并行准备；
   1B publisher integration 等 1A PASS；C.2 等 1A+1B+1C 全部 PASS；C.2 PASS 后 C.3→C.4→C.5 runtime 串行。
   1A/1B/C.2 schema 边界采用 R10 contract（epoch_ms lease + DB_NOW_MS fence + indeterminate entry evidence seal +
   activation_mode + resolution_evidence_hash + mapping_mode/subject_mode 双路径 +
