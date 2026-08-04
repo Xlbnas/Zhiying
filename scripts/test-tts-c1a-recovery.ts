@@ -158,6 +158,38 @@ async function runRecoveryChild(limit: number): Promise<{count: number; error?: 
   const terminalReqs = db.prepare("SELECT count(*) c FROM voice_materialization_requests WHERE project_id=? AND status IN ('failed','succeeded') AND request_id LIKE 'rec-%'").get(fx.projectId) as {c: number};
   ok(terminalReqs.c >= 6, 'REC-07 全部 expired 请求经 recovery 结束（无新 POST）', terminalReqs.c);
 
+  // ── REC-DUR-02：injected final fsync 失败 → 不成功（indeterminate） ──
+  const revDur2 = await freshRevision(665);
+  const jobDur2 = insertExpiredRunning(revDur2, 'rec-dur2');
+  const finalAbsDur2 = destinationAbsolutePath(`${fx.profileId}/${revDur2.revisionId}/reference.wav`);
+  fs.mkdirSync(path.dirname(finalAbsDur2), {recursive: true});
+  fs.copyFileSync(path.join(fx.dataDir, 'voice-library', fx.profileId, revDur2.revisionId, 'reference.wav'), finalAbsDur2);
+  const handledDur2 = await recoverExpiredMaterializationJobs(10, db, {
+    fsyncFile: async () => {
+      throw new Error('injected recovery final fsync failure');
+    },
+  });
+  ok(handledDur2 === 1, 'REC-DUR-02 注入 final fsync 失败 → 被处理', handledDur2);
+  const jobDur2r = getMaterializationJob(jobDur2)!;
+  ok(jobDur2r.status === 'indeterminate', 'REC-DUR-02 final fsync 失败 → indeterminate（不冒充 success）', jobDur2r.status);
+  ok(getProjection(fx.profileId, revDur2.revisionId) === undefined, 'REC-DUR-02 不创建 projection', undefined);
+
+  // ── REC-DUR-03：injected dir fsync 失败 → 不成功（indeterminate） ──
+  const revDur3 = await freshRevision(666);
+  const jobDur3 = insertExpiredRunning(revDur3, 'rec-dur3');
+  const finalAbsDur3 = destinationAbsolutePath(`${fx.profileId}/${revDur3.revisionId}/reference.wav`);
+  fs.mkdirSync(path.dirname(finalAbsDur3), {recursive: true});
+  fs.copyFileSync(path.join(fx.dataDir, 'voice-library', fx.profileId, revDur3.revisionId, 'reference.wav'), finalAbsDur3);
+  const handledDur3 = await recoverExpiredMaterializationJobs(10, db, {
+    fsyncDir: async () => {
+      throw new Error('injected recovery dir fsync failure');
+    },
+  });
+  ok(handledDur3 === 1, 'REC-DUR-03 注入 dir fsync 失败 → 被处理', handledDur3);
+  const jobDur3r = getMaterializationJob(jobDur3)!;
+  ok(jobDur3r.status === 'indeterminate', 'REC-DUR-03 dir fsync 失败 → indeterminate（不冒充 success）', jobDur3r.status);
+  ok(getProjection(fx.profileId, revDur3.revisionId) === undefined, 'REC-DUR-03 不创建 projection', undefined);
+
   cleanupC1a(TAG);
   summary('TTS-C.1A recovery');
 })().catch((e) => {

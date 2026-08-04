@@ -60,9 +60,14 @@ async function claimAndRun(fx_: C1aFixture, requestId: string, deps: Parameters<
   try {
     workerFinalizeMaterialization({
       handle: {jobId: 'no-such-job', ownerToken: 'x', attempt: 1, leaseExpiresAtEpochMs: Date.now() + 60000},
-      finalRelativePath: `${fx.profileId}/${fx.revisionId}/reference.wav`,
-      finalSha256: 'a'.repeat(64), finalSize: 1,
-      codec: 'pcm_s16le', sampleRate: 48000, channels: 1, durationMs: 100,
+      evidence: {
+        relativePath: `${fx.profileId}/${fx.revisionId}/reference.wav`,
+        absolutePathInternal: 'internal',
+        sha256: 'a'.repeat(64), size: 1,
+        codec: 'pcm_s16le', sampleRate: 48000, channels: 1, durationMs: 100,
+        device: 0n, inode: 0n, mtimeNs: 0n, parentRealpath: 'internal',
+        durabilityEstablished: true,
+      },
       revisionEvidence: {
         voiceProfileId: fx.profileId,
         voiceProfileRevisionId: fx.revisionId,

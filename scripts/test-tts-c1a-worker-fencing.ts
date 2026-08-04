@@ -63,19 +63,27 @@ async function claimHandleFor(rev: RevCtx, requestId: string): Promise<Materiali
   return claimed.handle;
 }
 
-/** 真实 finalize 输入（executor 语义；绑定 rev 的 canonical SHA/size/path）。 */
+/** 真实 finalize 输入（executor 语义；绑定 rev 的 canonical SHA/size/path + final evidence）。 */
 function finalInput(handle: MaterializationExecutionHandle, rev: RevCtx, overrides: Partial<WorkerFinalizeInput> = {}): WorkerFinalizeInput {
   const revAbs = path.join(fx.dataDir, 'voice-library', fx.profileId, rev.revisionId, 'reference.wav');
   const fileSize = fs.statSync(revAbs).size;
   return {
     handle,
-    finalRelativePath: `${fx.profileId}/${rev.revisionId}/reference.wav`,
-    finalSha256: rev.sha,
-    finalSize: fileSize,
-    codec: 'pcm_s16le',
-    sampleRate: 48000,
-    channels: 1,
-    durationMs: 1500,
+    evidence: {
+      relativePath: `${fx.profileId}/${rev.revisionId}/reference.wav`,
+      absolutePathInternal: 'internal',
+      sha256: rev.sha,
+      size: fileSize,
+      codec: 'pcm_s16le',
+      sampleRate: 48000,
+      channels: 1,
+      durationMs: 1500,
+      device: 0n,
+      inode: 0n,
+      mtimeNs: 0n,
+      parentRealpath: 'internal',
+      durabilityEstablished: true,
+    },
     revisionEvidence: {
       voiceProfileId: fx.profileId,
       voiceProfileRevisionId: rev.revisionId,
@@ -177,7 +185,7 @@ function expectErrCode(label: string, fn: () => unknown, code: string): void {
   const h7 = await claimHandleFor(rev7, 'wf-7');
   expectErrCode(
     'WF-07 final relative path 漂移 → REQUEST_STATE_INCONSISTENT',
-    () => workerFinalizeMaterialization(finalInput(h7, rev7, {finalRelativePath: `${fx.profileId}/${rev7.revisionId}/evil.wav`})),
+    () => workerFinalizeMaterialization(finalInput(h7, rev7, {evidence: {...finalInput(h7, rev7).evidence, relativePath: `${fx.profileId}/${rev7.revisionId}/evil.wav`}})),
     'REQUEST_STATE_INCONSISTENT',
   );
   ok(getProjection(fx.profileId, rev7.revisionId) === undefined, 'WF-07 projection 不创建', undefined);
@@ -187,7 +195,7 @@ function expectErrCode(label: string, fn: () => unknown, code: string): void {
   const h8 = await claimHandleFor(rev8, 'wf-8');
   expectErrCode(
     'WF-08 final SHA 替换 → REQUEST_STATE_INCONSISTENT',
-    () => workerFinalizeMaterialization(finalInput(h8, rev8, {finalSha256: 'f'.repeat(64)})),
+    () => workerFinalizeMaterialization(finalInput(h8, rev8, {evidence: {...finalInput(h8, rev8).evidence, sha256: 'f'.repeat(64)}})),
     'REQUEST_STATE_INCONSISTENT',
   );
   ok(getProjection(fx.profileId, rev8.revisionId) === undefined, 'WF-08 projection 不创建', undefined);

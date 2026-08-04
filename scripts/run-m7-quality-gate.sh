@@ -132,6 +132,12 @@ run_suite "tts-c1a-recovery" npx tsx scripts/test-tts-c1a-recovery.ts
 run_suite "tts-c1a-path-security" npx tsx scripts/test-tts-c1a-path-security.ts
 run_suite "tts-c1a-request-concurrency" npx tsx scripts/test-tts-c1a-request-concurrency.ts
 run_suite "tts-c1a-compose-mounts" npx tsx scripts/test-tts-c1a-compose-mounts.ts
+# TTS-C.1A.R2 新增 5 套（periodic recovery / final evidence / validation evidence / replay integrity / resource cleanup）
+run_suite "tts-c1a-recovery-loop" npx tsx scripts/test-tts-c1a-recovery-loop.ts
+run_suite "tts-c1a-final-evidence" npx tsx scripts/test-tts-c1a-final-evidence.ts
+run_suite "tts-c1a-validation-evidence" npx tsx scripts/test-tts-c1a-validation-evidence.ts
+run_suite "tts-c1a-replay-integrity" npx tsx scripts/test-tts-c1a-replay-integrity.ts
+run_suite "tts-c1a-resource-cleanup" npx tsx scripts/test-tts-c1a-resource-cleanup.ts
 
 echo "QUALITY_GATE_RESULT=PASS"
 echo "QUALITY_GATE_SHA=$GATE_SHA"

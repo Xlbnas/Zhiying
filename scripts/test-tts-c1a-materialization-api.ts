@@ -168,12 +168,12 @@ async function expectErr(label: string, fn: () => Promise<unknown>, code: string
 
   // 9f) succeeded request（job succeeded + projection）→ outcome reused（仅此状态才 reused）
   // 前置：释放 9e 的 indeterminate job（indeterminate→failed 合法；indeterminate 是 active）
+  const {claimNextAnyJob} = await import('../src/lib/scheduler');
   db.prepare(
     `UPDATE voice_materialization_jobs SET status='failed', owner_token=NULL, lease_expires_at_epoch_ms=NULL,
        heartbeat_at=NULL, updated_at=?
      WHERE voice_profile_id=? AND voice_profile_revision_id=? AND status='indeterminate'`,
   ).run(new Date().toISOString(), fx.profileId, fx.revisionId);
-  const {claimNextAnyJob} = await import('../src/lib/scheduler');
   const {runMaterializationJob} = await import('../src/worker/materialization-executor');
   const rSuccess = await createC1aRequest(fx, 'st-success');
   ok(rSuccess.outcome === 'queued', '成功场景前置：queued', rSuccess.outcome);
@@ -183,6 +183,85 @@ async function expectErr(label: string, fn: () => Promise<unknown>, code: string
   }
   const rs = await createMaterializationRequest(fx.projectId, 'st-success', fx.assignmentArtifactId);
   ok(rs.outcome === 'reused' && rs.request.status === 'succeeded', 'succeeded request + usable projection → outcome=reused（唯一 reused 路径）', {outcome: rs.outcome, status: rs.request.status});
+
+  // 10) POST feature gate（R2 §二）：env 缺失/false → 503 MATERIALIZATION_NOT_ENABLED；true → 正常；
+  //     GET 不受影响；不泄漏内部配置
+  const route = await import('../src/app/api/projects/[id]/voice-materializations/route');
+  const postReq = (): Promise<Response> =>
+    route.POST(
+      new Request('http://localhost/api/projects/x/voice-materializations', {
+        method: 'POST',
+        body: JSON.stringify({requestId: 'gate-1', projectVoiceAssignmentArtifactId: fx.assignmentArtifactId}),
+      }),
+      {params: Promise.resolve({id: fx.projectId})},
+    );
+  // env 缺失 → 503
+  delete process.env.TTS_C1A_MATERIALIZATION_POST_ENABLED;
+  const g1 = await postReq();
+  const g1b = (await g1.json()) as {error: {code: string; message: string}};
+  ok(g1.status === 503 && g1b.error.code === 'MATERIALIZATION_NOT_ENABLED', 'POST gate env 缺失 → 503 MATERIALIZATION_NOT_ENABLED', {status: g1.status, code: g1b.error.code});
+  ok(!JSON.stringify(g1b).includes('TTS_C1A_MATERIALIZATION_POST_ENABLED') && !JSON.stringify(g1b).includes('/'), 'POST gate 503 不泄漏内部配置', g1b.error.message);
+  // false → 503
+  process.env.TTS_C1A_MATERIALIZATION_POST_ENABLED = 'false';
+  const g2 = await postReq();
+  const g2b = (await g2.json()) as {error: {code: string}};
+  ok(g2.status === 503 && g2b.error.code === 'MATERIALIZATION_NOT_ENABLED', 'POST gate false → 503', {status: g2.status, code: g2b.error.code});
+  // GET 不受 gate 影响
+  const g3 = await route.GET(new Request('http://localhost/api/projects/x/voice-materializations'), {params: Promise.resolve({id: fx.projectId})});
+  ok(g3.status === 200, 'POST gate 不影响 GET（200）', g3.status);
+  // true → 正常流程（queued 202 或 reused 200）
+  process.env.TTS_C1A_MATERIALIZATION_POST_ENABLED = 'true';
+  const g4 = await postReq();
+  const g4b = (await g4.json()) as {outcome: string; request: {status: string}};
+  ok((g4.status === 202 && g4b.outcome === 'queued') || (g4.status === 200 && g4b.outcome === 'reused'), 'POST gate true → 正常流程', {status: g4.status, outcome: g4b.outcome});
+  delete process.env.TTS_C1A_MATERIALIZATION_POST_ENABLED;
+
+  // 11) DB-time lease（R2 §十一）：takeover 的 lease 创建值基于 DB_NOW（host 时钟漂移不影响）
+  const {dbNowMs, takeoverStaleValidatingJob} = await import('../src/lib/tts-c/materialization');
+  const {MATERIALIZATION_VALIDATION_LEASE_MS} = await import('../src/lib/tts-c/constants');
+  const leaseJobId = crypto.randomUUID();
+  db.prepare(
+    `INSERT INTO voice_materialization_jobs
+       (id, voice_profile_id, voice_profile_revision_id, status, validation_owner_token,
+        validation_lease_expires_at_epoch_ms, validation_attempt, source_canonical_sha256,
+        adapter_compatibility_key, destination_voice_root_relative_path, created_at, updated_at)
+     VALUES (?, ?, ?, 'validating_existing', 'old', ?, 1, ?, 'indextts2-adapter-registry@1', ?, ?, ?)`,
+  ).run(leaseJobId, fx.profileId, fx.revisionId, Date.now() - 1000, fx.revisionSha256, `${fx.profileId}/${fx.revisionId}/reference.wav`, new Date().toISOString(), new Date().toISOString());
+  const leaseHandle = takeoverStaleValidatingJob(leaseJobId);
+  ok(leaseHandle !== null, 'DB-time lease 前置：takeover 成功', leaseHandle !== null);
+  const dbNowLease = dbNowMs(db);
+  const delta = leaseHandle!.validationLeaseExpiresAtEpochMs - dbNowLease;
+  ok(Math.abs(delta - MATERIALIZATION_VALIDATION_LEASE_MS) < 5000, 'takeover lease = DB_NOW + VALIDATION_LEASE_MS（DB 时间源）', {delta, dbNow: dbNowLease, lease: leaseHandle!.validationLeaseExpiresAtEpochMs});
+  // executor heartbeat 的 lease 也是 DB-time（实现层已统一；此处验证 scheduler claim 后 lease ≈ DB_NOW + EXECUTION_LEASE）
+  // 前置：释放 takeover job（validating→queued→failed）避免 fan-in
+  db.prepare(
+    `UPDATE voice_materialization_jobs SET status='queued', validation_owner_token=NULL,
+       validation_lease_expires_at_epoch_ms=NULL, updated_at=? WHERE id=? AND status='validating_existing'`,
+  ).run(new Date().toISOString(), leaseJobId);
+  db.prepare(`UPDATE voice_materialization_jobs SET status='failed', updated_at=? WHERE id=? AND status='queued'`).run(new Date().toISOString(), leaseJobId);
+  // 独立 revision（无 projection → queued）
+  const leaseRev = await ingestVoiceProfileRevision(
+    {voiceProfileId: fx.profileId, requestId: `lease-rev-${crypto.randomUUID()}`, audioBuffer: makeWav(1500, 1450)},
+    execDeps,
+  );
+  const leaseRevRow = leaseRev.outcome === 'created' || leaseRev.outcome === 'reused' ? leaseRev.revision : null;
+  if (!leaseRevRow) throw new Error('lease rev failed');
+  const leaseAsg = await buildProjectVoiceAssignment({
+    projectId: fx.projectId,
+    voiceProfileId: fx.profileId,
+    voiceProfileRevisionId: leaseRevRow.id,
+    requestId: `lease-asg-${crypto.randomUUID()}`,
+  });
+  if (leaseAsg.kind !== 'created' && leaseAsg.kind !== 'reused') throw new Error('lease asg failed');
+  const execReq = await createMaterializationRequest(fx.projectId, 'lease-exec', leaseAsg.artifact.id);
+  ok(execReq.outcome === 'queued', 'DB-time lease 前置：queued', execReq.outcome);
+  const cLease = claimNextAnyJob('lease-worker');
+  if (cLease && cLease.type === 'voice_materialization') {
+    const {MATERIALIZATION_EXECUTION_LEASE_MS} = await import('../src/lib/tts-c/constants');
+    const dbNow2 = dbNowMs(db);
+    const d2 = cLease.job.lease_expires_at_epoch_ms! - dbNow2;
+    ok(Math.abs(d2 - MATERIALIZATION_EXECUTION_LEASE_MS) < 5000, 'scheduler claim lease = DB_NOW + EXECUTION_LEASE_MS（DB 时间源）', {delta: d2, dbNow: dbNow2});
+  }
 
   cleanupC1a(TAG);
   summary('TTS-C.1A materialization-api');
