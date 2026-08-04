@@ -131,9 +131,16 @@ def tf07(h):
 
 
 def tf08(h):
-    """lease=now-1ms → 已过期 ABORT；julianday→epoch ms 截断漂移 ∈ {-1,0}（保守，不宽限）。"""
+    """lease=DB_NOW-1ms → 已过期 ABORT；julianday→epoch ms 截断漂移 ∈ {-1,0}（保守，不宽限）。
+
+    lease 基准用 SQLite 时钟（与 fence 同一时钟源）而非宿主时钟：
+    宿主时钟与 SQLite 时钟存在 ±1ms 偏差，跨时钟源构造"now-1ms"在
+    in-process Python 引擎下是 flaky；同源时 DB 时钟单调不减，
+    lease=DB_NOW_pre-1 < DB_NOW_cur 严格成立，语义与冻结契约一致。
+    """
     h.seed_base()
-    h.mk_claim("C1", lease_ms=now_ms() - 1)
+    db_now = int(h.query("SELECT %s" % DBNOW)[0][0])
+    h.mk_claim("C1", lease_ms=db_now - 1)
     h.mk_subscriber("R1", "C1")
     ok, msg = h.expect_abort(
         """INSERT INTO tts_claim_generation_dispatches
