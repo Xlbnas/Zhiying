@@ -46,6 +46,8 @@ services:
       - ${ZHIYING_HOST_DATA_DIR:?ZHIYING_HOST_DATA_DIR required}:/app/data
       - ${ZHIYING_HOST_PUBLIC_DIR:?ZHIYING_HOST_PUBLIC_DIR required}:/app/public:ro
       - ${ZHIYING_HOST_ASSETS_DIR:?ZHIYING_HOST_ASSETS_DIR required}:/app/public/assets:rw
+      # TTS-C.1A.R1：Web 对 materialization root 只读（Worker 唯一 rw writer）
+      - ${ZHIYING_HOST_MATERIALIZATIONS_DIR:?ZHIYING_HOST_MATERIALIZATIONS_DIR required}:/app/data/voice-materializations:ro
     container_name: zhiying-web
     # M6.2.1: host network for Wikimedia TLS (Docker bridge blocks TLS to Wikimedia CDN)
     network_mode: host
@@ -78,6 +80,8 @@ services:
       - ${ZHIYING_HOST_DATA_DIR:?ZHIYING_HOST_DATA_DIR required}:/app/data
       - ${ZHIYING_HOST_PUBLIC_DIR:?ZHIYING_HOST_PUBLIC_DIR required}:/app/public:ro
       - ${ZHIYING_HOST_ASSETS_DIR:?ZHIYING_HOST_ASSETS_DIR required}:/app/public/assets:rw
+      # TTS-C.1A.R1：Worker 是 materialization root 唯一 rw writer
+      - ${ZHIYING_HOST_MATERIALIZATIONS_DIR:?ZHIYING_HOST_MATERIALIZATIONS_DIR required}:/app/data/voice-materializations:rw
     # M6.2.1: host network — worker also needs internet for Wikimedia
     network_mode: host
     container_name: zhiying-worker
