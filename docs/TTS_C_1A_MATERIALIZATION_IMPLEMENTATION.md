@@ -170,3 +170,48 @@ publication=0/activation=0/adapterReady=false/paths redacted）、H boundary（I
 TTS jobs=0/narration 不变/registry 未发布/adapter 未 reload/project m7 未激活）、
 I frozen regressions（R13 contract 150/150、M7 gate、TTS-A/B frozen、resource leases、billing、
 build/typecheck）。新 suites 并入 `scripts/run-m7-quality-gate.sh`（suite 数真实增加）。
+
+## 10. TTS-C.1A.R1 加固（独立 Review FAIL 关闭项）
+
+- **P0-1 validation ownership handle**：`ValidationLeaseHandle{jobId, validationOwnerToken, validationAttempt, validationLeaseExpiresAtEpochMs, candidateMaterializationId, candidateMaterializationMetadataHash}`。
+  只有 Phase 1 创建 job 或 fenced takeover（changes=1）的赢家持有；`takeoverStaleValidatingJob` 返回
+  `handle | null`（输家 null，不重读借用新 owner token）；`finalizeValidatingJob(handle, result)` 的
+  fenced reread WHERE 只来自 handle（id/status/token/attempt/DB_NOW<=lease/candidate id+hash exact），
+  禁止接受整行 fresh DB job 作为凭据；lease 有效时 subscriber 只 fan-in（waiting + inflight），
+  不运行 validateExistingProjection、不 finalize（validator 实际调用恰好一次）。
+- **P0-2 worker execution handle**：scheduler claim 返回 `MaterializationExecutionHandle{jobId, ownerToken, attempt, leaseExpiresAtEpochMs}`；
+  `runMaterializationJob(handle)` 全程只用 handle；`workerFinalizeMaterialization` final WHERE
+  `status='running' AND owner_token=handle.ownerToken AND attempt=handle.attempt AND DB_NOW<=lease`
+  （禁止仅 owner_token IS NOT NULL）。
+- **Heartbeat**：claim 后立即启动 loop（每 `MATERIALIZATION_HEARTBEAT_INTERVAL_MS` fenced 续租；
+  changes=0 → ownershipLost + 停止后续文件副作用）；关键步骤前（source open / temp 写 / rename /
+  final DB）显式 fenced verify；shutdown signal 中止；finally 停 timer；异常不静默。
+- **Autonomous recovery**：`recoverExpiredMaterializationJobs(limit)` 在 Worker scheduler tick 前独立运行
+  （不依赖新 HTTP request）：expired running + 无 durable final file → failed + requests failed
+  （error_code=`RECOVERY_FILE_UNAVAILABLE`）；final file exact（SHA+WAV 契约）→ 完成
+  projection/job/request（crash 窗口）；damaged → failed；无法确定 → indeterminate；每 job BEGIN
+  IMMEDIATE fenced（多 Worker 恰一裁决）。确定性 executor 错误且仍持有 exact handle →
+  立即 `failMaterializationJobFenced`（不等 lease 过期）。
+- **Commit-time exact source fence**：final DB transaction 内逐项重读——job exact
+  owner/token/attempt/lease、destination path shape、exact Revision DB metadata identity
+  （sha/adapter/provider）、每个 active request 的 Assignment source 逐项
+  （project/profile/revision/provider/sha/adapter）、final evidence 逐项
+  （relative path/SHA/size/regular/codec/sr/ch/duration）——任一漂移 → SOURCE_STALE/
+  REQUEST_STATE_INCONSISTENT，整事务回滚零副作用（mutation proof：owner/attempt/lease 条件
+  任一移除测试 FAIL）。
+- **P0-3 真实 no-follow 与 containment**：source/final `O_RDONLY|O_NOFOLLOW` + fstat regular
+  （不依赖 lstat→open 两步）；temp `O_CREAT|O_EXCL|O_WRONLY|O_NOFOLLOW`；root 必须真实目录非
+  symlink；profile/revision 逐级 lstat（任一级 symlink → fail-closed）；parent realpath 必须位于
+  root realpath 内；rename 前后 parent containment 复核；cleanup 只删自身路径。
+- **Web/Worker mount 分离**：`ZHIYING_HOST_MATERIALIZATIONS_DIR`（:? 强制，缺失 fail-closed）——
+  Web `:/app/data/voice-materializations:ro`、Worker `:rw`、adapter 无该 mount；TTS-A voice-library
+  Web 写入不回退（/app/data 主挂载保留 rw）；registry mount 不变。
+- **P1 requestId 并发幂等**：envelope-first BEGIN IMMEDIATE 事务内 SELECT→裁决→INSERT；
+  UNIQUE race 事务内捕获重读裁决（不逃逸 500）；同 requestId+同 source 并发恰一 INSERT 两调用成功；
+  异 source → 409；跨 project 互不冲突。
+- **Existing request outcome 按真实状态映射**：succeeded/reused+usable projection→reused；
+  waiting+validating/queued→inflight/queued（按 job 真实状态）；running→inflight；failed→failed；
+  cancelled→cancelled；indeterminate→indeterminate；committed initializing→REQUEST_STATE_INCONSISTENT。
+- **测试**：13 套件（原 7 + R1 新增 6：validation-ownership/worker-fencing/recovery/path-security/
+  request-concurrency/compose-mounts），真实双进程并发（child 进程独立连接）、真实 symlink fs、
+  mutation proof（5 项 fence 禁用验证均 FAIL）。
