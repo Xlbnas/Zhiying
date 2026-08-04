@@ -28,6 +28,7 @@ export const RESOURCE_CLASSES = [
   'network_io',
   'cpu_compile',
   'db_short_write',
+  'voice_materialization',
 ] as const;
 
 export type ResourceClass = (typeof RESOURCE_CLASSES)[number];
@@ -41,13 +42,14 @@ export const GPU_EXCLUSIVE_GROUP: readonly ResourceClass[] = [
 
 /** 四类真实队列 → 资源类别（调度器唯一映射真相）。 */
 export const JOB_TYPE_RESOURCE_CLASS: Record<
-  'render' | 'llm' | 'tts' | 'dispatch',
+  'render' | 'llm' | 'tts' | 'dispatch' | 'voice_materialization',
   ResourceClass
 > = {
   render: 'render_gpu',
   llm: 'llm_api',
   tts: 'tts_gpu',
   dispatch: 'llm_api',
+  voice_materialization: 'voice_materialization',
 };
 
 const GPU_SET = new Set<ResourceClass>(GPU_EXCLUSIVE_GROUP);
@@ -66,6 +68,7 @@ export const RESOURCE_CLASS_LABELS: Record<ResourceClass, string> = {
   network_io: '网络下载',
   cpu_compile: '本地编译',
   db_short_write: '数据库写入',
+  voice_materialization: 'Voice Materialization',
 };
 
 /**
@@ -93,6 +96,7 @@ export const RESOURCE_LIMIT_ENV: Record<ResourceClass, string> = {
   render_gpu: 'ZHIYING_MAX_RENDER_JOBS',
   local_image_gpu: 'ZHIYING_MAX_LOCAL_IMAGE_JOBS',
   remote_image_api: 'ZHIYING_MAX_REMOTE_IMAGE_JOBS',
+  voice_materialization: 'ZHIYING_MAX_VOICE_MATERIALIZATION_JOBS',
   network_io: 'ZHIYING_MAX_NETWORK_JOBS',
   cpu_compile: 'ZHIYING_MAX_CPU_JOBS',
   db_short_write: 'ZHIYING_MAX_DB_WRITE_JOBS',
@@ -108,6 +112,7 @@ export const DEFAULT_RESOURCE_LIMITS: Record<ResourceClass, number> = {
   network_io: 8,
   cpu_compile: 2,
   db_short_write: 16,
+  voice_materialization: 4,
 };
 
 /**

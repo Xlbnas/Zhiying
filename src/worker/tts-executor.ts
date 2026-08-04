@@ -5,6 +5,8 @@ import path from 'node:path';
 import {getDataDir} from '@/lib/db';
 import {getTtsProviderByName} from '@/lib/tts';
 import {TtsError, type TtsProvider} from '@/lib/tts/types';
+import type {AudioProbe} from '@/lib/tts-c/audio-probe';
+import {probeAudio as probeAudioImpl} from '@/lib/tts-c/audio-probe';
 import {
   anyTtsJobPayloadSchema,
   failTtsJob,
@@ -62,38 +64,8 @@ export interface TtsExecutorDeps {
   ffprobeImpl?: (filePath: string) => AudioProbe;
 }
 
-export interface AudioProbe {
-  durationMs: number;
-  codec: string;
-  sampleRate: number;
-  channels: number;
-}
-
-/** ffprobe 实测音频元数据（唯一时长真相）。 */
-export function probeAudio(filePath: string): AudioProbe {
-  const out = execFileSync('ffprobe', [
-    '-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', filePath,
-  ], {encoding: 'utf8'});
-  const json = JSON.parse(out) as {
-    format?: {duration?: string};
-    streams?: Array<{codec_type?: string; codec_name?: string; sample_rate?: string; channels?: number}>;
-  };
-  const stream = json.streams?.find((s) => s.codec_type === 'audio');
-  if (!stream) {
-    throw new TtsError('INVALID_AUDIO', 'ffprobe 未找到 audio stream');
-  }
-  const durationSec = Number(json.format?.duration ?? 0);
-  if (!Number.isFinite(durationSec) || durationSec <= 0) {
-    throw new TtsError('INVALID_AUDIO', `ffprobe duration 非法: ${json.format?.duration}`);
-  }
-  return {
-    durationMs: Math.round(durationSec * 1000),
-    codec: stream.codec_name ?? 'unknown',
-    sampleRate: Number(stream.sample_rate ?? 0),
-    channels: stream.channels ?? 0,
-  };
-}
-
+export {probeAudio} from '@/lib/tts-c/audio-probe';
+export type {AudioProbe} from '@/lib/tts-c/audio-probe';
 function sha256File(filePath: string): string {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
@@ -104,7 +76,7 @@ export async function runTtsJob(
   deps: TtsExecutorDeps = {},
 ): Promise<void> {
   const {log} = ctx;
-  const probe = deps.ffprobeImpl ?? probeAudio;
+  const probe = deps.ffprobeImpl ?? probeAudioImpl;
   let tmpPath: string | null = null;
   // M7.3A.3：lease-lost 标志（提升到函数级，供 Commit Fence 与 catch 读取）
   let leaseLost = false;

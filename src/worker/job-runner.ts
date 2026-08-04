@@ -13,6 +13,7 @@ import {runDispatchJob} from './dispatch-executor';
 import {runLlmJob} from './llm-executor';
 import {runTtsJob} from './tts-executor';
 import {runAssetGenerationJob} from './asset-generation-executor';
+import {runMaterializationJob} from './materialization-executor';
 
 /**
  * 并行 Worker 的 per-job 运行器 + 调度循环（M7 依赖/资源感知并行化）。
@@ -107,6 +108,20 @@ export async function executeClaimedJob(
       claimed.job,
       ctx,
       leaseMeta ? {group: leaseMeta.group, ownerToken: leaseMeta.ownerToken} : undefined,
+    );
+    return;
+  }
+  if (claimed.type === 'voice_materialization') {
+    // TTS-C.1A：durable materialization（非 GPU/LLM；不占用任何资源 lease；
+    // 不调用 IndexTTS2；不创建 TTS job）
+    const job = claimed.job;
+    if (job.owner_token === null || job.attempt === undefined) {
+      log(`materialization job ${job.id} 缺 owner/attempt（claim 异常），跳过`);
+      return;
+    }
+    await runMaterializationJob(
+      {jobId: job.id, ownerToken: job.owner_token, attempt: job.attempt},
+      ctx,
     );
     return;
   }

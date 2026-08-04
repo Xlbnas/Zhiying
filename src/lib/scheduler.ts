@@ -17,6 +17,8 @@ import {
   type ResourceClass,
 } from './workflow/resource-classes';
 import type {AssetGenerationJobRow} from './assets/generation-jobs';
+import type {VoiceMaterializationJobRow} from './tts-c/materialization';
+import {MATERIALIZATION_EXECUTION_LEASE_MS} from './tts-c/constants';
 
 /**
  * 单调度器多队列领取（M2-C 双队列 → M3-B 三队列 → M7 四队列 → M7 资源感知并行
@@ -41,7 +43,8 @@ export type ClaimedJob =
   | {type: 'llm'; job: LlmJobRow; resourceClass: ResourceClass}
   | {type: 'tts'; job: TtsJobRow; resourceClass: ResourceClass; resourceLease?: ResourceLeaseMeta}
   | {type: 'dispatch'; job: DispatchJobRow; resourceClass: ResourceClass}
-  | {type: 'asset_generation'; job: AssetGenerationJobRow; resourceClass: ResourceClass; resourceLease?: ResourceLeaseMeta};
+  | {type: 'asset_generation'; job: AssetGenerationJobRow; resourceClass: ResourceClass; resourceLease?: ResourceLeaseMeta}
+  | {type: 'voice_materialization'; job: VoiceMaterializationJobRow; resourceClass: ResourceClass};
 
 /** 资源感知 claim 选项（M7）。 */
 export interface ClaimOptions {
@@ -79,6 +82,12 @@ function getAssetGenerationJobById(id: string): AssetGenerationJobRow | undefine
   return getDb()
     .prepare('SELECT * FROM asset_generation_jobs WHERE id = ?')
     .get(id) as AssetGenerationJobRow | undefined;
+}
+
+function getMaterializationJobById(id: string): VoiceMaterializationJobRow | undefined {
+  return getDb()
+    .prepare('SELECT * FROM voice_materialization_jobs WHERE id = ?')
+    .get(id) as VoiceMaterializationJobRow | undefined;
 }
 
 const CLAIM_UPDATE_SQL: Record<'render' | 'llm' | 'tts' | 'dispatch', string> = {
@@ -137,11 +146,13 @@ export function claimNextAnyJob(workerId: string, opts?: ClaimOptions): ClaimedJ
            SELECT 'dispatch' AS type, id, created_at AS queued_at FROM generation_dispatch_jobs WHERE status = 'queued'
            UNION ALL
            SELECT 'asset_generation' AS type, id, created_at AS queued_at FROM asset_generation_jobs WHERE status = 'queued'
+           UNION ALL
+           SELECT 'voice_materialization' AS type, id, created_at AS queued_at FROM voice_materialization_jobs WHERE status = 'queued'
            ORDER BY queued_at ASC, type ASC, id ASC
            LIMIT 50`,
         )
         .all() as Array<{
-          type: 'render' | 'llm' | 'tts' | 'dispatch' | 'asset_generation';
+          type: 'render' | 'llm' | 'tts' | 'dispatch' | 'asset_generation' | 'voice_materialization';
           id: string;
           queued_at: string;
         }>;
@@ -210,6 +221,41 @@ export function claimNextAnyJob(workerId: string, opts?: ClaimOptions): ClaimedJ
           return job ? {type: 'asset_generation', job, resourceClass, resourceLease} : null;
         }
 
+        if (next.type === 'voice_materialization') {
+          // 1A：claim 前裁决——cancel_requested 或 active subscriber=0 → 直接 cancelled（不 enqueue running）
+          const cancelRes = db
+            .prepare(
+              `UPDATE voice_materialization_jobs
+               SET status = 'cancelled', updated_at = ?
+               WHERE id = ? AND status = 'queued'
+                 AND (cancel_requested = 1
+                      OR NOT EXISTS (SELECT 1 FROM voice_materialization_requests r
+                                     WHERE r.job_id = voice_materialization_jobs.id
+                                       AND r.status IN ('waiting','running')))`,
+            )
+            .run(at, next.id);
+          if (cancelRes.changes === 1) {
+            db.prepare(
+              `UPDATE voice_materialization_requests SET status = 'cancelled', updated_at = ?
+               WHERE job_id = ? AND status IN ('waiting','running')`,
+            ).run(at, next.id);
+            continue;
+          }
+          // fenced claim（validating_existing 不可见；只 claim queued）
+          const ownerToken = `${claimedBy}:${crypto.randomUUID()}`;
+          const leaseExpires = Date.now() + MATERIALIZATION_EXECUTION_LEASE_MS;
+          const res = db
+            .prepare(
+              `UPDATE voice_materialization_jobs
+               SET status = 'running', owner_token = ?, lease_expires_at_epoch_ms = ?,
+                   heartbeat_at = ?, attempt = attempt + 1, updated_at = ?
+               WHERE id = ? AND status = 'queued'`,
+            )
+            .run(ownerToken, leaseExpires, at, at, next.id);
+          if (res.changes === 0) continue;
+          const job = getMaterializationJobById(next.id);
+          return job ? {type: 'voice_materialization', job, resourceClass} : null;
+        }
         const res = db
           .prepare(CLAIM_UPDATE_SQL[next.type])
           .run(claimedBy, at, at, at, next.id);
