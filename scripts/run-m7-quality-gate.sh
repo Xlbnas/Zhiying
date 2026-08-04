@@ -117,6 +117,15 @@ run_suite "m71-tts" npx tsx scripts/test-m71-tts.ts
 run_suite "m3b-tts" npx tsx scripts/test-m3b-tts.ts
 run_suite "m3c-subtitle-timing" npx tsx scripts/test-m3c-subtitle-timing.ts
 
+# 8. TTS-C.1A materialization 7 套（Durable Voice Materialization Foundation）
+run_suite "tts-c1a-migration" npx tsx scripts/test-tts-c1a-migration.ts
+run_suite "tts-c1a-schema" npx tsx scripts/test-tts-c1a-materialization-schema.ts
+run_suite "tts-c1a-api" npx tsx scripts/test-tts-c1a-materialization-api.ts
+run_suite "tts-c1a-worker" npx tsx scripts/test-tts-c1a-materialization-worker.ts
+run_suite "tts-c1a-durability" npx tsx scripts/test-tts-c1a-materialization-durability.ts
+run_suite "tts-c1a-concurrency" npx tsx scripts/test-tts-c1a-materialization-concurrency.ts
+run_suite "tts-c1a-files" npx tsx scripts/test-tts-c1a-materialization-files.ts
+
 echo "QUALITY_GATE_RESULT=PASS"
 echo "QUALITY_GATE_SHA=$GATE_SHA"
 echo "QUALITY_GATE_TOTAL_SUITES=$((PASS_COUNT))"
