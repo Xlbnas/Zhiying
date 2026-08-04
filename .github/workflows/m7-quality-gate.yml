@@ -123,14 +123,18 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: sqlite3 CLI version（ubuntu-24.04 自带 3.45.1，作为 CLI 引擎固定版本）
-        run: sqlite3 --version
+      - name: sqlite3 CLI version fail-closed pin（exact 3.45.1；不匹配即 failure）
+        run: |
+          ACTUAL="$(sqlite3 --version | awk '{print $1}')"
+          echo "sqlite3 CLI version: ${ACTUAL}"
+          test "$ACTUAL" = "3.45.1"
+          python3 -c "import sqlite3; print('python sqlite3 version:', sqlite3.sqlite_version)"
 
       - name: Run TTS-C contract runner（双引擎）
         id: contract
         run: |
           set -o pipefail
-          python3 docs/evidence/tts-c-r11/contract_runner.py \
+          python3 docs/evidence/tts-c-r12/contract_runner.py \
             --design docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md \
             --sqlite-bin sqlite3 \
             --engine all \
@@ -138,7 +142,7 @@ jobs:
 
       - name: 双引擎一致性校验（test ID / TOTAL/PASS/FAIL/SKIP / design SHA / SQL SHA）
         run: |
-          python3 docs/evidence/tts-c-r11/verify_engines.py \
+          python3 docs/evidence/tts-c-r12/verify_engines.py \
             /tmp/ttsc-r11-ci/results-python-sqlite.txt \
             /tmp/ttsc-r11-ci/results-sqlite-3.45.1.txt
 
@@ -146,7 +150,7 @@ jobs:
         run: |
           python3 - <<'EOF'
           import sys, hashlib
-          sys.path.insert(0, "docs/evidence/tts-c-r11")
+          sys.path.insert(0, "docs/evidence/tts-c-r12")
           from extract_contract import extract_section2_sql
           cur = extract_section2_sql("docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md")["sha256"]
           rec = None
