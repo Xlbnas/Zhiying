@@ -1,57 +1,52 @@
-# TTS-C 实施计划（TTS-C.0.R12 修订；runtime implementation not started）
+# TTS-C 实施计划（TTS-C.0.R13 修订；runtime implementation not started）
 
-> 状态：**TTS-C.0.R12 architecture revision completed；pending independent Review；
+> 状态：**TTS-C.0.R13 architecture revision completed；pending independent Review；
 > TTS-C runtime implementation not started；TTS-C.1A / 1B / 1C not started**。
-> 本计划按 TTS-C.0.R12 Review 闭环更新。R12 关闭独立 Review 对 R11 的 FAIL 发现（docs-only，零 runtime/零 migration/零 schema）：
-> **P0-C**（historical command replay：R11 per-column fence 用"EXISTS 任意历史 command 行、其字段值
-> 等于 NEW"授权直接 UPDATE——command 表 append-only，历史 worker_claim/renewal/takeover/
-> state_transition 行永久存在：可先 worker_claim w1 → takeover w2，再直接
-> `UPDATE claim.owner_token='w1'` 被历史行错误放行，形成 claim owner=w1 / job owner=w2 的
-> split-brain；同样可复活 terminal owner、回退 attempt/lease/heartbeat/error 证据）：
-> ① **database-time lease fencing**（所有 lease 列统一 INTEGER epoch milliseconds；权限判断时间 =
-> SQLite DB 当前时间 `DB_NOW_MS`（trigger 内 SELECT 计算）；`DB_NOW_MS <= lease` 含等值；
-> 过期 = `lease < DB_NOW_MS` 严格；julianday 截断最多约 1ms 保守误差；evidence 时间冻结不得晚于
-> `DB_NOW_ISO`；fence 比较全部 trigger 内 SELECT 计算，不使用 caller-supplied 时间）；
+> 本计划按 TTS-C.0.R13 Review 闭环更新。R13 关闭独立 Review 对 R12 的 FAIL 发现（docs-only，零 runtime/零 migration/零 schema）：
+> **P0-D**（terminal claim evidence 可篡改：R12 的 attempt fence 只保护执行期状态，generated
+> terminal（succeeded/failed/cancelled）的 `validation_attempt` 可直接 UPDATE 篡改（不推进 head、
+> 无 command、不触发 fence、不违反 CHECK/immutable），使 terminal claim attempt 与 job/command
+> history 脱钩；且离开 validating_reuse 后 candidate/validation evidence 可被直接改写/回填）：
+> ① **database-time lease fencing**（`DB_NOW_MS` trigger 内 SELECT 计算；`<=` 含等值 / `<` 严格；
+> julianday 截断 ≤1ms 保守；evidence 时间冻结；不使用 caller-supplied 时间）；
 > ② **indeterminate entry evidence seal**（`trg_vrp_indeterminate_seal` + `trg_vrp_indeterminate_shape`）；
 > ③ **indeterminate exact-attempt resolution**（`activation_mode` 双态 + `resolution_evidence(_hash)`）；
-> ④ **legacy cutover reachable：mapping_mode 双路径**（publish_and_cutover 与 cutover_existing 均可达；
+> ④ **legacy cutover reachable：mapping_mode 双路径**（publish_and_cutover / cutover_existing 均可达；
 > cutover_existing activation 零改写 projection evidence）；
 > ⑤ **materialization_publish 与 legacy mapping 互斥 + 竞争裁决**（三情况确定性裁决；
-> 活跃一对一 `uq_lve_active_mapped_materialization`；retired 不占活跃唯一位）；
-> ⑥ **atomic claim/job execution coupling（R12 重写，关闭 P0-C）**（第 13 表
-> `tts_job_execution_transitions` append-only command：**applied-command chain（execution head）**——
-> claim/job 各增加 `last_execution_command_id` + `execution_command_seq`（双侧恒等；TTS-C 行 dispatch
-> 后 seq=0/last=NULL；legacy 行 NULL 不受影响）；command 行增加 `previous_command_id` +
-> `command_seq`（首条 worker_claim/prestart_terminal：previous IS NULL、seq=1；后续：
-> previous = 双侧当前 head id、seq = 当前 seq+1；`UNIQUE(job_id,command_seq)` +
-> `UNIQUE(claim_id,command_seq)`）；
-> 五类 `command_kind` 互斥保持（worker_claim / lease_renewal / execution_takeover /
-> prestart_terminal / state_transition），renewal/takeover/state_transition 的 owner/attempt/head
-> 校验升级为 claim↔job 精确配对 JOIN（单一 EXISTS 内裁决 `claim.owner_token = job.claimed_by`、
-> attempt 双侧相等、head 双侧相等、status 双侧 exact）；
-> **direct mutation fence 一律绑定 NEW head**（R12 P0-C 核心）：任何受保护字段变化必须同时满足
-> head 精确推进（`NEW.seq = OLD.seq+1`、`NEW.last = 该 seq 的唯一 command e`、
-> `e.previous_command_id IS OLD.last`、`e.from/to = OLD/NEW status`、字段值与 e 逐项一致）——
-> **历史 command 的 id/seq 永远不等于当前 head 的 NEW 值，历史行不能授权任何直接 UPDATE**；
-> head 自身 trigger（不可回退/跳号/单侧推进/重复消费）；`trg_tjs_terminal_shape`：TTS-C job
-> terminal（succeeded/failed/cancelled）claimed_* 必须 NULL；terminal 后 owner/attempt/error/head
-> 复活一律 ABORT；`running→succeeded` command 是 §8.2 原子成功终局事务内一条 statement）；
+> `uq_lve_active_mapped_materialization` 活跃一对一；retired 不占活跃唯一位）；
+> ⑥ **atomic claim/job execution coupling（R12 applied-command chain 保持，R13 补 claim terminal
+> evidence seal）**：execution head（claim/job `last_execution_command_id` + `execution_command_seq`
+> 双侧恒等）+ command `previous_command_id`/`command_seq`（UNIQUE(job_id|claim_id, command_seq)）
+> + 五类 `command_kind` + claim↔job 精确配对 JOIN + direct mutation fence 绑定 NEW head——
+> R12 全套不回退；**R13 新增**：`trg_tsc_terminal_immutable`（succeeded/failed/cancelled 的 claim
+> 全字段含 validation_attempt/candidate/validation evidence/execution head/updated_at 完全冻结；
+> 基于 OLD.status 判定，进入 terminal 的同一 command statement 不误伤）+
+> `trg_tsc_post_validation_evidence_seal`（离开 validating_reuse 后 candidate_artifact_id/
+> candidate_artifact_metadata_hash/validation_started_at 一律 immutable；dispatch 出口清空与
+> reuse finalize 保留 snapshot 均不受影响）；**attempt 语义冻结**：generated execution 双侧恒等
+> （worker_claim 建立、takeover 双侧 +1、terminal 后任一侧不可改）；prestart terminal 无 Worker
+> attempt（job.attempt 保持初始 0，command.worker_attempt 仅作 validation fence），commit 后各自
+> immutable——禁止模糊写"双侧 attempt 永远恒等"；`running→succeeded` command 是 §8.2 原子成功
+> 终局事务内一条 statement）；
 > ⑦ **voice identity compatibility freeze**（`CAST(revision_number AS TEXT)` 双向一致；immutable）；
 > ⑧ **journal identity seal + generation uniqueness**（DB-level UNIQUE + 应用 BEGIN IMMEDIATE 单调）；
-> ⑨ **可执行 SQLite contract 实证（R12 证据口径 + 真实事务 + CI fail-closed pin）**（可复跑 runner
-> 入库 `docs/evidence/tts-c-r12/`：只从设计文档 §2 提取 SQL + 最小真实基座 fixture；双引擎
-> （sqlite3 3.45.1 + Python sqlite3）schema apply / foreign_key_check（空）/ integrity_check（ok）/
-> 真实 BEGIN IMMEDIATE 事务能力；**130 项 mutation 实跑 FAIL=0（两引擎逐 test 一致）**——
-> 含 R12 新增 HR-01…20（historical replay seal，真实历史值）20 项 + R11 全矩阵重跑 110 项；
-> R11 的 110 项被覆盖、R10 的 91 项与 R9 的 360/23-29 口径不再引用；历史回归 NOT EXECUTED
-> 清单见设计文档 §10.5；**CI TTS-C Contract Gate：sqlite3 CLI 版本 fail-closed pin 3.45.1**
-> （不匹配即 workflow failure；Python 版本记录报告、CLI 为 authoritative engine），final HEAD
-> 重新生成双引擎结果，两引擎一致 + SHA 一致，FAIL>0 → workflow failure）。
-> R7/R8/R9/R10/R11 的 publication journal、projection/publication 分离、无环 claim/job、result 封存、
+> ⑨ **可执行 SQLite contract 实证（R13 证据口径）**（可复跑 runner 入库 `docs/evidence/tts-c-r13/`：
+> 只从设计文档 §2 提取 SQL + 最小真实基座 fixture；双引擎（sqlite3 3.45.1 + Python sqlite3）
+> schema apply / foreign_key_check（空）/ integrity_check（ok）/ 真实 BEGIN IMMEDIATE 事务能力；
+> **150 项 mutation 实跑 FAIL=0（两引擎逐 test 一致）**——含 R13 新增 CE-01…20（claim terminal
+> evidence seal + post-validation evidence seal）20 项 + R12 全矩阵重跑 130 项；R12 的 130 项、
+> R11 的 110 项、R10 的 91 项、R9 的 360/23-29 不再引用；历史回归 NOT EXECUTED 清单见设计文档
+> §10.5；**CI TTS-C Contract Gate**：sqlite3 CLI fail-closed pin 3.45.1（不匹配即 failure；Python
+> 版本记录报告、CLI 为 authoritative engine），final HEAD 重新生成双引擎结果、两引擎一致 +
+> SHA 一致、FAIL>0 → workflow failure；checked-in results 记录生成时 base HEAD，final HEAD 权威
+> 绑定由 CI artifact 提供）。
+> R7-R12 的 publication journal、projection/publication 分离、无环 claim/job、result 封存、
 > subscriber identity、initializing 状态、initial INSERT 冻结、exact voice identity、validation
 > fencing、attempt 证据不可变、provenance 闭包、cutover journal、lease fencing、五类 command、
-> prestart 可达、indeterminate 保留 owner、双路径 cutover、indeterminate seal/resolve 由 R10/R11/R12
-> 继承并强化；R11 被独立 Review 判 FAIL 的 P0-C（historical command replay）全部关闭。
+> prestart 可达、indeterminate 保留 owner、双路径 cutover、indeterminate seal/resolve、
+> applied-command chain、historical replay seal 由 R11/R12/R13 继承并强化；R12 被独立 Review 判
+> FAIL 的 P0-D（terminal claim evidence 可篡改）全部关闭。
 > 每阶段：独立 migration、独立 tests、独立 Review、独立 deployment gate、不跨阶段、不产生半成品 active 状态。
 ## 0. 总原则（R6 强化）
 
@@ -177,11 +172,13 @@ PE-01…04（indeterminate evidence closure）。
 **scope**（设计文档 §2.0–2.4/§3/§4/§8）：
 - 新表：`tts_audio_requests`（**R8-H**：initializing→waiting 必须 exact claim 链接，`waiting requires claim link`）、
   `tts_synthesis_claims`（fenced reclaimable validation：§3.1 contract + takeover CAS + fenced renewal + 三方竞争单裁决；
-  **R12 ⑥**：indeterminate 保留 Worker owner/lease（可 renewal / 可 takeover / 非终态）、
+  **R13 ⑥**：indeterminate 保留 Worker owner/lease（可 renewal / 可 takeover / 非终态）；
+  terminal claim 全证据字段冻结（trg_tsc_terminal_immutable）；离开 validating_reuse 后
+  candidate/validation evidence 不可改写（trg_tsc_post_validation_evidence_seal）、
   **`tts_claim_generation_dispatches`（R8-F 第 12 表）**（append-only atomic dispatch command：单条 INSERT 原子完成
   fencing + subscriber>0 + 恰好一个 queued job + claim→generation_pending；UNIQUE(claim_id)；generation_pending
   无 dispatch 的状态迁移 ABORT）、
-  **`tts_job_execution_transitions`（R12 ⑥ 第 13 表）**（append-only execution coupling command：
+  **`tts_job_execution_transitions`（R13 ⑥ 第 13 表）**（append-only execution coupling command：
   `command_kind` 五态 worker_claim / lease_renewal / execution_takeover / prestart_terminal /
   state_transition；**applied-command chain**：claim/job 双侧 execution head
   （last_execution_command_id + execution_command_seq）恒等、每应用一条 command 同时 +1；
@@ -266,10 +263,10 @@ failed-retry/cost-usage）；**production acceptance gate**：人工验收命令
 | C.4 | ✓ | ✓ | ✓ | ✓ | ✗（master 显式构建） | ✗ |
 | C.5 | ✓ | ✓ | ✓ | ✓ | ✗ | 仅人工验收命令 |
 
-## 依赖顺序（R12 DAG，取代 R5/R8 的 1A→1B→1C 链）
+## 依赖顺序（R13 DAG，取代 R5/R8 的 1A→1B→1C 链）
 
 ```text
-R12 PASS
+R13 PASS
 ├─ 1A ∥ 1C            （可并行开发：不同 worktree/local branch）
 └─ limited 1B-prep    （adapter parser/reloader 测试骨架可并行准备）
 
@@ -283,14 +280,14 @@ C.2 PASS
 → C.3 → C.4 → C.5（runtime 串行；仅 schema/mock/test planning 可提前并行）
 ```
 
-更新 1A/1B/C.2 schema 边界以采用 R12 contract（epoch_ms lease + DB_NOW_MS fence + indeterminate entry
+更新 1A/1B/C.2 schema 边界以采用 R13 contract（epoch_ms lease + DB_NOW_MS fence + indeterminate entry
 evidence seal + activation_mode + resolution_evidence_hash + mapping_mode/subject_mode 双路径 +
 execution_transitions applied-command chain（execution head + previous_command_id/command_seq +
 五类 command）+ direct mutation fence 绑定 NEW head + terminal shape + 全生命周期多 transition +
 voice_revision compat closure）。
 
 **建议首先实现**：**TTS-C.1A**（零音频风险、解锁 materialization、为 1B cutover 提供 DB 基础）——但 1A 未开始，
-须待本 R12 独立 Review PASS。
+须待本 R13 独立 Review PASS。
 
 ## 并行开发矩阵（冻结：并行开发，串行集成/Review/部署）
 
@@ -322,4 +319,4 @@ voice_revision compat closure）。
 
 > 注：materialization schema、request envelope、validation/cutover fencing、crash-safe cutover 协议、
 > relational provenance 闭包、attempt/materialization/cutover 证据不可变与全部状态机已在
-> `docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md`（R12）以可执行 contract 冻结，不再属于"进入 1A 后再决定"项。
+> `docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md`（R13）以可执行 contract 冻结，不再属于"进入 1A 后再决定"项。
