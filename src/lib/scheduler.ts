@@ -244,7 +244,9 @@ export function claimNextAnyJob(workerId: string, opts?: ClaimOptions): ClaimedJ
           }
           // fenced claim（validating_existing 不可见；只 claim queued）
           const ownerToken = `${claimedBy}:${crypto.randomUUID()}`;
-          const leaseExpires = Date.now() + MATERIALIZATION_EXECUTION_LEASE_MS;
+          // R2：DB-time lease（host 时钟漂移不影响语义）
+          const dbNowRow = db.prepare(`SELECT (CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)) AS n`).get() as {n: number};
+          const leaseExpires = dbNowRow.n + MATERIALIZATION_EXECUTION_LEASE_MS;
           const res = db
             .prepare(
               `UPDATE voice_materialization_jobs

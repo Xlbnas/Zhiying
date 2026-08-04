@@ -9,11 +9,25 @@ const createBodySchema = z.object({
   projectVoiceAssignmentArtifactId: z.string().min(1),
 });
 
+/**
+ * R2：POST feature gate——production 缺失或非显式 "true" → 503 MATERIALIZATION_NOT_ENABLED。
+ * 只有未来独立 Review PASS 后才能单独启用；GET 不受影响；不泄漏内部配置。
+ */
+function postEnabled(): boolean {
+  return process.env.TTS_C1A_MATERIALIZATION_POST_ENABLED === 'true';
+}
+
 export async function POST(
   request: Request,
   {params}: {params: Promise<{id: string}>},
 ): Promise<NextResponse> {
   const {id: projectId} = await params;
+  if (!postEnabled()) {
+    return NextResponse.json(
+      {error: {code: 'MATERIALIZATION_NOT_ENABLED', message: 'materialization POST 未启用（feature gate）'}},
+      {status: 503},
+    );
+  }
   let body: unknown;
   try {
     body = await request.json();
@@ -30,6 +44,7 @@ export async function POST(
       parsed.data.requestId,
       parsed.data.projectVoiceAssignmentArtifactId,
     );
+    // R2：finalize 后重读 request/job/projection（禁止返回 Phase 1 缓存的 waiting row）
     const view = serializeMaterializationRequest(result.request, result.projection);
     return NextResponse.json(
       {
@@ -46,7 +61,9 @@ export async function POST(
                 ? 'materialization in flight（Worker 正在执行）'
                 : result.outcome === 'failed'
                   ? 'materialization failed（Worker 失联，lease 过期恢复；请重新提交）'
-                  : 'materialization cancelled（无 active subscriber）',
+                  : result.outcome === 'indeterminate'
+                    ? 'materialization indeterminate（durability 无法确定；等待 reconciliation）'
+                    : 'materialization cancelled（无 active subscriber）',
       },
       {status: result.outcome === 'queued' ? 202 : 200},
     );
