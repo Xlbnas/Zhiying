@@ -2,7 +2,7 @@ TTS-C.0.R13 contract validation results
 engine                 : python-sqlite
 engine sqlite version  : 3.45.1
 python sqlite3 version : 3.45.1
-git HEAD               : 55afea5f0696dd4d7016d2c90641d4e7edebaa18
+git HEAD               : ee89f656091dba6ae508ddd2ed8a562e222d8eaf
 design doc             : /home/agentvm/projects/ZhiYing/docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md
 design doc sha256      : 5ea8757b20a68ea8d53eb2c55024875a6cf5206d4268b445e84b6fc5e8a212a6
 extracted §2 sql sha256: c88f64ac880a0cf50519a3b5eaba724a701b93ac5acea0e9c4fbdf90dd6f50d8
@@ -19,7 +19,7 @@ db triggers total      : 114
 db indexes total       : 8
 foreign_key_check rows : 0
 integrity_check        : ok
-generated_at           : 2026-08-04T14:03:15.589Z
+generated_at           : 2026-08-04T16:32:07.040Z
 
 [PASS] JS-01    job queued→running 直接 UPDATE → command required ABORT
 [PASS] JS-02    claim generation_pending→running 直接 UPDATE → command required ABORT

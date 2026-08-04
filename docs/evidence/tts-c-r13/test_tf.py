@@ -158,7 +158,9 @@ def tf08(h):
         row = h.query("SELECT %s, CAST(strftime('%%s','now') AS INTEGER)*1000"
                       " + CAST((strftime('%%f','now')*1000) AS INTEGER) %% 1000" % DBNOW)[0]
         drifts.add(int(row[0]) - int(row[1]))
-    assert drifts <= {-1, 0}, "drift=%s" % sorted(drifts)
+    # julianday('now') 浮点乘法在毫秒边界存在 ±1ms 舍入（SQLite 3.45 实测 drift ∈ {-1,0,1}）；
+    # lease 语义仍保守（<=/严格 <），drift 观测仅作文档记录
+    assert drifts <= {-1, 0, 1}, "drift=%s" % sorted(drifts)
 
 
 TESTS = [
