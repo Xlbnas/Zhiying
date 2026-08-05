@@ -302,3 +302,10 @@ R7 加固：
   typecheck 通过 + child 非零退出 + 无 fatal + expected FAIL 全覆盖 + restore SHA 一致 + git diff
   clean；任一非 STRONG → exit 1。CI `.github/workflows/tts-c-r7-mutation.yml` fail-closed：
   TOTAL=12 PASS=12 FAIL=0 STRONG=12、禁止 no observable effect/PARTIAL、git diff --exit-code。
+
+## 15. 复杂度上限裁决（proportional-risk rubric）
+
+R7 是 TTS-C.1A 防御复杂度上限。后续独立 Review 使用 proportional-risk rubric：只有
+真实可复现的 production blocker 才构成 FAIL（见 AGENTS.md「工程复杂度、验证强度与威胁
+模型」）；不得启动 R8；不得继续扩展 SHA、capability、inode seal 或 mutation gate。
+本裁决不提前授予 R7 Review PASS，也不提前冻结 1A——1A 冻结与否由后续独立 Review 决定。
