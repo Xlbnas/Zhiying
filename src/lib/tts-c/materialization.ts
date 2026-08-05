@@ -26,12 +26,14 @@ import {probeAudio, sha256FileBytes} from './audio-probe';
 import {
   openHeldMaterializedFileEvidence,
   validateMaterializedFileSnapshot,
-  assertHeldEvidenceCurrentSync,
+  assertHeldCurrentSync,
   assertHeldCapability,
   MaterializedFileError,
+  ValidatedReusableProjectionCapability,
   type MaterializedFileEvidence,
   type HeldMaterializedFileEvidence,
 } from './materialized-file-validator';
+import {__internal as __validatorInternal} from './materialized-file-validator';
 
 export type MaterializationErrorCode =
   | 'PROJECT_NOT_FOUND'
@@ -198,6 +200,20 @@ export function getProjection(profileId: string, revisionId: string): VoiceMater
     .get(profileId, revisionId) as VoiceMaterializationRow | undefined;
 }
 
+/** R5 §七：按 exact materialization id 读取（response link closure）。 */
+export function getMaterializationById(materializationId: string): VoiceMaterializationRow | undefined {
+  return getDb()
+    .prepare('SELECT * FROM voice_materializations WHERE id = ?')
+    .get(materializationId) as VoiceMaterializationRow | undefined;
+}
+
+/** R5：依据 exact revision 行读取 provider（无行 → 'unknown'）；仅 Phase 3 capability binding 使用。 */
+async function getRevisionProviderOrUnknown(profileId: string, revisionId: string): Promise<string> {
+  const {validateVoiceProfileRevisionExact} = await import('../voice-library/revisions');
+  const d = await validateVoiceProfileRevisionExact(profileId, revisionId).catch(() => null);
+  return d && d.row ? d.row.provider : 'unknown';
+}
+
 export function listActiveRequestRows(jobId: string): VoiceMaterializationRequestRow[] {
   return getDb()
     .prepare(
@@ -259,11 +275,26 @@ export async function resolveMaterializationSourceIdentity(
 
 // ── Phase 2：exact projection/file validator（事务外只读） ──
 
-export type ProjectionValidationResult =
-  | {kind: 'usable'; projection: VoiceMaterializationRow; fileSha256: string; fileEvidence: MaterializedFileEvidence}
+/**
+ * R5 P0-B：Phase 2 outcome 必须绑定 branded capability。usable 分支持有的 held fd
+ * 由 capability 持有到 Phase 3 finalize 完成；Phase 3 完成后 capability.close() 释放 fd。
+ * caller 构造的 plain `{kind:'usable', fileEvidence:{...}}` 无法触发 reused——
+ * finalizeValidatingJob 要求 branded capability 并通过 module-private WeakMap 校验。
+ */
+export type ProjectionValidationOutcome =
+  | {
+      kind: 'usable';
+      capability: ValidatedReusableProjectionCapability;
+      projection: VoiceMaterializationRow;
+      fileSha256: string;
+      fileEvidence: Readonly<MaterializedFileEvidence>;
+    }
   | {kind: 'unusable'; reason: string};
 
-/** P0-D：Phase 2 完成后、Phase 3 前捕获的 projection/file evidence（不可伪造的绑定凭据）。 */
+/** R4 兼容别名（既存 tests 使用）；内部实现已迁到 ProjectionValidationOutcome。 */
+export type ProjectionValidationResult = ProjectionValidationOutcome;
+
+/** R4 兼容类型别名（既存 tests 用）。 */
 export interface ValidatedProjectionEvidence {
   projectionId: string;
   profileId: string;
@@ -277,6 +308,11 @@ export interface ValidatedProjectionEvidence {
   validatedAt: string;
 }
 
+/** R5 §九：production hook guard。test 环境方可注入；NODE_ENV=production 拒绝。 */
+function isProductionEnv(): boolean {
+  return process.env.NODE_ENV === 'production';
+}
+
 /** 测试 hook（仅测试）：recovery durabilize 完成后、success transaction 前。 */
 export let afterRecoveryEvidenceBeforeCommit:
   | ((ctx: {jobId: string; relativePath: string}) => Promise<void> | void)
@@ -284,6 +320,9 @@ export let afterRecoveryEvidenceBeforeCommit:
 export function setAfterRecoveryEvidenceBeforeCommit(
   fn: ((ctx: {jobId: string; relativePath: string}) => Promise<void> | void) | null,
 ): void {
+  if (isProductionEnv()) {
+    throw new Error('test hook disabled in production（setAfterRecoveryEvidenceBeforeCommit）');
+  }
   afterRecoveryEvidenceBeforeCommit = fn;
 }
 
@@ -294,12 +333,21 @@ export let afterProjectionValidationBeforeFinalize:
 export function setAfterProjectionValidationBeforeFinalize(
   fn: ((ctx: {projectionId: string | null; validationKind: 'usable' | 'unusable'}) => Promise<void> | void) | null,
 ): void {
+  if (isProductionEnv()) {
+    throw new Error('test hook disabled in production（setAfterProjectionValidationBeforeFinalize）');
+  }
   afterProjectionValidationBeforeFinalize = fn;
 }
 
+/**
+ * R5：Phase 2 唯一 issuer。usable 分支返回 branded capability，held fd 持续打开直到
+ * capability.close()。unusable 分支不持有 fd。
+ */
 export async function validateExistingProjection(
   projection: VoiceMaterializationRow,
-): Promise<ProjectionValidationResult> {
+  candidateMetadataHash: string | null,
+  provider: string,
+): Promise<ProjectionValidationOutcome> {
   if (projection.status !== 'file_ready_unpublished' && projection.status !== 'published_usable') {
     return {kind: 'unusable', reason: `projection status=${projection.status}`};
   }
@@ -311,7 +359,6 @@ export async function validateExistingProjection(
   if (!descriptor.usable) {
     return {kind: 'unusable', reason: descriptor.unusableReason ?? 'hash_mismatch'};
   }
-  // R2/R3：projection 文件用共享 safe final-file validator（verify 模式，零 mkdir/零写）
   try {
     const held = await openHeldMaterializedFileEvidence(
       {
@@ -328,13 +375,18 @@ export async function validateExistingProjection(
       },
       'verify',
     );
-    const evidence = held.evidence;
-    await held.close();
+    const {capability, fileEvidence} = __validatorInternal.issueReuseCapabilityFromHeld(
+      projection,
+      candidateMetadataHash ?? '',
+      provider,
+      held,
+    );
     return {
       kind: 'usable',
+      capability,
       projection,
-      fileSha256: evidence.sha256,
-      fileEvidence: evidence,
+      fileSha256: capability.fileSha256,
+      fileEvidence,
     };
   } catch (err) {
     return {kind: 'unusable', reason: err instanceof Error ? err.message : String(err)};
@@ -347,12 +399,11 @@ export type FinalizeOutcome = 'reused' | 'queued' | 'cancelled' | 'inflight' | '
 
 export function finalizeValidatingJob(
   handle: ValidationLeaseHandle,
-  validationResult: ProjectionValidationResult,
+  outcome: ProjectionValidationOutcome,
   db: Db = getDb(),
-  validatedEvidence?: ValidatedProjectionEvidence,
 ): FinalizeOutcome {
   const now = nowIso();
-  const outcome = db.transaction((): FinalizeOutcome => {
+  const tx = db.transaction((): FinalizeOutcome => {
     // fenced reread：凭据只来自 handle（id/token/attempt/lease/candidate id+hash exact）
     const fresh = db
       .prepare(
@@ -375,7 +426,7 @@ export function finalizeValidatingJob(
     }
     const subscribers = listActiveRequestRows(handle.jobId);
 
-    if (validationResult.kind === 'usable') {
+    if (outcome.kind === 'usable') {
       // R4 §七：zero-subscriber 终局独立 fail-closed——usable 也不得 succeeded/reused
       if (subscribers.length === 0) {
         const j = db
@@ -389,19 +440,33 @@ export function finalizeValidatingJob(
         if (j.changes !== 1) throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'job cancel failed', 409);
         return 'cancelled';
       }
-      // P0-D：Phase 3 必须持有 Phase 2 的不可伪造 evidence（否则视为未验证）
-      if (!validatedEvidence) {
-        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'usable 结果缺少 ValidatedProjectionEvidence（Phase 2 未完成验证）', 409);
+      // R5 P0-B：Phase 3 只接受 branded capability；plain ValidatedProjectionEvidence / 伪造对象 → SEAL_MISMATCH
+      const cap = outcome.capability;
+      // P0-C：unified ancestor seal（requireDurability=false：reuse path）
+      try {
+        assertHeldCurrentSync(__validatorInternal.underlyingHeldForReuse(cap), {
+          requireDurability: false,
+          expectedVoiceProfileId: cap.voiceProfileId,
+          expectedVoiceProfileRevisionId: cap.voiceProfileRevisionId,
+        });
+      } catch (e) {
+        if (e instanceof MaterializedFileError) {
+          throw new MaterializationError(
+            'MATERIALIZATION_UNUSABLE',
+            `reuse commit seal reject（${e.code}）：${e.message}`,
+            409,
+          );
+        }
+        throw e;
       }
-      const projection = validationResult.projection;
-      // P0-D：逐项 reread——validated evidence ↔ handle.candidate ↔ current projection row
-      if (validatedEvidence.projectionId !== handle.candidateMaterializationId) {
-        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'validated projectionId ≠ handle.candidateMaterializationId', 409);
+      const projection = outcome.projection;
+      // 逐项 reread——capability ↔ handle.candidate ↔ current projection row
+      if (cap.projectionId !== handle.candidateMaterializationId) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'capability projectionId ≠ handle.candidateMaterializationId', 409);
       }
-      if (validatedEvidence.projectionId !== projection.id) {
-        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'validated projectionId ≠ validation result projectionId', 409);
+      if (cap.projectionId !== projection.id) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'capability projectionId ≠ validation result projectionId', 409);
       }
-      // current projection row 与 validated evidence 一致（逐项）
       const currentProjection = db
         .prepare('SELECT * FROM voice_materializations WHERE id = ?')
         .get(projection.id) as VoiceMaterializationRow | undefined;
@@ -413,51 +478,19 @@ export function finalizeValidatingJob(
         throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'projection metadata hash 与 handle.candidate 不一致（漂移）', 409);
       }
       if (
-        currentProjection.voice_profile_id !== validatedEvidence.profileId ||
-        currentProjection.voice_profile_revision_id !== validatedEvidence.revisionId ||
-        currentProjection.source_canonical_sha256 !== validatedEvidence.sourceSha256 ||
-        currentProjection.adapter_compatibility_key !== validatedEvidence.adapterCompatibilityKey ||
-        currentProjection.status !== validatedEvidence.status ||
-        currentProjection.destination_voice_root_relative_path !== validatedEvidence.relativePath
+        currentProjection.voice_profile_id !== cap.voiceProfileId ||
+        currentProjection.voice_profile_revision_id !== cap.voiceProfileRevisionId ||
+        currentProjection.source_canonical_sha256 !== cap.sourceSha256 ||
+        currentProjection.adapter_compatibility_key !== cap.adapterCompatibilityKey ||
+        currentProjection.destination_voice_root_relative_path !== cap.relativePath
       ) {
-        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'projection row 与 validated evidence 不一致', 409);
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'projection row 与 capability 不一致', 409);
       }
-      // file evidence 仍对应当前 projection（path + SHA + inode/dev 同步复核）
-      const fileEvidence = validatedEvidence.fileEvidence;
-      if (
-        fileEvidence.relativePath !== currentProjection.destination_voice_root_relative_path ||
-        fileEvidence.sha256 !== currentProjection.source_canonical_sha256
-      ) {
-        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'file evidence 与 current projection 不一致', 409);
+      // R5 P0-D：SHA 来自 capability record（真实 issuer 读取），不可由 caller 注入
+      if (cap.fileSha256 !== currentProjection.source_canonical_sha256) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'capability.fileSha256 ≠ projection row SHA', 409);
       }
-      // R3 §六：held/重新建立 capability 语义——同 inode 原地改写（mtime/ctime 漂移）、
-      // path 替换（dev/inode）、parent 替换（parent dev/inode）全部拒绝
-      let stNow: fsSync.BigIntStats;
-      try {
-        stNow = fsSync.lstatSync(destinationAbsolutePath(currentProjection.destination_voice_root_relative_path), {bigint: true});
-      } catch {
-        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'projection 文件不可 stat（Phase 2→3 期间丢失）', 409);
-      }
-      if (stNow.isSymbolicLink() || stNow.dev !== fileEvidence.device || stNow.ino !== fileEvidence.inode) {
-        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'projection 文件在 Phase 2→3 期间被替换（dev/inode）', 409);
-      }
-      if (stNow.size !== BigInt(fileEvidence.size)) {
-        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'projection 文件 size 漂移（Phase 2→3）', 409);
-      }
-      if (stNow.mtimeNs !== fileEvidence.mtimeNs || stNow.ctimeNs !== fileEvidence.ctimeNs) {
-        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'projection 文件同 inode 原地改写（mtime/ctime 漂移）', 409);
-      }
-      // parent dev/inode 复核
-      let parentNow;
-      try {
-        parentNow = fsSync.lstatSync(fileEvidence.parentRealpath, {bigint: true});
-      } catch {
-        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'parent 不可 stat（Phase 2→3）', 409);
-      }
-      if (parentNow.isSymbolicLink() || parentNow.dev !== fileEvidence.parentDev || parentNow.ino !== fileEvidence.parentIno) {
-        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'parent 在 Phase 2→3 期间被替换', 409);
-      }
-      // exact Revision metadata reread
+      // exact Revision metadata reread（含 provider — R3 §六）
       const revisionRow = db
         .prepare('SELECT * FROM voice_profile_revisions WHERE id = ? AND voice_profile_id = ?')
         .get(currentProjection.voice_profile_revision_id, currentProjection.voice_profile_id) as
@@ -466,7 +499,8 @@ export function finalizeValidatingJob(
       if (
         !revisionRow ||
         revisionRow.canonical_audio_sha256 !== currentProjection.source_canonical_sha256 ||
-        revisionRow.adapter_compatibility_key !== currentProjection.adapter_compatibility_key
+        revisionRow.adapter_compatibility_key !== currentProjection.adapter_compatibility_key ||
+        revisionRow.provider !== cap.provider
       ) {
         throw new MaterializationError('SOURCE_STALE', 'exact Revision metadata identity 漂移（Phase 2→3）', 409);
       }
@@ -479,7 +513,8 @@ export function finalizeValidatingJob(
           src.voiceProfileId !== currentProjection.voice_profile_id ||
           src.voiceProfileRevisionId !== currentProjection.voice_profile_revision_id ||
           src.canonicalAudioSha256 !== currentProjection.source_canonical_sha256 ||
-          src.adapterCompatibilityKey !== currentProjection.adapter_compatibility_key
+          src.adapterCompatibilityKey !== currentProjection.adapter_compatibility_key ||
+          src.provider !== revisionRow.provider
         ) {
           throw new MaterializationError('SOURCE_STALE', `request ${r.request_id} assignment source 漂移（Phase 2→3）`, 409);
         }
@@ -532,7 +567,16 @@ export function finalizeValidatingJob(
     if (j.changes !== 1) throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'job enqueue failed', 409);
     return 'queued';
   });
-  return outcome.immediate();
+  let result: FinalizeOutcome;
+  try {
+    result = tx.immediate();
+  } finally {
+    if (outcome.kind === 'usable') {
+      // Phase 3 完成或失败后关闭 capability（fd 释放；closed=true 后 capability 不可再用）
+      void outcome.capability.close().catch(() => undefined);
+    }
+  }
+  return result;
 }
 
 // ── stale validating job 接管（fenced CAS；只有赢家返回 handle） ──
@@ -905,39 +949,48 @@ export async function createMaterializationRequest(
 
   if (r1.handle) {
     // 我是 validation owner：Phase 2（事务外只读）→ hook → Phase 3（handle fenced finalize
-    // + ValidatedProjectionEvidence 逐项 reread；Phase 2 期间任何漂移 → STALE/SOURCE_STALE/
+    // + branded capability 逐项 reread；Phase 2 期间任何漂移 → STALE/SOURCE_STALE/
     // MATERIALIZATION_UNUSABLE，零更新）
     const projection = getProjection(identity.voiceProfileId, identity.voiceProfileRevisionId);
-    const validation: ProjectionValidationResult = projection
-      ? await validateExistingProjection(projection)
+    const validation: ProjectionValidationOutcome = projection
+      ? await validateExistingProjection(
+          projection,
+          r1.handle.candidateMaterializationMetadataHash,
+          await getRevisionProviderOrUnknown(identity.voiceProfileId, identity.voiceProfileRevisionId),
+        )
       : {kind: 'unusable', reason: 'no projection yet'};
-    let validatedEvidence: ValidatedProjectionEvidence | undefined;
-    if (validation.kind === 'usable' && validation.fileEvidence) {
-      validatedEvidence = {
-        projectionId: validation.projection.id,
-        profileId: validation.projection.voice_profile_id,
-        revisionId: validation.projection.voice_profile_revision_id,
-        sourceSha256: validation.projection.source_canonical_sha256,
-        adapterCompatibilityKey: validation.projection.adapter_compatibility_key,
-        status: validation.projection.status,
-        relativePath: validation.projection.destination_voice_root_relative_path,
-        fileEvidence: validation.fileEvidence,
-        candidateMetadataHash: r1.handle.candidateMaterializationMetadataHash,
-        validatedAt: nowIso(),
-      };
-    }
     if (afterProjectionValidationBeforeFinalize) {
       await afterProjectionValidationBeforeFinalize({
         projectionId: validation.kind === 'usable' ? validation.projection.id : null,
         validationKind: validation.kind,
       });
     }
-    const outcome = finalizeValidatingJob(r1.handle, validation, getDb(), validatedEvidence);
+    const outcome = finalizeValidatingJob(r1.handle, validation, getDb());
+    // R5 §七：response link closure——重读最终 request，按 request.materialization_id 取 projection，
+    // 不得按 validation.kind === 'usable' 取 projection（防止 reused 但 materialization_id 未链接）
+    const finalRequest = getMaterializationRequest(projectId, requestId)!;
+    const finalJob = getMaterializationJob(r1.job.id)!;
+    const finalProjection =
+      finalRequest.materialization_id !== null
+        ? (getMaterializationById(finalRequest.materialization_id) ?? null)
+        : null;
+    // R5 §八：POST integrity closure——reused/succeeded 终态必须通过统一复用验证入口；
+    // fail-closed（不硬编码 verified；damaged → MATERIALIZATION_UNUSABLE）
+    if (outcome === 'reused' && finalRequest.status === 'reused' && finalRequest.materialization_id) {
+      const integrityStatus = await integrityStatusOf(finalRequest);
+      if (integrityStatus !== 'verified') {
+        throw new MaterializationError(
+          'MATERIALIZATION_UNUSABLE',
+          `reuse 投影文件不可用（integrity=${integrityStatus}）；fail-closed 不冒充 reused`,
+          422,
+        );
+      }
+    }
     return {
-      request: getMaterializationRequest(projectId, requestId)!,
-      job: getMaterializationJob(r1.job.id)!,
+      request: finalRequest,
+      job: finalJob,
       outcome,
-      projection: validation.kind === 'usable' ? validation.projection : null,
+      projection: finalProjection,
       adapterReady: false,
     };
   }
@@ -989,8 +1042,19 @@ export function workerFinalizeMaterialization(
   input: WorkerFinalizeInput,
   db: Db = getDb(),
 ): WorkerFinalizeResult {
-  // R4 P0-A：capability 真实性是第一道 fence（伪造/clone/spoof 一律 SEAL_MISMATCH）
-  assertHeldCapability(input.held);
+  // R5 P0-A：capability 真实性是第一道 fence（伪造/clone/spoof/closed 一律 SEAL_MISMATCH）
+  try {
+    assertHeldCapability(input.held);
+  } catch (e) {
+    if (e instanceof MaterializedFileError) {
+      throw new MaterializationError(
+        'REQUEST_STATE_INCONSISTENT',
+        `held capability brand reject（${e.code}）：${e.message}`,
+        409,
+      );
+    }
+    throw e;
+  }
   const now = nowIso();
   const outcome = db.transaction((): WorkerFinalizeResult => {
     // P0-2：execution handle exact fence（禁止仅 owner_token IS NOT NULL）
@@ -1087,29 +1151,27 @@ export function workerFinalizeMaterialization(
         throw new MaterializationError('SOURCE_STALE', `request ${r.request_id} assignment source 漂移（commit 前被改写）`, 409);
       }
     }
-    // 4) R3：held evidence 逐项比较 + commit-time current-file seal（同步；同 inode 改写/path 替换/parent 替换均拒绝）
-    const evidence = input.held.evidence;
-    if (evidence.relativePath !== job.destination_voice_root_relative_path) {
-      throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'evidence relative path 与 job 冻结值不一致', 409);
+    // 4) R5：unified ancestor seal（requireDurability=true：worker path）
+    //    job-binding 与 commit-time current-file seal（同步；同 inode 改写/path 替换/parent 替换均拒绝）
+    //    注：早期 evidence 字段比较移除——R5 改由 seal 内 record-based 检查覆盖（P0-A authority record）；
+    //    size/WAV/durability 由 seal 内 record + fsyncAlready 完成保证。
+    try {
+      assertHeldCurrentSync(input.held, {
+        requireDurability: true,
+        expectedVoiceProfileId: job.voice_profile_id,
+        expectedVoiceProfileRevisionId: job.voice_profile_revision_id,
+        expectedSha256: job.source_canonical_sha256,
+      });
+    } catch (e) {
+      if (e instanceof MaterializedFileError) {
+        throw new MaterializationError(
+          'REQUEST_STATE_INCONSISTENT',
+          `worker commit seal reject（${e.code}）：${e.message}`,
+          409,
+        );
+      }
+      throw e;
     }
-    if (evidence.sha256 !== job.source_canonical_sha256) {
-      throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'final SHA 与 job 冻结值不一致', 409);
-    }
-    if (evidence.size !== input.revisionEvidence.fileSize) {
-      throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'final size 与 revision 不一致', 409);
-    }
-    if (evidence.codec !== 'pcm_s16le' || evidence.sampleRate !== 48000 || evidence.channels !== 1 || evidence.durationMs <= 0) {
-      throw new MaterializationError('REQUEST_STATE_INCONSISTENT', `final WAV 契约不匹配: ${JSON.stringify({codec: evidence.codec, sampleRate: evidence.sampleRate, channels: evidence.channels, durationMs: evidence.durationMs})}`, 409);
-    }
-    if (!evidence.durabilityEstablished) {
-      throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'final evidence 未建立 durability（fsync 未完成）', 409);
-    }
-    assertHeldEvidenceCurrentSync(input.held, {
-      relativePath: job.destination_voice_root_relative_path,
-      voiceProfileId: job.voice_profile_id,
-      voiceProfileRevisionId: job.voice_profile_revision_id,
-      expectedSha256: job.source_canonical_sha256,
-    });
     // projection：INSERT 或 repair（failed/indeterminate → file_ready_unpublished）
     const existing = db
       .prepare('SELECT * FROM voice_materializations WHERE voice_profile_id = ? AND voice_profile_revision_id = ?')
@@ -1428,13 +1490,24 @@ async function recoverOneMaterializationJob(job: VoiceMaterializationJobRow, db:
           throw new MaterializationError('SOURCE_STALE', `recovery: request ${r.request_id} assignment source 漂移`, 409);
         }
       }
-      // P0-B：commit-time current-file seal（同步；同 inode 改写 / path 替换 / parent 替换均拒绝）
-      assertHeldEvidenceCurrentSync(held, {
-        relativePath: fresh.destination_voice_root_relative_path,
-        voiceProfileId: fresh.voice_profile_id,
-        voiceProfileRevisionId: fresh.voice_profile_revision_id,
-        expectedSha256: fresh.source_canonical_sha256,
-      });
+      // R5 P0-C：unified ancestor seal（recovery durabilize path 也走统一 seal）
+      try {
+        assertHeldCurrentSync(held, {
+          requireDurability: true,
+          expectedVoiceProfileId: fresh.voice_profile_id,
+          expectedVoiceProfileRevisionId: fresh.voice_profile_revision_id,
+          expectedSha256: fresh.source_canonical_sha256,
+        });
+      } catch (e) {
+        if (e instanceof MaterializedFileError) {
+          throw new MaterializationError(
+            'REQUEST_STATE_INCONSISTENT',
+            `recovery commit seal reject（${e.code}）：${e.message}`,
+            409,
+          );
+        }
+        throw e;
+      }
       // R3 REC-EXIST：existing projection 确定性裁决（不悬挂 running）
       const existing = db
         .prepare('SELECT * FROM voice_materializations WHERE voice_profile_id = ? AND voice_profile_revision_id = ?')
