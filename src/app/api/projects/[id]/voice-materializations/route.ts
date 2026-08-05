@@ -1,5 +1,5 @@
 import {NextResponse} from 'next/server';
-import {createMaterializationRequest, listMaterializationRequests, serializeMaterializationRequest, getProjection, integrityStatusOf, MaterializationError} from '@/lib/tts-c/materialization';
+import {createMaterializationRequest, listMaterializationRequests, serializeMaterializationRequest, getProjection, integrityStatusOf, MaterializationError, type ReuseIntegrityStatus} from '@/lib/tts-c/materialization';
 import {z} from 'zod';
 
 export const dynamic = 'force-dynamic';
@@ -87,10 +87,26 @@ export async function GET(
     const rows = listMaterializationRequests(projectId);
     // R3：GET fail-closed integrity——绝不只序列化 DB projection status；
     // 只有 safe validator 通过才 verified（零 mkdir/零文件写）
+    // R4 §九：单次请求内对同一 projection 的 integrity validation 做 memoization
+    // （key = materialization_id + source_canonical_sha256 + projection.updated_at
+    //  + assignment_artifact_id——request 级 assignment 分类参与判定，必须进 key）；
+    // 不跨请求持久缓存；每次 HTTP 请求仍至少对每个 distinct key fail-closed 检查一次。
+    const integrityMemo = new Map<string, Promise<ReuseIntegrityStatus>>();
     const views = [];
     for (const r of rows) {
       const projection = r.materialization_id ? getProjection(r.voice_profile_id, r.voice_profile_revision_id) : null;
-      const integrityStatus = r.materialization_id ? await integrityStatusOf(r) : 'unchecked';
+      let integrityStatus: ReuseIntegrityStatus = 'unchecked';
+      if (r.materialization_id) {
+        const memoKey = projection
+          ? `${r.materialization_id}:${projection.source_canonical_sha256}:${projection.updated_at}:${r.assignment_artifact_id}`
+          : `request:${r.id}`;
+        let pending = integrityMemo.get(memoKey);
+        if (!pending) {
+          pending = integrityStatusOf(r);
+          integrityMemo.set(memoKey, pending);
+        }
+        integrityStatus = await pending;
+      }
       views.push(serializeMaterializationRequest(r, projection, integrityStatus));
     }
     return NextResponse.json({requests: views, adapterReady: false});

@@ -27,6 +27,7 @@ import {
   openHeldMaterializedFileEvidence,
   validateMaterializedFileSnapshot,
   assertHeldEvidenceCurrentSync,
+  assertHeldCapability,
   MaterializedFileError,
   type MaterializedFileEvidence,
   type HeldMaterializedFileEvidence,
@@ -375,6 +376,19 @@ export function finalizeValidatingJob(
     const subscribers = listActiveRequestRows(handle.jobId);
 
     if (validationResult.kind === 'usable') {
+      // R4 §七：zero-subscriber 终局独立 fail-closed——usable 也不得 succeeded/reused
+      if (subscribers.length === 0) {
+        const j = db
+          .prepare(
+            `UPDATE voice_materialization_jobs
+             SET status = 'cancelled', validation_owner_token = NULL,
+                 validation_lease_expires_at_epoch_ms = NULL, updated_at = ?
+             WHERE id = ? AND status = 'validating_existing'`,
+          )
+          .run(now, handle.jobId);
+        if (j.changes !== 1) throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'job cancel failed', 409);
+        return 'cancelled';
+      }
       // P0-D：Phase 3 必须持有 Phase 2 的不可伪造 evidence（否则视为未验证）
       if (!validatedEvidence) {
         throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'usable 结果缺少 ValidatedProjectionEvidence（Phase 2 未完成验证）', 409);
@@ -959,19 +973,24 @@ export interface WorkerFinalizeResult {
 
 /**
  * BEGIN IMMEDIATE 原子终局（P0-2 + commit-time exact source fence）：
+ *   capability 真实性首验（R4 P0-A WeakSet brand）→
  *   fenced reread job（status='running' + owner_token=handle + attempt=handle + DB_NOW<=lease）→
- *   cancel_requested 裁决 → destination path shape 复核 →
+ *   cancel_requested 裁决 → zero-subscriber 事务内重统计（R4 §七：0 → cancelled，
+ *   不创建/repair projection、不写 succeeded、requestsUpdated=0）→
+ *   destination path shape 复核 →
  *   exact Revision DB metadata identity 重读（sha/adapter/provider 逐项）→
  *   每个 active request 的 Assignment source 逐项重读（project/profile/revision/provider/sha/adapter）→
  *   final evidence 逐项比较（relative path/SHA/size/regular/codec/sr/ch/duration）→
  *   INSERT（或 repair failed/indeterminate→file_ready）projection → job→succeeded →
  *   active requests→succeeded + materialization_id。
- * 任一失败整事务回滚；cancel_requested → 不写 projection，job/requests cancelled。
+ * 任一失败整事务回滚；cancel_requested / zero-subscriber → 不写 projection，job cancelled。
  */
 export function workerFinalizeMaterialization(
   input: WorkerFinalizeInput,
   db: Db = getDb(),
 ): WorkerFinalizeResult {
+  // R4 P0-A：capability 真实性是第一道 fence（伪造/clone/spoof 一律 SEAL_MISMATCH）
+  assertHeldCapability(input.held);
   const now = nowIso();
   const outcome = db.transaction((): WorkerFinalizeResult => {
     // P0-2：execution handle exact fence（禁止仅 owner_token IS NOT NULL）
@@ -1000,6 +1019,25 @@ export function workerFinalizeMaterialization(
         )
         .run(now, job.id);
       return {projectionId: '', requestsUpdated: reqs.changes};
+    }
+    // R4 §七：zero-subscriber 终局独立 fail-closed——事务内重新统计 active subscriber；
+    // 为 0 → cancelled，不创建/repair projection、不写 succeeded（不得只依赖 cancel_requested）
+    const subCount = (
+      db
+        .prepare(
+          `SELECT count(*) AS n FROM voice_materialization_requests
+           WHERE job_id = ? AND status IN ('waiting','running')`,
+        )
+        .get(job.id) as {n: number}
+    ).n;
+    if (subCount === 0) {
+      db.prepare(
+        `UPDATE voice_materialization_jobs
+         SET status = 'cancelled', owner_token = NULL, lease_expires_at_epoch_ms = NULL,
+             heartbeat_at = NULL, updated_at = ?
+         WHERE id = ? AND status = 'running'`,
+      ).run(now, job.id);
+      return {projectionId: '', requestsUpdated: 0};
     }
     // commit-time exact source fence（§八：逐项重读，全部证据参与）
     // 1) destination path shape（job 冻结值 vs 实测 final path）
@@ -1305,16 +1343,15 @@ async function recoverOneMaterializationJob(job: VoiceMaterializationJobRow, db:
       await afterRecoveryEvidenceBeforeCommit({jobId: job.id, relativePath: job.destination_voice_root_relative_path});
     }
     // 事务外 classify（async）：每个 active request Assignment 必须 current_candidate；
-    // 记录 content hash 供事务内整体漂移检测（VAL-SEAL-04 语义）
+    // 记录 content hash 供事务内整体漂移检测（VAL-SEAL-04 语义）。
+    // R4 §八：唯一合法路径 = getProjectVoiceAssignment → artifact row → classify（无 as never）
     const asgSnapshots: Array<{artifactId: string; contentHash: string}> = [];
     for (const r of listActiveRequestRows(job.id)) {
-      const classified = await classifyProjectVoiceAssignment(r.project_id, r.assignment_artifact_id as never);
-      // 注：classify 签名需要 artifact row；这里用 getProjectVoiceAssignment 取 row 后 classify
       const asgRow = getProjectVoiceAssignment(r.project_id, r.assignment_artifact_id);
       if (!asgRow) throw new MaterializationError('SOURCE_STALE', `recovery: request ${r.request_id} assignment 不可读`, 409);
-      const classified2 = await classifyProjectVoiceAssignment(r.project_id, asgRow.artifact);
-      if (classified2.status !== 'current_candidate' || !classified2.assignment) {
-        throw new MaterializationError('SOURCE_STALE', `recovery: request ${r.request_id} assignment 非 current_candidate（${classified2.statusReason ?? '?'}）`, 409);
+      const classified = await classifyProjectVoiceAssignment(r.project_id, asgRow.artifact);
+      if (classified.status !== 'current_candidate' || !classified.assignment) {
+        throw new MaterializationError('SOURCE_STALE', `recovery: request ${r.request_id} assignment 非 current_candidate（${classified.statusReason ?? '?'}）`, 409);
       }
       asgSnapshots.push({
         artifactId: r.assignment_artifact_id,
