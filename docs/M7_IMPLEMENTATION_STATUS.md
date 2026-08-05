@@ -9,7 +9,7 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-05T03:10Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B FROZEN（独立 Review PASS）**；**TTS-C.0 = FROZEN（独立 Review PASS）**；**TTS-C.1A.R3 deployed（pending independent Review PASS；not frozen；production POST disabled）**；TTS-C.1B / 1C / C.2 not started） |
+| statusUpdatedAt | 2026-08-05T03:10Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B FROZEN（独立 Review PASS）**；**TTS-C.0 = FROZEN（独立 Review PASS）**；**TTS-C.1A.R4 implementation completed（pending independent Review PASS；not frozen；未部署——production runtime 仍为 R3 `a400853…`，POST disabled）**；TTS-C.1B / 1C / C.2 not started） |
 | reviewedCodeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（M7.3B final code/runtime；M7.3B deployment evidence docs HEAD 为 `044ac23e2524d53f41d223c37d16619425b21182`；M7.3A frozen code 为 `aa3f814…`） |
 | productionRuntimeSHA | `a40085336bdada2f15d792d873ccecdaa08ffee5`（TTS-C.1A.R3 部署后容器镜像实际代码 SHA；TTS-C.0 freeze 基线与 CI 证据见 §11.4） |
 | productionHostCheckoutSHA | `a40085336bdada2f15d792d873ccecdaa08ffee5`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
@@ -526,6 +526,7 @@
 - `scripts/test-tts-c1a-materialization-durability.ts`（TTS-C.1A 新增，9 PASS）：temp 校验失败不返回成功、失联恢复（running lease 过期→failed + requests failed→新请求恢复→成功）、final DB 失败 STALE 回滚、孤儿文件 fail-closed、cleanup 不删未引用/已引用文件、DB 引用文件被删→validator unusable
 - `scripts/test-tts-c1a-materialization-concurrency.ts`（TTS-C.1A 新增，17 PASS）：fan-in 单 job、并发 create 单飞、4 request 同 projection 全 succeeded、reused 零写、unusable+subscriber→queued、zero subscriber→cancelled、stale takeover attempt+1、旧 owner STALE
 - `scripts/test-tts-c1a-materialization-files.ts`（TTS-C.1A 新增，17 PASS）：missing/hash drift/archived 允许/sha 污染→ASSIGNMENT_UNUSABLE/provider 污染→schema 违约 NOT_FOUND、publication/activation 0 行、TTS jobs=0、路径形状/symlink/escape 拒绝
+- `scripts/test-tts-c1a-r4-hardening.ts`（TTS-C.1A.R4 新增，55 PASS）：CAP-01…05 held capability runtime brand（plain object/prototype spoof/clone+arbitrary fd 拒绝、无公开 factory、合法通过）/ SEAL-08…11 exact destination binding（canonical source path 伪装、outside-root+forged durability、absolutePathInternal/parentRealpath 漂移）/ DIR-04…07 full ancestor seal（profile/root rename+symlink、profile 换目录、合法链通过）/ VERIFY-01…04 verify 零写（整 root 缺失下 GET/reuse/replay 不 mkdir + fs snapshot 不变、Worker writer 可创建）/ CANCEL-06…08 zero-subscriber closure（worker final/validation usable 前 subscriber=0 → cancelled，合法路径仍 succeeded/reused）；gate suite 数 49→50
 - `scripts/test-llm-dispatch.ts`
 - `scripts/test-workflow-stages.ts`
 - `scripts/test-m6310-usage.ts`

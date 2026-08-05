@@ -215,3 +215,43 @@ build/typecheck）。新 suites 并入 `scripts/run-m7-quality-gate.sh`（suite 
 - **测试**：13 套件（原 7 + R1 新增 6：validation-ownership/worker-fencing/recovery/path-security/
   request-concurrency/compose-mounts），真实双进程并发（child 进程独立连接）、真实 symlink fs、
   mutation proof（5 项 fence 禁用验证均 FAIL）。
+
+## 11. TTS-C.1A.R4 加固（独立 Review FAIL 关闭项；pending independent Review PASS；not frozen；未部署）
+
+- **P0-A non-forgeable held capability**：`HeldMaterializedFileEvidence` 删除公开 `static create`；
+  构造器由 module-private issue token（`HELD_ISSUE_TOKEN`，runtime secret，不导出）门控；
+  合法实例由 `openHeldMaterializedFileEvidence` 经模块内唯一发行点登记入 module-private
+  `WeakSet`；`assertHeldCapability`（runtime 检查，非 TypeScript 类型）为
+  `assertHeldEvidenceCurrentSync` 与 `workerFinalizeMaterialization` 的第一道 fence——
+  plain object / `Object.create(prototype)` / clone + arbitrary fd 一律 `SEAL_MISMATCH`。
+- **P0-B exact destination binding**：commit seal 的目标路径一律从 frozen identity
+  （`voiceProfileId/voiceProfileRevisionId`）重新派生 `expectedRelative/expectedAbsolute/
+  expectedParent`；path stat 只使用派生值，绝不信任 `evidence.absolutePathInternal/
+  parentRealpath`；evidence 路径字段必须逐项等于派生值（canonical source fd/path +
+  bytes exact + relativePath 伪装 destination 的攻击 → `SEAL_MISMATCH`、projection=0）。
+- **P0-C full ancestor seal**：acquisition 记录 root/profile/revision(parent)/file 四级
+  dev/ino；commit-time 逐级 `lstat`（非 symlink、类型、dev/ino 与 acquisition 相同）+
+  root realpath 锚定 `path.resolve(materializationRootAbs())` + revision parent realpath
+  精确等于 acquisition 值且位于 root 下。profile/root ancestor rename+symlink 替换
+  （final/immediate parent inode 不变）必拒绝。实现为 path+lstat 逐级复核（非 dirfd/openat
+  anchored traversal），依赖本地 single-writer contract；ancestor mutation 由测试覆盖。
+- **P0-D verify 零写**：root helper 拆分——`requireExistingMaterializationRootSafe`
+  （缺失 → MISSING，绝不 mkdir；GET/replay/validation/reuse/recovery verify/integrityStatusOf/
+  validateMaterializedFileSnapshot 专用）与 `ensureOrCreateMaterializationRootSafe`
+  （仅 Worker durable copy / recovery durabilize writer）。删除整个 `voice-materializations/`
+  后 GET/replay/validation 返回 missing/unusable 且 filesystem snapshot 完全不变。
+- **Zero-subscriber closure（§七）**：worker final transaction 在任何 projection INSERT/repair
+  前事务内重统计 active subscriber（`waiting/running`），为 0 → job cancelled、projection=0、
+  `requestsUpdated=0`（不只依赖 `cancel_requested`）；validation usable 分支 Phase 3 前
+  subscriber=0 → job cancelled、不 succeeded、不 fan-out reused；recovery 既有 durabilize 前
+  检查 + success transaction 再检查不回退。
+- **Recovery cleanup（§八）**：删除 `classifyProjectVoiceAssignment(projectId, artifactId as never)`
+  调用；唯一合法路径 = `getProjectVoiceAssignment` → artifact row → `classifyProjectVoiceAssignment`。
+- **GET request-scope memoization（§九）**：单次 GET 内按
+  `materialization_id + source_canonical_sha256 + projection.updated_at + assignment_artifact_id`
+  memoize integrity validation（assignment 分类参与判定故入 key）；不跨请求缓存；每次 HTTP
+  请求仍对每个 distinct key fail-closed 检查。
+- **测试**：新增 `test-tts-c1a-r4-hardening.ts`（55 PASS：CAP-01…05 / SEAL-08…11 /
+  DIR-04…07 / VERIFY-01…04 / CANCEL-06…08）；mutation proof 7 项（MUT-R4-01…07）全部
+  使目标测试 FAIL——其中 DIR-04/05 的 profile/root swap invariant 由「ancestor seal +
+  parent realpath 等值」多层互补 fence 共同覆盖，mutation 按整组 invariant 变异验证。
