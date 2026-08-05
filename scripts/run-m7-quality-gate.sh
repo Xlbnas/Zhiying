@@ -138,6 +138,11 @@ run_suite "tts-c1a-final-evidence" npx tsx scripts/test-tts-c1a-final-evidence.t
 run_suite "tts-c1a-validation-evidence" npx tsx scripts/test-tts-c1a-validation-evidence.ts
 run_suite "tts-c1a-replay-integrity" npx tsx scripts/test-tts-c1a-replay-integrity.ts
 run_suite "tts-c1a-resource-cleanup" npx tsx scripts/test-tts-c1a-resource-cleanup.ts
+# TTS-C.1A.R3 新增 4 套（commit seal / recovery cancellation / get integrity / db-time stale）
+run_suite "tts-c1a-commit-seal" npx tsx scripts/test-tts-c1a-commit-seal.ts
+run_suite "tts-c1a-recovery-cancellation" npx tsx scripts/test-tts-c1a-recovery-cancellation.ts
+run_suite "tts-c1a-get-integrity" npx tsx scripts/test-tts-c1a-get-integrity.ts
+run_suite "tts-c1a-db-time-stale" npx tsx scripts/test-tts-c1a-db-time-stale.ts
 
 echo "QUALITY_GATE_RESULT=PASS"
 echo "QUALITY_GATE_SHA=$GATE_SHA"

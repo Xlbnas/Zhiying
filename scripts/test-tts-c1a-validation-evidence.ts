@@ -138,6 +138,59 @@ async function buildUsableProjection(rev: RevCtx, requestId: string): Promise<{p
   const reqs = db.prepare("SELECT count(*) c FROM voice_materialization_requests WHERE project_id=? AND request_id IN ('ve-6a','ve-6b') AND status='reused'").get(fx.projectId) as {c: number};
   ok(reqs.c === 2, 'VAL-EV-06 两个 subscriber 均 reused', reqs.c);
 
+  // ── VAL-SEAL-01：Phase 2 后同 inode overwrite（不同内容）→ 不 reused ──
+  const revS1 = await freshRevision(1160);
+  const {finalAbs: fS1} = await buildUsableProjection(revS1, 'vs-1');
+  setAfterProjectionValidationBeforeFinalize(() => {
+    fs.writeFileSync(fS1, makeWav(900, 888)); // 同 inode（truncate+write），mtime/ctime 变
+  });
+  await expectNotReused('VAL-SEAL-01 Phase 2 后同 inode overwrite → MATERIALIZATION_UNUSABLE', () => createMaterializationRequest(fx.projectId, 'vs-1r', revS1.assignmentArtifactId), 'MATERIALIZATION_UNUSABLE');
+
+  // ── VAL-SEAL-02：Phase 2 后保持 size 但修改 bytes（同 inode）→ 不 reused ──
+  const revS2 = await freshRevision(1170);
+  const {finalAbs: fS2} = await buildUsableProjection(revS2, 'vs-2');
+  setAfterProjectionValidationBeforeFinalize(() => {
+    const orig = fs.readFileSync(fS2);
+    const sameLen = Buffer.from(orig);
+    sameLen[sameLen.length - 1] = sameLen[sameLen.length - 1] ^ 0xff;
+    fs.writeFileSync(fS2, sameLen); // 同长度同 inode
+  });
+  await expectNotReused('VAL-SEAL-02 Phase 2 后同 size 改 bytes → MATERIALIZATION_UNUSABLE', () => createMaterializationRequest(fx.projectId, 'vs-2r', revS2.assignmentArtifactId), 'MATERIALIZATION_UNUSABLE');
+
+  // ── VAL-SEAL-03：Phase 2 后 parent 替换 → 不 reused ──
+  const revS3 = await freshRevision(1180);
+  const {finalAbs: fS3} = await buildUsableProjection(revS3, 'vs-3');
+  setAfterProjectionValidationBeforeFinalize(() => {
+    const parent = path.dirname(fS3);
+    const moved = `${parent}-moved-${Math.random()}`;
+    fs.renameSync(parent, moved);
+    fs.symlinkSync(path.join(fx.dataDir, 'voice-library'), parent);
+  });
+  await expectNotReused('VAL-SEAL-03 Phase 2 后 parent 替换 → MATERIALIZATION_UNUSABLE', () => createMaterializationRequest(fx.projectId, 'vs-3r', revS3.assignmentArtifactId), 'MATERIALIZATION_UNUSABLE');
+
+  // ── VAL-SEAL-04：Assignment artifact 整体漂移但字段看似匹配 → classify fail-closed ──
+  const revS4 = await freshRevision(1190);
+  await buildUsableProjection(revS4, 'vs-4');
+  setAfterProjectionValidationBeforeFinalize(() => {
+    // 用另一个 artifact 替换 content（字段复制但整体不同 → content hash 漂移）
+    const asgRow = db.prepare('SELECT * FROM artifacts WHERE id=?').get(revS4.assignmentArtifactId) as {content_json: string};
+    const parsed = JSON.parse(asgRow.content_json);
+    parsed.nonce = 'tampered';
+    db.prepare('UPDATE artifacts SET content_json=? WHERE id=?').run(JSON.stringify(parsed), revS4.assignmentArtifactId);
+  });
+  await expectNotReused('VAL-SEAL-04 Assignment 整体漂移 → SOURCE_STALE', () => createMaterializationRequest(fx.projectId, 'vs-4r', revS4.assignmentArtifactId), 'SOURCE_STALE');
+
+  // ── VAL-SEAL-05：provider 漂移 → 不 reused（provider 参与 source fence） ──
+  const revS5 = await freshRevision(1195);
+  await buildUsableProjection(revS5, 'vs-5');
+  setAfterProjectionValidationBeforeFinalize(() => {
+    const asgRow = db.prepare('SELECT * FROM artifacts WHERE id=?').get(revS5.assignmentArtifactId) as {content_json: string};
+    const parsed = JSON.parse(asgRow.content_json);
+    parsed.source.provider = 'other-provider';
+    db.prepare('UPDATE artifacts SET content_json=? WHERE id=?').run(JSON.stringify(parsed), revS5.assignmentArtifactId);
+  });
+  await expectNotReused('VAL-SEAL-05 provider 漂移 → SOURCE_STALE', () => createMaterializationRequest(fx.projectId, 'vs-5r', revS5.assignmentArtifactId), 'SOURCE_STALE');
+
   cleanupC1a(TAG);
   summary('TTS-C.1A validation-evidence');
 })().catch((e) => {

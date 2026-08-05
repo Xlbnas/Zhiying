@@ -19,7 +19,7 @@ import crypto from 'node:crypto';
 import {ok, summary, setupC1aFixture, cleanupC1a, type C1aFixture} from './lib/tts-c1a-test-utils';
 import {
   ensureMaterializationRootSafe,
-  ensureDestinationParentSafe,
+  ensureExistingDestinationParentSafe,
   destinationAbsolutePath,
   stagingTempPath,
   OPEN_FLAGS,
@@ -49,7 +49,7 @@ let fx: C1aFixture;
   }
 
   // PATH-04：profile directory symlink outside root → reject
-  await ensureDestinationParentSafe(rootAbs, `${crypto.randomUUID()}/${crypto.randomUUID()}/reference.wav`); // 建真实 root
+  fsSync.mkdirSync(rootAbs, {recursive: true}); // existing 版不 mkdir——测试先建 root
   const profId = fx.profileId;
   const revId = fx.revisionId;
   const profDir = path.join(rootAbs, profId);
@@ -58,7 +58,7 @@ let fx: C1aFixture;
   fsSync.rmSync(profDir, {recursive: true, force: true});
   fsSync.symlinkSync(outside, profDir);
   try {
-    await ensureDestinationParentSafe(rootAbs, rel);
+    await ensureExistingDestinationParentSafe(rootAbs, rel);
     ok(false, 'PATH-04 profile symlink → reject', 'no error');
   } catch (e) {
     ok(e instanceof ProjectionPathError && e.message.includes('symlink'), 'PATH-04 profile symlink outside root → reject', e);
@@ -69,7 +69,7 @@ let fx: C1aFixture;
   fsSync.mkdirSync(profDir, {recursive: true});
   fsSync.symlinkSync(outside, path.join(profDir, revId));
   try {
-    await ensureDestinationParentSafe(rootAbs, rel);
+    await ensureExistingDestinationParentSafe(rootAbs, rel);
     ok(false, 'PATH-05 revision symlink → reject', 'no error');
   } catch (e) {
     ok(e instanceof ProjectionPathError && e.message.includes('symlink'), 'PATH-05 revision symlink outside root → reject', e);
@@ -79,15 +79,16 @@ let fx: C1aFixture;
   fsSync.rmSync(path.join(profDir, revId), {force: true});
   fsSync.symlinkSync(path.join(fx.dataDir, '..'), path.join(profDir, revId));
   try {
-    await ensureDestinationParentSafe(rootAbs, rel);
+    await ensureExistingDestinationParentSafe(rootAbs, rel);
     ok(false, 'PATH-08 parent realpath outside root → reject', 'no error');
   } catch (e) {
     ok(e instanceof ProjectionPathError, 'PATH-08 parent realpath outside root → reject', e);
   }
 
-  // PATH-09：合法目录链成功（realpath 包含性 + O_NOFOLLOW 写读）
+  // PATH-09：合法目录链成功（realpath 包含性 + O_NOFOLLOW 写读；existing 版不 mkdir——先建目录）
   fsSync.rmSync(path.join(profDir, revId), {force: true});
-  const safe = await ensureDestinationParentSafe(rootAbs, rel);
+  fsSync.mkdirSync(path.join(profDir, revId), {recursive: true});
+  const safe = await ensureExistingDestinationParentSafe(rootAbs, rel);
   ok(safe.realRoot === fsSync.realpathSync(rootAbs) && safe.realParent.startsWith(safe.realRoot + path.sep), 'PATH-09 合法目录链 realpath 包含', {root: safe.realRoot, parent: safe.realParent});
   const finalAbs = destinationAbsolutePath(rel);
   const tmp = stagingTempPath(finalAbs);

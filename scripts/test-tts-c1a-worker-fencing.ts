@@ -26,6 +26,7 @@ import {
   type WorkerFinalizeInput,
 } from '../src/lib/tts-c/materialization';
 import {destinationAbsolutePath} from '../src/lib/tts-c/paths';
+import {openHeldMaterializedFileEvidence, type HeldMaterializedFileEvidence} from '../src/lib/tts-c/materialized-file-validator';
 
 const TAG = 'test-tts-c1a-worker-fencing';
 let fx: C1aFixture;
@@ -63,27 +64,44 @@ async function claimHandleFor(rev: RevCtx, requestId: string): Promise<Materiali
   return claimed.handle;
 }
 
-/** 真实 finalize 输入（executor 语义；绑定 rev 的 canonical SHA/size/path + final evidence）。 */
-function finalInput(handle: MaterializationExecutionHandle, rev: RevCtx, overrides: Partial<WorkerFinalizeInput> = {}): WorkerFinalizeInput {
+/** 为 rev 建立真实 final 文件 + held evidence（WorkerFinalize 只接受 held capability）。 */
+async function makeHeldFor(rev: RevCtx): Promise<HeldMaterializedFileEvidence> {
+  const finalAbs = destinationAbsolutePath(`${fx.profileId}/${rev.revisionId}/reference.wav`);
+  fs.mkdirSync(path.dirname(finalAbs), {recursive: true});
+  fs.copyFileSync(path.join(fx.dataDir, 'voice-library', fx.profileId, rev.revisionId, 'reference.wav'), finalAbs);
+  return openHeldMaterializedFileEvidence(
+    {
+      relativePath: `${fx.profileId}/${rev.revisionId}/reference.wav`,
+      voiceProfileId: fx.profileId,
+      voiceProfileRevisionId: rev.revisionId,
+      expectedSha256: rev.sha,
+      expectedCodec: 'pcm_s16le',
+      expectedSampleRate: 48000,
+      expectedChannels: 1,
+      minDurationMs: 1,
+      adapterCompatibilityKey: 'indextts2-adapter-registry@1',
+    },
+    'durabilize',
+  );
+}
+
+/** 真实 finalize 输入（held 绑定 rev 的真实 final 文件；asgSnapshots 由调用方按需补充）。 */
+async function finalInput(handle: MaterializationExecutionHandle, rev: RevCtx, overrides: Partial<WorkerFinalizeInput> = {}): Promise<WorkerFinalizeInput> {
   const revAbs = path.join(fx.dataDir, 'voice-library', fx.profileId, rev.revisionId, 'reference.wav');
   const fileSize = fs.statSync(revAbs).size;
-  return {
+  const held = await makeHeldFor(rev);
+  // 自动构造 asgSnapshots：job 的 active requests 的真实 assignment content hash（与 executor 同语义）
+  const {listActiveRequestRows, sha256Text} = await import('../src/lib/tts-c/materialization');
+  const {getProjectVoiceAssignment} = await import('../src/lib/tts-b/assignment');
+  const db = getDb();
+  const asgSnapshots: Array<{artifactId: string; contentHash: string}> = [];
+  for (const r of listActiveRequestRows(handle.jobId)) {
+    const asgRow = getProjectVoiceAssignment(r.project_id, r.assignment_artifact_id);
+    if (asgRow) asgSnapshots.push({artifactId: r.assignment_artifact_id, contentHash: sha256Text(asgRow.artifact.content_json)});
+  }
+  const base: WorkerFinalizeInput = {
     handle,
-    evidence: {
-      relativePath: `${fx.profileId}/${rev.revisionId}/reference.wav`,
-      absolutePathInternal: 'internal',
-      sha256: rev.sha,
-      size: fileSize,
-      codec: 'pcm_s16le',
-      sampleRate: 48000,
-      channels: 1,
-      durationMs: 1500,
-      device: 0n,
-      inode: 0n,
-      mtimeNs: 0n,
-      parentRealpath: 'internal',
-      durabilityEstablished: true,
-    },
+    held,
     revisionEvidence: {
       voiceProfileId: fx.profileId,
       voiceProfileRevisionId: rev.revisionId,
@@ -92,13 +110,23 @@ function finalInput(handle: MaterializationExecutionHandle, rev: RevCtx, overrid
       provider: 'indextts2',
       fileSize,
     },
-    ...overrides,
+    asgSnapshots,
   };
+  return {...base, ...overrides} as WorkerFinalizeInput;
 }
 
 function expectErrCode(label: string, fn: () => unknown, code: string): void {
   try {
     fn();
+    ok(false, label, 'no error');
+  } catch (e) {
+    ok(e instanceof MaterializationError && e.code === code, label, e);
+  }
+}
+
+async function expectErrCodeAsync(label: string, fn: () => Promise<unknown>, code: string): Promise<void> {
+  try {
+    await fn();
     ok(false, label, 'no error');
   } catch (e) {
     ok(e instanceof MaterializationError && e.code === code, label, e);
@@ -148,14 +176,14 @@ function expectErrCode(label: string, fn: () => unknown, code: string): void {
   // ── WF-03：owner token 漂移 → STALE，DB success=0 ──
   const rev3 = await freshRevision(720);
   const h3 = await claimHandleFor(rev3, 'wf-3');
-  expectErrCode('WF-03 owner token 漂移 → STALE_VALIDATION_OWNER', () => workerFinalizeMaterialization(finalInput({...h3, ownerToken: 'wrong-owner'}, rev3)), 'STALE_VALIDATION_OWNER');
+  expectErrCodeAsync('WF-03 owner token 漂移 → STALE_VALIDATION_OWNER', async () => workerFinalizeMaterialization(await finalInput({...h3, ownerToken: 'wrong-owner'}, rev3)), 'STALE_VALIDATION_OWNER');
   const job3 = getMaterializationJob(h3.jobId);
   ok(job3?.status === 'running' && getProjection(fx.profileId, rev3.revisionId) === undefined, 'WF-03 job 不假 succeeded + projection 不创建', {status: job3?.status});
 
   // ── WF-04：attempt 漂移 → STALE ──
   const rev4 = await freshRevision(730);
   const h4 = await claimHandleFor(rev4, 'wf-4');
-  expectErrCode('WF-04 attempt 漂移 → STALE_VALIDATION_OWNER', () => workerFinalizeMaterialization(finalInput({...h4, attempt: h4.attempt + 1}, rev4)), 'STALE_VALIDATION_OWNER');
+  expectErrCodeAsync('WF-04 attempt 漂移 → STALE_VALIDATION_OWNER', async () => workerFinalizeMaterialization(await finalInput({...h4, attempt: h4.attempt + 1}, rev4)), 'STALE_VALIDATION_OWNER');
   ok(getProjection(fx.profileId, rev4.revisionId) === undefined, 'WF-04 projection 不创建', undefined);
 
   // ── WF-05：copy 后 commit 前 Assignment source 漂移 → SOURCE_STALE ──
@@ -166,38 +194,46 @@ function expectErrCode(label: string, fn: () => unknown, code: string): void {
   const asgParsed5 = JSON.parse(asgRow5.content_json);
   asgParsed5.source.canonicalAudioSha256 = 'e'.repeat(64);
   db.prepare('UPDATE artifacts SET content_json=? WHERE id=?').run(JSON.stringify(asgParsed5), req5[0].assignment_artifact_id);
-  expectErrCode('WF-05 Assignment source 漂移 → SOURCE_STALE', () => workerFinalizeMaterialization(finalInput(h5, rev5)), 'SOURCE_STALE');
+  expectErrCodeAsync('WF-05 Assignment source 漂移 → SOURCE_STALE', async () => workerFinalizeMaterialization(await finalInput(h5, rev5)), 'SOURCE_STALE');
   ok(getProjection(fx.profileId, rev5.revisionId) === undefined, 'WF-05 projection 不创建', undefined);
 
   // ── WF-06：revisionEvidence 与实际 Revision row 不一致（commit 时逐项重读） → SOURCE_STALE ──
   const rev6 = await freshRevision(750);
   const h6 = await claimHandleFor(rev6, 'wf-6');
-  const badEvidence = finalInput(h6, rev6).revisionEvidence;
-  expectErrCode(
+  const base6 = await finalInput(h6, rev6);
+  const badEvidence = base6.revisionEvidence;
+  await base6.held.close();
+  expectErrCodeAsync(
     'WF-06 Revision evidence 漂移 → SOURCE_STALE',
-    () => workerFinalizeMaterialization(finalInput(h6, rev6, {revisionEvidence: {...badEvidence, canonicalAudioSha256: 'c'.repeat(64)}})),
+    async () => workerFinalizeMaterialization(await finalInput(h6, rev6, {revisionEvidence: {...badEvidence, canonicalAudioSha256: 'c'.repeat(64)}})),
     'SOURCE_STALE',
   );
   ok(getProjection(fx.profileId, rev6.revisionId) === undefined, 'WF-06 projection 不创建', undefined);
 
-  // ── WF-07：destination path 漂移 → REQUEST_STATE_INCONSISTENT ──
+  // ── WF-07：destination path 漂移（held evidence 的 relativePath ≠ job 冻结值）→ REQUEST_STATE_INCONSISTENT ──
   const rev7 = await freshRevision(760);
   const h7 = await claimHandleFor(rev7, 'wf-7');
-  expectErrCode(
-    'WF-07 final relative path 漂移 → REQUEST_STATE_INCONSISTENT',
-    () => workerFinalizeMaterialization(finalInput(h7, rev7, {evidence: {...finalInput(h7, rev7).evidence, relativePath: `${fx.profileId}/${rev7.revisionId}/evil.wav`}})),
+  const rev7b = await freshRevision(761);
+  const wrongHeld7 = await makeHeldFor(rev7b); // held 指向 rev7b 的路径（≠ job7 路径）
+  expectErrCodeAsync(
+    'WF-07 held relativePath 漂移 → REQUEST_STATE_INCONSISTENT',
+    async () => workerFinalizeMaterialization((await finalInput(h7, rev7, {held: wrongHeld7}))),
     'REQUEST_STATE_INCONSISTENT',
   );
+  await wrongHeld7.close();
   ok(getProjection(fx.profileId, rev7.revisionId) === undefined, 'WF-07 projection 不创建', undefined);
 
-  // ── WF-08：final 文件在 commit 前被替换（SHA 不匹配）→ 拒绝 ──
+  // ── WF-08：final 文件在 commit 前被替换（held SHA ≠ job 冻结值）→ 拒绝 ──
   const rev8 = await freshRevision(770);
   const h8 = await claimHandleFor(rev8, 'wf-8');
-  expectErrCode(
-    'WF-08 final SHA 替换 → REQUEST_STATE_INCONSISTENT',
-    () => workerFinalizeMaterialization(finalInput(h8, rev8, {evidence: {...finalInput(h8, rev8).evidence, sha256: 'f'.repeat(64)}})),
+  const rev8b = await freshRevision(771);
+  const wrongHeld8 = await makeHeldFor(rev8b); // held.sha = rev8b.sha ≠ job8.sha
+  expectErrCodeAsync(
+    'WF-08 held SHA ≠ job → REQUEST_STATE_INCONSISTENT',
+    async () => workerFinalizeMaterialization((await finalInput(h8, rev8, {held: wrongHeld8}))),
     'REQUEST_STATE_INCONSISTENT',
   );
+  await wrongHeld8.close();
   ok(getProjection(fx.profileId, rev8.revisionId) === undefined, 'WF-08 projection 不创建', undefined);
 
   // ── WF-09：request Assignment 链接不可改（frozen write-once，DB 层防线） ──

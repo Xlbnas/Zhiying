@@ -18,7 +18,7 @@ import {buildProjectVoiceAssignment} from '../src/lib/tts-b/assignment';
 import {claimNextAnyJob} from '../src/lib/scheduler';
 import {runMaterializationJob} from '../src/worker/materialization-executor';
 import {getProjection, getMaterializationJob, createMaterializationRequest} from '../src/lib/tts-c/materialization';
-import {validateMaterializedFile, MaterializedFileError} from '../src/lib/tts-c/materialized-file-validator';
+import {openHeldMaterializedFileEvidence, validateMaterializedFileSnapshot, MaterializedFileError} from '../src/lib/tts-c/materialized-file-validator';
 import {destinationAbsolutePath} from '../src/lib/tts-c/paths';
 
 const TAG = 'test-tts-c1a-final-evidence';
@@ -102,13 +102,12 @@ async function claimHandleFor(rev: RevCtx, requestId: string) {
   const rev3 = await freshRevision(1030);
   const h3 = await claimHandleFor(rev3, 'fe-3');
   let fsyncFailed = false;
-  await runMaterializationJob(h3, {log: () => undefined}, {}).catch(() => undefined); // 先正常跑？不——直接注入失败需要 validator deps，executor 不暴露。
   // executor 不传 validator deps → 直接单测 validator 的 fsync 注入（FINAL-03/04 覆盖 validator 契约）
   const finalAbs3 = destinationAbsolutePath(`${fx.profileId}/${rev3.revisionId}/reference.wav`);
   fs.mkdirSync(path.dirname(finalAbs3), {recursive: true});
   fs.copyFileSync(path.join(fx.dataDir, 'voice-library', fx.profileId, rev3.revisionId, 'reference.wav'), finalAbs3);
   try {
-    await validateMaterializedFile(
+    await openHeldMaterializedFileEvidence(
       {
         relativePath: `${fx.profileId}/${rev3.revisionId}/reference.wav`,
         voiceProfileId: fx.profileId,
@@ -127,7 +126,9 @@ async function claimHandleFor(rev: RevCtx, requestId: string) {
           throw new Error('injected final fsync failure');
         },
       },
-    );
+    ).catch((e) => {
+      throw e;
+    });
     ok(false, 'FINAL-03 final fsync 失败 → 抛 FSYNC_FAILED', 'no error');
   } catch (e) {
     ok(fsyncFailed && e instanceof MaterializedFileError && e.code === 'FSYNC_FAILED', 'FINAL-03 final fsync 失败 → FSYNC_FAILED（durability 未建立）', e);
@@ -135,7 +136,7 @@ async function claimHandleFor(rev: RevCtx, requestId: string) {
 
   // ── FINAL-04：parent dir fsync 失败（注入）→ FSYNC_FAILED ──
   try {
-    await validateMaterializedFile(
+    await openHeldMaterializedFileEvidence(
       {
         relativePath: `${fx.profileId}/${rev3.revisionId}/reference.wav`,
         voiceProfileId: fx.profileId,
@@ -179,10 +180,7 @@ async function claimHandleFor(rev: RevCtx, requestId: string) {
     ['channels 漂移', {expectedChannels: 2}],
   ] as const) {
     try {
-      await validateMaterializedFile(
-        {...baseExpect, ...expect},
-        'verify',
-      );
+      await validateMaterializedFileSnapshot({...baseExpect, ...expect});
       ok(false, `FINAL-05 ${label} → 拒绝`, 'no error');
     } catch (e) {
       ok(e instanceof MaterializedFileError, `FINAL-05 ${label} → MaterializedFileError`, e);
@@ -190,7 +188,7 @@ async function claimHandleFor(rev: RevCtx, requestId: string) {
   }
 
   // ── FINAL-06：合法 final evidence（durabilize）→ 成功后 validator verify 再次 usable ──
-  const ev6 = await validateMaterializedFile(
+  const held6 = await openHeldMaterializedFileEvidence(
     {
       relativePath: `${fx.profileId}/${rev3.revisionId}/reference.wav`,
       voiceProfileId: fx.profileId,
@@ -204,21 +202,20 @@ async function claimHandleFor(rev: RevCtx, requestId: string) {
     },
     'durabilize',
   );
-  ok(ev6.durabilityEstablished === true && ev6.sha256 === rev3.sha && ev6.size > 0, 'FINAL-06 durabilize 建立完整 evidence', {sha: ev6.sha256.slice(0, 12), durable: ev6.durabilityEstablished});
-  const ev6v = await validateMaterializedFile(
-    {
-      relativePath: `${fx.profileId}/${rev3.revisionId}/reference.wav`,
-      voiceProfileId: fx.profileId,
-      voiceProfileRevisionId: rev3.revisionId,
-      expectedSha256: rev3.sha,
-      expectedCodec: 'pcm_s16le',
-      expectedSampleRate: 48000,
-      expectedChannels: 1,
-      minDurationMs: 1,
-      adapterCompatibilityKey: 'indextts2-adapter-registry@1',
-    },
-    'verify',
-  );
+  const ev6 = held6.evidence;
+  ok(ev6.durabilityEstablished === true && ev6.sha256 === rev3.sha && ev6.size > 0, 'FINAL-06 durabilize 建立完整 held evidence', {sha: ev6.sha256.slice(0, 12), durable: ev6.durabilityEstablished});
+  await held6.close();
+  const ev6v = await validateMaterializedFileSnapshot({
+    relativePath: `${fx.profileId}/${rev3.revisionId}/reference.wav`,
+    voiceProfileId: fx.profileId,
+    voiceProfileRevisionId: rev3.revisionId,
+    expectedSha256: rev3.sha,
+    expectedCodec: 'pcm_s16le',
+    expectedSampleRate: 48000,
+    expectedChannels: 1,
+    minDurationMs: 1,
+    adapterCompatibilityKey: 'indextts2-adapter-registry@1',
+  });
   ok(ev6v.sha256 === rev3.sha && ev6v.device === ev6.device && ev6v.inode === ev6.inode, 'FINAL-06 verify 模式再次 usable（同 inode）', ev6v.sha256.slice(0, 12));
 
   // ── 真实 executor 合法路径（FINAL-06 集成）：worker 成功 → job succeeded ──

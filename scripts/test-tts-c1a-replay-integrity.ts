@@ -140,12 +140,14 @@ const expectUnusable = async (label: string, fn: () => Promise<unknown>): Promis
   const view = serializeMaterializationRequest(reqRow as never, proj1 ?? null);
   const json = JSON.stringify(view);
   ok(view.materialization === null || view.materialization.adapterReady === false, 'REPLAY-07 adapterReady 恒 false（不冒充 ready）', view.materialization?.adapterReady);
+  // R3：损坏文件 → status='unusable'（fail-closed，不再显示 file_ready_unpublished 为当前可用）
   ok(
-    !json.includes('usable') &&
+    json.includes('"status":"unusable"') &&
+      !/"status":"file_ready_unpublished"/.test(json) &&
       !/ready for|adapter ready|ready to use/i.test(json) &&
       !json.includes('voice-materializations') &&
       !json.includes('staging'),
-    'REPLAY-07 视图不把损坏 projection 描述成 usable/ready（状态名 file_ready_unpublished 如实展示）',
+    'REPLAY-07 损坏 projection → status=unusable（不显示 file_ready_unpublished 为可用）',
     json.slice(0, 200),
   );
   ok(!json.includes(f1), 'REPLAY-07 无 absolute path 泄漏', undefined);

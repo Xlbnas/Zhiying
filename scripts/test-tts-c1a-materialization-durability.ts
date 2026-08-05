@@ -13,6 +13,8 @@ import {getDb} from '../src/lib/db';
 import {claimNextAnyJob} from '../src/lib/scheduler';
 import {runMaterializationJob} from '../src/worker/materialization-executor';
 import {workerFinalizeMaterialization, MaterializationError} from '../src/lib/tts-c/materialization';
+import {destinationAbsolutePath} from '../src/lib/tts-c/paths';
+import {openHeldMaterializedFileEvidence} from '../src/lib/tts-c/materialized-file-validator';
 
 const TAG = 'test-tts-c1a-durability';
 let fx: C1aFixture;
@@ -57,29 +59,43 @@ async function claimAndRun(fx_: C1aFixture, requestId: string, deps: Parameters<
 
   // 3) DB final 事务失败注入：workerFinalizeMaterialization 用伪造 handle（no-such-job）→ STALE 错误，
   //    不产生 false success
+  // 先建真实 final 文件拿 held（伪造 handle 场景：fenced reread 先失败 → STALE，held 内容无关）
+  const fakeFinalAbs = destinationAbsolutePath(`${fx.profileId}/${fx.revisionId}/reference.wav`);
+  fs.mkdirSync(path.dirname(fakeFinalAbs), {recursive: true});
+  fs.copyFileSync(path.join(fx.dataDir, 'voice-library', fx.profileId, fx.revisionId, 'reference.wav'), fakeFinalAbs);
+  const fakeHeld = await openHeldMaterializedFileEvidence(
+    {
+      relativePath: `${fx.profileId}/${fx.revisionId}/reference.wav`,
+      voiceProfileId: fx.profileId,
+      voiceProfileRevisionId: fx.revisionId,
+      expectedSha256: fx.revisionSha256,
+      expectedCodec: 'pcm_s16le',
+      expectedSampleRate: 48000,
+      expectedChannels: 1,
+      minDurationMs: 1,
+      adapterCompatibilityKey: 'indextts2-adapter-registry@1',
+    },
+    'durabilize',
+  );
   try {
     workerFinalizeMaterialization({
       handle: {jobId: 'no-such-job', ownerToken: 'x', attempt: 1, leaseExpiresAtEpochMs: Date.now() + 60000},
-      evidence: {
-        relativePath: `${fx.profileId}/${fx.revisionId}/reference.wav`,
-        absolutePathInternal: 'internal',
-        sha256: 'a'.repeat(64), size: 1,
-        codec: 'pcm_s16le', sampleRate: 48000, channels: 1, durationMs: 100,
-        device: 0n, inode: 0n, mtimeNs: 0n, parentRealpath: 'internal',
-        durabilityEstablished: true,
-      },
+      held: fakeHeld,
       revisionEvidence: {
         voiceProfileId: fx.profileId,
         voiceProfileRevisionId: fx.revisionId,
-        canonicalAudioSha256: 'a'.repeat(64),
+        canonicalAudioSha256: fx.revisionSha256,
         adapterCompatibilityKey: 'indextts2-adapter-registry@1',
         provider: 'indextts2',
-        fileSize: 1,
+        fileSize: fs.statSync(path.join(fx.dataDir, 'voice-library', fx.profileId, fx.revisionId, 'reference.wav')).size,
       },
+      asgSnapshots: [],
     });
     ok(false, 'final DB 失败注入 → 抛错', 'no error');
   } catch (e) {
     ok(e instanceof MaterializationError && e.code === 'STALE_VALIDATION_OWNER', 'final DB 失败 → STALE_VALIDATION_OWNER', e);
+  } finally {
+    await fakeHeld.close();
   }
 
   // 4) orphan 文件不视为 usable：向 materialization root 写入无 DB 引用的孤儿文件，

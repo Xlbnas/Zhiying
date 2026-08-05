@@ -107,7 +107,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ── TTS-C Contract Gate（R11）：TTS-C 架构 contract 的双引擎实证 ──────────
-  # 与上方 runtime gate（34 → 45 suites，TTS-C.1A 已纳入）分别报告，不混称。
+  # 与上方 runtime gate（34 → 49 suites，TTS-C.1A 已纳入）分别报告，不混称。
   # 边界：无 Node/无真实 provider/无 production DB；纯 Python + 系统 sqlite3 CLI。
   # 在 final HEAD 重新生成双引擎结果（不依赖 checked-in result 伪装执行）。
   tts-c-contract-gate:
@@ -196,5 +196,5 @@ jobs:
             echo "| SQL SHA | \`${SQL_SHA}\` |"
             echo "| conclusion | ${{ job.status }} |"
             echo ""
-            echo "TTS-C contract tests × engines（与 45-suite runtime gate 分别报告）。"
+            echo "TTS-C contract tests × engines（与 49-suite runtime gate 分别报告）。"
           } >> "$GITHUB_STEP_SUMMARY"
