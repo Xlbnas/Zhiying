@@ -358,7 +358,7 @@ async function buildUsableProjection(rev: RevCtx, requestId: string): Promise<st
   // Use the legitimate validateExistingProjection flow + tamper after acquisition via clone (not in WeakMap)
   let rc01b = false;
   try {
-    const legit = await validateExistingProjection(getProjection(fx.profileId, revR1.revisionId)!, null, 'indextts2');
+    const legit = await validateExistingProjection(getProjection(fx.profileId, revR1.revisionId)!, null, {jobId: '', validationOwnerToken: '', validationAttempt: 0, validationLeaseExpiresAtEpochMs: 0, candidateMaterializationId: getProjection(fx.profileId, revR1.revisionId)!.id, candidateMaterializationMetadataHash: null}, 'indextts2');
     if (legit.kind === 'usable') {
       // Close capability (simulate Phase 3 done); cloned should be rejected
       await legit.capability.close();
@@ -411,7 +411,7 @@ async function buildUsableProjection(rev: RevCtx, requestId: string): Promise<st
   // ── REUSE-CAP-04：clone/prototype spoof branded capability → reject ──
   const revR4 = await freshRevision(4240);
   const projR4Id = await buildUsableProjection(revR4, 'reuse-4');
-  const valid4 = await validateExistingProjection(getProjection(fx.profileId, revR4.revisionId)!, null, 'indextts2');
+  const valid4 = await validateExistingProjection(getProjection(fx.profileId, revR4.revisionId)!, null, {jobId: '', validationOwnerToken: '', validationAttempt: 0, validationLeaseExpiresAtEpochMs: 0, candidateMaterializationId: getProjection(fx.profileId, revR4.revisionId)!.id, candidateMaterializationMetadataHash: null}, 'indextts2');
   let rc04 = false;
   if (valid4.kind === 'usable') {
     const clone = Object.assign(Object.create(Object.getPrototypeOf(valid4.capability)), valid4.capability) as ValidatedReusableProjectionCapability;

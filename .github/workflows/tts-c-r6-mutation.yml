@@ -1,0 +1,112 @@
+name: TTS-C R6 Mutation Gate
+
+on:
+  push:
+    branches:
+      - m7
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tts-c-r6-mutation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  r6-mutation-gate:
+    name: TTS-C R6 Mutation Gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      NODE_ENV: test
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve commit SHA
+        id: sha
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Node / pnpm 版本与仓库一致
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Node dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install real ffmpeg / ffprobe（fixture 音频依赖）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
+      - name: TTS-C.1A.R6 Mutation Gate
+        id: gate
+        run: |
+          set -o pipefail
+          export PATH="$PWD/.tools/static-ffmpeg:$PATH"
+          npx tsx scripts/test-tts-c1a-r6-mutations.ts 2>&1 | tee /tmp/r6-mutation-console.log
+          # mutation runner exits 0 only if all 10 PASS + final restore sanity PASS + git diff empty
+          echo "exit_code=$?"
+
+      - name: Validate mutation output
+        run: |
+          if [ ! -f /tmp/r6-mutation-output.txt ]; then
+            echo "FAIL: /tmp/r6-mutation-output.txt not produced"
+            exit 1
+          fi
+          if [ ! -f docs/evidence/tts-c-r16/mutation-output.txt ]; then
+            echo "FAIL: docs/evidence/tts-c-r16/mutation-output.txt not produced"
+            exit 1
+          fi
+          TOTAL=$(grep -E '^## MUT-R6-' docs/evidence/tts-c-r16/mutation-output.txt | wc -l)
+          PASS=$(grep -cE '^### MUT-R6-[0-9]+$' docs/evidence/tts-c-r16/mutation-output.txt | head -1)
+          echo "TOTAL=$TOTAL"
+          grep -E '^### MUT-R6-' docs/evidence/tts-c-r16/mutation-output.txt
+
+      - name: Verify git diff empty（restore sanity）
+        run: |
+          if [ -n "$(git diff --check)" ]; then
+            echo "FAIL: git diff not empty after restore"
+            git diff
+            exit 1
+          fi
+          echo "git diff --check: empty"
+
+      - name: Upload mutation artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tts-c-r6-mutation-${{ steps.sha.outputs.sha }}
+          path: |
+            /tmp/r6-mutation-output.txt
+            /tmp/r6-mutation-console.log
+            docs/evidence/tts-c-r16/mutation-output.txt
+          if-no-files-found: ignore
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## TTS-C R6 Mutation Gate — ${{ steps.sha.outputs.sha }}"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| commit SHA | \`${{ steps.sha.outputs.sha }}\` |"
+            echo "| runner | \`scripts/test-tts-c1a-r6-mutations.ts\` (portable) |"
+            echo "| target test | \`scripts/test-tts-c1a-r6-hardening.ts\` |"
+            echo "| mutation output | \`docs/evidence/tts-c-r16/mutation-output.txt\` |"
+            echo "| conclusion | ${{ job.status }} |"
+            echo ""
+            echo "10 项 mutation（MUT-R6-01..10）逐项修改真实生效点 → 跑目标 test → 断言目标测试因 mutation 而 FAIL（不得因 ReferenceError / SyntaxError / undefined 记为 PASS）→ restore → 验证 git diff 为空。"
+          } >> "$GITHUB_STEP SUMMARY"

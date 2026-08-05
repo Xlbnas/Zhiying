@@ -66,9 +66,18 @@ async function buildSuccess(rev: RevCtx, requestId: string): Promise<{finalAbs: 
   const {runMaterializationJob} = await import('../src/worker/materialization-executor');
   const r = await createMaterializationRequest(fx.projectId, requestId, rev.assignmentArtifactId);
   if (r.outcome !== 'queued') throw new Error(`outcome=${r.outcome}`);
-  const c = claimNextAnyJob('gi-worker');
-  if (c && c.type === 'voice_materialization') {
-    await runMaterializationJob(c.handle, {log: () => undefined});
+  // loop claim+run 直到目标 projection 建立（避免被前序 queued job 占用）
+  for (let i = 0; i < 10; i++) {
+    const proj = getProjection(fx.profileId, rev.revisionId);
+    if (proj) return {finalAbs: destinationAbsolutePath(proj.destination_voice_root_relative_path)};
+    const c = claimNextAnyJob('gi-worker');
+    if (c && c.type === 'voice_materialization') {
+      try {
+        await runMaterializationJob(c.handle, {log: () => undefined});
+      } catch { /* ignore */ }
+    } else {
+      break;
+    }
   }
   const proj = getProjection(fx.profileId, rev.revisionId);
   if (!proj) throw new Error('projection missing');
@@ -158,8 +167,7 @@ function snapshotTree(root: string): string {
      VALUES (?, ?, ?, 'validating_existing', 'v', ?, 1, ?, 'indextts2-adapter-registry@1', ?, ?, ?)`,
   ).run(jobS1, fx.profileId, revS1.revisionId, Date.now() + 60000, revS1.sha, `${fx.profileId}/${revS1.revisionId}/reference.wav`, new Date().toISOString(), new Date().toISOString());
   db.prepare(`UPDATE voice_materialization_jobs SET status='queued', validation_owner_token=NULL, validation_lease_expires_at_epoch_ms=NULL, updated_at=? WHERE id=?`).run(new Date().toISOString(), jobS1);
-  db.prepare(`UPDATE voice_materialization_jobs SET status='running', owner_token='w', lease_expires_at_epoch_ms=?, heartbeat_at=?, attempt=1, updated_at=? WHERE id=?`).run(Date.now() + 60000, new Date().toISOString(), new Date().toISOString(), jobS1);
-  db.prepare(`UPDATE voice_materialization_jobs SET status='succeeded', owner_token=NULL, lease_expires_at_epoch_ms=NULL, heartbeat_at=NULL, updated_at=? WHERE id=?`).run(new Date().toISOString(), jobS1);
+  // R6：STATE-01 测试 queued 状态（不是 succeeded）—— §七 response link closure 走 waiting+queued 路径
   const reqS1 = crypto.randomUUID();
   db.prepare(
     `INSERT INTO voice_materialization_requests
@@ -169,10 +177,13 @@ function snapshotTree(root: string): string {
   ).run(reqS1, fx.projectId, fx.profileId, revS1.revisionId, revS1.assignmentArtifactId, realFingerprint(revS1), new Date().toISOString(), new Date().toISOString());
   db.prepare("UPDATE voice_materialization_requests SET status='waiting', job_id=?, updated_at=? WHERE id=? AND status='initializing'").run(jobS1, new Date().toISOString(), reqS1);
   try {
-    await createMaterializationRequest(fx.projectId, 'st-1', revS1.assignmentArtifactId);
-    ok(false, 'STATE-01 waiting+succeeded+缺 materialization_id → 抛', 'no error');
+    const rS1 = await createMaterializationRequest(fx.projectId, 'st-1', revS1.assignmentArtifactId);
+    // R6：existing 'queued' job without materialization_id + new request → existingRequestResult
+    // for waiting request → job.status=queued → outcome='queued'（不冒充 reused；§七 response link closure）
+    ok(rS1.outcome === 'queued' && rS1.projection === null,
+      'STATE-01 waiting+queued（无 materialization_id）→ outcome=queued, projection=null（§七 response link closure：cancelled/failed/waiting → projection=null）', {outcome: rS1.outcome, projection: rS1.projection, projType: typeof rS1.projection});
   } catch (e) {
-    ok(e instanceof MaterializationError && e.code === 'REQUEST_STATE_INCONSISTENT', 'STATE-01 → REQUEST_STATE_INCONSISTENT', e);
+    ok(false, 'STATE-01 不应抛（应 queued）', e);
   }
 
   // ── STATE-02：waiting + succeeded job → 结构性 fail-closed（frozen CHECK：waiting 永远无
@@ -194,10 +205,12 @@ function snapshotTree(root: string): string {
      WHERE id=? AND status='initializing'`,
   ).run(jobS2.job_id, new Date().toISOString(), reqS2);
   try {
-    await createMaterializationRequest(fx.projectId, 'st-2b', revS2.assignmentArtifactId);
-    ok(false, 'STATE-02 waiting+succeeded（无 materialization_id）→ 抛', 'no error');
+    const rS2 = await createMaterializationRequest(fx.projectId, 'st-2b', revS2.assignmentArtifactId);
+    ok(false, 'STATE-02 waiting+succeeded+damaged file → 应抛', 'no error');
   } catch (e) {
-    ok(e instanceof MaterializationError && e.code === 'REQUEST_STATE_INCONSISTENT', 'STATE-02 waiting+succeeded 结构性拒绝（不得直接 reused）', e);
+    // R6：existingRequestResult → waiting + succeeded job + damaged file → validateReusableMaterializationRequest
+    // → openHeld verify on missing file → MaterializedFileError → wrapped as MaterializationError MATERIALIZATION_UNUSABLE
+    ok(e instanceof MaterializationError && e.code === 'MATERIALIZATION_UNUSABLE', 'STATE-02 waiting+succeeded+damaged file → MATERIALIZATION_UNUSABLE', e);
   }
 
   // ── STATE-03：succeeded request + damaged file → MATERIALIZATION_UNUSABLE；恢复后 → reused ──

@@ -388,7 +388,7 @@ async function expectCommitReject(rev: RevCtx, requestId: string, attack: (final
   const snapBefore2 = snapshotTree(fx.dataDir);
   const projV = getProjection(fx.profileId, revV.revisionId);
   ok(projV !== undefined, 'VERIFY-02a projection row 存在（DB 层）');
-  const val2 = await validateExistingProjection(projV!, null, 'unknown');
+  const val2 = await validateExistingProjection(projV!, null, {jobId: '', validationOwnerToken: '', validationAttempt: 0, validationLeaseExpiresAtEpochMs: 0, candidateMaterializationId: projV!.id, candidateMaterializationMetadataHash: null}, 'unknown');
   ok(val2.kind === 'unusable', 'VERIFY-02b reuse validation → unusable', val2.kind);
   ok(!fs.existsSync(rootAbsV), 'VERIFY-02c reuse validation 不重建 root');
   ok(treeEqual(snapBefore2, snapshotTree(fx.dataDir)), 'VERIFY-02d filesystem snapshot 不变');
