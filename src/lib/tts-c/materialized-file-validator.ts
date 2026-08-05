@@ -1,21 +1,31 @@
 /**
- * TTS-C.1A.R3 共享 safe final-file validator + Held evidence（唯一 exact file contract）。
+ * TTS-C.1A.R4 共享 safe final-file validator + Held evidence（唯一 exact file contract）。
  *
  * R3（P0-A/P0-B）：
  * - HeldMaterializedFileEvidence：final fd（O_RDONLY|O_NOFOLLOW）+ parent fd
  *   （O_RDONLY|O_DIRECTORY|O_NOFOLLOW）持有到 DB commit 完成或失败；close() 恰好一次；
  *   普通快照（snapshot）不得用于 DB success；
- * - evidence 增加 ctimeNs / parentDev / parentIno；
  * - SHA/WAV 均从 held final fd 读取；fsync held final + held parent；
- * - assertHeldEvidenceCurrentSync：commit-time 同步 fence（path lstat ↔ held fd
- *   dev/inode/size/mtimeNs/ctimeNs + parent dev/inode）——同 inode 原地改写（mtime/ctime
- *   漂移）与 path 替换（inode 变化）均可检测；
  * - verify（Web/replay/GET/validation/recovery 校验，零 mkdir/零文件写）与 durabilize
- *   （Worker/recovery 建立 durability）双模式；
+ *   （Worker/recovery 建立 durability）双模式。
+ *
+ * R4 加固：
+ * - P0-A runtime capability seal：module-private WeakSet 登记合法实例；
+ *   不存在任何公开 factory/register；clone / Object.create(prototype) / plain object
+ *   一律 SEAL_MISMATCH（assertHeldCapability）；
+ * - P0-B exact destination binding：commit seal 的目标路径一律从 frozen identity
+ *   （voiceProfileId/voiceProfileRevisionId）重新派生（expectedRelative/expectedAbsolute/
+ *   expectedParent），绝不信任 evidence 自带路径；evidence 路径字段必须逐项等于派生值；
+ * - P0-C full ancestor seal：acquisition 记录 root/profile/revision/file 四级 dev/ino；
+ *   commit-time 逐级 lstat（非 symlink、类型、dev/ino）+ root realpath 锚定
+ *   path.resolve(materializationRootAbs())；ancestor rename+symlink 替换必拒绝；
+ * - P0-D verify 零写：root/parent 缺失 → MISSING，绝不 mkdir（见 paths.ts 拆分）。
  * - 参考审计：Node fs numeric flags 透传 Linux open(2)（O_NOFOLLOW 拒绝 symlink、
  *   O_DIRECTORY 非目录 ENOTDIR）；fd 持有 = inode 锚定，path 可替换 → commit-time 必须
  *   复核 path↔held fd；SQLite 与 filesystem 无跨资源原子事务 → fail-closed 边界 =
  *   held fd + 同步 seal + 先文件后 DB；知影为本地单 Worker writer（无分布式锁需求）。
+ *   commit seal 使用 path+lstat 逐级复核（非 dirfd/openat anchored traversal），
+ *   依赖本地 single-writer contract；ancestor mutation 由 R4 测试套件覆盖。
  */
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
@@ -83,6 +93,11 @@ export interface MaterializedFileEvidence {
   parentRealpath: string;
   parentDev: bigint;
   parentIno: bigint;
+  /** R4 P0-C：acquisition 时 root / profile 两级 ancestor 身份（revision 级 = parent*） */
+  rootDev: bigint;
+  rootIno: bigint;
+  profileDev: bigint;
+  profileIno: bigint;
   durabilityEstablished: boolean;
 }
 
@@ -95,24 +110,29 @@ export interface MaterializedFileValidatorDeps {
 }
 
 /**
+ * R4 P0-A：module-private issue token（runtime secret，不导出）。
+ * 构造器运行时必须出示本 token；外部/测试无法获得 → 无法构造或登记伪造 capability。
+ */
+const HELD_ISSUE_TOKEN: unique symbol = Symbol('tts-c1a-held-evidence-issue');
+
+/**
  * Held evidence（P0-A）：final + parent fd 持有到 DB commit 完成或失败。
- * 构造函数不导出——只有 openHeldMaterializedFileEvidence 能创建；
+ * R4 起不存在任何公开 factory/register；构造器由 module-private issue token 门控
+ * （runtime 检查，非仅靠 TypeScript private），合法实例只能经
+ * openHeldMaterializedFileEvidence 发行并登记入 module-private WeakSet；
  * 普通 snapshot 不得作为 DB success 凭据。
  */
 export class HeldMaterializedFileEvidence {
   private closed = false;
-  private constructor(
+  constructor(
     readonly evidence: MaterializedFileEvidence,
     private readonly fileHandle: fsSync.promises.FileHandle,
     private readonly parentDirHandle: fsSync.promises.FileHandle,
-  ) {}
-
-  static create(
-    evidence: MaterializedFileEvidence,
-    fileHandle: fsSync.promises.FileHandle,
-    parentDirHandle: fsSync.promises.FileHandle,
-  ): HeldMaterializedFileEvidence {
-    return new HeldMaterializedFileEvidence(evidence, fileHandle, parentDirHandle);
+    issueToken: symbol,
+  ) {
+    if (issueToken !== HELD_ISSUE_TOKEN) {
+      throw new MaterializedFileError('SEAL_MISMATCH', 'held capability 只能由 validator 发行（issue token 无效）');
+    }
   }
 
   get fileFd(): fsSync.promises.FileHandle {
@@ -143,6 +163,34 @@ export class HeldMaterializedFileEvidence {
 
   get isClosed(): boolean {
     return this.closed;
+  }
+}
+
+/**
+ * R4 P0-A：runtime capability seal。module-private WeakSet 是唯一合法实例登记处；
+ * brand 不导出，测试/调用方无法注册伪造 capability。
+ * clone / Object.create(prototype) / prototype spoof / plain object 均不在集合内。
+ */
+const legitimateHeldEvidence = new WeakSet<object>();
+
+/** 模块内部唯一发行点（不导出）。 */
+function issueHeldEvidence(
+  evidence: MaterializedFileEvidence,
+  fileHandle: fsSync.promises.FileHandle,
+  parentDirHandle: fsSync.promises.FileHandle,
+): HeldMaterializedFileEvidence {
+  const held = new HeldMaterializedFileEvidence(evidence, fileHandle, parentDirHandle, HELD_ISSUE_TOKEN);
+  legitimateHeldEvidence.add(held);
+  return held;
+}
+
+/**
+ * 验证 value 是 validator 发行的合法 held capability（runtime seal，非类型声明）。
+ * 任何非 WeakSet 登记对象 → SEAL_MISMATCH。
+ */
+export function assertHeldCapability(value: unknown): asserts value is HeldMaterializedFileEvidence {
+  if (typeof value !== 'object' || value === null || !legitimateHeldEvidence.has(value)) {
+    throw new MaterializedFileError('SEAL_MISMATCH', 'held capability is not validator-issued');
   }
 }
 
@@ -297,6 +345,11 @@ export async function openHeldMaterializedFileEvidence(
     if (parentPathStat.dev !== Number(parentStat.dev) || parentPathStat.ino !== Number(parentStat.ino)) {
       throw new MaterializedFileError('CONTAINMENT', 'parent path 与 held parent fd 不一致（被替换）');
     }
+    // R4 P0-C：ancestor chain 身份锚定（root / profile 两级；revision 级 = parent*）。
+    // 逐级 lstat 已在 containment 中拒绝 symlink；此处仅记录 dev/ino 供 commit seal 复核。
+    const relParts = expectation.relativePath.split('/');
+    const rootStat = await fs.lstat(realRoot, {bigint: true});
+    const profileStat = await fs.lstat(path.join(realRoot, relParts[0]), {bigint: true});
     // SHA from fd
     const sha = await sha256FromFd(fh);
     if (sha !== expectation.expectedSha256) {
@@ -355,9 +408,13 @@ export async function openHeldMaterializedFileEvidence(
       parentRealpath: realParent,
       parentDev: parentStat.dev,
       parentIno: parentStat.ino,
+      rootDev: rootStat.dev,
+      rootIno: rootStat.ino,
+      profileDev: profileStat.dev,
+      profileIno: profileStat.ino,
       durabilityEstablished,
     };
-    return HeldMaterializedFileEvidence.create(evidence, fh, dirFh);
+    return issueHeldEvidence(evidence, fh, dirFh);
   } catch (err) {
     if (dirFh) {
       try {
@@ -378,9 +435,16 @@ export async function openHeldMaterializedFileEvidence(
 }
 
 /**
- * commit-time 同步 seal（P0-B）：BEGIN IMMEDIATE 内、DB writes 前调用。
- * 验证 held fd 与当前 path 仍为同一对象（同 inode 原地改写 = mtimeNs/ctimeNs 漂移；
- * path 替换 = dev/inode 变化；parent 替换 = parent dev/inode 变化）。
+ * commit-time 同步 seal（P0-A/P0-B/P0-C）：BEGIN IMMEDIATE 内、DB writes 前调用。
+ * R4：
+ * 1. capability 真实性（WeakSet brand，伪造/clone/spoof 一律拒绝）；
+ * 2. exact destination binding——目标路径只从 frozen identity 派生
+ *    （expectedRelative/expectedAbsolute/expectedParent），绝不信任 evidence 自带路径；
+ *    evidence 的 relativePath/absolutePathInternal/parentRealpath 必须逐项等于派生值；
+ * 3. full ancestor seal——root/profile/revision(final parent)/final file 逐级
+ *    lstat（非 symlink、类型、dev/ino 与 acquisition evidence 相同）+ root realpath
+ *    锚定 path.resolve(materializationRootAbs())；ancestor rename+symlink 替换必拒绝；
+ * 4. held fd fstat ↔ acquisition evidence（同 inode 原地改写 = mtime/ctime 漂移）。
  * 必须同步（无 await）；fence 后到 COMMIT 之间不得有可注入异步 hook。
  */
 export function assertHeldEvidenceCurrentSync(
@@ -392,15 +456,66 @@ export function assertHeldEvidenceCurrentSync(
     expectedSha256: string;
   },
 ): void {
+  // P0-A：capability 真实性是第一道 fence（未登记对象直接拒绝）
+  assertHeldCapability(held);
   const ev = held.evidence;
   const fail = (code: MaterializedFileError['code'], msg: string): never => {
     throw new MaterializedFileError(code, msg);
   };
-  if (ev.relativePath !== expected.relativePath) fail('SEAL_MISMATCH', 'relativePath 漂移');
-  const destRel = destinationRelativePath(expected.voiceProfileId, expected.voiceProfileRevisionId);
-  if (expected.relativePath !== destRel) fail('SEAL_MISMATCH', 'relativePath ≠ destinationRelativePath');
+  // P0-B：从 frozen identity 重新派生 exact destination（不信任 evidence 路径）
+  const expectedRelative = destinationRelativePath(expected.voiceProfileId, expected.voiceProfileRevisionId);
+  if (expected.relativePath !== expectedRelative) fail('SEAL_MISMATCH', 'expected.relativePath ≠ destinationRelativePath(identity)');
+  if (ev.relativePath !== expectedRelative) fail('SEAL_MISMATCH', 'evidence.relativePath ≠ derived destination');
+  const expectedAbsolute = destinationAbsolutePath(expectedRelative);
+  const expectedParent = path.dirname(expectedAbsolute);
+  const profileDir = path.dirname(expectedParent);
+  const rootDir = path.dirname(profileDir);
+  if (ev.absolutePathInternal !== expectedAbsolute) fail('SEAL_MISMATCH', 'evidence.absolutePathInternal ≠ derived destination');
   if (ev.sha256 !== expected.expectedSha256) fail('SEAL_MISMATCH', 'evidence SHA ≠ expected');
   if (!ev.durabilityEstablished) fail('SEAL_MISMATCH', 'durability 未建立');
+  // P0-C：full ancestor chain seal（path lstat ↔ acquisition dev/ino；本地 single-writer contract）
+  // root：非 symlink、目录、dev/ino 一致、realpath 锚定 path.resolve(materializationRootAbs())
+  let rootStat: fsSync.BigIntStats;
+  try {
+    rootStat = fsSync.lstatSync(rootDir, {bigint: true});
+  } catch {
+    return fail('SEAL_MISMATCH', 'materialization root 不可 stat');
+  }
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) fail('SEAL_MISMATCH', 'materialization root 非目录/symlink');
+  if (rootStat.dev !== ev.rootDev || rootStat.ino !== ev.rootIno) fail('SEAL_MISMATCH', 'materialization root dev/inode 漂移（被替换）');
+  let realRootNow: string;
+  try {
+    realRootNow = fsSync.realpathSync(rootDir);
+  } catch {
+    return fail('SEAL_MISMATCH', 'materialization root realpath 不可解析');
+  }
+  if (realRootNow !== path.resolve(materializationRootAbs())) fail('SEAL_MISMATCH', 'materialization root realpath 漂移');
+  // profile：非 symlink、目录、dev/ino 一致
+  let profileStat: fsSync.BigIntStats;
+  try {
+    profileStat = fsSync.lstatSync(profileDir, {bigint: true});
+  } catch {
+    return fail('SEAL_MISMATCH', 'profile ancestor 不可 stat');
+  }
+  if (profileStat.isSymbolicLink() || !profileStat.isDirectory()) fail('SEAL_MISMATCH', 'profile ancestor 非目录/symlink');
+  if (profileStat.dev !== ev.profileDev || profileStat.ino !== ev.profileIno) fail('SEAL_MISMATCH', 'profile ancestor dev/inode 漂移（被替换）');
+  // revision（final parent）：非 symlink、目录、dev/ino 一致、realpath 精确等于 acquisition 值且位于 root 下
+  let parentStat: fsSync.BigIntStats;
+  try {
+    parentStat = fsSync.lstatSync(expectedParent, {bigint: true});
+  } catch {
+    return fail('SEAL_MISMATCH', 'revision parent 不可 stat');
+  }
+  if (parentStat.isSymbolicLink() || !parentStat.isDirectory()) fail('SEAL_MISMATCH', 'revision parent 非目录/symlink');
+  if (parentStat.dev !== ev.parentDev || parentStat.ino !== ev.parentIno) fail('SEAL_MISMATCH', 'revision parent dev/inode 漂移（被替换）');
+  let realParentNow: string;
+  try {
+    realParentNow = fsSync.realpathSync(expectedParent);
+  } catch {
+    return fail('SEAL_MISMATCH', 'revision parent realpath 不可解析');
+  }
+  if (realParentNow !== ev.parentRealpath) fail('SEAL_MISMATCH', 'evidence.parentRealpath ≠ derived parent realpath');
+  if (!realParentNow.startsWith(realRootNow + path.sep)) fail('SEAL_MISMATCH', 'revision parent 越出 materialization root');
   // held fd fstat：同一 inode 的当前状态（mtime/ctime 反映同 inode 改写）
   const fdStat = fsSync.fstatSync(held.fileFd.fd, {bigint: true});
   if (fdStat.dev !== ev.device || fdStat.ino !== ev.inode) fail('SEAL_MISMATCH', 'held fd inode 漂移');
@@ -408,10 +523,10 @@ export function assertHeldEvidenceCurrentSync(
   if (fdStat.mtimeNs !== ev.mtimeNs || fdStat.ctimeNs !== ev.ctimeNs) {
     fail('SEAL_MISMATCH', 'held fd mtime/ctime 漂移（同 inode 原地改写）');
   }
-  // final path lstat ↔ held fd
+  // final path（派生 expectedAbsolute，非 evidence 路径）lstat ↔ held fd
   let pathStat: fsSync.BigIntStats | undefined;
   try {
-    pathStat = fsSync.lstatSync(ev.absolutePathInternal, {bigint: true});
+    pathStat = fsSync.lstatSync(expectedAbsolute, {bigint: true});
   } catch {
     fail('SEAL_MISMATCH', 'final path 不可 stat');
   }
@@ -421,19 +536,7 @@ export function assertHeldEvidenceCurrentSync(
   if (ps.dev !== ev.device || ps.ino !== ev.inode) fail('SEAL_MISMATCH', 'final path inode ≠ held fd（被替换）');
   if (ps.size !== BigInt(ev.size)) fail('SEAL_MISMATCH', 'final path size 漂移');
   if (ps.mtimeNs !== ev.mtimeNs || ps.ctimeNs !== ev.ctimeNs) fail('SEAL_MISMATCH', 'final path mtime/ctime 漂移（同 inode 改写）');
-  // parent path lstat ↔ held parent fd
-  let parentStat: fsSync.BigIntStats | undefined;
-  try {
-    parentStat = fsSync.lstatSync(ev.parentRealpath, {bigint: true});
-  } catch {
-    fail('SEAL_MISMATCH', 'parent path 不可 stat');
-  }
-  if (!parentStat) fail('SEAL_MISMATCH', 'parent path 不可 stat');
-  const pps: fsSync.BigIntStats = parentStat as fsSync.BigIntStats;
-  if (pps.isSymbolicLink() || !pps.isDirectory()) fail('SEAL_MISMATCH', 'parent path 非目录/symlink');
-  if (pps.dev !== ev.parentDev || pps.ino !== ev.parentIno) {
-    fail('SEAL_MISMATCH', 'parent path inode ≠ held parent fd（被替换）');
-  }
+  // held parent fd ↔ acquisition parent evidence
   const parentFdStat = fsSync.fstatSync(held.parentFd.fd, {bigint: true});
   if (parentFdStat.dev !== ev.parentDev || parentFdStat.ino !== ev.parentIno) fail('SEAL_MISMATCH', 'held parent fd inode 漂移');
 }

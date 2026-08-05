@@ -61,26 +61,48 @@ export function stagingTempPath(finalAbs: string): string {
 }
 
 /**
- * P0-3：materialization root 必须真实目录且非 symlink；
- * 返回 realpath(root)（后续 containment 比较基准）。
+ * R4（P0-D）：root helper 拆分——verify 路径绝不 mkdir。
+ * requireExistingMaterializationRootSafe：root 缺失 → ProjectionPathError（零 filesystem 写；
+ *   GET/replay/validation/reuse/recovery verify/integrityStatusOf/validateMaterializedFileSnapshot
+ *   只允许走这条路径）。
+ * ensureOrCreateMaterializationRootSafe：仅 Worker durable copy / 明确的 recovery durabilize
+ *   writer 路径允许创建 root。
+ * 两者共同契约：root 必须真实目录且非 symlink；返回 realpath(root)（containment 比较基准）。
  */
-export async function ensureMaterializationRootSafe(rootAbs: string): Promise<string> {
-  let st;
-  try {
-    st = await fs.lstat(rootAbs);
-  } catch {
-    await fs.mkdir(rootAbs, {recursive: true});
-    try {
-      st = await fs.lstat(rootAbs);
-    } catch {
-      throw new ProjectionPathError('materialization root 不可创建');
-    }
-  }
+async function checkMaterializationRootShape(rootAbs: string): Promise<string> {
+  const st = await fs.lstat(rootAbs);
   if (st.isSymbolicLink()) throw new ProjectionPathError('materialization root 是 symlink');
   if (!st.isDirectory()) throw new ProjectionPathError('materialization root 非目录');
   const real = await fs.realpath(rootAbs);
   if (real !== path.resolve(rootAbs)) throw new ProjectionPathError('materialization root realpath 漂移');
   return real;
+}
+
+/** verify 专用：root 必须已存在；缺失 → ProjectionPathError（绝不 mkdir）。 */
+export async function requireExistingMaterializationRootSafe(rootAbs: string): Promise<string> {
+  try {
+    return await checkMaterializationRootShape(rootAbs);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      throw new ProjectionPathError('materialization root 缺失（零 mkdir）');
+    }
+    throw err;
+  }
+}
+
+/** Worker writer 专用：root 缺失可创建（创建后重新 lstat/realpath 验证）。 */
+export async function ensureOrCreateMaterializationRootSafe(rootAbs: string): Promise<string> {
+  try {
+    return await checkMaterializationRootShape(rootAbs);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
+    await fs.mkdir(rootAbs, {recursive: true});
+    try {
+      return await checkMaterializationRootShape(rootAbs);
+    } catch {
+      throw new ProjectionPathError('materialization root 不可创建');
+    }
+  }
 }
 
 /**
@@ -136,7 +158,7 @@ export async function ensureExistingDestinationParentSafe(
   rel: string,
 ): Promise<{realRoot: string; realParent: string}> {
   validateDestinationRelativePath(rel);
-  const realRoot = await ensureMaterializationRootSafe(rootAbs);
+  const realRoot = await requireExistingMaterializationRootSafe(rootAbs);
   const realParent = await checkDestinationParentSegments(realRoot, rel.split('/'), false);
   return {realRoot, realParent};
 }
@@ -146,7 +168,7 @@ export async function ensureOrCreateDestinationParentSafe(
   rel: string,
 ): Promise<{realRoot: string; realParent: string}> {
   validateDestinationRelativePath(rel);
-  const realRoot = await ensureMaterializationRootSafe(rootAbs);
+  const realRoot = await ensureOrCreateMaterializationRootSafe(rootAbs);
   const realParent = await checkDestinationParentSegments(realRoot, rel.split('/'), true);
   return {realRoot, realParent};
 }
