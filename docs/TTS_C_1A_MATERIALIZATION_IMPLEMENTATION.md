@@ -267,3 +267,7 @@ build/typecheck）。新 suites 并入 `scripts/run-m7-quality-gate.sh`（suite 
 - **§九 Production Hook Guard**：`setAfterProjectionValidationBeforeFinalize` 与 `setAfterRecoveryEvidenceBeforeCommit` 在 `NODE_ENV='production'` 下抛 Error；test 环境仍可用（HOOK-01/02/03 实证）。
 - **测试**：新增 `test-tts-c1a-r5-hardening.ts`（28 PASS）+ `test-tts-c1a-r5-mutations.ts`（reproducible runner，输出 `/tmp/r5-mutation-output.txt`）；既有 12 个 TTS-C.1A 套件全部 PASS（R3 SEAL-08/10/11 删除——R5 下公开字段不可信，语义由 CAP-07 覆盖）。
 - **mutation proof**（reproducible）：9 项 mutation 修改真实生效点；目标测试 FAIL 符合预期（MUT-R5-01..07 实证于 R4 阶段原型；MUT-R5-08/09 在 R5 runner 跑通后归档）。
+
+## 13. TTS-C.1A.R5 后续订正
+
+R5 mutation proof 实测 4/9 匹配（非 9/9）—— 4 项 mutation（01/02/07/09）触发预期目标测试 FAIL；其余 5 项 mutation（03/04/05/06/08）mutation 应用成功但目标测试无 observable effect（保护无法被对应绕过——current design 无对应 bypass；R6 已删除此漏洞面）。R5 evidence docs/evidence/tts-c-r15/ 归档为历史，未修改。

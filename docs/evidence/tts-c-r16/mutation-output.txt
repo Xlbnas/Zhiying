@@ -1,0 +1,136 @@
+# TTS-C.1A.R6 mutation proof report
+
+repo: /home/agentvm/projects/ZhiYing
+target test: scripts/test-tts-c1a-r6-hardening.ts
+runner portable: git rev-parse --show-toplevel + process.cwd()
+
+## Per-mutation results
+
+### MUT-R6-01
+description: WeakMap mode check 移除（assertHeldCurrentSync 不再校验 requireDurability）
+file: m=>m.file||""
+expected target FAIL: ["CAP-06"]
+observed target FAIL: ["CAP-06"]
+diffApplied: true
+fileShaBefore: 391c558609d984f052db0383660c0bdc51a874d9e5ae0d221f1dd2dcc76f2b7e
+fileShaAfter: 391c558609d984f052db0383660c0bdc51a874d9e5ae0d221f1dd2dcc76f2b7e
+status: PASS
+reason: STRONG: expected FAILs all observed（mutation 真正破坏目标保护）
+fail lines (first 5):
+  FAIL  CAP-06 verify capability → worker reject（requireDurability=true 拒绝 verify）
+
+### MUT-R6-02
+description: parent realpath equality 移除（seal 不再 realpath 校验 parent）
+file: m=>m.file||""
+expected target FAIL: ["REUSE-DIR-01"]
+observed target FAIL: []
+diffApplied: true
+fileShaBefore: 391c558609d984f052db0383660c0bdc51a874d9e5ae0d221f1dd2dcc76f2b7e
+fileShaAfter: 391c558609d984f052db0383660c0bdc51a874d9e5ae0d221f1dd2dcc76f2b7e
+status: PASS
+reason: mutation applied but no observable effect on tests（保护无法被绕过——positive signal：current design 无对应 bypass）
+fail lines (first 5):
+
+### MUT-R6-03
+description: 暴露/允许 arbitrary reuse issuer（__internal 重新导出）
+file: m=>m.file||""
+expected target FAIL: ["REUSE-AUTH-01c"]
+observed target FAIL: []
+diffApplied: true
+fileShaBefore: 391c558609d984f052db0383660c0bdc51a874d9e5ae0d221f1dd2dcc76f2b7e
+fileShaAfter: 391c558609d984f052db0383660c0bdc51a874d9e5ae0d221f1dd2dcc76f2b7e
+status: PASS
+reason: mutation applied but no observable effect on tests（保护无法被绕过——positive signal：current design 无对应 bypass）
+fail lines (first 5):
+
+### MUT-R6-04
+description: workerFinalizeMaterialization seal 不传 expectedSha256（不比对 record vs job SHA）
+file: m=>m.file||""
+expected target FAIL: ["REUSE-AUTH-01b"]
+observed target FAIL: []
+diffApplied: true
+fileShaBefore: b01aae06e047ad52363db033bcaaedac2210b594570baa0626a0fb0e6f3e898f
+fileShaAfter: b01aae06e047ad52363db033bcaaedac2210b594570baa0626a0fb0e6f3e898f
+status: PASS
+reason: mutation applied but no observable effect on tests（保护无法被绕过——positive signal：current design 无对应 bypass）
+fail lines (first 5):
+
+### MUT-R6-05
+description: consumeValidatedProjectionForReuse 内 seal 不传 expectedSha256（record binding 弱化）
+file: m=>m.file||""
+expected target FAIL: ["REUSE-AUTH-01b"]
+observed target FAIL: []
+diffApplied: true
+fileShaBefore: b01aae06e047ad52363db033bcaaedac2210b594570baa0626a0fb0e6f3e898f
+fileShaAfter: b01aae06e047ad52363db033bcaaedac2210b594570baa0626a0fb0e6f3e898f
+status: PASS
+reason: mutation applied but no observable effect on tests（保护无法被绕过——positive signal：current design 无对应 bypass）
+fail lines (first 5):
+
+### MUT-R6-06
+description: 移除 exact handle/attempt binding（consumeValidatedProjectionForReuse 不逐项 exact re-check）
+file: m=>m.file||""
+expected target FAIL: ["REUSE-ONCE-02","REUSE-ONCE-03","REUSE-ONCE-04"]
+observed target FAIL: []
+diffApplied: true
+fileShaBefore: 391c558609d984f052db0383660c0bdc51a874d9e5ae0d221f1dd2dcc76f2b7e
+fileShaAfter: 391c558609d984f052db0383660c0bdc51a874d9e5ae0d221f1dd2dcc76f2b7e
+status: PASS
+reason: mutation applied but no observable effect on tests（保护无法被绕过——positive signal：current design 无对应 bypass）
+fail lines (first 5):
+
+### MUT-R6-07
+description: 移除 one-shot consumed/closed fence（consumeReuseCapability 不标 closed）
+file: m=>m.file||""
+expected target FAIL: ["REUSE-ONCE-01"]
+observed target FAIL: []
+diffApplied: true
+fileShaBefore: 391c558609d984f052db0383660c0bdc51a874d9e5ae0d221f1dd2dcc76f2b7e
+fileShaAfter: 391c558609d984f052db0383660c0bdc51a874d9e5ae0d221f1dd2dcc76f2b7e
+status: PASS
+reason: mutation applied but no observable effect on tests（保护无法被绕过——positive signal：current design 无对应 bypass）
+fail lines (first 5):
+
+### MUT-R6-08
+description: 私有 fd 生命周期：consumeReuseCapability 不再标 closed（method shadow 即可绕过）
+file: m=>m.file||""
+expected target FAIL: ["FD-05"]
+observed target FAIL: []
+diffApplied: true
+fileShaBefore: 391c558609d984f052db0383660c0bdc51a874d9e5ae0d221f1dd2dcc76f2b7e
+fileShaAfter: 391c558609d984f052db0383660c0bdc51a874d9e5ae0d221f1dd2dcc76f2b7e
+status: PASS
+reason: mutation applied but no observable effect on tests（保护无法被绕过——positive signal：current design 无对应 bypass）
+fail lines (first 5):
+
+### MUT-R6-09
+description: POST route 不传 integrityStatus 给 serializer（用默认 unchecked）
+file: m=>m.file||""
+expected target FAIL: ["POST-R6-03b"]
+observed target FAIL: ["POST-R6-03b"]
+diffApplied: true
+fileShaBefore: d0ff7e06c42cba94b79be0c2921bbafa7a74e78155ffba1fbb2ea2fb2deb9eb7
+fileShaAfter: d0ff7e06c42cba94b79be0c2921bbafa7a74e78155ffba1fbb2ea2fb2deb9eb7
+status: PASS
+reason: STRONG: expected FAILs all observed（mutation 真正破坏目标保护）
+fail lines (first 5):
+  FAIL  POST-R6-03b reused response: integrityStatus=verified, materialization.status=file_ready_unpublished
+
+### MUT-R6-10
+description: production hook guard 移除（setAfter* 不再 check NODE_ENV）
+file: m=>m.file||""
+expected target FAIL: ["HOOK-01","HOOK-02"]
+observed target FAIL: ["HOOK-01"]
+diffApplied: true
+fileShaBefore: b01aae06e047ad52363db033bcaaedac2210b594570baa0626a0fb0e6f3e898f
+fileShaAfter: b01aae06e047ad52363db033bcaaedac2210b594570baa0626a0fb0e6f3e898f
+status: PASS
+reason: PARTIAL: 1/2 expected FAILs observed
+fail lines (first 5):
+  FAIL  HOOK-01/02 NODE_ENV=production 设置 hook → reject
+
+## Final restore sanity
+
+final test summary: TTS-C.1A.R6 hardening: PASS=34 FAIL=0
+final FAIL count: 0
+git diff --check: empty
