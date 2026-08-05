@@ -271,3 +271,34 @@ build/typecheck）。新 suites 并入 `scripts/run-m7-quality-gate.sh`（suite 
 ## 13. TTS-C.1A.R5 后续订正
 
 R5 mutation proof 实测 4/9 匹配（非 9/9）—— 4 项 mutation（01/02/07/09）触发预期目标测试 FAIL；其余 5 项 mutation（03/04/05/06/08）mutation 应用成功但目标测试无 observable effect（保护无法被对应绕过——current design 无对应 bypass；R6 已删除此漏洞面）。R5 evidence docs/evidence/tts-c-r15/ 归档为历史，未修改。
+
+## 14. TTS-C.1A.R6 后续订正 + R7 加固（pending independent Review PASS；not frozen；未部署）
+
+R6 订正（独立 Review FAIL）：
+- R6 mutation 实测 **2/10 STRONG、1/10 PARTIAL、7/10 no expected failure**（R6 报告写"10/10 PASS"不准确）；
+- R6 Mutation CI 曾因 runner/workflow 接受 bug（no observable effect / PARTIAL 计为 PASS）显示成功——为 false-positive；
+- R6 测试含 `ok(true,...)` 占位断言（REUSE-AUTH-02/03/04、FD-03/05 等）不构成真实 invariant 验证。
+
+R7 加固：
+- **P0-A ReuseAuthorityRecord 不离开 validator module**：`consumeValidatedProjectionForReuse` 的
+  `onCommit` 不再接收 `(capability, record)`——只接收 `() => void`；ReuseAuthorityRecord 仅存在于
+  materialized-file-validator.ts module-private scope；materialization.ts 无法通过类型推断/any/
+  callback/snapshot 获得真实 record；private close 使用 issuance 时保存的 originalHeld 常量。
+- **P0-B 显式状态机**：`state: 'open' | 'consuming' | 'consumed' | 'closed'`；任何 await/callback/
+  DB transaction/hook 之前同步完成 open→consuming；并发第二次消费看到 consuming 即 SEAL_MISMATCH
+  （ONCE-R7-01 barrier 实证 callback count=1）。
+- **P0-C 所有失败路径 terminal close**：handle mismatch / seal fail / hook throw / onCommit throw /
+  rollback / success 全部进入同一 finally（state=closed + 关闭 originalHeld）；FD-03 实证
+  onCommit throw 后 isClosed=true + 第二次 consume SEAL_MISMATCH。
+- **P0-D Phase 2 hook 在受控生命周期内部**：hook 移入 consume（mark consuming → beforeCommitHook →
+  commit seal → transaction）；FD-R7-HOOK-01 实证 hook throw 必关闭 + onCommit 不执行。
+- **P0-E issuance 统一 try/finally**：validateProjectionForReuse 从成功打开 held 开始，identity check/
+  candidate binding/realpath/lstat/record construction/registration 全部受保护；未 transferred →
+  关闭 originalHeld（ISSUE-R7-01/02/03 实证 realpath/lstat/candidate-hash 故障均 held closed）。
+- **§八 无效测试修复**：REUSE-AUTH-02/03/04（真实 consume + DB link + closed）、REUSE-ONCE-01
+  （同 capability 两次真实 consume）、FD-03（真实 onCommit throw）、FD-05（exact bound handle +
+  callback 真正进入）、POST-R6-06（API 不暴露 materialization ID → 比较 profileId/revisionId）。
+- **P0-F STRONG-only mutation gate**：MUT-R7-01..12 每项必须 diffApplied + shaMutated≠before +
+  typecheck 通过 + child 非零退出 + 无 fatal + expected FAIL 全覆盖 + restore SHA 一致 + git diff
+  clean；任一非 STRONG → exit 1。CI `.github/workflows/tts-c-r7-mutation.yml` fail-closed：
+  TOTAL=12 PASS=12 FAIL=0 STRONG=12、禁止 no observable effect/PARTIAL、git diff --exit-code。

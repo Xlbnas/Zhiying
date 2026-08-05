@@ -1,0 +1,242 @@
+# TTS-C.1A.R7 mutation proof report
+
+repo: /home/agentvm/projects/ZhiYing
+runner: scripts/test-tts-c1a-r7-mutations.ts（portable；git rev-parse --show-toplevel）
+target tests: scripts/test-tts-c1a-r5-hardening.ts, scripts/test-tts-c1a-r6-hardening.ts
+mutation 数: 12
+
+## Per-mutation results
+
+### MUT-R7-01
+description: remove durable mode check（assertHeldCurrentSync requireDurability 失效）
+file: MUT-R7-01
+expected target FAIL: ["CAP-06"]
+observed target FAIL: ["CAP-06"]
+diffApplied: true
+fileShaBefore: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+fileShaMutated: bd7b526aa5dd192f828939ba8bff8e7b0278f4b548e9be4b08e8885bc46f3c89
+fileShaRestored: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+typecheckOk: true
+childStatus: 1
+fatalPattern: none
+status: PASS
+reason: STRONG
+fail lines (first 3):
+  FAIL  CAP-06 verify capability + 伪造 durabilityEstablished=true → worker reject（authority record 未授权 durabilize）
+  FAIL  CAP-06b job 不得 succeeded
+  FAIL  CAP-06c projection=0
+
+### MUT-R7-02
+description: remove entire parent/ancestor identity group（parent realpath + root/profile/revision lstat 整组 + §八 integrity 互补 fence）
+file: MUT-R7-02
+expected target FAIL: ["REUSE-DIR-01","REUSE-DIR-03"]
+observed target FAIL: ["REUSE-DIR-01","REUSE-DIR-03"]
+diffApplied: true
+fileShaBefore: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+fileShaMutated: e42505ff47571bbce3b14336793d69555eee265ff257cd1628b427c113eea274
+fileShaRestored: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+typecheckOk: true
+childStatus: 1
+fatalPattern: none
+status: PASS
+reason: STRONG
+fail lines (first 3):
+  FAIL  REUSE-DIR-01 Phase 2 后 profile rename+symlink → MATERIALIZATION_UNUSABLE
+  FAIL  REUSE-DIR-02 Phase 2 后 root rename+symlink → MATERIALIZATION_UNUSABLE
+  FAIL  REUSE-DIR-03 Phase 2 后 profile new inode replacement → MATERIALIZATION_UNUSABLE
+
+### MUT-R7-03
+description: expose actual usable issuer path（__internal 重新导出；引用真实存在的符号）
+file: MUT-R7-03
+expected target FAIL: ["REUSE-AUTH-01c"]
+observed target FAIL: ["REUSE-AUTH-01c"]
+diffApplied: true
+fileShaBefore: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+fileShaMutated: 2f35d69cb4a8d4f75dcf5cb8166a68a346b13bd589cf9f17d6e7a51d18739864
+fileShaRestored: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+typecheckOk: true
+childStatus: 1
+fatalPattern: none
+status: PASS
+reason: STRONG
+fail lines (first 3):
+  FAIL  REUSE-AUTH-01c exported issuer/private registration 入口已删除（__internal / issueReuseCapabilityFromHeld / underlyingHeldForReuse 不存在）
+
+### MUT-R7-04
+description: remove issuance SHA equality + openHeld SHA comparison（SHA authority 整组）
+file: MUT-R7-04
+expected target FAIL: ["REUSE-AUTH-01a","REUSE-AUTH-01b"]
+observed target FAIL: ["REUSE-AUTH-01a","REUSE-AUTH-01b"]
+diffApplied: true
+fileShaBefore: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+fileShaMutated: af4361051bdc8cdbe07069023042b69dd096d2f471220ed8e9c2b5d2d3f6189f
+fileShaRestored: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+typecheckOk: true
+childStatus: 1
+fatalPattern: none
+status: PASS
+reason: STRONG
+fail lines (first 3):
+  FAIL  REUSE-CAP-03 same-size damaged file + 同 request_id replay → MATERIALIZATION_UNUSABLE（SHA 来自 record 与现 fd 字节不符）
+  FAIL  REUSE-AUTH-01a openHeldMaterializedFileEvidence with 伪造 expected SHA → SHA_MISMATCH（issuance authority 来自 held fd 真实读取，不信任 caller）
+  FAIL  REUSE-AUTH-01b re-POST damaged file → MATERIALIZATION_UNUSABLE（fail-closed；不冒充 reused）
+
+### MUT-R7-05
+description: remove reuse commit-time seal + POST integrity（互补 fence 整组：seal 移除 + §八 fail-closed 移除）
+file: MUT-R7-05
+expected target FAIL: ["REUSE-DIR-02"]
+observed target FAIL: ["REUSE-DIR-02"]
+diffApplied: true
+fileShaBefore: d050e848c0dc53749d36eba6e8dbb3cb46937d29e4d61b8aff32927a31535694
+fileShaMutated: 7659d4b9f110dceac77e537bed3bc944d34c410617993235d87d3121f5a9a827
+fileShaRestored: d050e848c0dc53749d36eba6e8dbb3cb46937d29e4d61b8aff32927a31535694
+typecheckOk: true
+childStatus: 1
+fatalPattern: none
+status: PASS
+reason: STRONG
+fail lines (first 3):
+  FAIL  REUSE-DIR-01 Phase 2 后 profile rename+symlink → MATERIALIZATION_UNUSABLE
+  FAIL  REUSE-DIR-02 Phase 2 后 root rename+symlink → MATERIALIZATION_UNUSABLE
+  FAIL  REUSE-DIR-03 Phase 2 后 profile new inode replacement → MATERIALIZATION_UNUSABLE
+
+### MUT-R7-06
+description: remove complete handle binding block（5 字段 exact re-check 整块）
+file: MUT-R7-06
+expected target FAIL: ["REUSE-ONCE-02","REUSE-ONCE-03","REUSE-ONCE-04"]
+observed target FAIL: ["REUSE-ONCE-02","REUSE-ONCE-03","REUSE-ONCE-04"]
+diffApplied: true
+fileShaBefore: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+fileShaMutated: 13dfb4ad6e5832096adc944ae275d07c8ac7b6c3bdbd82ca61cf09c8f2943f0b
+fileShaRestored: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+typecheckOk: true
+childStatus: 1
+fatalPattern: none
+status: PASS
+reason: STRONG
+fail lines (first 3):
+  FAIL  REUSE-ONCE-02 capability 用于不同 job → SEAL_MISMATCH（handle binding 不匹配）
+  FAIL  REUSE-ONCE-03 capability 用于 attempt+1 → SEAL_MISMATCH（takeover 后旧 capability 失效）
+  FAIL  REUSE-ONCE-04 candidate hash 漂移 → SEAL_MISMATCH
+
+### MUT-R7-07
+description: remove open→consuming atomic transition（state 不置 consuming；并发第二次不被拒）
+file: MUT-R7-07
+expected target FAIL: ["ONCE-R7-01"]
+observed target FAIL: ["ONCE-R7-01"]
+diffApplied: true
+fileShaBefore: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+fileShaMutated: a49f83961000d37ec2729292903524615c925f284304b2749bbe097ec0f08a08
+fileShaRestored: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+typecheckOk: true
+childStatus: 1
+fatalPattern: none
+status: PASS
+reason: STRONG
+fail lines (first 3):
+  FAIL  ONCE-R7-01 并发两次 consume：第二个 callback 前 SEAL_MISMATCH + callback count=1 + 最终 closed
+
+### MUT-R7-08
+description: remove finally/private original-held close（失败后不 closed、不关 fd）
+file: MUT-R7-08
+expected target FAIL: ["FD-03"]
+observed target FAIL: ["FD-03"]
+diffApplied: true
+fileShaBefore: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+fileShaMutated: 79557182c51ec5aba3d74bc35ec3f0c833b92ec647eb922402bb554c794150e7
+fileShaRestored: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+typecheckOk: true
+childStatus: 1
+fatalPattern: none
+status: PASS
+reason: STRONG
+fail lines (first 3):
+  FAIL  FD-03 onCommit throw（transaction rollback）→ capability closed + 第二次 consume SEAL_MISMATCH
+  FAIL  FD-R7-HOOK-01 hook throw → capability closed + 第二次 consume SEAL_MISMATCH + onCommit 不执行
+
+### MUT-R7-09
+description: POST serializer omit integrityStatus（route 不传；默认 unchecked）
+file: MUT-R7-09
+expected target FAIL: ["POST-R6-03b"]
+observed target FAIL: ["POST-R6-03b"]
+diffApplied: true
+fileShaBefore: d0ff7e06c42cba94b79be0c2921bbafa7a74e78155ffba1fbb2ea2fb2deb9eb7
+fileShaMutated: 099e604bc43fa644cf828172864f47aadb0b0d3a6617c13e3861062ad9b56170
+fileShaRestored: d0ff7e06c42cba94b79be0c2921bbafa7a74e78155ffba1fbb2ea2fb2deb9eb7
+typecheckOk: true
+childStatus: 1
+fatalPattern: none
+status: PASS
+reason: STRONG
+fail lines (first 3):
+  FAIL  POST-R6-03b reused response: integrityStatus=verified, materialization.status=file_ready_unpublished
+
+### MUT-R7-10
+description: remove projection hook production guard
+file: MUT-R7-10
+expected target FAIL: ["HOOK-01"]
+observed target FAIL: ["HOOK-01"]
+diffApplied: true
+fileShaBefore: d050e848c0dc53749d36eba6e8dbb3cb46937d29e4d61b8aff32927a31535694
+fileShaMutated: ce0ab8f964d805e9a33eb734ffecd185859bc507bcd7b5c9e1b104bf451e58e5
+fileShaRestored: d050e848c0dc53749d36eba6e8dbb3cb46937d29e4d61b8aff32927a31535694
+typecheckOk: true
+childStatus: 1
+fatalPattern: none
+status: PASS
+reason: STRONG
+fail lines (first 3):
+  FAIL  HOOK-01/02 NODE_ENV=production 设置 hook → reject
+  FAIL  HOOK-01/02 NODE_ENV=production 设置 hook → reject
+
+### MUT-R7-11
+description: remove recovery hook production guard
+file: MUT-R7-11
+expected target FAIL: ["HOOK-01"]
+observed target FAIL: ["HOOK-01"]
+diffApplied: true
+fileShaBefore: d050e848c0dc53749d36eba6e8dbb3cb46937d29e4d61b8aff32927a31535694
+fileShaMutated: 71e759a6be7c08d0edc12a8a4cf17d9a017e3e9428f4f9cb8511f5637d74e8c8
+fileShaRestored: d050e848c0dc53749d36eba6e8dbb3cb46937d29e4d61b8aff32927a31535694
+typecheckOk: true
+childStatus: 1
+fatalPattern: none
+status: PASS
+reason: STRONG
+fail lines (first 3):
+  FAIL  HOOK-01/02 NODE_ENV=production 设置 hook → reject
+  FAIL  HOOK-01/02 NODE_ENV=production 设置 hook → reject
+
+### MUT-R7-12
+description: remove hook-throw close path（beforeCommitHook throw 后不 terminal close）
+file: MUT-R7-12
+expected target FAIL: ["FD-R7-HOOK-01"]
+observed target FAIL: ["FD-R7-HOOK-01"]
+diffApplied: true
+fileShaBefore: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+fileShaMutated: 3686cb3c3d901d55e6c2887a86c8285f871c4929c4359aad03bd1269cb911e93
+fileShaRestored: fc5751ff89ab7d8be9b663d8e455207179944b517754991bf94a975132207d0b
+typecheckOk: true
+childStatus: 1
+fatalPattern: none
+status: PASS
+reason: STRONG
+fail lines (first 3):
+  FAIL  FD-03 onCommit throw（transaction rollback）→ capability closed + 第二次 consume SEAL_MISMATCH
+  FAIL  FD-R7-HOOK-01 hook throw → capability closed + 第二次 consume SEAL_MISMATCH + onCommit 不执行
+
+## Summary
+
+TOTAL=12
+PASS=12
+FAIL=0
+STRONG=12
+no observable effect: 0
+PARTIAL: 0
+git diff before/after (mutated files) identical: yes
+git status --porcelain --untracked-files=no: M docs/M7_IMPLEMENTATION_STATUS.md
+ M docs/TTS_C_1A_MATERIALIZATION_IMPLEMENTATION.md
+ M scripts/run-m7-quality-gate.sh
+ M scripts/test-tts-c1a-r6-hardening.ts
+ M src/lib/tts-c/materialization.ts
+ M src/lib/tts-c/materialized-file-validator.ts
