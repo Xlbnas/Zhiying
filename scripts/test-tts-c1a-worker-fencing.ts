@@ -26,7 +26,7 @@ import {
   type WorkerFinalizeInput,
 } from '../src/lib/tts-c/materialization';
 import {destinationAbsolutePath} from '../src/lib/tts-c/paths';
-import {openHeldMaterializedFileEvidence, type HeldMaterializedFileEvidence} from '../src/lib/tts-c/materialized-file-validator';
+import {openHeldMaterializedFileEvidence, type HeldMaterializedFileEvidence, MaterializedFileError} from '../src/lib/tts-c/materialized-file-validator';
 
 const TAG = 'test-tts-c1a-worker-fencing';
 let fx: C1aFixture;
@@ -129,6 +129,7 @@ async function expectErrCodeAsync(label: string, fn: () => Promise<unknown>, cod
     await fn();
     ok(false, label, 'no error');
   } catch (e) {
+    console.log(`   DEBUG ${label}: ${(e as Error).constructor.name} code=${(e as MaterializationError).code ?? (e as MaterializedFileError).code} msg=${(e as Error).message}`);
     ok(e instanceof MaterializationError && e.code === code, label, e);
   }
 }

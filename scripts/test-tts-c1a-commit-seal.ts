@@ -19,7 +19,7 @@ import {ingestVoiceProfileRevision} from '../src/lib/voice-library/revisions';
 import {buildProjectVoiceAssignment} from '../src/lib/tts-b/assignment';
 import {claimNextAnyJob} from '../src/lib/scheduler';
 import {runMaterializationJob} from '../src/worker/materialization-executor';
-import {createMaterializationRequest, getProjection, getMaterializationJob, workerFinalizeMaterialization} from '../src/lib/tts-c/materialization';
+import {createMaterializationRequest, getProjection, getMaterializationJob, workerFinalizeMaterialization, MaterializationError} from '../src/lib/tts-c/materialization';
 import {openHeldMaterializedFileEvidence, validateMaterializedFileSnapshot, HeldMaterializedFileEvidence, MaterializedFileError} from '../src/lib/tts-c/materialized-file-validator';
 import {destinationAbsolutePath} from '../src/lib/tts-c/paths';
 
@@ -191,7 +191,12 @@ async function expectSealReject(rev: RevCtx, requestId: string, attack: (finalAb
     });
     ok(false, 'SEAL-06 伪造 held capability 不得成功终局', 'no error');
   } catch (e) {
-    ok(e instanceof MaterializedFileError && e.code === 'SEAL_MISMATCH', 'SEAL-06 伪造 held capability → capability fence 拒绝（非 WeakSet 登记实例）', e);
+    ok(
+    (e instanceof MaterializedFileError && e.code === 'SEAL_MISMATCH') ||
+      (e instanceof MaterializationError && e.code === 'REQUEST_STATE_INCONSISTENT'),
+    'SEAL-06 伪造 held capability → capability fence 拒绝（非 WeakSet 登记实例；R5 wrap 为 MaterializationError）',
+    e,
+  );
   }
   await legitHeld6b.close();
 
@@ -272,13 +277,8 @@ async function expectSealReject(rev: RevCtx, requestId: string, attack: (finalAb
   fs.renameSync(parentD2, movedD2);
   fs.mkdirSync(parentD2, {recursive: true});
   try {
-    const {assertHeldEvidenceCurrentSync} = await import('../src/lib/tts-c/materialized-file-validator');
-    assertHeldEvidenceCurrentSync(heldD2, {
-      relativePath: `${fx.profileId}/${revD2.revisionId}/reference.wav`,
-      voiceProfileId: fx.profileId,
-      voiceProfileRevisionId: revD2.revisionId,
-      expectedSha256: revD2.sha,
-    });
+    const {assertHeldCurrentSync} = await import('../src/lib/tts-c/materialized-file-validator');
+    assertHeldCurrentSync(heldD2, {requireDurability: true});
     ok(false, 'DIR-02 parent 替换 → seal 拒绝', 'no error');
   } catch (e) {
     ok(e instanceof MaterializedFileError && e.code === 'SEAL_MISMATCH', 'DIR-02 held parent 与 path inode 不一致 → seal 拒绝', e);

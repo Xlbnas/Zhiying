@@ -120,7 +120,7 @@ async function claimAndRun(fx_: C1aFixture, requestId: string, deps: Parameters<
     const realBytes = fs.readFileSync(realAbs);
     fs.rmSync(realAbs, {force: true});
     const {validateExistingProjection} = await import('../src/lib/tts-c/materialization');
-    const vr = await validateExistingProjection(realProj as never);
+    const vr = await validateExistingProjection(realProj as never, null, 'unknown');
     ok(vr.kind === 'unusable', 'DB 引用文件被删 → validator 判 unusable（fail-closed）', vr.kind);
     fs.writeFileSync(realAbs, realBytes); // 还原
   }
