@@ -1,26 +1,21 @@
 /**
- * TTS-C.1A.R2 共享 safe final-file validator（唯一 exact file contract）。
+ * TTS-C.1A.R3 共享 safe final-file validator + Held evidence（唯一 exact file contract）。
  *
- * worker temp 校验 / recovery path 校验 / existing projection 校验 三路径共用本模块，
- * 禁止维护三套不同的文件契约。
- *
- * 模式：
- * - verify：Web/validation reuse 只读验证（不要求目录写权限）；
- * - durabilize：Worker/recovery 使用——验证后 fsync final fd + fsync parent dir，
- *   durability 建立后才能允许 DB success。
- *
- * 安全模型（P0-3 + R2）：
- * 1. validateDestinationRelativePath（形状）；
- * 2. root realpath + profile/revision 逐级 lstat + parent realpath containment；
- * 3. final 以 O_RDONLY|O_NOFOLLOW 打开；
- * 4. fstat 必须 regular；
- * 5. SHA 从已打开 fd 读取（不重新按 path 打开）；
- * 6. WAV 契约从同一 fd 安全解析 header（不重新跟随可替换 path）；
- * 7. verify path 当前 dev/inode 与 held fd 一致（detect path replacement）；
- * 8. durabilize：fsync held final fd + 安全打开 parent 并 fsync；
- * 9. fsync 失败 → durabilityEstablished=false / 抛错，禁止 DB success；
- * 10. finally 关闭全部 fd；
- * 11. absolute path 仅供内部（调用方负责 API redaction）。
+ * R3（P0-A/P0-B）：
+ * - HeldMaterializedFileEvidence：final fd（O_RDONLY|O_NOFOLLOW）+ parent fd
+ *   （O_RDONLY|O_DIRECTORY|O_NOFOLLOW）持有到 DB commit 完成或失败；close() 恰好一次；
+ *   普通快照（snapshot）不得用于 DB success；
+ * - evidence 增加 ctimeNs / parentDev / parentIno；
+ * - SHA/WAV 均从 held final fd 读取；fsync held final + held parent；
+ * - assertHeldEvidenceCurrentSync：commit-time 同步 fence（path lstat ↔ held fd
+ *   dev/inode/size/mtimeNs/ctimeNs + parent dev/inode）——同 inode 原地改写（mtime/ctime
+ *   漂移）与 path 替换（inode 变化）均可检测；
+ * - verify（Web/replay/GET/validation/recovery 校验，零 mkdir/零文件写）与 durabilize
+ *   （Worker/recovery 建立 durability）双模式；
+ * - 参考审计：Node fs numeric flags 透传 Linux open(2)（O_NOFOLLOW 拒绝 symlink、
+ *   O_DIRECTORY 非目录 ENOTDIR）；fd 持有 = inode 锚定，path 可替换 → commit-time 必须
+ *   复核 path↔held fd；SQLite 与 filesystem 无跨资源原子事务 → fail-closed 边界 =
+ *   held fd + 同步 seal + 先文件后 DB；知影为本地单 Worker writer（无分布式锁需求）。
  */
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
@@ -28,7 +23,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {
   destinationAbsolutePath,
-  ensureDestinationParentSafe,
+  destinationRelativePath,
+  ensureExistingDestinationParentSafe,
   validateDestinationRelativePath,
   OPEN_FLAGS,
   ProjectionPathError,
@@ -47,6 +43,7 @@ export class MaterializedFileError extends Error {
       | 'INODE_CHANGED'
       | 'CONTAINMENT'
       | 'FSYNC_FAILED'
+      | 'SEAL_MISMATCH'
       | 'IO_ERROR',
     message: string,
   ) {
@@ -82,7 +79,10 @@ export interface MaterializedFileEvidence {
   device: bigint;
   inode: bigint;
   mtimeNs: bigint;
+  ctimeNs: bigint;
   parentRealpath: string;
+  parentDev: bigint;
+  parentIno: bigint;
   durabilityEstablished: boolean;
 }
 
@@ -92,6 +92,58 @@ export type MaterializedFileMode = 'verify' | 'durabilize';
 export interface MaterializedFileValidatorDeps {
   fsyncFile?: (fh: fsSync.promises.FileHandle) => Promise<void>;
   fsyncDir?: (fh: fsSync.promises.FileHandle) => Promise<void>;
+}
+
+/**
+ * Held evidence（P0-A）：final + parent fd 持有到 DB commit 完成或失败。
+ * 构造函数不导出——只有 openHeldMaterializedFileEvidence 能创建；
+ * 普通 snapshot 不得作为 DB success 凭据。
+ */
+export class HeldMaterializedFileEvidence {
+  private closed = false;
+  private constructor(
+    readonly evidence: MaterializedFileEvidence,
+    private readonly fileHandle: fsSync.promises.FileHandle,
+    private readonly parentDirHandle: fsSync.promises.FileHandle,
+  ) {}
+
+  static create(
+    evidence: MaterializedFileEvidence,
+    fileHandle: fsSync.promises.FileHandle,
+    parentDirHandle: fsSync.promises.FileHandle,
+  ): HeldMaterializedFileEvidence {
+    return new HeldMaterializedFileEvidence(evidence, fileHandle, parentDirHandle);
+  }
+
+  get fileFd(): fsSync.promises.FileHandle {
+    return this.fileHandle;
+  }
+
+  get parentFd(): fsSync.promises.FileHandle {
+    return this.parentDirHandle;
+  }
+
+  /** 恰好一次关闭（重复调用 no-op）。 */
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    let firstErr: unknown = null;
+    try {
+      await this.parentDirHandle.close();
+    } catch (err) {
+      firstErr = err;
+    }
+    try {
+      await this.fileHandle.close();
+    } catch (err) {
+      if (firstErr === null) firstErr = err;
+    }
+    if (firstErr !== null) throw firstErr;
+  }
+
+  get isClosed(): boolean {
+    return this.closed;
+  }
 }
 
 /** 流式 SHA256 从已打开 fd（1MB buffer）。 */
@@ -118,9 +170,7 @@ interface WavParse {
 }
 
 /**
- * 从已打开 fd 安全解析 WAV header（RIFF/WAVE/fmt PCM s16le + data chunk size）。
- * 顺序扫描 chunk（容忍 LIST/INFO 等额外 chunk；上限 1MB 防恶意结构）；
- * 不依赖 ffprobe 重新打开 path（避免 TOCTOU）；失败抛 WAV_CONTRACT。
+ * 从已打开 fd 安全解析 WAV header（顺序 chunk 扫描，容忍 LIST/INFO；上限 1MB）。
  */
 async function parseWavHeaderFromFd(fh: fsSync.promises.FileHandle): Promise<WavParse> {
   const riff = Buffer.alloc(12);
@@ -174,18 +224,28 @@ async function parseWavHeaderFromFd(fh: fsSync.promises.FileHandle): Promise<Wav
 }
 
 /**
- * 唯一 exact file contract 入口。
- * 返回不可伪造的 MaterializedFileEvidence；任何不满足 expectation 的
- * 条件抛 MaterializedFileError / ProjectionPathError（fail-closed）。
+ * 打开并验证 materialized file，返回 Held evidence（fd 持有到调用方 close）。
+ * durabilize：fsync held final fd + held parent fd。
+ * verify：零 mkdir、零文件写（parent 目录缺失 → MISSING）。
  */
-export async function validateMaterializedFile(
+export async function openHeldMaterializedFileEvidence(
   expectation: MaterializedFileExpectation,
   mode: MaterializedFileMode,
   deps: MaterializedFileValidatorDeps = {},
-): Promise<MaterializedFileEvidence> {
+): Promise<HeldMaterializedFileEvidence> {
   validateDestinationRelativePath(expectation.relativePath);
   const rootAbs = materializationRootAbs();
-  const {realRoot, realParent} = await ensureDestinationParentSafe(rootAbs, expectation.relativePath);
+  // verify/replay/GET/validation：parent 必须已存在（绝不 mkdir）；目录缺失 → MISSING
+  let realRoot: string;
+  let realParent: string;
+  try {
+    ({realRoot, realParent} = await ensureExistingDestinationParentSafe(rootAbs, expectation.relativePath));
+  } catch (err) {
+    if (err instanceof ProjectionPathError && err.message.includes('缺失')) {
+      throw new MaterializedFileError('MISSING', `parent 目录缺失（零 mkdir）: ${err.message}`);
+    }
+    throw new MaterializedFileError('CONTAINMENT', `parent containment 失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
   if (!realParent.startsWith(realRoot + path.sep)) {
     throw new MaterializedFileError('CONTAINMENT', 'parent realpath 越出 root');
   }
@@ -194,6 +254,7 @@ export async function validateMaterializedFile(
   let fh: fsSync.promises.FileHandle | null = null;
   let dirFh: fsSync.promises.FileHandle | null = null;
   try {
+    // final fd：O_RDONLY|O_NOFOLLOW
     try {
       fh = await fs.open(finalAbs, OPEN_FLAGS.readNoFollow);
     } catch (err) {
@@ -202,8 +263,18 @@ export async function validateMaterializedFile(
       if (code === 'ELOOP' || code === 'ENOTDIR') throw new MaterializedFileError('SYMLINK', 'final 是 symlink（O_NOFOLLOW 拒绝）');
       throw new MaterializedFileError('IO_ERROR', `final open 失败: ${code ?? String(err)}`);
     }
+    // parent fd：O_RDONLY|O_DIRECTORY|O_NOFOLLOW
+    try {
+      dirFh = await fs.open(realParent, OPEN_FLAGS.parentReadNoFollow);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === 'ELOOP' || code === 'ENOTDIR') throw new MaterializedFileError('CONTAINMENT', `parent 非目录/symlink: ${code}`);
+      throw new MaterializedFileError('IO_ERROR', `parent open 失败: ${code ?? String(err)}`);
+    }
     const st = await fh.stat({bigint: true});
     if (!st.isFile()) throw new MaterializedFileError('NOT_REGULAR', 'final 非 regular file');
+    const parentStat = await dirFh.stat({bigint: true});
+    if (!parentStat.isDirectory()) throw new MaterializedFileError('CONTAINMENT', 'parent fd 非 directory');
     // path 当前 inode/dev 与 held fd 一致（detect replacement）
     let pathStat;
     try {
@@ -214,6 +285,17 @@ export async function validateMaterializedFile(
     if (pathStat.isSymbolicLink()) throw new MaterializedFileError('SYMLINK', 'final path 现在是 symlink');
     if (pathStat.dev !== Number(st.dev) || pathStat.ino !== Number(st.ino)) {
       throw new MaterializedFileError('INODE_CHANGED', 'final path 与 opened fd 的 dev/inode 不一致（被替换）');
+    }
+    // parent path 与 held parent fd 一致
+    let parentPathStat;
+    try {
+      parentPathStat = await fs.lstat(realParent);
+    } catch {
+      throw new MaterializedFileError('CONTAINMENT', 'parent path 不可 stat');
+    }
+    if (parentPathStat.isSymbolicLink()) throw new MaterializedFileError('CONTAINMENT', 'parent path 现在是 symlink');
+    if (parentPathStat.dev !== Number(parentStat.dev) || parentPathStat.ino !== Number(parentStat.ino)) {
+      throw new MaterializedFileError('CONTAINMENT', 'parent path 与 held parent fd 不一致（被替换）');
     }
     // SHA from fd
     const sha = await sha256FromFd(fh);
@@ -238,7 +320,7 @@ export async function validateMaterializedFile(
     if (expectation.expectedSize !== undefined && st.size !== BigInt(expectation.expectedSize)) {
       throw new MaterializedFileError('SIZE_MISMATCH', `size=${st.size} expected=${expectation.expectedSize}`);
     }
-    // durabilize：fsync held final fd + parent dir
+    // durabilize：fsync held final fd + held parent fd
     let durabilityEstablished = false;
     if (mode === 'durabilize') {
       try {
@@ -247,7 +329,6 @@ export async function validateMaterializedFile(
         } else {
           await fh.sync();
         }
-        dirFh = await fs.open(realParent, 'r');
         if (deps.fsyncDir) {
           await deps.fsyncDir(dirFh);
         } else {
@@ -258,7 +339,7 @@ export async function validateMaterializedFile(
         throw new MaterializedFileError('FSYNC_FAILED', `durability fsync 失败: ${(err as NodeJS.ErrnoException)?.code ?? String(err)}`);
       }
     }
-    return {
+    const evidence: MaterializedFileEvidence = {
       relativePath: expectation.relativePath,
       absolutePathInternal: finalAbs,
       sha256: sha,
@@ -270,10 +351,14 @@ export async function validateMaterializedFile(
       device: st.dev,
       inode: st.ino,
       mtimeNs: st.mtimeNs,
+      ctimeNs: st.ctimeNs,
       parentRealpath: realParent,
+      parentDev: parentStat.dev,
+      parentIno: parentStat.ino,
       durabilityEstablished,
     };
-  } finally {
+    return HeldMaterializedFileEvidence.create(evidence, fh, dirFh);
+  } catch (err) {
     if (dirFh) {
       try {
         await dirFh.close();
@@ -288,5 +373,79 @@ export async function validateMaterializedFile(
         /* best-effort */
       }
     }
+    throw err;
+  }
+}
+
+/**
+ * commit-time 同步 seal（P0-B）：BEGIN IMMEDIATE 内、DB writes 前调用。
+ * 验证 held fd 与当前 path 仍为同一对象（同 inode 原地改写 = mtimeNs/ctimeNs 漂移；
+ * path 替换 = dev/inode 变化；parent 替换 = parent dev/inode 变化）。
+ * 必须同步（无 await）；fence 后到 COMMIT 之间不得有可注入异步 hook。
+ */
+export function assertHeldEvidenceCurrentSync(
+  held: HeldMaterializedFileEvidence,
+  expected: {
+    relativePath: string;
+    voiceProfileId: string;
+    voiceProfileRevisionId: string;
+    expectedSha256: string;
+  },
+): void {
+  const ev = held.evidence;
+  const fail = (code: MaterializedFileError['code'], msg: string): never => {
+    throw new MaterializedFileError(code, msg);
+  };
+  if (ev.relativePath !== expected.relativePath) fail('SEAL_MISMATCH', 'relativePath 漂移');
+  const destRel = destinationRelativePath(expected.voiceProfileId, expected.voiceProfileRevisionId);
+  if (expected.relativePath !== destRel) fail('SEAL_MISMATCH', 'relativePath ≠ destinationRelativePath');
+  if (ev.sha256 !== expected.expectedSha256) fail('SEAL_MISMATCH', 'evidence SHA ≠ expected');
+  if (!ev.durabilityEstablished) fail('SEAL_MISMATCH', 'durability 未建立');
+  // held fd fstat：同一 inode 的当前状态（mtime/ctime 反映同 inode 改写）
+  const fdStat = fsSync.fstatSync(held.fileFd.fd, {bigint: true});
+  if (fdStat.dev !== ev.device || fdStat.ino !== ev.inode) fail('SEAL_MISMATCH', 'held fd inode 漂移');
+  if (fdStat.size !== BigInt(ev.size)) fail('SEAL_MISMATCH', 'held fd size 漂移（同 inode 改写）');
+  if (fdStat.mtimeNs !== ev.mtimeNs || fdStat.ctimeNs !== ev.ctimeNs) {
+    fail('SEAL_MISMATCH', 'held fd mtime/ctime 漂移（同 inode 原地改写）');
+  }
+  // final path lstat ↔ held fd
+  let pathStat: fsSync.BigIntStats | undefined;
+  try {
+    pathStat = fsSync.lstatSync(ev.absolutePathInternal, {bigint: true});
+  } catch {
+    fail('SEAL_MISMATCH', 'final path 不可 stat');
+  }
+  if (!pathStat) fail('SEAL_MISMATCH', 'final path 不可 stat');
+  const ps: fsSync.BigIntStats = pathStat as fsSync.BigIntStats;
+  if (ps.isSymbolicLink() || !ps.isFile()) fail('SEAL_MISMATCH', 'final path 非 regular');
+  if (ps.dev !== ev.device || ps.ino !== ev.inode) fail('SEAL_MISMATCH', 'final path inode ≠ held fd（被替换）');
+  if (ps.size !== BigInt(ev.size)) fail('SEAL_MISMATCH', 'final path size 漂移');
+  if (ps.mtimeNs !== ev.mtimeNs || ps.ctimeNs !== ev.ctimeNs) fail('SEAL_MISMATCH', 'final path mtime/ctime 漂移（同 inode 改写）');
+  // parent path lstat ↔ held parent fd
+  let parentStat: fsSync.BigIntStats | undefined;
+  try {
+    parentStat = fsSync.lstatSync(ev.parentRealpath, {bigint: true});
+  } catch {
+    fail('SEAL_MISMATCH', 'parent path 不可 stat');
+  }
+  if (!parentStat) fail('SEAL_MISMATCH', 'parent path 不可 stat');
+  const pps: fsSync.BigIntStats = parentStat as fsSync.BigIntStats;
+  if (pps.isSymbolicLink() || !pps.isDirectory()) fail('SEAL_MISMATCH', 'parent path 非目录/symlink');
+  if (pps.dev !== ev.parentDev || pps.ino !== ev.parentIno) {
+    fail('SEAL_MISMATCH', 'parent path inode ≠ held parent fd（被替换）');
+  }
+  const parentFdStat = fsSync.fstatSync(held.parentFd.fd, {bigint: true});
+  if (parentFdStat.dev !== ev.parentDev || parentFdStat.ino !== ev.parentIno) fail('SEAL_MISMATCH', 'held parent fd inode 漂移');
+}
+
+/** verify 模式的普通快照（不持 fd；不得用于 DB success）。 */
+export async function validateMaterializedFileSnapshot(
+  expectation: MaterializedFileExpectation,
+): Promise<MaterializedFileEvidence> {
+  const held = await openHeldMaterializedFileEvidence(expectation, 'verify');
+  try {
+    return held.evidence;
+  } finally {
+    await held.close();
   }
 }

@@ -84,18 +84,18 @@ export async function ensureMaterializationRootSafe(rootAbs: string): Promise<st
 }
 
 /**
- * P0-3：目标 parent 逐级 lstat（profile/revision 目录）+ realpath 包含性。
+ * R3：目标 parent 逐级检查（profile/revision 目录）+ realpath 包含性。
  * 任一级 symlink → fail-closed；parent realpath 必须位于 root realpath 内。
- * 返回 {realRoot, realParent} 供 rename 前后复核。
+ * ensureExistingDestinationParentSafe：绝不 mkdir（Web/replay/GET/validation/recovery verify 使用；
+ * 任意目录缺失 → ProjectionPathError，调用方按 MISSING 处理——零 filesystem 写）。
+ * ensureOrCreateDestinationParentSafe：仅 Worker copy 前使用（可创建 profile/revision 目录，
+ * 创建后重新 lstat/realpath 验证）。
  */
-export async function ensureDestinationParentSafe(
-  rootAbs: string,
-  rel: string,
-): Promise<{realRoot: string; realParent: string}> {
-  validateDestinationRelativePath(rel);
-  const parts = rel.split('/');
-  const realRoot = await ensureMaterializationRootSafe(rootAbs);
-  // 逐级 lstat（root 已校验；profile、revision 两级，路径累积）
+async function checkDestinationParentSegments(
+  realRoot: string,
+  parts: string[],
+  allowCreate: boolean,
+): Promise<string> {
   let cur = realRoot;
   for (const seg of parts.slice(0, 2)) {
     cur = path.join(cur, seg);
@@ -104,10 +104,17 @@ export async function ensureDestinationParentSafe(
       segSt = await fs.lstat(cur);
     } catch (err) {
       if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        if (!allowCreate) throw new ProjectionPathError(`目录段缺失: ${seg}`);
         await fs.mkdir(cur, {recursive: false});
-        continue;
+        // 创建后重新 lstat/realpath 验证（防竞态 symlink）
+        try {
+          segSt = await fs.lstat(cur);
+        } catch {
+          throw new ProjectionPathError(`目录段创建后不可 stat: ${seg}`);
+        }
+      } else {
+        throw new ProjectionPathError(`目录不可访问: ${seg}`);
       }
-      throw new ProjectionPathError(`目录不可访问: ${seg}`);
     }
     if (segSt.isSymbolicLink()) throw new ProjectionPathError(`目录段是 symlink: ${seg}`);
     if (!segSt.isDirectory()) throw new ProjectionPathError(`目录段非目录: ${seg}`);
@@ -121,13 +128,35 @@ export async function ensureDestinationParentSafe(
   }
   if (realParent !== path.resolve(parentAbs)) throw new ProjectionPathError('parent realpath 漂移（symlink 逃逸）');
   if (!realParent.startsWith(realRoot + path.sep)) throw new ProjectionPathError('parent realpath 越出 root');
+  return realParent;
+}
+
+export async function ensureExistingDestinationParentSafe(
+  rootAbs: string,
+  rel: string,
+): Promise<{realRoot: string; realParent: string}> {
+  validateDestinationRelativePath(rel);
+  const realRoot = await ensureMaterializationRootSafe(rootAbs);
+  const realParent = await checkDestinationParentSegments(realRoot, rel.split('/'), false);
   return {realRoot, realParent};
 }
 
-/** P0-3：source/final 打开 flags（O_NOFOLLOW 真实生效，numeric）。 */
+export async function ensureOrCreateDestinationParentSafe(
+  rootAbs: string,
+  rel: string,
+): Promise<{realRoot: string; realParent: string}> {
+  validateDestinationRelativePath(rel);
+  const realRoot = await ensureMaterializationRootSafe(rootAbs);
+  const realParent = await checkDestinationParentSegments(realRoot, rel.split('/'), true);
+  return {realRoot, realParent};
+}
+
+/** P0-3/R3：打开 flags（numeric，透传 Linux open(2) 语义）。 */
 export const OPEN_FLAGS = {
   /** source 与 final 只读 + no-follow */
   readNoFollow: fsSync.constants.O_RDONLY | fsSync.constants.O_NOFOLLOW,
+  /** parent directory 只读 + 必须目录 + 拒绝 symlink */
+  parentReadNoFollow: fsSync.constants.O_RDONLY | fsSync.constants.O_DIRECTORY | fsSync.constants.O_NOFOLLOW,
   /** temp 创建：独占 + 拒绝 symlink */
   tempCreate: fsSync.constants.O_CREAT | fsSync.constants.O_EXCL | fsSync.constants.O_WRONLY | fsSync.constants.O_NOFOLLOW,
 } as const;
