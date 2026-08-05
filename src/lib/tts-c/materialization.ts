@@ -461,6 +461,7 @@ export async function consumeReuseTransaction(
   handle: ValidationLeaseHandle,
   capability: ValidatedReusableProjectionCapability,
   db: Db = getDb(),
+  beforeCommitHook?: () => Promise<void> | void,
 ): Promise<{outcome: FinalizeOutcome; projection: VoiceMaterializationRow | null}> {
   const now = nowIso();
   let resultOutcome: FinalizeOutcome = 'cancelled';
@@ -473,7 +474,8 @@ export async function consumeReuseTransaction(
       validationAttempt: handle.validationAttempt,
       candidateMaterializationId: handle.candidateMaterializationId,
       candidateMaterializationMetadataHash: handle.candidateMaterializationMetadataHash,
-    }, async (_cap, _record) => {
+    }, async () => {
+    // R7 P0-A：onCommit 不接收 record（ReuseAuthorityRecord 不离开 validator module）
     // 事务内 fenced reread + UPDATE（通过闭包变量回传）
     await db.transaction((): FinalizeOutcome => {
       const freshJob = db
@@ -559,7 +561,7 @@ export async function consumeReuseTransaction(
       resultProjection = currentProjection;
       return 'reused';
     })();
-    });
+    }, beforeCommitHook);
   } catch (e) {
     if (e instanceof MaterializedFileError) {
       throw new MaterializationError(
@@ -975,17 +977,25 @@ export async function createMaterializationRequest(
           await getRevisionProviderOrUnknown(identity.voiceProfileId, identity.voiceProfileRevisionId),
         )
       : {kind: 'unusable', reason: 'no projection yet'};
-    if (afterProjectionValidationBeforeFinalize) {
-      await afterProjectionValidationBeforeFinalize({
-        projectionId: validation.kind === 'usable' ? validation.projection.id : null,
-        validationKind: validation.kind,
-      });
-    }
     let outcome: FinalizeOutcome;
     let resultProjection: VoiceMaterializationRow | null = null;
     if (validation.kind === 'usable') {
-      // R6 P0-A P0-D P0-E：usable 路径走 async consumeReuseTransaction
-      const txResult = await consumeReuseTransaction(r1.handle, validation.capability, getDb());
+      // R7 P0-D：Phase 2 hook 移入 consumeValidatedProjectionForReuse 受控生命周期内部
+      // （open→consuming 之后、commit-time seal 之前；hook throw 必关闭 capability）
+      const hook = afterProjectionValidationBeforeFinalize;
+      const txResult = await consumeReuseTransaction(
+        r1.handle,
+        validation.capability,
+        getDb(),
+        hook
+          ? async () => {
+              await hook({
+                projectionId: validation.projection.id,
+                validationKind: 'usable',
+              });
+            }
+          : undefined,
+      );
       outcome = txResult.outcome;
       resultProjection = txResult.projection;
     } else {

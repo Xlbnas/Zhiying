@@ -200,11 +200,13 @@ interface ReuseAuthorityRecord {
   candidateMaterializationMetadataHash: string | null;
   // one-shot consumption binding (P0-D)
   boundExpectedHandle: ValidationOwnerShape;
-  consumed: boolean;
-  // 持有的 verified held capability（事务内使用，事务完成后 module-private 关闭）
+  /**
+   * R7 P0-B：显式状态机。任何 await/callback/DB transaction/hook 之前必须完成 open→consuming；
+   * 并发第二次消费看到 consuming 即拒绝（callback 不执行）。
+   */
+  state: 'open' | 'consuming' | 'consumed' | 'closed';
+  // 持有的 verified held capability（issuance 时捕获；consume 中保存为常量，不被 callback 可修改）
   heldVerify: HeldMaterializedFileEvidence;
-  // fd 生命周期 (P0-E)：closed/consumed 同步标记
-  closed: boolean;
   // 仅诊断：deep-frozen 派生诊断快照（**不参与授权**；仅 GET 序列化诊断用）
   diagnosticSnapshotBase: MaterializedFileEvidence;
 }
@@ -313,43 +315,46 @@ function getHeldRecord(value: HeldMaterializedFileEvidence): HeldAuthorityRecord
 
 function getReuseRecord(value: ValidatedReusableProjectionCapability): ReuseAuthorityRecord {
   const r = reuseRecords.get(value);
-  if (!r || r.closed) throw new MaterializedFileError('SEAL_MISMATCH', 'reuse capability closed or not validator-issued');
+  if (!r || r.state === 'closed' || r.state === 'consumed') {
+    throw new MaterializedFileError('SEAL_MISMATCH', 'reuse capability closed or not validator-issued');
+  }
   return r;
 }
 
 // ────────── ValidatedReusableProjectionCapability（P0-A P0-B）──────────
 
 /**
- * R6 P0-A P0-B：branded reuse validation capability。**仅作为 opaque WeakMap key**——公开
+ * R7 P0-A P0-B：branded reuse validation capability。**仅作为 opaque WeakMap key**——公开
  * 字段不暴露任何身份/授权字段（projectionId/voiceProfileId/sourceSha256/adapterCompatibilityKey/
- * provider/relativePath/fileSha256 等全部隐藏在 module-private WeakMap record）。`consumed` /
- * `closed` 状态来自 record；method/property shadow 不影响 record。R6 引入 deep-frozen
- * diagnosticSnapshot 字段仅作 GET 序列化诊断用（**不参与授权**）。
+ * provider/relativePath/fileSha256 等全部隐藏在 module-private WeakMap record）。`state` /
+ * `isClosed` 来自 record；method/property shadow 不影响 record。R7 引入显式状态机
+ * open/consuming/consumed/closed（任何 await/callback/transaction/hook 前完成 open→consuming）；
+ * `diagnosticSnapshot` 为 deep-frozen 诊断字段（**不参与授权**）。
  */
 export class ValidatedReusableProjectionCapability {
   /**
-   * R6 P0-B：deep-frozen 诊断快照（**不参与 DB success 授权**；仅 GET 序列化诊断用）。
+   * R7 P0-B：deep-frozen 诊断快照（**不参与 DB success 授权**；仅 GET 序列化诊断用）。
    * 修改此字段不影响 record；篡改不影响授权。
    */
   readonly diagnosticSnapshot: Readonly<MaterializedFileEvidence> | null;
-  /** R6 P0-D：consumed 来自 record；method shadow 无效。 */
-  readonly consumed: boolean;
+  /** R7 P0-B：显式状态机（来自 module-private record；method shadow 无效）。 */
+  readonly state: 'open' | 'consuming' | 'consumed' | 'closed';
   constructor(issueToken: symbol, fields: ReuseAuthorityRecord) {
     if (issueToken !== HELD_ISSUE_TOKEN) {
       throw new MaterializedFileError('SEAL_MISMATCH', 'reuse capability 只能由 validator 发行（issue token 无效）');
     }
     this.diagnosticSnapshot = deepFreeze({...fields.diagnosticSnapshotBase}) as Readonly<MaterializedFileEvidence>;
-    this.consumed = fields.consumed;
+    this.state = fields.state;
     reuseRecords.set(this, fields);
   }
-  /** R6 P0-E：公开 close() 仅为便利包装——module-private 关闭路径（consumeReuseCapability /
-   * closeReuseCapability）才是权威；shadow 此方法不影响 record closed 标记。 */
+  /** R7 P0-C/P0-E：公开 close() 仅为便利包装——module-private 关闭路径（closeReuseCapability /
+   *  consume 内部 finally）才是权威；shadow 此方法不影响 record state。 */
   async close(): Promise<void> {
     await closeReuseCapability(this);
   }
   get isClosed(): boolean {
     const r = reuseRecords.get(this);
-    return !r || r.closed;
+    return !r || r.state === 'closed' || r.state === 'consumed';
   }
 }
 
@@ -754,167 +759,193 @@ export async function validateProjectionForReuse(
   // P0-C：issuance 严格一致性校验
   try {
     const snap = held.evidence;
-    const expectedRel = destinationRelativePath(projection.voice_profile_id, projection.voice_profile_revision_id);
-    const expectedAbs = destinationAbsolutePath(expectedRel);
-    const expectedParent = path.dirname(expectedAbs);
-    const realRoot = fsSync.realpathSync(materializationRootAbs());
-    const realParent = fsSync.realpathSync(expectedParent);
-    if (
-      projection.destination_voice_root_relative_path !== expectedRel ||
-      snap.relativePath !== expectedRel ||
-      snap.absolutePathInternal !== expectedAbs ||
-      snap.parentRealpath !== realParent ||
-      snap.voiceProfileId !== projection.voice_profile_id ||
-      snap.voiceProfileRevisionId !== projection.voice_profile_revision_id ||
-      snap.sha256 !== projection.source_canonical_sha256 ||
-      projection.destination_voice_root_relative_path !== expectedRel
-    ) {
-      throw new MaterializedFileError('SEAL_MISMATCH', 'issuance 严格一致性校验失败：projection/record identity 不匹配');
-    }
-    // candidate binding exact
-    if (expectedHandle.candidateMaterializationId !== (projection.id ?? null)) {
-      throw new MaterializedFileError('SEAL_MISMATCH', 'candidate materialization id 漂移（issuance）');
-    }
-    if (expectedHandle.candidateMaterializationMetadataHash !== candidateMetadataHash) {
-      throw new MaterializedFileError('SEAL_MISMATCH', 'candidate metadata hash 漂移（issuance）');
+    // P0-E：从成功打开 held 开始的全部后处理放入统一 try/finally——任何异常
+    // （identity check / candidate binding / realpath / lstat / record construction /
+    //  capability registration）都保证关闭 originalHeld（不注册 record）。
+    let transferred = false;
+    try {
+      const expectedRel = destinationRelativePath(projection.voice_profile_id, projection.voice_profile_revision_id);
+      const expectedAbs = destinationAbsolutePath(expectedRel);
+      const expectedParent = path.dirname(expectedAbs);
+      const realRoot = fsSync.realpathSync(materializationRootAbs());
+      const realParent = fsSync.realpathSync(expectedParent);
+      if (
+        projection.destination_voice_root_relative_path !== expectedRel ||
+        snap.relativePath !== expectedRel ||
+        snap.absolutePathInternal !== expectedAbs ||
+        snap.parentRealpath !== realParent ||
+        snap.voiceProfileId !== projection.voice_profile_id ||
+        snap.voiceProfileRevisionId !== projection.voice_profile_revision_id ||
+        snap.sha256 !== projection.source_canonical_sha256
+      ) {
+        throw new MaterializedFileError('SEAL_MISMATCH', 'issuance 严格一致性校验失败：projection/record identity 不匹配');
+      }
+      // candidate binding exact
+      if (expectedHandle.candidateMaterializationId !== (projection.id ?? null)) {
+        throw new MaterializedFileError('SEAL_MISMATCH', 'candidate materialization id 漂移（issuance）');
+      }
+      if (expectedHandle.candidateMaterializationMetadataHash !== candidateMetadataHash) {
+        throw new MaterializedFileError('SEAL_MISMATCH', 'candidate metadata hash 漂移（issuance）');
+      }
+      // 构造 record（lstat root/profile/revision + 冻结 fields）
+      const parentStat = fsSync.lstatSync(realParent, {bigint: true});
+      const rootStat = fsSync.lstatSync(realRoot, {bigint: true});
+      const profileStat = fsSync.lstatSync(path.dirname(expectedParent), {bigint: true});
+      const fields: ReuseAuthorityRecord = {
+        voiceProfileId: projection.voice_profile_id,
+        voiceProfileRevisionId: projection.voice_profile_revision_id,
+        sourceSha256: projection.source_canonical_sha256,
+        adapterCompatibilityKey: projection.adapter_compatibility_key,
+        provider,
+        relativePath: expectedRel,
+        absolutePathInternal: expectedAbs,
+        rootRealpath: realRoot,
+        revisionParentRealpath: realParent,
+        fileSha256: snap.sha256,
+        fileCodec: snap.codec,
+        fileSampleRate: snap.sampleRate,
+        fileChannels: snap.channels,
+        fileDurationMs: snap.durationMs,
+        fileSize: snap.size,
+        rootDev: rootStat.dev,
+        rootIno: rootStat.ino,
+        profileDev: profileStat.dev,
+        profileIno: profileStat.ino,
+        revisionDev: parentStat.dev,
+        revisionIno: parentStat.ino,
+        fileDev: snap.device,
+        fileIno: snap.inode,
+        fileMtimeNs: snap.mtimeNs,
+        fileCtimeNs: snap.ctimeNs,
+        projectionId: projection.id,
+        candidateMaterializationId: expectedHandle.candidateMaterializationId,
+        candidateMaterializationMetadataHash: expectedHandle.candidateMaterializationMetadataHash,
+        boundExpectedHandle: {
+          jobId: expectedHandle.jobId,
+          validationOwnerToken: expectedHandle.validationOwnerToken,
+          validationAttempt: expectedHandle.validationAttempt,
+          candidateMaterializationId: expectedHandle.candidateMaterializationId,
+          candidateMaterializationMetadataHash: expectedHandle.candidateMaterializationMetadataHash,
+        },
+        state: 'open',
+        heldVerify: held,
+        diagnosticSnapshotBase: {...snap},
+      };
+      // 通过 module-private 构造器写入 reuseRecords
+      const cap = new ValidatedReusableProjectionCapability(HELD_ISSUE_TOKEN, fields);
+      transferred = true;
+      return {kind: 'usable', capability: cap, projection};
+    } finally {
+      // P0-E：未 transferred（任何异常路径）→ 关闭 originalHeld；不注册 record
+      if (!transferred) {
+        await held.close().catch(() => undefined);
+      }
     }
   } catch (e) {
-    // 关闭 held fd，**不**注册 record
-    await held.close().catch(() => undefined);
     return {kind: 'unusable', reason: e instanceof Error ? e.message : String(e)};
   }
-  // issuance 成功：构造 record 并通过模块内 symbol-门控构造器写入 reuseRecords WeakMap
-  const snap = held.evidence;
-  const expectedRel = destinationRelativePath(projection.voice_profile_id, projection.voice_profile_revision_id);
-  const expectedAbs = destinationAbsolutePath(expectedRel);
-  const expectedParent = path.dirname(expectedAbs);
-  const realRoot = fsSync.realpathSync(materializationRootAbs());
-  const realParent = fsSync.realpathSync(expectedParent);
-  const parentStat = fsSync.lstatSync(realParent, {bigint: true});
-  const rootStat = fsSync.lstatSync(realRoot, {bigint: true});
-  const profileStat = fsSync.lstatSync(path.dirname(expectedParent), {bigint: true});
-  const fields: ReuseAuthorityRecord = {
-    voiceProfileId: projection.voice_profile_id,
-    voiceProfileRevisionId: projection.voice_profile_revision_id,
-    sourceSha256: projection.source_canonical_sha256,
-    adapterCompatibilityKey: projection.adapter_compatibility_key,
-    provider,
-    relativePath: expectedRel,
-    absolutePathInternal: expectedAbs,
-    rootRealpath: realRoot,
-    revisionParentRealpath: realParent,
-    fileSha256: snap.sha256,
-    fileCodec: snap.codec,
-    fileSampleRate: snap.sampleRate,
-    fileChannels: snap.channels,
-    fileDurationMs: snap.durationMs,
-    fileSize: snap.size,
-    rootDev: rootStat.dev,
-    rootIno: rootStat.ino,
-    profileDev: profileStat.dev,
-    profileIno: profileStat.ino,
-    revisionDev: parentStat.dev,
-    revisionIno: parentStat.ino,
-    fileDev: snap.device,
-    fileIno: snap.inode,
-    fileMtimeNs: snap.mtimeNs,
-    fileCtimeNs: snap.ctimeNs,
-    projectionId: projection.id,
-    candidateMaterializationId: expectedHandle.candidateMaterializationId,
-    candidateMaterializationMetadataHash: expectedHandle.candidateMaterializationMetadataHash,
-    boundExpectedHandle: {
-      jobId: expectedHandle.jobId,
-      validationOwnerToken: expectedHandle.validationOwnerToken,
-      validationAttempt: expectedHandle.validationAttempt,
-      candidateMaterializationId: expectedHandle.candidateMaterializationId,
-      candidateMaterializationMetadataHash: expectedHandle.candidateMaterializationMetadataHash,
-    },
-    consumed: false,
-    heldVerify: held,
-    closed: false,
-    diagnosticSnapshotBase: {...snap},
-  };
-  // 通过 module-private 构造器写入 reuseRecords
-  const cap = new ValidatedReusableProjectionCapability(HELD_ISSUE_TOKEN, fields);
-  return {kind: 'usable', capability: cap, projection};
 }
 
 /**
- * R6 P0-A：唯一对外的 reuse consume entry。**事务内**调用，逐项 exact re-check 后执行
- * Phase 3 fence（assertHeldCurrentSync requireDurability=false）；事务完成后无论成功/失败都
- * 调用 `consumeReuseCapability(cap, success)` 标记 consumed + 关闭 held fd。
+ * R7 P0-A P0-B P0-C P0-D：唯一对外的 reuse consume entry。
  *
- * 任何模块（含 materialization.ts）都不得绕过此函数直接访问 reuseRecords WeakMap。
+ * 生命周期（**任何 await/callback/DB transaction/hook 之前完成 open→consuming**）：
+ *  1. get private record（不在 WeakMap → SEAL_MISMATCH）
+ *  2. state !== 'open' → SEAL_MISMATCH（含 consuming 并发第二次）
+ *  3. 同步 state = 'consuming'
+ *  4. 保存 `const originalHeld = r.heldVerify`（**issuance 时捕获；不被 callback 可修改**）
+ *  5. try:
+ *       a. exact handle binding re-check
+ *       b. `await beforeCommitHook?.()`（Phase 2 后、commit seal 前——hook throw 必关闭）
+ *       c. commit-time seal（assertHeldCurrentSync requireDurability=false）
+ *       d. `await onCommit()`（DB transaction）
+ *       e. state = 'consumed'
+ *     finally:
+ *       state = 'closed'
+ *       关闭 originalHeld（module-private；不依赖 public close / callback 可修改对象）
+ *
+ * callback 签名 **不接收 record**（P0-A：ReuseAuthorityRecord 不离开本 module）。
  */
 export async function consumeValidatedProjectionForReuse(
   capability: ValidatedReusableProjectionCapability,
   expectedHandle: ValidationOwnerShape,
-  onCommit: (capability: ValidatedReusableProjectionCapability, record: ReuseAuthorityRecord) => Promise<void> | void,
+  onCommit: () => Promise<void> | void,
+  beforeCommitHook?: () => Promise<void> | void,
 ): Promise<void> {
-  // P0-D：one-shot + handle binding exact re-check（事务入口）
-  const r = getReuseRecord(capability); // throws if not in WeakMap
-  if (r.consumed) {
-    throw new MaterializedFileError('SEAL_MISMATCH', 'reuse capability already consumed（one-shot 违例）');
+  // 1. 私有 record（不导出）
+  const r = reuseRecords.get(capability);
+  if (!r) {
+    throw new MaterializedFileError('SEAL_MISMATCH', 'reuse capability 不是 validator-issued');
   }
-  if (r.closed) {
-    throw new MaterializedFileError('SEAL_MISMATCH', 'reuse capability closed');
+  // 2. state 检查（open 才可消费；consuming/consumed/closed 全部拒绝）
+  if (r.state !== 'open') {
+    throw new MaterializedFileError(
+      'SEAL_MISMATCH',
+      `reuse capability state=${r.state}（仅 open 可消费；consuming 表示并发第二次）`,
+    );
   }
-  if (
-    r.boundExpectedHandle.jobId !== expectedHandle.jobId ||
-    r.boundExpectedHandle.validationOwnerToken !== expectedHandle.validationOwnerToken ||
-    r.boundExpectedHandle.validationAttempt !== expectedHandle.validationAttempt ||
-    r.boundExpectedHandle.candidateMaterializationId !== expectedHandle.candidateMaterializationId ||
-    r.boundExpectedHandle.candidateMaterializationMetadataHash !== expectedHandle.candidateMaterializationMetadataHash
-  ) {
-    throw new MaterializedFileError('SEAL_MISMATCH', 'reuse capability handle binding 不匹配（attempt+1 takeover / 不同 job / candidate 漂移）');
-  }
-  // P0-D：能力内持有的 verified held 进行 unified seal
-  assertHeldCurrentSync(r.heldVerify, {
-    requireDurability: false,
-    expectedVoiceProfileId: r.voiceProfileId,
-    expectedVoiceProfileRevisionId: r.voiceProfileRevisionId,
-    expectedSha256: r.fileSha256,
-  });
-  // 事务工作由调用方在 `onCommit` 内 BEGIN IMMEDIATE...COMMIT/ROLLBACK
-  let success = false;
+  // 3. 同步 open→consuming（任何 await 之前）
+  r.state = 'consuming';
+  (capability as unknown as {state: string}).state = 'consuming';
+  // 4. 保存 originalHeld 常量（issuance 时捕获；callback 无法替换）
+  const originalHeld = r.heldVerify;
   try {
-    await onCommit(capability, r);
-    success = true;
+    // 5a. exact handle binding re-check
+    if (
+      r.boundExpectedHandle.jobId !== expectedHandle.jobId ||
+      r.boundExpectedHandle.validationOwnerToken !== expectedHandle.validationOwnerToken ||
+      r.boundExpectedHandle.validationAttempt !== expectedHandle.validationAttempt ||
+      r.boundExpectedHandle.candidateMaterializationId !== expectedHandle.candidateMaterializationId ||
+      r.boundExpectedHandle.candidateMaterializationMetadataHash !== expectedHandle.candidateMaterializationMetadataHash
+    ) {
+      throw new MaterializedFileError('SEAL_MISMATCH', 'reuse capability handle binding 不匹配（attempt+1 takeover / 不同 job / candidate 漂移）');
+    }
+    // 5b. Phase 2 hook（受控生命周期内部——hook throw 走 finally 关闭）
+    if (beforeCommitHook) {
+      await beforeCommitHook();
+    }
+    // 5c. commit-time seal（从 private record 读取 expected identity/SHA；不得省略）
+    assertHeldCurrentSync(originalHeld, {
+      requireDurability: false,
+      expectedVoiceProfileId: r.voiceProfileId,
+      expectedVoiceProfileRevisionId: r.voiceProfileRevisionId,
+      expectedSha256: r.fileSha256,
+    });
+    // 5d. DB transaction（callback 不接收 record）
+    await onCommit();
+    // 5e. consumed
+    r.state = 'consumed';
+    (capability as unknown as {state: string}).state = 'consumed';
   } finally {
-    // P0-E：无论成功/失败都通过 module-private 路径关闭——method shadow 不影响
-    await consumeReuseCapability(capability, success);
+    // P0-C：任何路径（handle mismatch / seal fail / hook throw / onCommit throw / rollback / success）
+    // 都进入同一 finally——state=closed + 关闭 originalHeld（恰好一次）
+    r.state = 'closed';
+    (capability as unknown as {state: string}).state = 'closed';
+    try {
+      await originalHeld.close();
+    } catch {
+      // best-effort；closed 已标记防 double-close
+    }
   }
 }
 
 /**
- * R6 P0-E：module-private fd 生命周期——直接操作 reuseRecords 关闭 record + held fd。
- * 任意 mutation 试图 shadow `ValidatedReusableProjectionCapability.close()` 不影响此路径。
- * 同步标记 `closed` 与 `consumed`；底层 held final fd 与 parent fd 恰好关闭一次。
+ * R7 P0-C/P0-E：module-private 关闭路径（不依赖 public close；不读取 callback 可修改对象）。
+ * 直接操作 reuseRecords；仅 open/consuming 可被外部 close（consumed/closed 已终态）。
  */
-async function consumeReuseCapability(
-  capability: ValidatedReusableProjectionCapability,
-  success: boolean,
-): Promise<void> {
+async function closeReuseCapability(capability: ValidatedReusableProjectionCapability): Promise<void> {
   const r = reuseRecords.get(capability);
   if (!r) return;
-  r.consumed = true;
-  r.closed = true;
-  // 复制 consumed/closed 到 capability 公开视图（method shadow 无效；record 是权威）
-  (capability as unknown as {consumed: boolean}).consumed = true;
-  (capability as unknown as {closed: boolean}).closed = true;
-  // 关闭底层 held（去重：HeldMaterializedFileEvidence.close 已自去重）
+  if (r.state === 'consumed' || r.state === 'closed') return;
+  // 保存 originalHeld 常量后标记 closed 并关闭（避免并发 consume 在 finally 中重复关闭）
+  const originalHeld = r.heldVerify;
+  r.state = 'closed';
+  (capability as unknown as {state: string}).state = 'closed';
   try {
-    await r.heldVerify.close();
+    await originalHeld.close();
   } catch {
-    // best-effort；已 closed=true 防 double-close
+    // best-effort
   }
-  // 占位：success 字段为后续扩展（审计日志、metrics）保留——当前不动作
-  void success;
-}
-
-/** R6 P0-E：module-private 关闭路径（不依赖 public close） */
-async function closeReuseCapability(capability: ValidatedReusableProjectionCapability): Promise<void> {
-  await consumeReuseCapability(capability, false);
 }
 
 /**
