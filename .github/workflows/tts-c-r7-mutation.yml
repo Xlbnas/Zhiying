@@ -69,9 +69,9 @@ jobs:
           test "$PASS" -eq 12
           test "$FAIL" -eq 0
           test "$STRONG" -eq 12
-          # 禁止 no observable effect（非零计数）/ PARTIAL
+          # 禁止 no observable effect（非零计数）/ PARTIAL（非零计数）
           if grep -Eq 'no observable effect: [1-9]' "$ARTIFACT"; then echo "FAIL: contains 'no observable effect'"; exit 1; fi
-          if grep -q 'PARTIAL' "$ARTIFACT"; then echo "FAIL: contains 'PARTIAL'"; exit 1; fi
+          if grep -Eq 'PARTIAL: [1-9]' "$ARTIFACT"; then echo "FAIL: contains 'PARTIAL'"; exit 1; fi
           # restore 后 exact diff empty（mutated files）
           if ! git diff --exit-code -- src/lib/tts-c/materialized-file-validator.ts src/lib/tts-c/materialization.ts 'src/app/api/projects/[id]/voice-materializations/route.ts'; then
             echo "FAIL: git diff not empty after restore"
