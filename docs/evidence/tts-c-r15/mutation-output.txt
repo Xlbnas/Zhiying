@@ -1,0 +1,66 @@
+# TTS-C.1A.R5 mutation proof report
+
+mutation source: scripts/test-tts-c1a-r5-mutations.ts
+target test: scripts/test-tts-c1a-r5-hardening.ts
+backup dir: /tmp/r5-mut-backup
+
+## Per-mutation results
+
+### MUT-R5-01
+description: WeakMap mode check 移除（assertHeldCurrentSync 不再校验 requireDurability）
+expected target FAIL: ["CAP-06"]
+observed target FAIL: ["CAP-06"]
+status: PASS
+
+### MUT-R5-02
+description: seal 改回读取 public evidence（用 held.evidence 替代 record）
+expected target FAIL: ["CAP-07"]
+observed target FAIL: ["CAP-07"]
+status: PASS
+
+### MUT-R5-03
+description: reuse capability brand 移除（issueValidatedReusableCapability 不注册 WeakMap）
+expected target FAIL: ["REUSE-CAP-01"]
+observed target FAIL: ["REUSE-CAP-01"]
+status: PASS
+
+### MUT-R5-04
+description: reuse SHA authority 改回 caller field（finalizeValidatingJob 不比对 record vs projection SHA）
+expected target FAIL: ["REUSE-CAP-03"]
+observed target FAIL: []
+status: FAIL
+
+### MUT-R5-05
+description: reuse profile ancestor seal 移除 + parent realpath 等值（profile swap 互补整组）
+expected target FAIL: ["REUSE-DIR-01","REUSE-DIR-03"]
+observed target FAIL: ["REUSE-DIR-03"]
+status: FAIL
+
+### MUT-R5-06
+description: reuse root seal 移除 + parent realpath 等值（root swap 互补整组）
+expected target FAIL: ["REUSE-DIR-02"]
+observed target FAIL: []
+status: FAIL
+
+### MUT-R5-07
+description: final response 改回 validation.kind projection（取消 RESP-01/04 link closure）
+expected target FAIL: ["RESP-01"]
+observed target FAIL: ["RESP-01"]
+status: PASS
+
+### MUT-R5-08
+description: POST 取消 §七 link closure + §八 integrity（同时移除 link closure 与 integrity throw）
+expected target FAIL: ["RESP-01","POST-INT-02"]
+observed target FAIL: ["RESP-01"]
+status: FAIL
+
+### MUT-R5-09
+description: production hook guard 移除（setAfter* 不再 check NODE_ENV）
+expected target FAIL: ["HOOK-01","HOOK-02"]
+observed target FAIL: ["HOOK-01"]
+status: FAIL
+
+## Final restore sanity
+
+final test summary: TTS-C.1A.R5 hardening: PASS=28 FAIL=0
+final FAIL count: 0

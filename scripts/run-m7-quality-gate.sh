@@ -145,6 +145,10 @@ run_suite "tts-c1a-get-integrity" npx tsx scripts/test-tts-c1a-get-integrity.ts
 run_suite "tts-c1a-db-time-stale" npx tsx scripts/test-tts-c1a-db-time-stale.ts
 # TTS-C.1A.R4 新增 1 套（held capability brand / exact destination binding / ancestor seal / verify zero-write / zero-subscriber closure）
 run_suite "tts-c1a-r4-hardening" npx tsx scripts/test-tts-c1a-r4-hardening.ts
+# TTS-C.1A.R5 新增 1 套（immutable authority record / branded reuse evidence / reuse ancestor seal / terminal response closure / POST integrity / production hook guard）
+run_suite "tts-c1a-r5-hardening" npx tsx scripts/test-tts-c1a-r5-hardening.ts
+# TTS-C.1A.R5 reproducible mutation runner：不入 gate（9× suite 耗时），独立运行
+# `npx tsx scripts/test-tts-c1a-r5-mutations.ts`，输出 /tmp/r5-mutation-output.txt
 
 echo "QUALITY_GATE_RESULT=PASS"
 echo "QUALITY_GATE_SHA=$GATE_SHA"
