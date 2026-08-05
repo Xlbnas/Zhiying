@@ -1,5 +1,5 @@
 import {NextResponse} from 'next/server';
-import {createMaterializationRequest, listMaterializationRequests, serializeMaterializationRequest, getProjection, MaterializationError} from '@/lib/tts-c/materialization';
+import {createMaterializationRequest, listMaterializationRequests, serializeMaterializationRequest, getProjection, integrityStatusOf, MaterializationError} from '@/lib/tts-c/materialization';
 import {z} from 'zod';
 
 export const dynamic = 'force-dynamic';
@@ -85,9 +85,14 @@ export async function GET(
   const {id: projectId} = await params;
   try {
     const rows = listMaterializationRequests(projectId);
-    const views = rows.map((r) =>
-      serializeMaterializationRequest(r, r.materialization_id ? getProjection(r.voice_profile_id, r.voice_profile_revision_id) : null),
-    );
+    // R3：GET fail-closed integrity——绝不只序列化 DB projection status；
+    // 只有 safe validator 通过才 verified（零 mkdir/零文件写）
+    const views = [];
+    for (const r of rows) {
+      const projection = r.materialization_id ? getProjection(r.voice_profile_id, r.voice_profile_revision_id) : null;
+      const integrityStatus = r.materialization_id ? await integrityStatusOf(r) : 'unchecked';
+      views.push(serializeMaterializationRequest(r, projection, integrityStatus));
+    }
     return NextResponse.json({requests: views, adapterReady: false});
   } catch {
     return NextResponse.json({error: {code: 'INTERNAL', message: 'internal error'}}, {status: 500});
