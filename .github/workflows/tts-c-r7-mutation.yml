@@ -1,0 +1,121 @@
+name: TTS-C R7 Mutation Gate
+
+on:
+  push:
+    branches:
+      - m7
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tts-c-r7-mutation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  r7-mutation-gate:
+    name: TTS-C R7 Mutation Gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      NODE_ENV: test
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve commit SHA
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Node dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install real ffmpeg / ffprobe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
+      - name: TTS-C.1A.R7 Mutation Gate
+        id: gate
+        run: |
+          set -o pipefail
+          export PATH="$PWD/.tools/static-ffmpeg:$PATH"
+          npx tsx scripts/test-tts-c1a-r7-mutations.ts 2>&1 | tee /tmp/r7-mutation-console.log
+          # runner exit 0 only if all 12 STRONG + restore git diff clean
+
+      - name: Validate mutation artifact（fail-closed）
+        run: |
+          ARTIFACT=/tmp/r7-mutation-output.txt
+          if [ ! -f "$ARTIFACT" ]; then echo "FAIL: artifact not produced"; exit 1; fi
+          TOTAL=$(grep -c '^### MUT-R7-' "$ARTIFACT")
+          PASS=$(grep -c '^status: PASS$' "$ARTIFACT")
+          FAIL=$(grep -c '^status: FAIL$' "$ARTIFACT" || true)
+          STRONG=$(grep -c '^reason: STRONG$' "$ARTIFACT")
+          echo "TOTAL=$TOTAL PASS=$PASS FAIL=$FAIL STRONG=$STRONG"
+          test "$TOTAL" -eq 12
+          test "$PASS" -eq 12
+          test "$FAIL" -eq 0
+          test "$STRONG" -eq 12
+          # 禁止 no observable effect / PARTIAL
+          if grep -q 'no observable effect' "$ARTIFACT"; then echo "FAIL: contains 'no observable effect'"; exit 1; fi
+          if grep -q 'PARTIAL' "$ARTIFACT"; then echo "FAIL: contains 'PARTIAL'"; exit 1; fi
+          # restore 后 exact diff empty（mutated files）
+          if ! git diff --exit-code -- src/lib/tts-c/materialized-file-validator.ts src/lib/tts-c/materialization.ts 'src/app/api/projects/[id]/voice-materializations/route.ts'; then
+            echo "FAIL: git diff not empty after restore"
+            git diff
+            exit 1
+          fi
+          # git status 无 tracked 改动
+          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+            echo "FAIL: git status not clean"
+            git status --porcelain --untracked-files=no
+            exit 1
+          fi
+          echo "MUTATION_GATE_OK"
+
+      - name: Upload mutation artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tts-c-r7-mutation-${{ steps.sha.outputs.sha }}
+          path: |
+            /tmp/r7-mutation-output.txt
+            /tmp/r7-mutation-console.log
+            docs/evidence/tts-c-r17/mutation-output.txt
+          if-no-files-found: ignore
+
+      - name: Write job summary
+        if: always()
+        run: |
+          ARTIFACT=/tmp/r7-mutation-output.txt
+          TOTAL=$(grep -c '^### MUT-R7-' "$ARTIFACT" 2>/dev/null || echo 0)
+          PASS=$(grep -c '^status: PASS$' "$ARTIFACT" 2>/dev/null || echo 0)
+          FAIL=$(grep -c '^status: FAIL$' "$ARTIFACT" 2>/dev/null || echo 0)
+          STRONG=$(grep -c '^reason: STRONG$' "$ARTIFACT" 2>/dev/null || echo 0)
+          {
+            echo "## TTS-C R7 Mutation Gate — ${{ steps.sha.outputs.sha }}"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| commit SHA | \`${{ steps.sha.outputs.sha }}\` |"
+            echo "| TOTAL | ${TOTAL} |"
+            echo "| PASS | ${PASS} |"
+            echo "| FAIL | ${FAIL} |"
+            echo "| STRONG | ${STRONG} |"
+            echo "| conclusion | ${{ job.status }} |"
+            echo ""
+            echo "12 项 mutation 全部 STRONG（diffApplied + typecheck + 非零退出 + 无 fatal + expected FAIL 全覆盖 + restore SHA 一致 + git diff clean）。"
+          } >> "$GITHUB_STEP_SUMMARY"

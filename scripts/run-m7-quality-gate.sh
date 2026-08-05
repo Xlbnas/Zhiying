@@ -149,8 +149,8 @@ run_suite "tts-c1a-r4-hardening" npx tsx scripts/test-tts-c1a-r4-hardening.ts
 run_suite "tts-c1a-r5-hardening" npx tsx scripts/test-tts-c1a-r5-hardening.ts
 # TTS-C.1A.R6 新增 1 套（private reuse authority / record-only SHA seal / one-shot consumption / real POST integrity / production hook guard）
 run_suite "tts-c1a-r6-hardening" npx tsx scripts/test-tts-c1a-r6-hardening.ts
-# TTS-C.1A.R6 reproducible mutation runner（10 项 mutation；9× 目标 test 耗时，不入 gate）—— 独立运行
-# `npx tsx scripts/test-tts-c1a-r6-mutations.ts`，输出 /tmp/r6-mutation-output.txt + docs/evidence/tts-c-r16/mutation-output.txt
+# TTS-C.1A.R7 STRONG-only mutation runner（12 项 mutation；耗时，不入 gate）—— 独立运行
+# `npx tsx scripts/test-tts-c1a-r7-mutations.ts`，输出 /tmp/r7-mutation-output.txt + docs/evidence/tts-c-r17/mutation-output.txt
 
 echo "QUALITY_GATE_RESULT=PASS"
 echo "QUALITY_GATE_SHA=$GATE_SHA"
