@@ -1,39 +1,42 @@
 /**
- * TTS-C.1A.R5 共享 safe final-file validator + Held evidence + Branded reuse capability
- * （唯一 exact file contract + immutable authority record + unified ancestor seal）。
+ * TTS-C.1A.R6 共享 safe final-file validator + Held capability + Branded reuse capability
+ * （唯一 exact file contract + immutable authority record + unified ancestor seal +
+ * private reuse authority + record-only SHA seal + one-shot consumption + private fd lifecycle）。
  *
- * R4（P0-A/P0-B/P0-C/P0-D）：
- * - HeldMaterializedFileEvidence：final fd（O_RDONLY|O_NOFOLLOW）+ parent fd
- *   （O_RDONLY|O_DIRECTORY|O_NOFOLLOW）持有到 DB commit 完成或失败；
- *   WeakSet brand；构造 token；公开 evidence 是 deep-frozen 诊断快照。
- * - verify/durabilize 双模式。
- * - commit-time exact destination binding + full ancestor seal（root/profile/revision/file）。
- * - verify 零写（root helper 拆分）。
- *
- * R5 加固：
- * - P0-A immutable authority record：module-private WeakMap 以 HeldMaterializedFileEvidence
- *   为键存储权威 mode/frozenEvidence/fileHandle/parentHandle/closed——**所有授权决策
- *   必须从 WeakMap record 读取**，绝不基于公开对象字段（`held.evidence.durabilityEstablished`、
- *   `held.fileFd`、`held.parentFd`）。verify capability 即使公开字段被改为
- *   `durabilityEstablished=true` 仍必须被 Worker reject。close 后 capability 不可用。
- * - P0-B branded reuse capability：新增 `ValidatedReusableProjectionCapability`，仅由
- *   validator 发行；持有 verified held + projection identity + candidate metadata hash +
- *   exact derived destination + 四级 ancestor identity + file SHA/WAV；WeakMap 注册；
- *   `finalizeValidatingJob` 仅接受 branded capability，拒绝 plain
- *   `ProjectionValidationResult`/`ValidatedProjectionEvidence`。Phase 3 完成后关闭 held。
- * - P0-C unified ancestor seal：`assertHeldCurrentSync(cap, {requireDurability})` 同时被
- *   Worker finalize（requireDurability=true）与 reuse finalize（requireDurability=false）
- *   调用，路径/parent/root profile ancestor 逐级 lstat + realpath 锚定。
- * - P0-D SHA authority：Phase 3 不得接受调用者填入 SHA——真实 SHA 来自 issuer 对 held fd
- *   的读取，并存于不可修改的 WeakMap record。
- * - §九 production hook guard 由调用方在 materialization.ts 实现。
+ * R3：openHeldMaterializedFileEvidence 唯一 issuer；verify/durabilize 双模式。
+ * R4：构造 token + WeakMap brand + exact destination binding + ancestor seal + verify zero-write。
+ * R5：WeakMap authority record + branded reuse capability + unified assertHeldCurrentSync +
+ *      terminal response link closure + POST integrity closure + production hook guard。
+ * R6（P0-A..F 全部生效点修改）：
+ * - P0-A：彻底删除 `__internal` / `__validatorInternal` 任何形式的 public export；reuse
+ *   capability 的发行与消费全部 module-private；任何模块（含 materialization.ts）不得
+ *   直接获得 issuer token 或访问 reuseRecords/heldRecords WeakMap——只能经高层
+ *   `validateProjectionForReuse`（事务外）→ `consumeValidatedProjectionForReuse`
+ *   （事务内）两个 entry 走完。
+ * - P0-B：公开 capability 只作为 opaque WeakMap key；不暴露 projectionId/voiceProfileId/
+ *   voiceProfileRevisionId/sourceSha256/adapterCompatibilityKey/provider/relativePath/
+ *   fileSha256 等任何身份/授权字段；若保留 deep-frozen diagnosticSnapshot 字段，仅作诊断
+ *   序列化（不参与任何授权判断）。
+ * - P0-C：issuance 时严格一致性：record.mode === 'verify'、record.sha256 === projection
+ *   .source_canonical_sha256、record.voiceProfileId/voiceProfileRevisionId/relativePath
+ *   === derived exact destination、projection.destination_voice_root_relative_path ===
+ *   derived、projection.voice_profile_id/voice_profile_revision_id === record.*、provider/
+ *   adapter exact、candidateMaterializationId/candidateMetadataHash exact；任一不一致：
+ *   关闭 held fd + 不注册 record + throw unusable。
+ * - P0-D：one-shot consumption + exact validation handle binding：record 绑定 jobId/
+ *   validationOwnerToken/validationAttempt/candidateMaterializationId/candidateMetadataHash/
+ *   projectionId；事务内 re-check；consumed 标记；attempt+1 takeover 后旧 capability
+ *   自动 reject；不同 job/handle 不得共享；candidate hash 漂移 reject。
+ * - P0-E：fd 生命周期 module-private——`consumeReuseCapability(cap, success)` + `closeReuse
+ *   Capability(cap)` 直接操作 record；method/property shadow 不影响关闭；record closed
+ *   同步标记；底层 held final fd 与 parent fd 恰好关闭一次。
  *
  * 参考审计：Node fs numeric flags 透传 Linux open(2)（O_NOFOLLOW 拒绝 symlink、
  * O_DIRECTORY 非目录 ENOTDIR）；fd 持有 = inode 锚定，path 可替换 → commit-time 必须
  * 复核 path↔held fd；SQLite 与 filesystem 无跨资源原子事务 → fail-closed 边界 =
  * held fd + 同步 seal + 先文件后 DB；知影为本地单 Worker writer（无分布式锁需求）。
  * commit seal 使用 path+lstat 逐级复核（非 dirfd/openat anchored traversal），
- * 依赖本地 single-writer contract；ancestor mutation 由 R4/R5 测试套件覆盖。
+ * 依赖本地 single-writer contract；ancestor mutation 由 R4/R5/R6 测试套件覆盖。
  */
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
@@ -79,12 +82,11 @@ export interface MaterializedFileExpectation {
   expectedCodec?: string;
   expectedSampleRate?: number;
   expectedChannels?: number;
-  /** duration 下限（ms）；默认 > 0 */
   minDurationMs?: number;
   adapterCompatibilityKey: string;
 }
 
-/** Deep-frozen snapshot（仅诊断；**不参与 DB success 授权**）。 */
+/** Deep-frozen diagnostic snapshot（**不参与 DB success 授权**；仅 GET 序列化诊断用）。 */
 export interface MaterializedFileEvidence {
   voiceProfileId: string;
   voiceProfileRevisionId: string;
@@ -113,22 +115,28 @@ export interface MaterializedFileEvidence {
 
 export type MaterializedFileMode = 'verify' | 'durabilize';
 
-/** 测试注入（仅测试）：fsync 失败注入。生产调用方不传（默认真实 fsync）。 */
+/** R6 私有：validation owner 凭据（materialization.ts 导入用于 capability binding shape） */
+export interface ValidationOwnerShape {
+  jobId: string;
+  validationOwnerToken: string;
+  validationAttempt: number;
+  candidateMaterializationId: string | null;
+  candidateMaterializationMetadataHash: string | null;
+}
+
 export interface MaterializedFileValidatorDeps {
   fsyncFile?: (fh: fsSync.promises.FileHandle) => Promise<void>;
   fsyncDir?: (fh: fsSync.promises.FileHandle) => Promise<void>;
 }
 
-// ────────── R5：immutable authority record（WeakMap；module-private） ──────────
+// ────────── R6：immutable authority records（WeakMap；module-private） ──────────
 
-/** module-private issue tokens；不导出；无 token 构造 → SEAL_MISMATCH。 */
+/** module-private issue tokens；不导出；无 token 构造 → SEAL_MISMATCH */
 const HELD_ISSUE_TOKEN: unique symbol = Symbol('tts-c1a-held-issue');
-const REUSE_ISSUE_TOKEN: unique symbol = Symbol('tts-c1a-reuse-issue');
 
-/** R5 P0-A：Held capability 的不可篡改权威记录。 */
+/** R6 P0-A 持有 record：权威 mode + fd 状态 */
 interface HeldAuthorityRecord {
   mode: 'verify' | 'durabilize';
-  /** 内部路径 + file identity 全字段；仅用于诊断；不能作授权决策。 */
   diagnosticSnapshot: Readonly<MaterializedFileEvidence>;
   fileHandle: fsSync.promises.FileHandle;
   parentHandle: fsSync.promises.FileHandle;
@@ -136,17 +144,45 @@ interface HeldAuthorityRecord {
 }
 const heldRecords = new WeakMap<HeldMaterializedFileEvidence, HeldAuthorityRecord>();
 
-/** R5 P0-B：reuse finalize 的不可篡改权威记录。 */
+/**
+ * R6 P0-A P0-B P0-C P0-D P0-E：reuse authority record。**唯一授权来源**——所有 finalizeValidatingJob
+ * 授权判断一律从此 record 读取；公开 `ValidatedReusableProjectionCapability` 不暴露任何身份/
+ * 授权字段（不暴露 projectionId/voiceProfileId/sourceSha256 等）。
+ *
+ * Issuance (P0-C) 校验：
+ * - heldRecord.mode === 'verify'
+ * - heldRecord.sha256 === projection.source_canonical_sha256
+ * - heldRecord.voiceProfileId/voiceProfileRevisionId === projection.*
+ * - heldRecord.relativePath === derived exact destination
+ * - projection.destination_voice_root_relative_path === derived
+ * - candidateMaterializationId / candidateMaterializationMetadataHash exact
+ *
+ * one-shot consumption (P0-D)：
+ * - boundExpectedHandle 绑定 transaction 入口的 validation handle（jobId/ownerToken/attempt/
+ *   candidate id+hash）——事务内逐项 exact re-check
+ * - consumed 标记：事务完成后无论成功/失败都标记；attempt+1 takeover 后旧 cap 自动 reject；
+ *   不同 job/handle 不得共享；candidate hash 漂移 reject
+ */
 interface ReuseAuthorityRecord {
-  projectionId: string;
+  // 来源身份（issuance 严格一致性校验冻结）
   voiceProfileId: string;
   voiceProfileRevisionId: string;
   sourceSha256: string;
   adapterCompatibilityKey: string;
   provider: string;
-  candidateMetadataHash: string;
+  // exact destination（derived once at issuance）
   relativePath: string;
   absolutePathInternal: string;
+  rootRealpath: string;
+  revisionParentRealpath: string;
+  // file identity（issuance 时刻从 held fd 读取）
+  fileSha256: string;
+  fileCodec: string;
+  fileSampleRate: number;
+  fileChannels: number;
+  fileDurationMs: number;
+  fileSize: number;
+  // 四级 ancestor identity（issuance 时刻 lstat 读取）
   rootDev: bigint;
   rootIno: bigint;
   profileDev: bigint;
@@ -157,21 +193,24 @@ interface ReuseAuthorityRecord {
   fileIno: bigint;
   fileMtimeNs: bigint;
   fileCtimeNs: bigint;
-  fileSize: number;
-  rootRealpath: string;
-  revisionParentRealpath: string;
-  fileSha256: string;
-  fileCodec: string;
-  fileSampleRate: number;
-  fileChannels: number;
-  fileDurationMs: number;
-  /** 持有直到 finalize close。 */
+  // projection identity（issuance 时刻与 projection row 严格一致）
+  projectionId: string;
+  // candidate binding（issuance 时刻冻结；transaction 内 exact re-check）
+  candidateMaterializationId: string | null;
+  candidateMaterializationMetadataHash: string | null;
+  // one-shot consumption binding (P0-D)
+  boundExpectedHandle: ValidationOwnerShape;
+  consumed: boolean;
+  // 持有的 verified held capability（事务内使用，事务完成后 module-private 关闭）
   heldVerify: HeldMaterializedFileEvidence;
+  // fd 生命周期 (P0-E)：closed/consumed 同步标记
   closed: boolean;
+  // 仅诊断：deep-frozen 派生诊断快照（**不参与授权**；仅 GET 序列化诊断用）
+  diagnosticSnapshotBase: MaterializedFileEvidence;
 }
 const reuseRecords = new WeakMap<ValidatedReusableProjectionCapability, ReuseAuthorityRecord>();
 
-/** 运行时 deep-freeze；不可变快照（用于 public diagnosticSnapshot）。 */
+/** 运行时 deep-freeze（不可变快照）。 */
 function deepFreeze<T>(obj: T): Readonly<T> {
   if (obj === null || typeof obj !== 'object') return obj;
   Object.freeze(obj);
@@ -185,12 +224,12 @@ function deepFreeze<T>(obj: T): Readonly<T> {
 // ────────── Held capability ──────────
 
 /**
- * R5：HeldMaterializedFileEvidence 仅作为 WeakMap 的 key；公开字段（evidence snapshot、
- * fileFd/parentFd getter）只是 OS 状态的便利视图——**不参与授权决策**。授权决策一律
- * 通过 `assertHeldCapability` + WeakMap record 完成；mode/closed 来自 record。
+ * R6 P0-A：HeldMaterializedFileEvidence 仅作为 WeakMap 的 key；公开字段是 deep-frozen 诊断
+ * 快照，**不参与 DB success 授权**。授权决策一律通过 `assertHeldCapability` + WeakMap record
+ * 完成；mode/closed 来自 record。fd 生命周期由 module-private 路径管理。
  */
 export class HeldMaterializedFileEvidence {
-  /** Deep-frozen 诊断快照；不参与 DB success 授权。 */
+  /** Deep-frozen 诊断快照（仅 GET 序列化诊断用；不参与 DB success 授权）。 */
   readonly evidence: Readonly<MaterializedFileEvidence>;
   constructor(
     evidence: MaterializedFileEvidence,
@@ -211,20 +250,16 @@ export class HeldMaterializedFileEvidence {
       closed: false,
     });
   }
-
-  /** 仅作 OS fstat 入口；不用于授权（授权看 record.mode 与 record.fileHandle）。 */
   get fileFd(): fsSync.promises.FileHandle {
     const r = heldRecords.get(this);
     if (!r) throw new MaterializedFileError('SEAL_MISMATCH', 'held capability 无 authority record');
     return r.fileHandle;
   }
-  /** 仅作 OS fstat 入口；不用于授权。 */
   get parentFd(): fsSync.promises.FileHandle {
     const r = heldRecords.get(this);
     if (!r) throw new MaterializedFileError('SEAL_MISMATCH', 'held capability 无 authority record');
     return r.parentHandle;
   }
-
   async close(): Promise<void> {
     const r = heldRecords.get(this);
     if (!r || r.closed) return;
@@ -242,14 +277,13 @@ export class HeldMaterializedFileEvidence {
     }
     if (firstErr !== null) throw firstErr;
   }
-
   get isClosed(): boolean {
     const r = heldRecords.get(this);
     return !r || r.closed;
   }
 }
 
-/** 模块内部唯一 Held 发行点。 */
+/** module-private：唯一 Held 发行点 */
 function issueHeldEvidence(
   evidence: MaterializedFileEvidence,
   fileHandle: fsSync.promises.FileHandle,
@@ -259,10 +293,7 @@ function issueHeldEvidence(
   return new HeldMaterializedFileEvidence(evidence, fileHandle, parentHandle, mode, HELD_ISSUE_TOKEN);
 }
 
-/**
- * Runtime capability seal + 返回权威 mode（用于 assertHeldCurrentSync 二次校验）。
- * 未登记对象、closed capability → SEAL_MISMATCH。
- */
+/** Runtime capability seal + 返回权威 mode（用于 assertHeldCurrentSync 二次校验） */
 export function assertHeldCapability(value: unknown): asserts value is HeldMaterializedFileEvidence {
   if (typeof value !== 'object' || value === null || !(value instanceof HeldMaterializedFileEvidence)) {
     throw new MaterializedFileError('SEAL_MISMATCH', 'held capability is not validator-issued');
@@ -273,7 +304,7 @@ export function assertHeldCapability(value: unknown): asserts value is HeldMater
   }
 }
 
-/** 模块内 accessors（不导出）。 */
+/** module-private accessors（不导出） */
 function getHeldRecord(value: HeldMaterializedFileEvidence): HeldAuthorityRecord {
   const r = heldRecords.get(value);
   if (!r || r.closed) throw new MaterializedFileError('SEAL_MISMATCH', 'held capability closed or not validator-issued');
@@ -286,80 +317,46 @@ function getReuseRecord(value: ValidatedReusableProjectionCapability): ReuseAuth
   return r;
 }
 
-// ────────── ValidatedReusableProjectionCapability（P0-B）──────────
+// ────────── ValidatedReusableProjectionCapability（P0-A P0-B）──────────
 
 /**
- * R5 P0-B：branded reuse validation capability。仅由 validateExistingProjection 发行；
- * module-private WeakMap 注册；构造需 REUSE_ISSUE_TOKEN。bind projection identity +
- * verified held capability + 四级 ancestor identity + file SHA/WAV。
- * finalizeValidatingJob 必须接受本类型；plain ProjectionValidationResult / 伪造对象
- * 全部 SEAL_MISMATCH。
+ * R6 P0-A P0-B：branded reuse validation capability。**仅作为 opaque WeakMap key**——公开
+ * 字段不暴露任何身份/授权字段（projectionId/voiceProfileId/sourceSha256/adapterCompatibilityKey/
+ * provider/relativePath/fileSha256 等全部隐藏在 module-private WeakMap record）。`consumed` /
+ * `closed` 状态来自 record；method/property shadow 不影响 record。R6 引入 deep-frozen
+ * diagnosticSnapshot 字段仅作 GET 序列化诊断用（**不参与授权**）。
  */
 export class ValidatedReusableProjectionCapability {
-  readonly projectionId: string;
-  readonly voiceProfileId: string;
-  readonly voiceProfileRevisionId: string;
-  readonly sourceSha256: string;
-  readonly adapterCompatibilityKey: string;
-  readonly provider: string;
-  readonly candidateMetadataHash: string;
-  readonly relativePath: string;
-  readonly absolutePathInternal: string;
-  readonly rootRealpath: string;
-  readonly revisionParentRealpath: string;
-  readonly fileSha256: string;
-  readonly fileCodec: string;
-  readonly fileSampleRate: number;
-  readonly fileChannels: number;
-  readonly fileDurationMs: number;
-  readonly fileSize: number;
-  readonly closed: boolean;
-  constructor(
-    fields: Omit<ReuseAuthorityRecord, 'closed'>,
-    issueToken: symbol,
-  ) {
-    if (issueToken !== REUSE_ISSUE_TOKEN) {
+  /**
+   * R6 P0-B：deep-frozen 诊断快照（**不参与 DB success 授权**；仅 GET 序列化诊断用）。
+   * 修改此字段不影响 record；篡改不影响授权。
+   */
+  readonly diagnosticSnapshot: Readonly<MaterializedFileEvidence> | null;
+  /** R6 P0-D：consumed 来自 record；method shadow 无效。 */
+  readonly consumed: boolean;
+  constructor(issueToken: symbol, fields: ReuseAuthorityRecord) {
+    if (issueToken !== HELD_ISSUE_TOKEN) {
       throw new MaterializedFileError('SEAL_MISMATCH', 'reuse capability 只能由 validator 发行（issue token 无效）');
     }
-    this.projectionId = fields.projectionId;
-    this.voiceProfileId = fields.voiceProfileId;
-    this.voiceProfileRevisionId = fields.voiceProfileRevisionId;
-    this.sourceSha256 = fields.sourceSha256;
-    this.adapterCompatibilityKey = fields.adapterCompatibilityKey;
-    this.provider = fields.provider;
-    this.candidateMetadataHash = fields.candidateMetadataHash;
-    this.relativePath = fields.relativePath;
-    this.absolutePathInternal = fields.absolutePathInternal;
-    this.rootRealpath = fields.rootRealpath;
-    this.revisionParentRealpath = fields.revisionParentRealpath;
-    this.fileSha256 = fields.fileSha256;
-    this.fileCodec = fields.fileCodec;
-    this.fileSampleRate = fields.fileSampleRate;
-    this.fileChannels = fields.fileChannels;
-    this.fileDurationMs = fields.fileDurationMs;
-    this.fileSize = fields.fileSize;
-    this.closed = false;
-    reuseRecords.set(this, {...fields, closed: false});
+    this.diagnosticSnapshot = deepFreeze({...fields.diagnosticSnapshotBase}) as Readonly<MaterializedFileEvidence>;
+    this.consumed = fields.consumed;
+    reuseRecords.set(this, fields);
   }
-
-  /** Phase 3 完成或失败后关闭（关闭内部持有的 verified held capability）。 */
+  /** R6 P0-E：公开 close() 仅为便利包装——module-private 关闭路径（consumeReuseCapability /
+   * closeReuseCapability）才是权威；shadow 此方法不影响 record closed 标记。 */
   async close(): Promise<void> {
+    await closeReuseCapability(this);
+  }
+  get isClosed(): boolean {
     const r = reuseRecords.get(this);
-    if (!r || r.closed) return;
-    r.closed = true;
-    (this as {closed: boolean}).closed = true;
-    await r.heldVerify.close().catch(() => undefined);
+    return !r || r.closed;
   }
 }
 
-/** 模块内 reuse capability 唯一发行点。 */
-function issueValidatedReusableCapability(
-  fields: Omit<ReuseAuthorityRecord, 'closed'>,
-): ValidatedReusableProjectionCapability {
-  return new ValidatedReusableProjectionCapability(fields, REUSE_ISSUE_TOKEN);
-}
+// ReuseAuthorityRecord 扩展诊断字段（不入 record 其它任何字段）
+type ReuseAuthorityRecordFields = ReuseAuthorityRecord;
 
-// ────────── 流式 SHA256 / WAV parse（保持既有）──────────
+// ────────── 流式 SHA256 / WAV parse ──────────
 
 async function sha256FromFd(fh: fsSync.promises.FileHandle): Promise<string> {
   const buf = Buffer.alloc(1024 * 1024);
@@ -574,41 +571,37 @@ export async function openHeldMaterializedFileEvidence(
     return issueHeldEvidence(evidence, fh, dirFh, mode);
   } catch (err) {
     if (dirFh) {
-      try {
-        await dirFh.close();
-      } catch {
-        /* best-effort */
-      }
+      try { await dirFh.close(); } catch { /* best-effort */ }
     }
     if (fh) {
-      try {
-        await fh.close();
-      } catch {
-        /* best-effort */
-      }
+      try { await fh.close(); } catch { /* best-effort */ }
     }
     throw err;
   }
 }
 
 /**
- * R5 统一 commit-time 同步 seal（P0-A/P0-B/P0-C/P0-D）：
+ * R5 unified commit-time 同步 seal（P0-A/P0-B/P0-C/P0-D/P0-E）。
  * - capability 真实性 + 未关闭（assertHeldCapability）；
  * - requireDurability=true 时 record.mode === 'durabilize'（verify capability 不得成功终局）；
- * - exact destination binding：从 frozen identity 重新派生 expectedRelative/expectedAbsolute/
- *   expectedParent/profileDir/rootDir，evidence.relativePath/absolutePathInternal/
- *   parentRealpath 必须逐项等于派生值；
- * - full ancestor seal：root/profile/revision(final parent)/final 逐级 lstatSync
- *   （非 symlink、类型、dev/ino 与 acquisition evidence 相同）+ root realpath 锚定
- *   path.resolve(materializationRootAbs()) + revision parent realpath 精确等于
- *   acquisition 值且位于 root 下；
- * - held fd fstat ↔ acquisition dev/inode/size/mtime/ctime（同 inode 原地改写 =
- *   mtime/ctime 漂移）。
+ * - expectedVoiceProfileId/voiceProfileRevisionId/expectedSha256 与 record identity exact
+ *   （P0-B/P0-C/P0-D：job-binding 与 issuance frozen identity）；
+ * - exact destination binding：从 record.voiceProfileId/voiceProfileRevisionId 重新派生
+ *   expectedRelative/expectedAbsolute/expectedParent/profileDir/rootDir；record.relativePath/
+ *   absolutePathInternal/parentRealpath 必须逐项等于派生值（不信任 record 路径字段外的任何
+ *   来源作为查询路径——改回 caller 字段的攻击由 binding equality 兜住）；
+ * - full ancestor seal：lstatSync root/profile/revision(final parent)/final + realpath
+ *   锚定（path+lstat 逐级复核；本地 single-writer contract）。
  * 必须同步（无 await）；fence 后到 COMMIT 之间不得有可注入异步 hook。
  */
 export function assertHeldCurrentSync(
   capability: HeldMaterializedFileEvidence,
-  opts: {requireDurability: boolean; expectedVoiceProfileId?: string; expectedVoiceProfileRevisionId?: string; expectedSha256?: string},
+  opts: {
+    requireDurability: boolean;
+    expectedVoiceProfileId?: string;
+    expectedVoiceProfileRevisionId?: string;
+    expectedSha256?: string;
+  },
 ): void {
   assertHeldCapability(capability);
   const r = getHeldRecord(capability);
@@ -616,6 +609,9 @@ export function assertHeldCurrentSync(
     throw new MaterializedFileError('SEAL_MISMATCH', 'held capability 非 durabilize mode（不得成功终局）');
   }
   const snap = r.diagnosticSnapshot;
+  const fail = (code: MaterializedFileError['code'], msg: string): never => {
+    throw new MaterializedFileError(code, msg);
+  };
   if (opts.expectedVoiceProfileId !== undefined && snap.voiceProfileId !== opts.expectedVoiceProfileId) {
     throw new MaterializedFileError('SEAL_MISMATCH', 'held voiceProfileId ≠ expected job binding');
   }
@@ -625,9 +621,6 @@ export function assertHeldCurrentSync(
   if (opts.expectedSha256 !== undefined && snap.sha256 !== opts.expectedSha256) {
     throw new MaterializedFileError('SEAL_MISMATCH', 'held sha256 ≠ expected job binding');
   }
-  const fail = (code: MaterializedFileError['code'], msg: string): never => {
-    throw new MaterializedFileError(code, msg);
-  };
   const expectedRelative = destinationRelativePath(snap.voiceProfileId, snap.voiceProfileRevisionId);
   if (snap.relativePath !== expectedRelative) fail('SEAL_MISMATCH', 'evidence.relativePath ≠ derived destination');
   const expectedAbsolute = destinationAbsolutePath(expectedRelative);
@@ -642,7 +635,6 @@ export function assertHeldCurrentSync(
     return fail('SEAL_MISMATCH', 'derived parent realpath 不可解析（可能 dangling symlink）');
   }
   if (snap.parentRealpath !== realParentNow) fail('SEAL_MISMATCH', 'evidence.parentRealpath ≠ derived parent realpath');
-  // root
   let rootStat: fsSync.BigIntStats;
   try {
     rootStat = fsSync.lstatSync(rootDir, {bigint: true});
@@ -658,7 +650,6 @@ export function assertHeldCurrentSync(
     return fail('SEAL_MISMATCH', 'materialization root realpath 不可解析');
   }
   if (realRootNow !== path.resolve(materializationRootAbs())) fail('SEAL_MISMATCH', 'materialization root realpath 漂移');
-  // profile
   let profileStat: fsSync.BigIntStats;
   try {
     profileStat = fsSync.lstatSync(profileDir, {bigint: true});
@@ -667,7 +658,6 @@ export function assertHeldCurrentSync(
   }
   if (profileStat.isSymbolicLink() || !profileStat.isDirectory()) fail('SEAL_MISMATCH', 'profile ancestor 非目录/symlink');
   if (profileStat.dev !== snap.profileDev || profileStat.ino !== snap.profileIno) fail('SEAL_MISMATCH', 'profile ancestor dev/inode 漂移（被替换）');
-  // revision (final parent)
   let parentStat: fsSync.BigIntStats;
   try {
     parentStat = fsSync.lstatSync(expectedParent, {bigint: true});
@@ -678,14 +668,12 @@ export function assertHeldCurrentSync(
   if (parentStat.dev !== snap.parentDev || parentStat.ino !== snap.parentIno) fail('SEAL_MISMATCH', 'revision parent dev/inode 漂移（被替换）');
   if (realParentNow !== snap.parentRealpath) fail('SEAL_MISMATCH', 'parentRealpath drift vs acquired');
   if (!realParentNow.startsWith(realRootNow + path.sep)) fail('SEAL_MISMATCH', 'revision parent 越出 materialization root');
-  // held fd fstat vs evidence
   const fdStat = fsSync.fstatSync(r.fileHandle.fd, {bigint: true});
   if (fdStat.dev !== snap.device || fdStat.ino !== snap.inode) fail('SEAL_MISMATCH', 'held fd inode 漂移');
   if (fdStat.size !== BigInt(snap.size)) fail('SEAL_MISMATCH', 'held fd size 漂移（同 inode 改写）');
   if (fdStat.mtimeNs !== snap.mtimeNs || fdStat.ctimeNs !== snap.ctimeNs) {
     fail('SEAL_MISMATCH', 'held fd mtime/ctime 漂移（同 inode 原地改写）');
   }
-  // final path (derived) lstat vs evidence
   let pathStat: fsSync.BigIntStats | undefined;
   try {
     pathStat = fsSync.lstatSync(expectedAbsolute, {bigint: true});
@@ -698,82 +686,121 @@ export function assertHeldCurrentSync(
   if (ps.dev !== snap.device || ps.ino !== snap.inode) fail('SEAL_MISMATCH', 'final path inode ≠ held fd（被替换）');
   if (ps.size !== BigInt(snap.size)) fail('SEAL_MISMATCH', 'final path size 漂移');
   if (ps.mtimeNs !== snap.mtimeNs || ps.ctimeNs !== snap.ctimeNs) fail('SEAL_MISMATCH', 'final path mtime/ctime 漂移');
-  // held parent fd vs evidence
   const parentFdStat = fsSync.fstatSync(r.parentHandle.fd, {bigint: true});
   if (parentFdStat.dev !== snap.parentDev || parentFdStat.ino !== snap.parentIno) fail('SEAL_MISMATCH', 'held parent fd inode 漂移');
 }
 
-/**
- * Internal: 派生 file evidence snapshot（仅诊断；P0-B 强调 SHA 真实来自 record，
- * 该 snapshot 不能被调用方用于构造 reuse capability）。
- */
-function fileEvidenceFromReuseRecord(r: ReuseAuthorityRecord): Readonly<MaterializedFileEvidence> {
-  return deepFreeze({
-    voiceProfileId: r.voiceProfileId,
-    voiceProfileRevisionId: r.voiceProfileRevisionId,
-    relativePath: r.relativePath,
-    absolutePathInternal: r.absolutePathInternal,
-    sha256: r.fileSha256,
-    size: r.fileSize,
-    codec: r.fileCodec,
-    sampleRate: r.fileSampleRate,
-    channels: r.fileChannels,
-    durationMs: r.fileDurationMs,
-    device: r.fileDev,
-    inode: r.fileIno,
-    mtimeNs: r.fileMtimeNs,
-    ctimeNs: r.fileCtimeNs,
-    parentRealpath: r.revisionParentRealpath,
-    parentDev: r.revisionDev,
-    parentIno: r.revisionIno,
-    rootDev: r.rootDev,
-    rootIno: r.rootIno,
-    profileDev: r.profileDev,
-    profileIno: r.profileIno,
-    durabilityEstablished: false,
-  }) as Readonly<MaterializedFileEvidence>;
-}
+// ────────── R6 P0-A P0-B P0-C P0-D P0-E：reusable projection 高层 API ──────────
 
-/** 模块内：发行 ValidatedReusableProjectionCapability 并返回 file evidence 诊断快照。 */
-function issueReuseCapabilityFromHeld(
-  projection: {id: string; voice_profile_id: string; voice_profile_revision_id: string; source_canonical_sha256: string; adapter_compatibility_key: string; destination_voice_root_relative_path: string},
-  candidateMetadataHash: string,
+/**
+ * R6 P0-A：唯一对外的 reuse entry。**事务外**调用，事务完成后通过 `consumeValidatedProjectionForReuse`
+ * 完成事务内 finalize（不允许 materialization.ts 之外的任何模块获得 issuer token / WeakMap 注册入口）。
+ *
+ * 内部（P0-C）严格一致性校验——任一不通过则：
+ *  1) 关闭已打开的 held fd（不留 dangling 资源）；
+ *  2) 不注册 record（不向 WeakMap 写入）；
+ *  3) throw MaterializedFileError SEAL_MISMATCH。
+ * 调用方应捕获 → 返回 unusable。
+ */
+export async function validateProjectionForReuse(
+  projection: {
+    id: string;
+    voice_profile_id: string;
+    voice_profile_revision_id: string;
+    source_canonical_sha256: string;
+    adapter_compatibility_key: string;
+    destination_voice_root_relative_path: string;
+    status: 'file_ready_unpublished' | 'published_usable' | 'failed' | 'indeterminate';
+    published_registry_generation: number | null;
+    published_registry_sha256: string | null;
+    published_by_publication_id: string | null;
+    created_at: string;
+    updated_at: string;
+  },
+  candidateMetadataHash: string | null,
+  expectedHandle: ValidationOwnerShape,
   provider: string,
-  held: HeldMaterializedFileEvidence,
-): {capability: ValidatedReusableProjectionCapability; fileEvidence: Readonly<MaterializedFileEvidence>} {
-  const r = getHeldRecord(held);
-  const snap = r.diagnosticSnapshot;
-  const expectedRelative = destinationRelativePath(projection.voice_profile_id, projection.voice_profile_revision_id);
-  if (snap.relativePath !== expectedRelative) {
-    throw new MaterializedFileError('SEAL_MISMATCH', 'projection relative path ≠ derived destination');
+): Promise<
+  | {kind: 'usable'; capability: ValidatedReusableProjectionCapability; projection: typeof projection}
+  | {kind: 'unusable'; reason: string}
+> {
+  if (projection.status !== 'file_ready_unpublished' && projection.status !== 'published_usable') {
+    return {kind: 'unusable', reason: `projection status=${projection.status}`};
   }
-  const expectedAbsolute = destinationAbsolutePath(expectedRelative);
-  const expectedParent = path.dirname(expectedAbsolute);
+  const {validateVoiceProfileRevisionExact} = await import('../voice-library/revisions');
+  const descriptor = await validateVoiceProfileRevisionExact(projection.voice_profile_id, projection.voice_profile_revision_id);
+  if (!descriptor) return {kind: 'unusable', reason: 'exact voice revision 不可读'};
+  if (!descriptor.usable) return {kind: 'unusable', reason: descriptor.unusableReason ?? 'hash_mismatch'};
+  let held: HeldMaterializedFileEvidence;
+  try {
+    held = await openHeldMaterializedFileEvidence(
+      {
+        relativePath: projection.destination_voice_root_relative_path,
+        voiceProfileId: projection.voice_profile_id,
+        voiceProfileRevisionId: projection.voice_profile_revision_id,
+        expectedSha256: projection.source_canonical_sha256,
+        expectedSize: descriptor.fileSize,
+        expectedCodec: 'pcm_s16le',
+        expectedSampleRate: 48000,
+        expectedChannels: 1,
+        minDurationMs: 1,
+        adapterCompatibilityKey: projection.adapter_compatibility_key,
+      },
+      'verify',
+    );
+  } catch (err) {
+    return {kind: 'unusable', reason: err instanceof Error ? err.message : String(err)};
+  }
+  // P0-C：issuance 严格一致性校验
+  try {
+    const snap = held.evidence;
+    const expectedRel = destinationRelativePath(projection.voice_profile_id, projection.voice_profile_revision_id);
+    const expectedAbs = destinationAbsolutePath(expectedRel);
+    const expectedParent = path.dirname(expectedAbs);
+    const realRoot = fsSync.realpathSync(materializationRootAbs());
+    const realParent = fsSync.realpathSync(expectedParent);
+    if (
+      projection.destination_voice_root_relative_path !== expectedRel ||
+      snap.relativePath !== expectedRel ||
+      snap.absolutePathInternal !== expectedAbs ||
+      snap.parentRealpath !== realParent ||
+      snap.voiceProfileId !== projection.voice_profile_id ||
+      snap.voiceProfileRevisionId !== projection.voice_profile_revision_id ||
+      snap.sha256 !== projection.source_canonical_sha256 ||
+      projection.destination_voice_root_relative_path !== expectedRel
+    ) {
+      throw new MaterializedFileError('SEAL_MISMATCH', 'issuance 严格一致性校验失败：projection/record identity 不匹配');
+    }
+    // candidate binding exact
+    if (expectedHandle.candidateMaterializationId !== (projection.id ?? null)) {
+      throw new MaterializedFileError('SEAL_MISMATCH', 'candidate materialization id 漂移（issuance）');
+    }
+    if (expectedHandle.candidateMaterializationMetadataHash !== candidateMetadataHash) {
+      throw new MaterializedFileError('SEAL_MISMATCH', 'candidate metadata hash 漂移（issuance）');
+    }
+  } catch (e) {
+    // 关闭 held fd，**不**注册 record
+    await held.close().catch(() => undefined);
+    return {kind: 'unusable', reason: e instanceof Error ? e.message : String(e)};
+  }
+  // issuance 成功：构造 record 并通过模块内 symbol-门控构造器写入 reuseRecords WeakMap
+  const snap = held.evidence;
+  const expectedRel = destinationRelativePath(projection.voice_profile_id, projection.voice_profile_revision_id);
+  const expectedAbs = destinationAbsolutePath(expectedRel);
+  const expectedParent = path.dirname(expectedAbs);
+  const realRoot = fsSync.realpathSync(materializationRootAbs());
   const realParent = fsSync.realpathSync(expectedParent);
-  const profileDir = path.dirname(expectedParent);
-  const rootDir = path.dirname(profileDir);
-  const realRoot = fsSync.realpathSync(rootDir);
-  const cap = issueValidatedReusableCapability({
-    projectionId: projection.id,
+  const parentStat = fsSync.lstatSync(realParent, {bigint: true});
+  const rootStat = fsSync.lstatSync(realRoot, {bigint: true});
+  const profileStat = fsSync.lstatSync(path.dirname(expectedParent), {bigint: true});
+  const fields: ReuseAuthorityRecord = {
     voiceProfileId: projection.voice_profile_id,
     voiceProfileRevisionId: projection.voice_profile_revision_id,
     sourceSha256: projection.source_canonical_sha256,
     adapterCompatibilityKey: projection.adapter_compatibility_key,
     provider,
-    candidateMetadataHash,
-    relativePath: snap.relativePath,
-    absolutePathInternal: snap.absolutePathInternal,
-    rootDev: snap.rootDev,
-    rootIno: snap.rootIno,
-    profileDev: snap.profileDev,
-    profileIno: snap.profileIno,
-    revisionDev: snap.parentDev,
-    revisionIno: snap.parentIno,
-    fileDev: snap.device,
-    fileIno: snap.inode,
-    fileMtimeNs: snap.mtimeNs,
-    fileCtimeNs: snap.ctimeNs,
-    fileSize: snap.size,
+    relativePath: expectedRel,
+    absolutePathInternal: expectedAbs,
     rootRealpath: realRoot,
     revisionParentRealpath: realParent,
     fileSha256: snap.sha256,
@@ -781,25 +808,117 @@ function issueReuseCapabilityFromHeld(
     fileSampleRate: snap.sampleRate,
     fileChannels: snap.channels,
     fileDurationMs: snap.durationMs,
+    fileSize: snap.size,
+    rootDev: rootStat.dev,
+    rootIno: rootStat.ino,
+    profileDev: profileStat.dev,
+    profileIno: profileStat.ino,
+    revisionDev: parentStat.dev,
+    revisionIno: parentStat.ino,
+    fileDev: snap.device,
+    fileIno: snap.inode,
+    fileMtimeNs: snap.mtimeNs,
+    fileCtimeNs: snap.ctimeNs,
+    projectionId: projection.id,
+    candidateMaterializationId: expectedHandle.candidateMaterializationId,
+    candidateMaterializationMetadataHash: expectedHandle.candidateMaterializationMetadataHash,
+    boundExpectedHandle: {
+      jobId: expectedHandle.jobId,
+      validationOwnerToken: expectedHandle.validationOwnerToken,
+      validationAttempt: expectedHandle.validationAttempt,
+      candidateMaterializationId: expectedHandle.candidateMaterializationId,
+      candidateMaterializationMetadataHash: expectedHandle.candidateMaterializationMetadataHash,
+    },
+    consumed: false,
     heldVerify: held,
-  });
-  const r2 = reuseRecords.get(cap)!;
-  return {capability: cap, fileEvidence: fileEvidenceFromReuseRecord(r2)};
+    closed: false,
+    diagnosticSnapshotBase: {...snap},
+  };
+  // 通过 module-private 构造器写入 reuseRecords
+  const cap = new ValidatedReusableProjectionCapability(HELD_ISSUE_TOKEN, fields);
+  return {kind: 'usable', capability: cap, projection};
 }
 
-/** 模块内 export — materialization.ts 唯一授权发行 reuse capability 的入口。 */
-export const __internal = {
-  issueReuseCapabilityFromHeld,
-  /** Reuse finalize / 测试 hook：取得 capability 内部持有的 verified held capability。 */
-  underlyingHeldForReuse: (cap: ValidatedReusableProjectionCapability): HeldMaterializedFileEvidence => {
-    const r = getReuseRecord(cap);
-    return r.heldVerify;
-  },
-};
+/**
+ * R6 P0-A：唯一对外的 reuse consume entry。**事务内**调用，逐项 exact re-check 后执行
+ * Phase 3 fence（assertHeldCurrentSync requireDurability=false）；事务完成后无论成功/失败都
+ * 调用 `consumeReuseCapability(cap, success)` 标记 consumed + 关闭 held fd。
+ *
+ * 任何模块（含 materialization.ts）都不得绕过此函数直接访问 reuseRecords WeakMap。
+ */
+export async function consumeValidatedProjectionForReuse(
+  capability: ValidatedReusableProjectionCapability,
+  expectedHandle: ValidationOwnerShape,
+  onCommit: (capability: ValidatedReusableProjectionCapability, record: ReuseAuthorityRecord) => Promise<void> | void,
+): Promise<void> {
+  // P0-D：one-shot + handle binding exact re-check（事务入口）
+  const r = getReuseRecord(capability); // throws if not in WeakMap
+  if (r.consumed) {
+    throw new MaterializedFileError('SEAL_MISMATCH', 'reuse capability already consumed（one-shot 违例）');
+  }
+  if (r.closed) {
+    throw new MaterializedFileError('SEAL_MISMATCH', 'reuse capability closed');
+  }
+  if (
+    r.boundExpectedHandle.jobId !== expectedHandle.jobId ||
+    r.boundExpectedHandle.validationOwnerToken !== expectedHandle.validationOwnerToken ||
+    r.boundExpectedHandle.validationAttempt !== expectedHandle.validationAttempt ||
+    r.boundExpectedHandle.candidateMaterializationId !== expectedHandle.candidateMaterializationId ||
+    r.boundExpectedHandle.candidateMaterializationMetadataHash !== expectedHandle.candidateMaterializationMetadataHash
+  ) {
+    throw new MaterializedFileError('SEAL_MISMATCH', 'reuse capability handle binding 不匹配（attempt+1 takeover / 不同 job / candidate 漂移）');
+  }
+  // P0-D：能力内持有的 verified held 进行 unified seal
+  assertHeldCurrentSync(r.heldVerify, {
+    requireDurability: false,
+    expectedVoiceProfileId: r.voiceProfileId,
+    expectedVoiceProfileRevisionId: r.voiceProfileRevisionId,
+    expectedSha256: r.fileSha256,
+  });
+  // 事务工作由调用方在 `onCommit` 内 BEGIN IMMEDIATE...COMMIT/ROLLBACK
+  let success = false;
+  try {
+    await onCommit(capability, r);
+    success = true;
+  } finally {
+    // P0-E：无论成功/失败都通过 module-private 路径关闭——method shadow 不影响
+    await consumeReuseCapability(capability, success);
+  }
+}
 
 /**
- * 兼容层：R4 `validateMaterializedFileSnapshot` —— 打开 verify 模式并立即关闭，
- * 返回只读 evidence snapshot（不能用于构造 reuse capability）。
+ * R6 P0-E：module-private fd 生命周期——直接操作 reuseRecords 关闭 record + held fd。
+ * 任意 mutation 试图 shadow `ValidatedReusableProjectionCapability.close()` 不影响此路径。
+ * 同步标记 `closed` 与 `consumed`；底层 held final fd 与 parent fd 恰好关闭一次。
+ */
+async function consumeReuseCapability(
+  capability: ValidatedReusableProjectionCapability,
+  success: boolean,
+): Promise<void> {
+  const r = reuseRecords.get(capability);
+  if (!r) return;
+  r.consumed = true;
+  r.closed = true;
+  // 复制 consumed/closed 到 capability 公开视图（method shadow 无效；record 是权威）
+  (capability as unknown as {consumed: boolean}).consumed = true;
+  (capability as unknown as {closed: boolean}).closed = true;
+  // 关闭底层 held（去重：HeldMaterializedFileEvidence.close 已自去重）
+  try {
+    await r.heldVerify.close();
+  } catch {
+    // best-effort；已 closed=true 防 double-close
+  }
+  // 占位：success 字段为后续扩展（审计日志、metrics）保留——当前不动作
+  void success;
+}
+
+/** R6 P0-E：module-private 关闭路径（不依赖 public close） */
+async function closeReuseCapability(capability: ValidatedReusableProjectionCapability): Promise<void> {
+  await consumeReuseCapability(capability, false);
+}
+
+/**
+ * R6 兼容层：verify 模式打开并立即关闭，返回只读 evidence snapshot（不能用于构造 reuse capability）。
  */
 export async function validateMaterializedFileSnapshot(
   expectation: MaterializedFileExpectation,

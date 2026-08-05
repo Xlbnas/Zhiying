@@ -44,8 +44,9 @@ export async function POST(
       parsed.data.requestId,
       parsed.data.projectVoiceAssignmentArtifactId,
     );
-    // R2：finalize 后重读 request/job/projection（禁止返回 Phase 1 缓存的 waiting row）
-    const view = serializeMaterializationRequest(result.request, result.projection);
+    // R6 §九：真实 POST integrity——显式传入 result.integrityStatus（reused 必 'verified'，
+    // 其它 outcome 为 'unchecked'）；不得用 serializer 默认值、不得硬编码 'verified'。
+    const view = serializeMaterializationRequest(result.request, result.projection, result.integrityStatus);
     return NextResponse.json(
       {
         request: view,

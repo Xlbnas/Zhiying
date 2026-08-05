@@ -30,10 +30,12 @@ import {
   assertHeldCapability,
   MaterializedFileError,
   ValidatedReusableProjectionCapability,
+  validateProjectionForReuse,
+  consumeValidatedProjectionForReuse,
   type MaterializedFileEvidence,
   type HeldMaterializedFileEvidence,
+  type ValidationOwnerShape,
 } from './materialized-file-validator';
-import {__internal as __validatorInternal} from './materialized-file-validator';
 
 export type MaterializationErrorCode =
   | 'PROJECT_NOT_FOUND'
@@ -276,25 +278,22 @@ export async function resolveMaterializationSourceIdentity(
 // ── Phase 2：exact projection/file validator（事务外只读） ──
 
 /**
- * R5 P0-B：Phase 2 outcome 必须绑定 branded capability。usable 分支持有的 held fd
- * 由 capability 持有到 Phase 3 finalize 完成；Phase 3 完成后 capability.close() 释放 fd。
- * caller 构造的 plain `{kind:'usable', fileEvidence:{...}}` 无法触发 reused——
- * finalizeValidatingJob 要求 branded capability 并通过 module-private WeakMap 校验。
+ * R6 P0-A P0-B：Phase 2 outcome 持有 opaque branded capability。usable 分支的能力不暴露
+ * 任何身份/授权字段（capability 公开字段仅作诊断）；`projection` 字段仅作 serial 化时
+ * 携带 DB 行。`fileSha256/fileEvidence` 从 capability.diagnosticSnapshot 派生（仅诊断）。
  */
 export type ProjectionValidationOutcome =
   | {
       kind: 'usable';
       capability: ValidatedReusableProjectionCapability;
       projection: VoiceMaterializationRow;
-      fileSha256: string;
-      fileEvidence: Readonly<MaterializedFileEvidence>;
     }
   | {kind: 'unusable'; reason: string};
 
-/** R4 兼容别名（既存 tests 使用）；内部实现已迁到 ProjectionValidationOutcome。 */
+/** R4/R5 兼容别名（既存 tests 使用）。 */
 export type ProjectionValidationResult = ProjectionValidationOutcome;
 
-/** R4 兼容类型别名（既存 tests 用）。 */
+/** R4 兼容类型（既存 tests 仍引用）。 */
 export interface ValidatedProjectionEvidence {
   projectionId: string;
   profileId: string;
@@ -340,57 +339,31 @@ export function setAfterProjectionValidationBeforeFinalize(
 }
 
 /**
- * R5：Phase 2 唯一 issuer。usable 分支返回 branded capability，held fd 持续打开直到
- * capability.close()。unusable 分支不持有 fd。
+ * R6 P0-A P0-C P0-D：Phase 2 高层 entry。**仅**委托 validator 的 `validateProjectionForReuse`
+ * （module-private issuer/WeakMap 注册入口已被删除——materialization.ts 不持有任何能构造
+ * 合法 capability 的 token 或函数）。issuance 严格一致性 + one-shot handle binding 由 validator
+ * 负责；任一不一致 → 关闭 held + 不注册 record + throw；本函数捕获后返回 unusable。
+ *
+ * handle 是真实 validation owner handle（Phase 2 阶段已确定）——issuance 时绑定到 record
+ * 用于 Phase 3 one-shot exact re-check。
  */
 export async function validateExistingProjection(
   projection: VoiceMaterializationRow,
   candidateMetadataHash: string | null,
+  handle: ValidationLeaseHandle,
   provider: string,
 ): Promise<ProjectionValidationOutcome> {
   if (projection.status !== 'file_ready_unpublished' && projection.status !== 'published_usable') {
     return {kind: 'unusable', reason: `projection status=${projection.status}`};
   }
-  const descriptor = await validateVoiceProfileRevisionExact(
-    projection.voice_profile_id,
-    projection.voice_profile_revision_id,
-  );
-  if (!descriptor) return {kind: 'unusable', reason: 'exact voice revision 不可读'};
-  if (!descriptor.usable) {
-    return {kind: 'unusable', reason: descriptor.unusableReason ?? 'hash_mismatch'};
-  }
-  try {
-    const held = await openHeldMaterializedFileEvidence(
-      {
-        relativePath: projection.destination_voice_root_relative_path,
-        voiceProfileId: projection.voice_profile_id,
-        voiceProfileRevisionId: projection.voice_profile_revision_id,
-        expectedSha256: projection.source_canonical_sha256,
-        expectedSize: descriptor.fileSize,
-        expectedCodec: 'pcm_s16le',
-        expectedSampleRate: 48000,
-        expectedChannels: 1,
-        minDurationMs: 1,
-        adapterCompatibilityKey: projection.adapter_compatibility_key,
-      },
-      'verify',
-    );
-    const {capability, fileEvidence} = __validatorInternal.issueReuseCapabilityFromHeld(
-      projection,
-      candidateMetadataHash ?? '',
-      provider,
-      held,
-    );
-    return {
-      kind: 'usable',
-      capability,
-      projection,
-      fileSha256: capability.fileSha256,
-      fileEvidence,
-    };
-  } catch (err) {
-    return {kind: 'unusable', reason: err instanceof Error ? err.message : String(err)};
-  }
+  const expectedHandle: ValidationOwnerShape = {
+    jobId: handle.jobId,
+    validationOwnerToken: handle.validationOwnerToken,
+    validationAttempt: handle.validationAttempt,
+    candidateMaterializationId: handle.candidateMaterializationId,
+    candidateMaterializationMetadataHash: handle.candidateMaterializationMetadataHash,
+  };
+  return validateProjectionForReuse(projection, candidateMetadataHash, expectedHandle, provider);
 }
 
 // ── Phase 3：fenced finalize（BEGIN IMMEDIATE；只接受 handle，不接受整行 fresh job） ──
@@ -403,8 +376,28 @@ export function finalizeValidatingJob(
   db: Db = getDb(),
 ): FinalizeOutcome {
   const now = nowIso();
+  // R6 P0-A P0-D P0-E：usable 分支**全部事务内工作**通过 `consumeValidatedProjectionForReuse`
+  // 委派给 validator（包含 one-shot exact-handle re-check + unified seal + module-private
+  // consume/close 路径）；unusable 分支走独立 fenced cancel/queue 路径。
+  if (outcome.kind !== 'usable') {
+    return finalizeUnusableReusePath(handle, db, now);
+  }
+  // 注意：consumeValidatedProjectionForReuse 是 async（含 assertHeldCurrentSync + 事务），
+  // 但本函数签名是 sync。R6 设计下此 sync 入口对 usable 路径抛错；调用方
+  // （createMaterializationRequest）必须走 async 路径 consumeReuseTransaction。
+  void outcome;
+  throw new Error('finalizeValidatingJob sync path removed in R6; use consumeReuseTransaction');
+}
+
+/**
+ * R6 unusable 路径（fenced cancel / queue）——未绑定 capability；事务 fence + 裁决。
+ */
+function finalizeUnusableReusePath(
+  handle: ValidationLeaseHandle,
+  db: Db,
+  now: string,
+): FinalizeOutcome {
   const tx = db.transaction((): FinalizeOutcome => {
-    // fenced reread：凭据只来自 handle（id/token/attempt/lease/candidate id+hash exact）
     const fresh = db
       .prepare(
         `SELECT * FROM voice_materialization_jobs
@@ -425,9 +418,84 @@ export function finalizeValidatingJob(
       throw new MaterializationError('STALE_VALIDATION_OWNER', 'validation handle 已失效（接管/过期）', 409);
     }
     const subscribers = listActiveRequestRows(handle.jobId);
+    if (subscribers.length === 0) {
+      const j = db
+        .prepare(
+          `UPDATE voice_materialization_jobs
+           SET status = 'cancelled', validation_owner_token = NULL,
+               validation_lease_expires_at_epoch_ms = NULL, updated_at = ?
+           WHERE id = ? AND status = 'validating_existing'`,
+        )
+        .run(now, handle.jobId);
+      if (j.changes !== 1) throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'job cancel failed', 409);
+      return 'cancelled';
+    }
+    const j = db
+      .prepare(
+        `UPDATE voice_materialization_jobs
+         SET status = 'queued', validation_owner_token = NULL,
+             validation_lease_expires_at_epoch_ms = NULL, updated_at = ?
+         WHERE id = ? AND status = 'validating_existing'`,
+      )
+      .run(now, handle.jobId);
+    if (j.changes !== 1) throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'job enqueue failed', 409);
+    return 'queued';
+  });
+  return tx.immediate();
+}
 
-    if (outcome.kind === 'usable') {
-      // R4 §七：zero-subscriber 终局独立 fail-closed——usable 也不得 succeeded/reused
+/**
+ * R6 P0-A P0-D P0-E：Phase 3 usable 完整事务入口（async）。
+ *
+ * 流程（**所有授权判断从 private record 读取；capability 公开字段不参与**）：
+ *  1. 委托 validator `consumeValidatedProjectionForReuse`：
+ *      a. exact handle re-check（jobId/ownerToken/attempt/candidate id+hash）
+ *      b. one-shot consumed check
+ *      c. unified seal (`assertHeldCurrentSync` requireDurability=false)
+ *      d. 事务内 fenced reread + UPDATE job→succeeded + active requests→reused
+ *      e. 无论成功/失败 module-private 关闭路径标记 consumed + closed + 关闭底层 held fd
+ *  2. 返回 `{outcome, projection}`：outcome 为 FinalizeOutcome；projection 来自 record-bound
+ *     不可变 identity（**不**基于 validation.kind）。
+ */
+export async function consumeReuseTransaction(
+  handle: ValidationLeaseHandle,
+  capability: ValidatedReusableProjectionCapability,
+  db: Db = getDb(),
+): Promise<{outcome: FinalizeOutcome; projection: VoiceMaterializationRow | null}> {
+  const now = nowIso();
+  let resultOutcome: FinalizeOutcome = 'cancelled';
+  let resultProjection: VoiceMaterializationRow | null = null;
+
+  try {
+    await consumeValidatedProjectionForReuse(capability, {
+      jobId: handle.jobId,
+      validationOwnerToken: handle.validationOwnerToken,
+      validationAttempt: handle.validationAttempt,
+      candidateMaterializationId: handle.candidateMaterializationId,
+      candidateMaterializationMetadataHash: handle.candidateMaterializationMetadataHash,
+    }, async (_cap, _record) => {
+    // 事务内 fenced reread + UPDATE（通过闭包变量回传）
+    await db.transaction((): FinalizeOutcome => {
+      const freshJob = db
+        .prepare(
+          `SELECT * FROM voice_materialization_jobs
+           WHERE id = ? AND status = 'validating_existing'
+             AND validation_owner_token = ? AND validation_attempt = ?
+             AND (${DBNOW_MS}) <= validation_lease_expires_at_epoch_ms
+             AND candidate_materialization_id IS ?
+             AND candidate_materialization_metadata_hash IS ?`,
+        )
+        .get(
+          handle.jobId,
+          handle.validationOwnerToken,
+          handle.validationAttempt,
+          handle.candidateMaterializationId,
+          handle.candidateMaterializationMetadataHash,
+        ) as VoiceMaterializationJobRow | undefined;
+      if (!freshJob) {
+        throw new MaterializationError('STALE_VALIDATION_OWNER', 'validation handle 已失效（接管/过期）', 409);
+      }
+      const subscribers = listActiveRequestRows(handle.jobId);
       if (subscribers.length === 0) {
         const j = db
           .prepare(
@@ -438,38 +506,16 @@ export function finalizeValidatingJob(
           )
           .run(now, handle.jobId);
         if (j.changes !== 1) throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'job cancel failed', 409);
+        resultOutcome = 'cancelled';
         return 'cancelled';
       }
-      // R5 P0-B：Phase 3 只接受 branded capability；plain ValidatedProjectionEvidence / 伪造对象 → SEAL_MISMATCH
-      const cap = outcome.capability;
-      // P0-C：unified ancestor seal（requireDurability=false：reuse path）
-      try {
-        assertHeldCurrentSync(__validatorInternal.underlyingHeldForReuse(cap), {
-          requireDurability: false,
-          expectedVoiceProfileId: cap.voiceProfileId,
-          expectedVoiceProfileRevisionId: cap.voiceProfileRevisionId,
-        });
-      } catch (e) {
-        if (e instanceof MaterializedFileError) {
-          throw new MaterializationError(
-            'MATERIALIZATION_UNUSABLE',
-            `reuse commit seal reject（${e.code}）：${e.message}`,
-            409,
-          );
-        }
-        throw e;
-      }
-      const projection = outcome.projection;
-      // 逐项 reread——capability ↔ handle.candidate ↔ current projection row
-      if (cap.projectionId !== handle.candidateMaterializationId) {
-        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'capability projectionId ≠ handle.candidateMaterializationId', 409);
-      }
-      if (cap.projectionId !== projection.id) {
-        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'capability projectionId ≠ validation result projectionId', 409);
+      const projectionId = handle.candidateMaterializationId;
+      if (!projectionId) {
+        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'handle.candidateMaterializationId 空（usable 但无 candidate projection）', 409);
       }
       const currentProjection = db
         .prepare('SELECT * FROM voice_materializations WHERE id = ?')
-        .get(projection.id) as VoiceMaterializationRow | undefined;
+        .get(projectionId) as VoiceMaterializationRow | undefined;
       if (!currentProjection) {
         throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'projection row 不存在（Phase 2→3 期间被删）', 409);
       }
@@ -477,34 +523,6 @@ export function finalizeValidatingJob(
       if (currentHash !== handle.candidateMaterializationMetadataHash) {
         throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'projection metadata hash 与 handle.candidate 不一致（漂移）', 409);
       }
-      if (
-        currentProjection.voice_profile_id !== cap.voiceProfileId ||
-        currentProjection.voice_profile_revision_id !== cap.voiceProfileRevisionId ||
-        currentProjection.source_canonical_sha256 !== cap.sourceSha256 ||
-        currentProjection.adapter_compatibility_key !== cap.adapterCompatibilityKey ||
-        currentProjection.destination_voice_root_relative_path !== cap.relativePath
-      ) {
-        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'projection row 与 capability 不一致', 409);
-      }
-      // R5 P0-D：SHA 来自 capability record（真实 issuer 读取），不可由 caller 注入
-      if (cap.fileSha256 !== currentProjection.source_canonical_sha256) {
-        throw new MaterializationError('MATERIALIZATION_UNUSABLE', 'capability.fileSha256 ≠ projection row SHA', 409);
-      }
-      // exact Revision metadata reread（含 provider — R3 §六）
-      const revisionRow = db
-        .prepare('SELECT * FROM voice_profile_revisions WHERE id = ? AND voice_profile_id = ?')
-        .get(currentProjection.voice_profile_revision_id, currentProjection.voice_profile_id) as
-        | {canonical_audio_sha256: string; adapter_compatibility_key: string; provider: string}
-        | undefined;
-      if (
-        !revisionRow ||
-        revisionRow.canonical_audio_sha256 !== currentProjection.source_canonical_sha256 ||
-        revisionRow.adapter_compatibility_key !== currentProjection.adapter_compatibility_key ||
-        revisionRow.provider !== cap.provider
-      ) {
-        throw new MaterializationError('SOURCE_STALE', 'exact Revision metadata identity 漂移（Phase 2→3）', 409);
-      }
-      // active requests Assignment source 逐项 reread
       for (const r of subscribers) {
         const asg = getProjectVoiceAssignment(r.project_id, r.assignment_artifact_id);
         if (!asg) throw new MaterializationError('SOURCE_STALE', `request ${r.request_id} assignment 不可读`, 409);
@@ -513,13 +531,11 @@ export function finalizeValidatingJob(
           src.voiceProfileId !== currentProjection.voice_profile_id ||
           src.voiceProfileRevisionId !== currentProjection.voice_profile_revision_id ||
           src.canonicalAudioSha256 !== currentProjection.source_canonical_sha256 ||
-          src.adapterCompatibilityKey !== currentProjection.adapter_compatibility_key ||
-          src.provider !== revisionRow.provider
+          src.adapterCompatibilityKey !== currentProjection.adapter_compatibility_key
         ) {
           throw new MaterializationError('SOURCE_STALE', `request ${r.request_id} assignment source 漂移（Phase 2→3）`, 409);
         }
       }
-      // 零文件写：job→succeeded + active requests→reused
       const j = db
         .prepare(
           `UPDATE voice_materialization_jobs
@@ -536,47 +552,26 @@ export function finalizeValidatingJob(
              SET status = 'reused', materialization_id = ?, updated_at = ?
              WHERE id = ? AND status IN ('waiting','running')`,
           )
-          .run(projection.id, now, r.id);
+          .run(currentProjection.id, now, r.id);
         if (res.changes !== 1) throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'request reuse failed', 409);
       }
+      resultOutcome = 'reused';
+      resultProjection = currentProjection;
       return 'reused';
+    })();
+    });
+  } catch (e) {
+    if (e instanceof MaterializedFileError) {
+      throw new MaterializationError(
+        'MATERIALIZATION_UNUSABLE',
+        `reuse commit seal reject（${e.code}）：${e.message}`,
+        409,
+      );
     }
-
-    // unusable
-    if (subscribers.length === 0) {
-      const j = db
-        .prepare(
-          `UPDATE voice_materialization_jobs
-           SET status = 'cancelled', validation_owner_token = NULL,
-               validation_lease_expires_at_epoch_ms = NULL, updated_at = ?
-           WHERE id = ? AND status = 'validating_existing'`,
-        )
-        .run(now, handle.jobId);
-      if (j.changes !== 1) throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'job cancel failed', 409);
-      return 'cancelled';
-    }
-    // unusable + subscriber>0 → queued（Scheduler 才可见）
-    const j = db
-      .prepare(
-        `UPDATE voice_materialization_jobs
-         SET status = 'queued', validation_owner_token = NULL,
-             validation_lease_expires_at_epoch_ms = NULL, updated_at = ?
-         WHERE id = ? AND status = 'validating_existing'`,
-      )
-      .run(now, handle.jobId);
-    if (j.changes !== 1) throw new MaterializationError('REQUEST_STATE_INCONSISTENT', 'job enqueue failed', 409);
-    return 'queued';
-  });
-  let result: FinalizeOutcome;
-  try {
-    result = tx.immediate();
-  } finally {
-    if (outcome.kind === 'usable') {
-      // Phase 3 完成或失败后关闭 capability（fd 释放；closed=true 后 capability 不可再用）
-      void outcome.capability.close().catch(() => undefined);
-    }
+    throw e;
   }
-  return result;
+
+  return {outcome: resultOutcome, projection: resultProjection};
 }
 
 // ── stale validating job 接管（fenced CAS；只有赢家返回 handle） ──
@@ -701,6 +696,12 @@ export interface CreateMaterializationRequestResult {
   job: VoiceMaterializationJobRow;
   outcome: FinalizeOutcome;
   projection: VoiceMaterializationRow | null;
+  /**
+   * R6 §九：真实 integrity status（来自统一 integrity validator；reused 必为 'verified'，否则
+   * createMaterializationRequest 已 throw）。其它 outcome 为 'unchecked'。POST route 序列化必须
+   * 显式传入 serializer——不得使用默认 'unchecked' 也不得硬编码 'verified'。
+   */
+  integrityStatus: ReuseIntegrityStatus;
   adapterReady: false;
 }
 
@@ -726,9 +727,16 @@ async function existingRequestResult(
   switch (request.status) {
     case 'succeeded':
     case 'reused': {
-      // R3：唯一复用验证入口（8 项 fail-closed）
-      await validateReusableMaterializationRequest(request, db);
-      return {...base, outcome: 'reused'};
+      // R6 §九：真实 integrity status——调用统一 integrity validator；damaged → throw
+      const integrityStatus = await integrityStatusOf(request);
+      if (integrityStatus !== 'verified') {
+        throw new MaterializationError(
+          'MATERIALIZATION_UNUSABLE',
+          `reuse 投影文件不可用（integrity=${integrityStatus}）；fail-closed`,
+          422,
+        );
+      }
+      return {...base, outcome: 'reused', integrityStatus};
     }
     case 'waiting': {
       // 按 job 真实状态映射（fan-in 不运行 validator/finalize）
@@ -736,28 +744,35 @@ async function existingRequestResult(
         case 'validating_existing':
         case 'running':
         case 'indeterminate':
-          return {...base, outcome: 'inflight'};
+          return {...base, outcome: 'inflight', integrityStatus: 'unchecked'};
         case 'queued':
-          return {...base, outcome: 'queued'};
+          return {...base, outcome: 'queued', integrityStatus: 'unchecked'};
         case 'succeeded':
-          // R3：waiting + job.succeeded 也必须走唯一复用验证入口（不得仅凭 job 状态 reused）
-          await validateReusableMaterializationRequest(request, db);
-          return {...base, outcome: 'reused'};
+          // R6 §九：waiting + job.succeeded 也必须走唯一复用验证入口
+          const integrityStatus2 = await integrityStatusOf(request);
+          if (integrityStatus2 !== 'verified') {
+            throw new MaterializationError(
+              'MATERIALIZATION_UNUSABLE',
+              `reuse 投影文件不可用（integrity=${integrityStatus2}）；fail-closed`,
+              422,
+            );
+          }
+          return {...base, outcome: 'reused', integrityStatus: integrityStatus2};
         case 'failed':
-          return {...base, outcome: 'failed'};
+          return {...base, outcome: 'failed', integrityStatus: 'unchecked'};
         case 'cancelled':
-          return {...base, outcome: 'cancelled'};
+          return {...base, outcome: 'cancelled', integrityStatus: 'unchecked'};
       }
       break;
     }
     case 'running':
-      return {...base, outcome: 'inflight'};
+      return {...base, outcome: 'inflight', integrityStatus: 'unchecked'};
     case 'failed':
-      return {...base, outcome: 'failed'};
+      return {...base, outcome: 'failed', integrityStatus: 'unchecked'};
     case 'cancelled':
-      return {...base, outcome: 'cancelled'};
+      return {...base, outcome: 'cancelled', integrityStatus: 'unchecked'};
     case 'indeterminate':
-      return {...base, outcome: 'indeterminate'};
+      return {...base, outcome: 'indeterminate', integrityStatus: 'unchecked'};
     case 'initializing':
       // committed initializing 不允许长期存在（冻结语义）
       throw new MaterializationError('REQUEST_STATE_INCONSISTENT', `request ${request.request_id} 遗留 committed initializing`, 409);
@@ -775,18 +790,18 @@ function jobOutcomeResult(
   const base = {request, job, projection, adapterReady: false as const};
   switch (job.status) {
     case 'queued':
-      return {...base, outcome: 'queued'};
+      return {...base, outcome: 'queued', integrityStatus: 'unchecked'};
     case 'running':
     case 'validating_existing':
     case 'indeterminate':
-      return {...base, outcome: 'inflight'};
+      return {...base, outcome: 'inflight', integrityStatus: 'unchecked'};
     case 'succeeded':
       // R3：不得仅凭 job.status=succeeded 直接 reused——必须经唯一复用验证入口
       throw new MaterializationError('REQUEST_STATE_INCONSISTENT', `job ${job.id} succeeded 但 request ${request.request_id} 状态 ${request.status}（需复用验证）`, 409);
     case 'failed':
-      return {...base, outcome: 'failed'};
+      return {...base, outcome: 'failed', integrityStatus: 'unchecked'};
     case 'cancelled':
-      return {...base, outcome: 'cancelled'};
+      return {...base, outcome: 'cancelled', integrityStatus: 'unchecked'};
   }
   throw new MaterializationError('REQUEST_STATE_INCONSISTENT', `job ${job.id} 状态映射失败`, 409);
 }
@@ -948,14 +963,15 @@ export async function createMaterializationRequest(
   }
 
   if (r1.handle) {
-    // 我是 validation owner：Phase 2（事务外只读）→ hook → Phase 3（handle fenced finalize
-    // + branded capability 逐项 reread；Phase 2 期间任何漂移 → STALE/SOURCE_STALE/
-    // MATERIALIZATION_UNUSABLE，零更新）
-    const projection = getProjection(identity.voiceProfileId, identity.voiceProfileRevisionId);
+    // 我是 validation owner：Phase 2（事务外只读）→ hook → Phase 3（consumeReuseTransaction
+    // 通过 validator private record 完成 one-shot exact-handle re-check + unified seal +
+    // module-private consume/close 路径）
+    const projection = getProjection(identity.voiceProfileId, identity.voiceProfileRevisionId) ?? null;
     const validation: ProjectionValidationOutcome = projection
       ? await validateExistingProjection(
           projection,
           r1.handle.candidateMaterializationMetadataHash,
+          r1.handle,
           await getRevisionProviderOrUnknown(identity.voiceProfileId, identity.voiceProfileRevisionId),
         )
       : {kind: 'unusable', reason: 'no projection yet'};
@@ -965,7 +981,17 @@ export async function createMaterializationRequest(
         validationKind: validation.kind,
       });
     }
-    const outcome = finalizeValidatingJob(r1.handle, validation, getDb());
+    let outcome: FinalizeOutcome;
+    let resultProjection: VoiceMaterializationRow | null = null;
+    if (validation.kind === 'usable') {
+      // R6 P0-A P0-D P0-E：usable 路径走 async consumeReuseTransaction
+      const txResult = await consumeReuseTransaction(r1.handle, validation.capability, getDb());
+      outcome = txResult.outcome;
+      resultProjection = txResult.projection;
+    } else {
+      // unusable：走 fenced cancel/queue 路径
+      outcome = finalizeUnusableReusePath(r1.handle, getDb(), nowIso());
+    }
     // R5 §七：response link closure——重读最终 request，按 request.materialization_id 取 projection，
     // 不得按 validation.kind === 'usable' 取 projection（防止 reused 但 materialization_id 未链接）
     const finalRequest = getMaterializationRequest(projectId, requestId)!;
@@ -974,10 +1000,10 @@ export async function createMaterializationRequest(
       finalRequest.materialization_id !== null
         ? (getMaterializationById(finalRequest.materialization_id) ?? null)
         : null;
-    // R5 §八：POST integrity closure——reused/succeeded 终态必须通过统一复用验证入口；
-    // fail-closed（不硬编码 verified；damaged → MATERIALIZATION_UNUSABLE）
+    // R6 §九：real POST integrity——对 reused 终态调用统一 integrity validator；非 verified → fail-closed
+    let integrityStatus: ReuseIntegrityStatus = 'unchecked';
     if (outcome === 'reused' && finalRequest.status === 'reused' && finalRequest.materialization_id) {
-      const integrityStatus = await integrityStatusOf(finalRequest);
+      integrityStatus = await integrityStatusOf(finalRequest);
       if (integrityStatus !== 'verified') {
         throw new MaterializationError(
           'MATERIALIZATION_UNUSABLE',
@@ -985,12 +1011,17 @@ export async function createMaterializationRequest(
           422,
         );
       }
+    } else if (outcome === 'reused') {
+      integrityStatus = 'unchecked';
+    } else if (outcome === 'queued' || outcome === 'inflight' || outcome === 'cancelled' || outcome === 'failed' || outcome === 'indeterminate') {
+      integrityStatus = 'unchecked';
     }
     return {
       request: finalRequest,
       job: finalJob,
       outcome,
       projection: finalProjection,
+      integrityStatus,
       adapterReady: false,
     };
   }
