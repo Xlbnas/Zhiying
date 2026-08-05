@@ -78,10 +78,11 @@ jobs:
             git diff
             exit 1
           fi
-          # git status 无 tracked 改动
-          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+          # git status 无 tracked 改动（除 runner 自身写入的 evidence artifact）
+          DIRTY=$(git status --porcelain --untracked-files=no | grep -v 'docs/evidence/tts-c-r17/mutation-output.txt' || true)
+          if [ -n "$DIRTY" ]; then
             echo "FAIL: git status not clean"
-            git status --porcelain --untracked-files=no
+            echo "$DIRTY"
             exit 1
           fi
           echo "MUTATION_GATE_OK"
