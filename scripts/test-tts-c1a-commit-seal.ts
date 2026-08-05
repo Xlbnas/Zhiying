@@ -5,7 +5,8 @@
  * - SEAL-03 同 inode 仅 mtime/ctime 漂移（touch）→ commit fence 拒绝；
  * - SEAL-04 evidence 后 rename 替换为新 inode → 拒绝；
  * - SEAL-05 parent directory 在 evidence 后被 rename/symlink 替换 → 拒绝；
- * - SEAL-06 普通伪造 HeldMaterializedFileEvidence（fd 指向另一文件）不能调用成功终局；
+ * - SEAL-06 伪造 held capability（clone 合法实例 + fd 指向另一文件）不能调用成功终局
+ *   （R4：无公开 factory，clone/spoof 在第一道 capability fence 即 SEAL_MISMATCH）；
  * - SEAL-07 合法 held evidence → succeeded；commit 后再 verify usable。
  * 使用 executor hook afterFinalEvidenceBeforeCommit（仅测试）。
  */
@@ -132,10 +133,10 @@ async function expectSealReject(rev: RevCtx, requestId: string, attack: (finalAb
     fs.symlinkSync(path.join(fx.dataDir, 'voice-library'), parent);
   });
 
-  // ── SEAL-06：普通伪造 Held evidence（fd 指向另一文件）不能成功终局 ──
+  // ── SEAL-06：伪造 held capability（clone 合法实例 + fd 指向另一文件）不能成功终局 ──
   const rev6 = await freshRevision(2160);
   const h6 = await claimHandleFor(rev6, 'seal-6');
-  // 伪造：用 rev6b 的真实 fd + 伪造 evidence 字段（sha 换成 rev6 的）
+  // 伪造素材：rev6b 的合法 held（fd 锚定 rev6b 文件）
   const rev6b = await freshRevision(2161);
   const f6b = destinationAbsolutePath(`${fx.profileId}/${rev6b.revisionId}/reference.wav`);
   fs.mkdirSync(path.dirname(f6b), {recursive: true});
@@ -154,18 +155,19 @@ async function expectSealReject(rev: RevCtx, requestId: string, attack: (finalAb
     },
     'durabilize',
   );
-  // 伪造：evidence 声称指向 job6 的目标文件（absolutePathInternal = job6 目标路径），
-  // 但 fd 实际锚定 rev6b 文件 → assertHeld 的 path↔fd inode 复核必须拒绝
-  const forged = HeldMaterializedFileEvidence.create(
-    {
-      ...legitHeld6b.evidence,
-      relativePath: `${fx.profileId}/${rev6.revisionId}/reference.wav`,
-      absolutePathInternal: destinationAbsolutePath(`${fx.profileId}/${rev6.revisionId}/reference.wav`),
-      sha256: rev6.sha,
-    },
-    legitHeld6b.fileFd,
-    legitHeld6b.parentFd,
+  // R4：不存在公开 factory/register——攻击者只能 clone/prototype spoof 合法实例；
+  // clone 是独立对象，不在 module-private WeakSet 内 → capability fence 必须拒绝
+  const forged = Object.assign(
+    Object.create(Object.getPrototypeOf(legitHeld6b)) as HeldMaterializedFileEvidence,
+    legitHeld6b,
   );
+  // 再篡改 evidence 声称指向 job6 的目标文件（relativePath/absolutePathInternal/sha 伪装）
+  (forged as {evidence: unknown}).evidence = {
+    ...legitHeld6b.evidence,
+    relativePath: `${fx.profileId}/${rev6.revisionId}/reference.wav`,
+    absolutePathInternal: destinationAbsolutePath(`${fx.profileId}/${rev6.revisionId}/reference.wav`),
+    sha256: rev6.sha,
+  };
   const {listActiveRequestRows, sha256Text} = await import('../src/lib/tts-c/materialization');
   const {getProjectVoiceAssignment} = await import('../src/lib/tts-b/assignment');
   const asgSnaps6 = [];
@@ -187,11 +189,11 @@ async function expectSealReject(rev: RevCtx, requestId: string, attack: (finalAb
       },
       asgSnapshots: asgSnaps6,
     });
-    ok(false, 'SEAL-06 伪造 held evidence 不得成功终局', 'no error');
+    ok(false, 'SEAL-06 伪造 held capability 不得成功终局', 'no error');
   } catch (e) {
-    ok(e instanceof MaterializedFileError && e.code === 'SEAL_MISMATCH', 'SEAL-06 伪造 held evidence → seal 拒绝（path↔fd inode 复核）', e);
+    ok(e instanceof MaterializedFileError && e.code === 'SEAL_MISMATCH', 'SEAL-06 伪造 held capability → capability fence 拒绝（非 WeakSet 登记实例）', e);
   }
-  await forged.close();
+  await legitHeld6b.close();
 
   // ── SEAL-07：合法 held evidence → succeeded；commit 后再 verify usable ──
   const rev7 = await freshRevision(2170);

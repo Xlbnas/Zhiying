@@ -143,6 +143,8 @@ run_suite "tts-c1a-commit-seal" npx tsx scripts/test-tts-c1a-commit-seal.ts
 run_suite "tts-c1a-recovery-cancellation" npx tsx scripts/test-tts-c1a-recovery-cancellation.ts
 run_suite "tts-c1a-get-integrity" npx tsx scripts/test-tts-c1a-get-integrity.ts
 run_suite "tts-c1a-db-time-stale" npx tsx scripts/test-tts-c1a-db-time-stale.ts
+# TTS-C.1A.R4 新增 1 套（held capability brand / exact destination binding / ancestor seal / verify zero-write / zero-subscriber closure）
+run_suite "tts-c1a-r4-hardening" npx tsx scripts/test-tts-c1a-r4-hardening.ts
 
 echo "QUALITY_GATE_RESULT=PASS"
 echo "QUALITY_GATE_SHA=$GATE_SHA"

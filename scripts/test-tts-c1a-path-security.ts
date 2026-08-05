@@ -18,7 +18,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {ok, summary, setupC1aFixture, cleanupC1a, type C1aFixture} from './lib/tts-c1a-test-utils';
 import {
-  ensureMaterializationRootSafe,
+  requireExistingMaterializationRootSafe,
   ensureExistingDestinationParentSafe,
   destinationAbsolutePath,
   stagingTempPath,
@@ -42,7 +42,7 @@ let fx: C1aFixture;
   fsSync.rmSync(fakeRoot, {force: true});
   fsSync.symlinkSync(rootAbs, fakeRoot);
   try {
-    await ensureMaterializationRootSafe(fakeRoot);
+    await requireExistingMaterializationRootSafe(fakeRoot);
     ok(false, 'PATH-03 root symlink → reject', 'no error');
   } catch (e) {
     ok(e instanceof ProjectionPathError && e.message.includes('symlink'), 'PATH-03 root symlink → reject', e);
