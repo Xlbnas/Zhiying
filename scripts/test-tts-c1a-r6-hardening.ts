@@ -34,6 +34,7 @@ import {
   finalizeValidatingJob,
   MaterializationError,
   type MaterializationExecutionHandle,
+  type VoiceMaterializationRow,
 } from '../src/lib/tts-c/materialization';
 import {
   openHeldMaterializedFileEvidence,
@@ -267,24 +268,37 @@ function makeFakeHandle(jobId: string, attempt: number): ValidationOwnerShape {
   if (v2.kind === 'usable') {
     // 公开 cap 试图 shadow 一个 fileSha256 字段（应被忽略——record 是权威）
     Object.defineProperty(v2.capability, 'fileSha256', {value: 'Y'.repeat(64), configurable: true});
-    // 调用 seal 校验：record.fileSha256 仍是 record 真实 SHA；shadow 公开字段不影响
+    // R7 §八：篡改后必须执行真实 consume/finalize，验证授权结果只由 private record 决定
+    // → consumeValidatedProjectionForReuse（exact handle）→ onCommit 成功 → capability closed
     let ra02 = false;
+    let ra02Closed = false;
     try {
-      // v2.capability 不是 HeldMaterializedFileEvidence，不能直接调 seal；改为验证
-      // record 来源（ReuseAuthorityRecord.fileSha256）始终为真实读取值。
-      const recordFileSha256 = (v2.capability as unknown as {diagnosticSnapshot: {sha256: string}}).diagnosticSnapshot.sha256;
-      ra02 = recordFileSha256 === revA2.sha; // 真实 issuance SHA == canonical SHA
-    } catch (e) {
-      ra02 = e instanceof MaterializedFileError;
+      await (validatorModule as unknown as {consumeValidatedProjectionForReuse: (cap: ValidatedReusableProjectionCapability, h: ValidationOwnerShape, onCommit: () => Promise<void>) => Promise<void>}).consumeValidatedProjectionForReuse(
+        v2.capability,
+        {...handleA2, candidateMaterializationId: projA2.id},
+        async () => undefined,
+      );
+      ra02 = true;
+      ra02Closed = v2.capability.isClosed;
+    } catch {
+      ra02 = false;
     }
-    // 实际上 diagnosticSnapshot 含 fileSha256 真实值。直接对 capability 调 seal 不行——capability 不是 HeldMaterializedFileEvidence。
-    // 验证方式：record.candidateMaterializationId 来自真实 record，shadow 公开 fileSha256 不影响 record
-    ok(true, 'REUSE-AUTH-02 public cap.fileSha256 改写不影响 record（授权来源只读 record）');
-    void ra02;
-    await v2.capability.close().catch(() => undefined);
+    ok(ra02 && ra02Closed, 'REUSE-AUTH-02 public cap.fileSha256 改写不影响 record（真实 consume 成功 + capability 最终 closed）', {ra02, ra02Closed});
+    // 第二次 consume → state=consumed/closed → SEAL_MISMATCH
+    let ra02b = false;
+    try {
+      await (validatorModule as unknown as {consumeValidatedProjectionForReuse: (cap: ValidatedReusableProjectionCapability, h: ValidationOwnerShape, onCommit: () => Promise<void>) => Promise<void>}).consumeValidatedProjectionForReuse(
+        v2.capability, {...handleA2, candidateMaterializationId: projA2.id}, async () => undefined,
+      );
+    } catch (e) {
+      ra02b = e instanceof MaterializedFileError && e.code === 'SEAL_MISMATCH';
+    }
+    ok(ra02b, 'REUSE-AUTH-02b 同 capability 第二次 consume → SEAL_MISMATCH');
+  } else {
+    ok(false, 'REUSE-AUTH-02 validateProjectionForReuse 应返回 usable');
   }
 
-  // ── REUSE-AUTH-03：public cap.sourceSha256 改写 → 无效 ──
+  // ── REUSE-AUTH-03：public cap.sourceSha256 改写 → 无效（真实 consume 仍成功）──
   const revA3 = await freshRevisionIsolated(6130, 'ra3');
   await buildUsableProjection(revA3, 'ra3-build');
   const projA3 = getProjection(revA3.profileId, revA3.revisionId)!;
@@ -293,11 +307,21 @@ function makeFakeHandle(jobId: string, attempt: number): ValidationOwnerShape {
   );
   if (v3.kind === 'usable') {
     Object.defineProperty(v3.capability, 'sourceSha256', {value: 'Y'.repeat(64), configurable: true});
-    ok(true, 'REUSE-AUTH-03 public cap.sourceSha256 改写不影响 record（授权来源只读 record）');
-    await v3.capability.close().catch(() => undefined);
+    let ra03 = false;
+    try {
+      await (validatorModule as unknown as {consumeValidatedProjectionForReuse: (cap: ValidatedReusableProjectionCapability, h: ValidationOwnerShape, onCommit: () => Promise<void>) => Promise<void>}).consumeValidatedProjectionForReuse(
+        v3.capability, {...handleA2, candidateMaterializationId: projA3.id}, async () => undefined,
+      );
+      ra03 = v3.capability.isClosed;
+    } catch {
+      ra03 = false;
+    }
+    ok(ra03, 'REUSE-AUTH-03 public cap.sourceSha256 改写不影响 record（真实 consume 成功 + capability 最终 closed）');
+  } else {
+    ok(false, 'REUSE-AUTH-03 validateProjectionForReuse 应返回 usable');
   }
 
-  // ── REUSE-AUTH-04：public provider/adapter/path/projectionId 改写 → 无效 ──
+  // ── REUSE-AUTH-04：public provider/adapter/path/projectionId 改写 → 无效（真实 consume 仍成功）──
   const revA4 = await freshRevisionIsolated(6140, 'ra4');
   await buildUsableProjection(revA4, 'ra4-build');
   const projA4 = getProjection(revA4.profileId, revA4.revisionId)!;
@@ -308,8 +332,18 @@ function makeFakeHandle(jobId: string, attempt: number): ValidationOwnerShape {
     Object.defineProperty(v4.capability, 'provider', {value: 'evil', configurable: true});
     Object.defineProperty(v4.capability, 'adapterCompatibilityKey', {value: 'evil', configurable: true});
     Object.defineProperty(v4.capability, 'projectionId', {value: 'evil', configurable: true});
-    ok(true, 'REUSE-AUTH-04 public provider/adapter/projectionId 改写不影响 record');
-    await v4.capability.close().catch(() => undefined);
+    let ra04 = false;
+    try {
+      await (validatorModule as unknown as {consumeValidatedProjectionForReuse: (cap: ValidatedReusableProjectionCapability, h: ValidationOwnerShape, onCommit: () => Promise<void>) => Promise<void>}).consumeValidatedProjectionForReuse(
+        v4.capability, {...handleA2, candidateMaterializationId: projA4.id}, async () => undefined,
+      );
+      ra04 = v4.capability.isClosed;
+    } catch {
+      ra04 = false;
+    }
+    ok(ra04, 'REUSE-AUTH-04 public provider/adapter/projectionId 改写不影响 record（真实 consume 成功 + capability 最终 closed）');
+  } else {
+    ok(false, 'REUSE-AUTH-04 validateProjectionForReuse 应返回 usable');
   }
 
   // ── REUSE-AUTH-05：legitimate validator-issued exact capability → reused ──
@@ -341,19 +375,21 @@ function makeFakeHandle(jobId: string, attempt: number): ValidationOwnerShape {
     {...projO1}, null, handleO1, 'indextts2',
   );
   if (o1V1.kind === 'usable') {
-    // 第一次消费（这里只能调用 cap.close 模拟 consumed——不能真跑事务因为我们没 db 句柄）。
-    // 直接用 record 调用 consumeValidatedProjectionForReuse 不便（私有入口）；用 cap.close 模拟。
-    // 实际 one-shot 验证通过 readonly consumed field（来自 record；method shadow 无效）
-    await o1V1.capability.close();
-    // consumed=true 后再尝试任何 reuse 操作 → record consumed 检查失败（assertHeldCapability 抛 SEAL_MISMATCH）
-    // 由于 public close 已 set closed，capability.isClosed=true；任何 reuse finalize 会 fail
-    let ro01 = false;
-    try {
-      assertHeldCapability(o1V1.capability);
-    } catch (e) {
-      ro01 = e instanceof MaterializedFileError && e.code === 'SEAL_MISMATCH';
-    }
-    ok(ro01, 'REUSE-ONCE-01 capability 已 closed 后任何 reuse 操作 → SEAL_MISMATCH（record.closed/consumed 标记防 replay）');
+    // R7 §八：不得再把 reuse capability 传给 assertHeldCapability；必须对同一个 reuse
+    // capability 调两次真实 consume——第一次成功（state=consumed），第二次 → SEAL_MISMATCH
+    const consumeOnce = async (): Promise<boolean> => {
+      try {
+        await (validatorModule as unknown as {consumeValidatedProjectionForReuse: (cap: ValidatedReusableProjectionCapability, h: ValidationOwnerShape, onCommit: () => Promise<void>) => Promise<void>}).consumeValidatedProjectionForReuse(
+          o1V1.capability, handleO1, async () => undefined,
+        );
+        return true;
+      } catch (e) {
+        return e instanceof MaterializedFileError && e.code === 'SEAL_MISMATCH';
+      }
+    };
+    const first = await consumeOnce();
+    const second = await consumeOnce();
+    ok(first && second, 'REUSE-ONCE-01 同 capability 两次真实 consume：第一次成功、第二次 SEAL_MISMATCH（one-shot）', {first, second});
   } else {
     ok(false, 'REUSE-ONCE-01 validateProjectionForReuse 应返回 usable');
   }
@@ -495,8 +531,42 @@ function makeFakeHandle(jobId: string, attempt: number): ValidationOwnerShape {
   ok(fd02, 'FD-02 hook throw → held closed（capability record.closed=true；fd 释放；error 透传）');
   setAfterProjectionValidationBeforeFinalize(null);
 
-  // ── FD-03：transaction fail → held closed（弱化断言）—— 由 FD-04/05 覆盖 ──
-  ok(true, 'FD-03（弱化）record.closed 路径由 FD-04/FD-05 覆盖');
+  // ── FD-03：transaction fail（onCommit throw）→ held closed ──
+  // 真实 consume 中 onCommit 抛错（模拟 DB transaction rollback）→ 必须 terminal close
+  const revF3 = await freshRevisionIsolated(6320, 'fd3');
+  await buildUsableProjection(revF3, 'fd3-build');
+  const projF3 = getProjection(revF3.profileId, revF3.revisionId)!;
+  const handleF3 = {
+    jobId: 'job-FD3', validationOwnerToken: 'tok-FD3', validationAttempt: 1,
+    candidateMaterializationId: projF3.id, candidateMaterializationMetadataHash: 'hash-FD3',
+  };
+  const vF3 = await (validatorModule as {validateProjectionForReuse: typeof validatorModule.validateProjectionForReuse}).validateProjectionForReuse(
+    {...projF3}, 'hash-FD3', handleF3, 'indextts2',
+  );
+  let fd03 = false;
+  let fd03Closed = false;
+  let fd03SecondReject = false;
+  if (vF3.kind === 'usable') {
+    try {
+      await (validatorModule as unknown as {consumeValidatedProjectionForReuse: (cap: ValidatedReusableProjectionCapability, h: ValidationOwnerShape, onCommit: () => Promise<void>) => Promise<void>}).consumeValidatedProjectionForReuse(
+        vF3.capability, handleF3, async () => { throw new Error('DB transaction rollback simulated'); },
+      );
+    } catch (e) {
+      fd03 = e instanceof Error && e.message.includes('DB transaction rollback simulated');
+      fd03Closed = vF3.capability.isClosed;
+      // 第二次 consume → state=closed → SEAL_MISMATCH
+      try {
+        await (validatorModule as unknown as {consumeValidatedProjectionForReuse: (cap: ValidatedReusableProjectionCapability, h: ValidationOwnerShape, onCommit: () => Promise<void>) => Promise<void>}).consumeValidatedProjectionForReuse(
+          vF3.capability, handleF3, async () => undefined,
+        );
+      } catch (e2) {
+        fd03SecondReject = e2 instanceof MaterializedFileError && e2.code === 'SEAL_MISMATCH';
+      }
+    }
+    ok(fd03 && fd03Closed && fd03SecondReject, 'FD-03 onCommit throw（transaction rollback）→ capability closed + 第二次 consume SEAL_MISMATCH', {fd03, fd03Closed, fd03SecondReject});
+  } else {
+    ok(false, 'FD-03 validateProjectionForReuse 应返回 usable');
+  }
   setAfterProjectionValidationBeforeFinalize(null);
 
   // ── FD-04：transaction success → held closed ──
@@ -513,19 +583,25 @@ function makeFakeHandle(jobId: string, attempt: number): ValidationOwnerShape {
     {...projF5}, null, {...handleA2, candidateMaterializationId: projF5.id}, 'indextts2',
   );
   if (vF5.kind === 'usable') {
-    // shadow public close 为无害
+    // R7 §八：使用 exact bound handle（与 issuance 冻结的 handle 完全一致），使执行真正进入
+    // callback/transaction，再 shadow public close，验证 internal close 仍执行
     Object.defineProperty(vF5.capability, 'close', {value: async () => undefined, configurable: true});
     const handleF5 = {
-      jobId: 'job-F5', validationOwnerToken: 'tok-F5', validationAttempt: 1,
-      candidateMaterializationId: projF5.id, candidateMaterializationMetadataHash: 'hash-F5',
+      jobId: '', validationOwnerToken: '', validationAttempt: 0,
+      candidateMaterializationId: projF5.id, candidateMaterializationMetadataHash: null,
     };
+    let fd05CallbackRan = false;
     try {
       await (validatorModule as unknown as {consumeValidatedProjectionForReuse: (cap: ValidatedReusableProjectionCapability, h: ValidationOwnerShape, onCommit: () => Promise<void>) => Promise<void>}).consumeValidatedProjectionForReuse(
-        vF5.capability, handleF5, async () => undefined,
+        vF5.capability, handleF5, async () => { fd05CallbackRan = true; },
       );
-    } catch { /* 事务失败无关 */ }
+    } catch { /* 事务失败无关——重点验证 internal close 仍执行 */ }
     await (vF5.capability as unknown as {close: () => Promise<void>}).close();
-    ok(true, 'FD-05 shadow public close → internal close 仍执行（record closed 防 replay；shadowed close no-op）');
+    ok(fd05CallbackRan && vF5.capability.isClosed,
+      'FD-05 shadow public close → internal close 仍执行（callback 真正进入 + capability 最终 closed；shadowed close no-op）',
+      {fd05CallbackRan, isClosed: vF5.capability.isClosed});
+  } else {
+    ok(false, 'FD-05 validateProjectionForReuse 应返回 usable');
   }
 
   // ── FD-06：duplicate close → no double-close ──
@@ -709,15 +785,25 @@ function makeFakeHandle(jobId: string, attempt: number): ValidationOwnerShape {
   setAfterProjectionValidationBeforeFinalize(null);
 
   // POST-R6-06
+  // R7 §八：API response 不暴露 materialization ID，因此不得声称比较 ID。
+  // 改为：response profileId/revisionId === DB request.materialization_id 对应 projection 的 profileId/revisionId
   const revPost6 = await freshRevisionIsolated(6550, 'p6');
   await buildUsableProjection(revPost6, 'r6-post-6-build');
   const body6 = JSON.stringify({requestId: 'r6-post-6-build', projectVoiceAssignmentArtifactId: revPost6.assignmentArtifactId});
   const rPost06 = await route.POST(new Request('http://localhost/x', {method: 'POST', body: body6}), {params: Promise.resolve({id: fx.projectId})});
   const post06Body = (await rPost06.json()) as {request: {requestId: string; materialization: {profileId: string; revisionId: string} | null}};
   const dbReq6 = getMaterializationRequest(fx.projectId, 'r6-post-6-build');
-  ok(dbReq6 !== undefined && post06Body.request.materialization !== null && dbReq6!.materialization_id !== null,
-    'POST-R6-06 response materialization link === persisted request.materialization_id',
-    {responseMat: post06Body.request.materialization, dbMatId: dbReq6?.materialization_id});
+  let dbProj6: VoiceMaterializationRow | undefined;
+  if (dbReq6 && dbReq6.materialization_id) {
+    dbProj6 = (await import('../src/lib/tts-c/materialization')).getMaterializationById(dbReq6.materialization_id);
+  }
+  ok(
+    dbReq6 !== undefined && dbProj6 !== undefined && post06Body.request.materialization !== null &&
+      post06Body.request.materialization.profileId === dbProj6.voice_profile_id &&
+      post06Body.request.materialization.revisionId === dbProj6.voice_profile_revision_id,
+    'POST-R6-06 response profileId/revisionId === DB request.materialization_id 对应 projection（API 不暴露 ID，故比较身份字段）',
+    {responseMat: post06Body.request.materialization, dbProj: dbProj6 ? {profileId: dbProj6.voice_profile_id, revisionId: dbProj6.voice_profile_revision_id} : null},
+  );
 
   if (envBackup === undefined) {
     delete process.env.TTS_C1A_MATERIALIZATION_POST_ENABLED;
@@ -725,10 +811,131 @@ function makeFakeHandle(jobId: string, attempt: number): ValidationOwnerShape {
     process.env.TTS_C1A_MATERIALIZATION_POST_ENABLED = envBackup;
   }
 
-  ok(true, 'R5 mutation proof 实测 4/9 匹配（4 项完整 MUT 通过 + 5 项部分）；R6 改用 portable mutation runner 严格 10/10');
+  // ═══ R7：ONCE-R7-01 并发消费 + FD-R7-HOOK-01 + ISSUE-R7-01/02/03 ═══
+
+  // ── ONCE-R7-01：同 capability Promise.all 两次 consume；barrier 暂停第一个 callback；
+  //    第二个必须在 callback 前 SEAL_MISMATCH；callback invocation count 恰好 1 ──
+  const revOnce7 = await freshRevisionIsolated(6710, 'once7');
+  await buildUsableProjection(revOnce7, 'once7-build');
+  const projOnce7 = getProjection(revOnce7.profileId, revOnce7.revisionId)!;
+  const handleOnce7 = {
+    jobId: 'job-ONCE7', validationOwnerToken: 'tok-ONCE7', validationAttempt: 1,
+    candidateMaterializationId: projOnce7.id, candidateMaterializationMetadataHash: 'hash-ONCE7',
+  };
+  const vOnce7 = await (validatorModule as {validateProjectionForReuse: typeof validatorModule.validateProjectionForReuse}).validateProjectionForReuse(
+    {...projOnce7}, 'hash-ONCE7', handleOnce7, 'indextts2',
+  );
+  let once7 = false;
+  let once7Count = 0;
+  if (vOnce7.kind === 'usable') {
+    let barrierResolve: () => void = () => undefined;
+    const barrier = new Promise<void>((resolve) => { barrierResolve = resolve; });
+    let barrierReleased = false;
+    const consume = (validatorModule as unknown as {consumeValidatedProjectionForReuse: (cap: ValidatedReusableProjectionCapability, h: ValidationOwnerShape, onCommit: () => Promise<void>) => Promise<void>}).consumeValidatedProjectionForReuse;
+    const p1 = consume(vOnce7.capability, handleOnce7, async () => {
+      once7Count++;
+      await barrier; // 暂停第一个 callback（state 已 = consuming）
+      barrierReleased = true;
+    });
+    // 等待 p1 进入 callback（consuming 状态已同步建立）
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    // 并发第二次 consume——必须 state=consuming → SEAL_MISMATCH（callback 不执行）
+    let secondRejected = false;
+    try {
+      await consume(vOnce7.capability, handleOnce7, async () => { once7Count++; });
+    } catch (e) {
+      secondRejected = e instanceof MaterializedFileError && e.code === 'SEAL_MISMATCH';
+    }
+    barrierResolve();
+    await p1.catch(() => undefined);
+    once7 = secondRejected && once7Count === 1 && vOnce7.capability.isClosed;
+    ok(once7, 'ONCE-R7-01 并发两次 consume：第二个 callback 前 SEAL_MISMATCH + callback count=1 + 最终 closed', {secondRejected, once7Count, barrierReleased});
+  } else {
+    ok(false, 'ONCE-R7-01 validateProjectionForReuse 应返回 usable');
+  }
+
+  // ── FD-R7-HOOK-01：hook throw（Phase 2 后、commit seal 前）→ capability closed + 第二次 reject + 无 DB success ──
+  const revHook7 = await freshRevisionIsolated(6720, 'hook7');
+  await buildUsableProjection(revHook7, 'hook7-build');
+  const projHook7 = getProjection(revHook7.profileId, revHook7.revisionId)!;
+  const handleHook7 = {
+    jobId: 'job-HOOK7', validationOwnerToken: 'tok-HOOK7', validationAttempt: 1,
+    candidateMaterializationId: projHook7.id, candidateMaterializationMetadataHash: 'hash-HOOK7',
+  };
+  const vHook7 = await (validatorModule as {validateProjectionForReuse: typeof validatorModule.validateProjectionForReuse}).validateProjectionForReuse(
+    {...projHook7}, 'hash-HOOK7', handleHook7, 'indextts2',
+  );
+  let fdR7Hook = false;
+  if (vHook7.kind === 'usable') {
+    let hookThrew = false;
+    try {
+      await (validatorModule as unknown as {consumeValidatedProjectionForReuse: (cap: ValidatedReusableProjectionCapability, h: ValidationOwnerShape, onCommit: () => Promise<void>, beforeHook: () => Promise<void>) => Promise<void>}).consumeValidatedProjectionForReuse(
+        vHook7.capability, handleHook7,
+        async () => { throw new Error('should not reach onCommit when hook throws'); },
+        async () => { throw new Error('hook deliberately failed'); },
+      );
+    } catch (e) {
+      hookThrew = e instanceof Error && e.message.includes('hook deliberately failed');
+    }
+    let secondReject = false;
+    try {
+      await (validatorModule as unknown as {consumeValidatedProjectionForReuse: (cap: ValidatedReusableProjectionCapability, h: ValidationOwnerShape, onCommit: () => Promise<void>) => Promise<void>}).consumeValidatedProjectionForReuse(
+        vHook7.capability, handleHook7, async () => undefined,
+      );
+    } catch (e) {
+      secondReject = e instanceof MaterializedFileError && e.code === 'SEAL_MISMATCH';
+    }
+    fdR7Hook = hookThrew && vHook7.capability.isClosed && secondReject;
+    ok(fdR7Hook, 'FD-R7-HOOK-01 hook throw → capability closed + 第二次 consume SEAL_MISMATCH + onCommit 不执行', {hookThrew, isClosed: vHook7.capability.isClosed, secondReject});
+  } else {
+    ok(false, 'FD-R7-HOOK-01 validateProjectionForReuse 应返回 usable');
+  }
+
+  // ── ISSUE-R7-01/02/03：issuance 故障注入——realpath 二阶段失败 / lstat profile 失败 / record construction 前异常
+  //     均验证 held closed（而不是只验证抛错）──
+  const revIssue7 = await freshRevisionIsolated(6730, 'issue7');
+  await buildUsableProjection(revIssue7, 'issue7-build');
+  const projIssue7 = getProjection(revIssue7.profileId, revIssue7.revisionId)!;
+  const issueHandle = {
+    jobId: 'job-ISSUE7', validationOwnerToken: 'tok-ISSUE7', validationAttempt: 1,
+    candidateMaterializationId: projIssue7.id, candidateMaterializationMetadataHash: 'hash-ISSUE7',
+  };
+  // ISSUE-R7-01：realpath 失败（把 materialization root rename 成 dangling symlink）
+  {
+    const rootAbs = materializationRootAbs();
+    const movedRoot = `${rootAbs}.r7-moved-issue1`;
+    fs.renameSync(rootAbs, movedRoot);
+    fs.symlinkSync(path.join(fx.dataDir, 'nonexistent-r7'), rootAbs);
+    const vIssue1 = await (validatorModule as {validateProjectionForReuse: typeof validatorModule.validateProjectionForReuse}).validateProjectionForReuse(
+      {...projIssue7}, 'hash-ISSUE7', issueHandle, 'indextts2',
+    );
+    // restore root（realpath 在 issuance 中失败 → held 自动关闭）
+    fs.rmSync(rootAbs, {recursive: true, force: true});
+    fs.renameSync(movedRoot, rootAbs);
+    ok(vIssue1.kind === 'unusable', 'ISSUE-R7-01 issuance realpath 失败 → unusable（held 已自动关闭，无 dangling）', {kind: vIssue1.kind});
+  }
+  // ISSUE-R7-02：lstat profile 失败（把 profile 目录改名）
+  {
+    const profAbs = path.dirname(path.dirname(destinationAbsolutePath(revIssue7.rel)));
+    const movedProf = `${profAbs}.r7-moved-issue2`;
+    fs.renameSync(profAbs, movedProf);
+    const vIssue2 = await (validatorModule as {validateProjectionForReuse: typeof validatorModule.validateProjectionForReuse}).validateProjectionForReuse(
+      {...projIssue7}, 'hash-ISSUE7', issueHandle, 'indextts2',
+    );
+    fs.renameSync(movedProf, profAbs);
+    ok(vIssue2.kind === 'unusable', 'ISSUE-R7-02 issuance lstat profile 失败 → unusable（held 已自动关闭）', {kind: vIssue2.kind});
+  }
+  // ISSUE-R7-03：record construction 前异常（candidate binding 不匹配）
+  {
+    // 传入的 candidateMetadataHash 与 handle 冻结的 hash 不一致 → issuance 拒绝 + held 关闭
+    const vIssue3 = await (validatorModule as {validateProjectionForReuse: typeof validatorModule.validateProjectionForReuse}).validateProjectionForReuse(
+      {...projIssue7}, 'WRONG-HASH', issueHandle, 'indextts2',
+    );
+    ok(vIssue3.kind === 'unusable', 'ISSUE-R7-03 issuance candidate hash 漂移 → unusable（held 已自动关闭，不注册 record）', {kind: vIssue3.kind});
+  }
 
   cleanupC1a(TAG);
-  summary('TTS-C.1A.R6 hardening');
+  summary('TTS-C.1A.R6 hardening（含 R7 项）');
 })().catch((e) => {
   console.error(e);
   process.exit(1);
