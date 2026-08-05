@@ -9,9 +9,9 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-05T03:10Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B FROZEN（独立 Review PASS）**；**TTS-C.0 = FROZEN（独立 Review PASS）**；**TTS-C.1A.R5 implementation completed（pending independent Review PASS；not frozen；未部署——production runtime 仍为 R3 `a400853…`，POST disabled；mutation proof 4/9 fully matched）**；**TTS-C.1A.R6 implementation completed（pending independent Review PASS；not frozen；未部署；mutation 实测 2/10 STRONG、1/10 PARTIAL、7/10 no expected failure；R6 Mutation CI 因 runner/workflow 接受 bug 为 false-positive——R7 起 STRONG-only）**；**TTS-C.1A.R7 implementation completed（pending independent Review PASS；not frozen；未部署——同上；mutation 12/12 STRONG；**R7 为 TTS-C.1A 防御复杂度上限，后续 Review 使用 proportional-risk rubric，除非真实可复现 production blocker 否则不启动 R8**）**；TTS-C.1B / 1C / C.2 not started） |
+| statusUpdatedAt | 2026-08-06T01:30Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B FROZEN（独立 Review PASS）**；**TTS-C.0 = FROZEN（独立 Review PASS）**；**TTS-C.1A.R7 deployed（production runtime = `37eaac6c8c8969239cab00848f6291454615a912`；pending deployment-evidence Review；not yet declared FROZEN；POST disabled）**；TTS-C.1B / 1C / C.2 not started） |
 | reviewedCodeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（M7.3B final code/runtime；M7.3B deployment evidence docs HEAD 为 `044ac23e2524d53f41d223c37d16619425b21182`；M7.3A frozen code 为 `aa3f814…`） |
-| productionRuntimeSHA | `a40085336bdada2f15d792d873ccecdaa08ffee5`（TTS-C.1A.R3 部署后容器镜像实际代码 SHA；TTS-C.0 freeze 基线与 CI 证据见 §11.4） |
+| productionRuntimeSHA | `37eaac6c8c8969239cab00848f6291454615a912`（TTS-C.1A.R7 部署后容器镜像实际代码 SHA；runtime code 内容来自 `17d4078…`，`37eaac6…` 仅多 complexity-policy docs；TTS-C.0 freeze 基线与 CI 证据见 §11.4） |
 | productionHostCheckoutSHA | `a40085336bdada2f15d792d873ccecdaa08ffee5`（宿主机 checkout；可因 docs/ops commit 高于 runtime） |
 | 当前分支 | `m7` |
 | 实时 origin/m7 HEAD | 以 `git rev-parse origin/m7` 为准（不硬编码为「永远当前」） |
