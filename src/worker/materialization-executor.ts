@@ -24,10 +24,11 @@ import {
   destinationAbsolutePath,
   stagingTempPath,
   materializationRootAbs,
-  ensureDestinationParentSafe,
+  ensureOrCreateDestinationParentSafe,
   OPEN_FLAGS,
 } from '../lib/tts-c/paths';
-import {validateMaterializedFile, type MaterializedFileEvidence} from '../lib/tts-c/materialized-file-validator';
+import {openHeldMaterializedFileEvidence, type HeldMaterializedFileEvidence} from '../lib/tts-c/materialized-file-validator';
+import {classifyProjectVoiceAssignment} from '../lib/tts-b/assignment';
 import {
   MATERIALIZATION_HEARTBEAT_INTERVAL_MS,
   MATERIALIZATION_EXECUTION_LEASE_MS,
@@ -49,6 +50,8 @@ export interface MaterializationExecutorDeps {
   onHeartbeatLoss?: () => void;
   /** 测试注入（仅测试）：rename 后、final evidence 读取前 */
   afterRenameBeforeFinalEvidence?: (finalAbs: string) => Promise<void> | void;
+  /** 测试注入（仅测试）：final evidence 建立后、DB commit 前 */
+  afterFinalEvidenceBeforeCommit?: (finalAbs: string) => Promise<void> | void;
 }
 
 function dbNowMs(db: ReturnType<typeof getDb>): number {
@@ -73,6 +76,7 @@ export async function runMaterializationJob(
   let tempPath: string | null = null;
   let ownershipLost = false;
   let heartbeatTimer: NodeJS.Timeout | null = null;
+  let heldEvidence: HeldMaterializedFileEvidence | null = null;
   const openedFds: fsSync.promises.FileHandle[] = [];
 
   /** fenced heartbeat/verify：exact handle + DB-time lease；changes=0 → ownershipLost。 */
@@ -212,7 +216,7 @@ export async function runMaterializationJob(
     // 5) containment（root realpath + 逐级 lstat + parent realpath）
     const rootAbs = materializationRootAbs();
     const finalAbs = destinationAbsolutePath(job.destination_voice_root_relative_path);
-    const {realRoot, realParent} = await ensureDestinationParentSafe(rootAbs, job.destination_voice_root_relative_path);
+    const {realRoot, realParent} = await ensureOrCreateDestinationParentSafe(rootAbs, job.destination_voice_root_relative_path);
     const dirAbs = path.dirname(finalAbs);
     tempPath = stagingTempPath(finalAbs);
 
@@ -264,11 +268,11 @@ export async function runMaterializationJob(
       log(`materialization job ${handle.jobId} rename 前 lease 丢失，中止`);
       return;
     }
-    const {realParent: realParentBefore} = await ensureDestinationParentSafe(rootAbs, job.destination_voice_root_relative_path);
+    const {realParent: realParentBefore} = await ensureOrCreateDestinationParentSafe(rootAbs, job.destination_voice_root_relative_path);
     if (realParentBefore !== realParent) throw new Error('rename 前 parent containment 漂移');
     await fs.rename(tempPath, finalAbs);
     tempPath = null;
-    const {realParent: realParentAfter} = await ensureDestinationParentSafe(rootAbs, job.destination_voice_root_relative_path);
+    const {realParent: realParentAfter} = await ensureOrCreateDestinationParentSafe(rootAbs, job.destination_voice_root_relative_path);
     if (realParentAfter !== realParent || realParentAfter !== realRoot + path.sep + job.destination_voice_root_relative_path.split('/').slice(0, 2).join(path.sep)) {
       throw new Error('rename 后 parent containment 漂移');
     }
@@ -278,10 +282,10 @@ export async function runMaterializationJob(
       await deps.afterRenameBeforeFinalEvidence(finalAbs);
     }
 
-    // 10) P0-B：rename 后对真实 final 建立 evidence（durabilize：fd SHA + fd WAV + fsync final + dir fsync）
-    let evidence: MaterializedFileEvidence;
+    // 10) P0-B/R3：rename 后对真实 final 建立 held evidence（durabilize：fd SHA + fd WAV + fsync final + dir）
+    let held: HeldMaterializedFileEvidence;
     try {
-      evidence = await validateMaterializedFile(
+      held = await openHeldMaterializedFileEvidence(
         {
           relativePath: job.destination_voice_root_relative_path,
           voiceProfileId: job.voice_profile_id,
@@ -296,8 +300,27 @@ export async function runMaterializationJob(
         },
         'durabilize',
       );
+      heldEvidence = held;
     } catch (err) {
       throw new Error(`final evidence 建立失败: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (deps.afterFinalEvidenceBeforeCommit) {
+      await deps.afterFinalEvidenceBeforeCommit(finalAbs);
+    }
+    // 事务外 classify：每个 active request Assignment 必须 current_candidate（content hash 快照）
+    const asgSnapshots: Array<{artifactId: string; contentHash: string}> = [];
+    {
+      const {sha256Text: shaT, listActiveRequestRows} = await import('../lib/tts-c/materialization');
+      const {getProjectVoiceAssignment} = await import('../lib/tts-b/assignment');
+      for (const r of listActiveRequestRows(job.id)) {
+        const asgRow = getProjectVoiceAssignment(r.project_id, r.assignment_artifact_id);
+        if (!asgRow) throw new Error(`request ${r.request_id} assignment 不可读`);
+        const classified = await classifyProjectVoiceAssignment(r.project_id, asgRow.artifact);
+        if (classified.status !== 'current_candidate' || !classified.assignment) {
+          throw new Error(`request ${r.request_id} assignment 非 current_candidate（${classified.statusReason ?? '?'}）`);
+        }
+        asgSnapshots.push({artifactId: r.assignment_artifact_id, contentHash: shaT(asgRow.artifact.content_json)});
+      }
     }
 
     // 11) final DB transaction 前 fenced verify（commit fence）
@@ -308,8 +331,9 @@ export async function runMaterializationJob(
     // 12) BEGIN IMMEDIATE fenced 终局（commit-time exact source fence + final evidence 逐项）
     const result = workerFinalizeMaterialization({
       handle,
-      evidence,
+      held,
       revisionEvidence,
+      asgSnapshots,
     });
     log(`materialization job ${handle.jobId} succeeded（projection=${result.projectionId}，requests=${result.requestsUpdated}）`);
   } catch (err) {
@@ -342,6 +366,10 @@ export async function runMaterializationJob(
     await closeFd(dirFh);
     for (const fh of openedFds.splice(0)) {
       await closeFd(fh);
+    }
+    if (heldEvidence) {
+      await heldEvidence.close().catch(() => undefined); // DB 事务完成后关闭 held fd
+      heldEvidence = null;
     }
     await cleanupTemp();
     if (caughtErr !== null) {
