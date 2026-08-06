@@ -1,13 +1,16 @@
 # TTS-C.1B / TTS-C.1C 执行计划（代码入口审计 + 最小实施计划）
 
-> 状态：**TTS-C.1C.1（Independent Review PASS）与 TTS-C.1B.1（R1 blocker-specific Review PASS）已集成到
-> m7（pending integrated exact-SHA Review；not deployed）；TTS-C.1B.2 / 1B.3 not started；
-> TTS-C.1C.2 not started；TTS-C.2 not authorized**。本文件是 1B/1C 的唯一实施计划入口，
-> 基于 frozen contract（`docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md` R13）与当前代码只读审计写成。
-> 权威基线：deployed production SHA `37eaac6c8c8969239cab00848f6291454615a912`（runtime code 内容
-> `17d40787ce70c025d7daa012c04a76bc69c10a2b`）；deployment evidence commit
-> `c29801b3b313a41560e4e0547033c2a409ed244c`；TTS-C.0 / TTS-C.1A = FROZEN；production POST disabled；
-> **TTS-C.2 not authorized**。
+> 状态（2026-08-06 update）：**TTS-C.1B.1 = FROZEN**（Independent Review PASS + R1 blocker-specific
+> Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS，deployment evidence：
+> `docs/evidence/tts-c-r17/deployment-c1b1-c1c1.md`）；**TTS-C.1C.1 = FROZEN**（Independent Review PASS +
+> Integrated exact-SHA Review PASS + Production deployment PASS）；deployed production SHA
+> `01f8536b4bac1661aa86ad57f90985ec56c8aaa5`；TTS-C.0 / TTS-C.1A = FROZEN；production POST remains
+> disabled；TTS-C.1B.2 / 1B.3 / 1C.2 not started；TTS-C.2 not authorized；**Deployment Evidence Review pending**。
+> 本文件是 1B/1C 的唯一实施计划入口，基于 frozen contract（`docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md`
+> R13）与当前代码只读审计写成。历史基线：上一 production runtime SHA
+> `37eaac6c8c8969239cab00848f6291454615a912`（runtime code 内容
+> `17d40787ce70c025d7daa012c04a76bc69c10a2b`），其 deployment evidence commit
+> `c29801b3b313a41560e4e0547033c2a409ed244c`（`docs/evidence/tts-c-r17/deployment.md`）。
 
 ## 0. 边界与前提订正
 
