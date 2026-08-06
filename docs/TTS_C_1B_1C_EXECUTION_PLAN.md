@@ -6,9 +6,10 @@
 > **TTS-C.1C.1 = FROZEN**（Independent Review PASS + Integrated exact-SHA Review PASS + Production
 > deployment PASS + Deployment Evidence Review PASS）；deployed production SHA
 > `01f8536b4bac1661aa86ad57f90985ec56c8aaa5`；TTS-C.0 / TTS-C.1A = FROZEN；production POST remains
-> disabled；**TTS-C.1B.2 implemented on work branch `work/tts-c1b2-publisher-candidate`
-> （Independent Review FAIL → TTS-C.1B.2.R1 blocker repair implemented；pending blocker-specific
-> Review；not merged；not deployed；测试 138 PASS；combined gate suite 55）**；
+> disabled；**TTS-C.1B.2 merged to m7**（审计链：initial Independent Review = FAIL
+> `08be813…` → TTS-C.1B.2.R1 blocker-specific Review = PASS `bcfd29b…` → all identified blockers
+> closed → merged to m7（fast-forward）；**pending Integrated exact-SHA Review**；not deployed；
+> 测试 138 PASS；combined gate suite 55）；
 > TTS-C.1B.3 not started；TTS-C.1C.2 not started；TTS-C.2 not authorized；
 > **Deployment Evidence Review = PASS**。
 > 本文件是 1B/1C 的唯一实施计划入口，基于 frozen contract（`docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md`
@@ -208,7 +209,8 @@ frozen 语义，§C/§D 是它们的代码落地规划，不重述设计。
 > `file_durable` + candidate 文件 durable；不 reload adapter（T3）、不 activation（T4/T5）、
 > 不 recovery（§D，1B.3）。**
 >
-> **TTS-C.1B.2.R1 blocker repair（2026-08-06，pending blocker-specific Review）**：① P0-A
+> **TTS-C.1B.2.R1 blocker repair（2026-08-06；R1 blocker-specific Review = PASS；merged to m7；
+> pending Integrated exact-SHA Review；not deployed）**：① P0-A
 > same-subject loser 分流——`publishRegistryCandidate` 按 `claim.kind` 分流；`already_in_flight`
 > 公开返回收窄为无 owner_token 的 `PublicationStatusDto`；loser 不 renew/build/写文件/推进 DB/
 > failPublication；file_durable → 只读 durable verification → `already_file_durable`；
@@ -219,7 +221,8 @@ frozen 语义，§C/§D 是它们的代码落地规划，不重述设计。
 > `verifyReferenceFile(rootDir)`（root realpath 固定 + 逐级 parent 无 symlink + O_NOFOLLOW +
 > fd 读取 + SHA）；resolver 只做 path translation；materialization projection 复用
 > `validateMaterializedFileSnapshot`。④ P2 final bytes 语义校验在 persist/acceptance 内部。
-> ⑤ exact-HEAD 55-suite gate。测试 138 PASS ×2。
+> ⑤ exact-HEAD 55-suite gate（`QUALITY_GATE_SHA=bcfd29b…` == reviewed final HEAD；agentvm 本地执行，
+> 无 GitHub Actions run/status，非 GitHub-hosted independent CI evidence）。测试 138 PASS ×2。
 
 一条清晰正常路径，严格映射 frozen T1-T5；publisher 运行于 **Worker**（唯一文件 writer，同 1A
 边界）；全部 DB 写走 `db.transaction(fn).immediate()`；每个外部副作用前 fenced verify/renew
@@ -343,8 +346,8 @@ production 拓扑变更；未部署（无 production build / compose up / regist
 
 ## F. legacy import（1B.2）
 
-> **已实现（2026-08-06，work branch `work/tts-c1b2-publisher-candidate`；R1 blocker repair 后 pending
-> blocker-specific Review；not merged；not deployed）**：`src/lib/tts-c/legacy-import.ts`
+> **已实现（2026-08-06；R1 blocker repair 后 blocker-specific Review = PASS；merged to m7；
+> pending Integrated exact-SHA Review；not deployed）**：`src/lib/tts-c/legacy-import.ts`
 > `importLegacyRegistry(db, {registryFilePath, voiceRootDir, resolveReferencePath})`——单 BEGIN IMMEDIATE
 > 事务（任一冲突整批回滚零写入）；确定性身份 = frozen `UNIQUE(voice_profile_key, voice_revision_key)`
 > （不依赖数组顺序/时间）；同 key 同内容（speaker/path/SHA 全等）→ no-op 复用（保留首次 imported_at 与
@@ -472,7 +475,7 @@ compilePerformanceToProvider(input: CapabilityCompileInput, snapshot: ProviderCa
 
 ## J. 测试计划（最小充分；普通 unit/integration；零真实 provider）
 
-> **1B.2 测试已实现（2026-08-06；R1 后 138 PASS ×2 独立运行）**：`scripts/test-tts-c1b2-publisher-candidate.ts`
+> **1B.2 测试已实现（2026-08-06；R1 后 138 PASS ×2 独立运行；已并入 m7，pending Integrated exact-SHA Review）**：`scripts/test-tts-c1b2-publisher-candidate.ts`
 > **106 PASS ×2**（零进程/fd/temp/端口泄漏；真实双进程并发 via `scripts/lib/tts-c1b2-child.ts`）+ **R1 新增 32
 > 断言**：R1-01 双进程完整 orchestrator（同 subject 恰好一个 completed winner，另一个 already_in_flight /
 > already_file_durable；publication row 1；generation 1；无 temp 残留；DB evidence == candidate SHA）；
@@ -537,7 +540,7 @@ evidence、大量理论 corner case、production 真实 IndexTTS2 调用。
 | 子阶段 | 内容 | 依赖 |
 |---|---|---|
 | **TTS-C.1B.1** | adapter registry/status/reload contract（§E：POST /reload + LKG + /health 扩展 + registry-status ack 面 + registry JSON 1.0/1.1 双 schema）+ mock integration tests；**不触碰 production active registry**。**FROZEN（R1 blocker-specific Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS；已部署）** | 无（可与 1C.1 并行） |
-| **TTS-C.1B.2** | legacy import（§F）+ publisher candidate creation（§C 步骤 1-3：T1 claim、candidate 构建、T2 persist 到 file_durable）+ publication 状态推进；**不 reload adapter**。**implemented on work branch `work/tts-c1b2-publisher-candidate`（Independent Review FAIL → R1 blocker repair implemented；pending blocker-specific Review；not merged；not deployed；测试 138 PASS；combined gate suite 55）** | 依赖 1B.1 contract（registry JSON schema 与 ack 字段冻结） |
+| **TTS-C.1B.2** | legacy import（§F）+ publisher candidate creation（§C 步骤 1-3：T1 claim、candidate 构建、T2 persist 到 file_durable）+ publication 状态推进；**不 reload adapter**。**merged to m7（审计链：initial Independent Review FAIL `08be813…` → R1 blocker-specific Review PASS `bcfd29b…`；测试 138 PASS；combined gate suite 55；pending Integrated exact-SHA Review；not deployed）** | 依赖 1B.1 contract（registry JSON schema 与 ack 字段冻结） |
 | **TTS-C.1B.3** | adapter reload 接入（§C 步骤 4）+ activation acknowledgment（步骤 5）+ atomic activation（步骤 6）+ recovery/reconciler（§D） | 依赖 1B.2 |
 | **TTS-C.1C.1** | capability snapshot（§G）+ pure compiler（§H）+ tests（§J 1C 七项）——**FROZEN（Independent Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS；已部署）** | 无（可与 1B.1 并行） |
 | **TTS-C.1C.2** | 编译结果接入未来 C.2 payload builder（provenance 字段交接，§I）；**当前阶段不调用真实 synthesis** | 等待 C.2 authorized |
