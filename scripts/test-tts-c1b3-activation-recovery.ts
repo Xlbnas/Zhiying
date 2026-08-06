@@ -9,6 +9,15 @@
  *   E Crash matrix（CC-1…CC-6）
  *   F Indeterminate（evidence seal/reconciliation/stable→failed/unknown 保持/非 activation_pending 来源/evidence exact/重复拒绝）
  *   G Recovery controller（周期/不重入/shutdown settle/单条隔离/terminal 无动作/single-flight/无泄漏）
+ *   R1 blocker repair（stale-owner race / reload 三态 / stable restore / legacy rollback / per-HTTP renew /
+ *      path containment / adapter error shape）
+ *   R2 blocker repair（R2-01..R2-10）：
+ *      P0-1  active 文件 mutation 紧邻前 fenced renew（promote / restore / snapshot 竞态，stale owner
+ *            在最终 renew 处失败、零文件副作用）
+ *      P0-2  indeterminate→failed atomic legacy rollback（resolveIndeterminateFailedAndRollbackLegacy；
+ *            legacy mismatch 整事务回滚）
+ *      P1-1  pre-promotion（building/candidate_persisted）terminal + legacy rollback
+ *      P1-2  exact final parent dir fsync（nested root/sub 目标验证 + fsync 故障注入）
  *
  * 全部使用临时 SQLite + 临时目录 + mock HTTP adapter；零 production、零真实 IndexTTS2。
  */
@@ -36,6 +45,7 @@ import {
   candidateRegistryPath,
   PUBLISHER_SCHEMA_VERSION,
   PUBLICATION_NOT_OWNER,
+  PUBLICATION_LEASE_EXPIRED,
   type PublicationRow,
 } from '../src/lib/tts-c/registry-publisher';
 import {
@@ -50,10 +60,13 @@ import {
   durabilizeStableSnapshot,
   restoreStableAndConfirm,
   failPublicationAndRollbackLegacy,
+  failPrePromotionPublicationAndRollbackLegacy,
+  resolveIndeterminateFailedAndRollbackLegacy,
   enterIndeterminateFenced,
   stableSnapshotPath,
   recoverRegistryPublications,
   STABLE_SNAPSHOT_CONFLICT,
+  LEGACY_ROLLBACK_MISMATCH,
   type ActiveRegistryPaths,
 } from '../src/lib/tts-c/registry-activation';
 import {RegistryRecoveryController} from '../src/lib/tts-c/registry-recovery-controller';
@@ -156,6 +169,15 @@ function failRow(row: PublicationRow, errorCode: string, errorMessage: string): 
 
 function publicationCount(): number {
   return (getDb().prepare('SELECT COUNT(*) AS n FROM voice_registry_publications').get() as {n: number}).n;
+}
+
+/** 轮询等待条件成立（R2 竞态测试用；超时抛错使测试失败可见）。 */
+async function waitFor(cond: () => boolean, timeoutMs = 3000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error(`waitFor timeout: ${timeoutMs}ms`);
+    await new Promise((r) => setTimeout(r, 5));
+  }
 }
 
 async function runChild(args: string[]): Promise<Record<string, unknown>> {
@@ -1221,6 +1243,439 @@ function recoveryDeps(adapter: MockAdapter) {
     fs.unlinkSync(path.join(ACTIVE_DIR, 'sub'));
     failRow(getPublicationRow(getDb(), p11.id), 'TEST_FAIL', 'release R1-11/12');
     await a11.stop();
+  }
+
+  // ══════════════ R2. TTS-C.1B.3.R2 blocker repair ══════════════
+  {
+    // ── R2-01: candidate promotion race——A 在 active write 前挂起 → lease 过期 + B takeover →
+    //           A 在最终 renew 处失败，active registry bytes 不变，B owner/attempt/lease 不变 ──
+    const {pub: p1, adapter: a1} = await prepareFileDurable();
+    const activeBytesBefore1 = fs.readFileSync(ACTIVE_PATH);
+    let releaseGate1!: () => void;
+    const gate1 = new Promise<void>((resolve) => {
+      releaseGate1 = resolve;
+    });
+    let hookFired1 = false;
+    const paths1: ActiveRegistryPaths = {
+      ...PATHS,
+      beforeActiveWriteHook: () => {
+        hookFired1 = true;
+        return gate1;
+      },
+    };
+    const flow1 = promoteCandidateToActive(getDb(), p1.id, p1.owner_token as string, p1.attempt, paths1);
+    await waitFor(() => hookFired1);
+    getDb().prepare('UPDATE voice_registry_publications SET lease_expires_at_epoch_ms=1 WHERE id=?').run(p1.id);
+    const t1 = takeoverExpiredPublication(getDb(), p1.id);
+    ok(t1.kind === 'taken', 'R2-01 B takeover 成功（A 挂起期间 lease 过期）');
+    const b1Before = getPublicationRow(getDb(), p1.id);
+    releaseGate1();
+    await expectCode('R2-01 stale owner 最终 renew → PUBLICATION_LEASE_EXPIRED', () => flow1, PUBLICATION_LEASE_EXPIRED);
+    ok(sha256Bytes(fs.readFileSync(ACTIVE_PATH)) === sha256Bytes(activeBytesBefore1), 'R2-01 active registry bytes 不变（A 未写）');
+    ok(fs.readdirSync(ACTIVE_DIR).filter((f) => f.endsWith('.tmp')).length === 0, 'R2-01 无 temp 残留');
+    const b1After = getPublicationRow(getDb(), p1.id);
+    ok(b1After.owner_token === b1Before.owner_token && b1After.attempt === b1Before.attempt && b1After.lease_expires_at_epoch_ms === b1Before.lease_expires_at_epoch_ms, 'R2-01 B owner/attempt/lease 不变');
+    releaseAllActiveFlights();
+    await a1.stop();
+
+    // ── R2-02: stable restore race——A 在 restore write 前挂起 → B takeover → A 不得覆盖 active registry ──
+    const {pub: p2, adapter: a2} = await prepareFileDurable();
+    await promoteCandidateToActive(getDb(), p2.id, p2.owner_token as string, p2.attempt, PATHS);
+    ok((await classifyActiveDiskState(getDb(), p2.id, PATHS)).state === 'candidate', 'R2-02 disk candidate 前置');
+    const candidateBytes2 = fs.readFileSync(ACTIVE_PATH);
+    let releaseGate2!: () => void;
+    const gate2 = new Promise<void>((resolve) => {
+      releaseGate2 = resolve;
+    });
+    let hookFired2 = false;
+    const paths2: ActiveRegistryPaths = {
+      ...PATHS,
+      beforeStableRestoreWriteHook: () => {
+        hookFired2 = true;
+        return gate2;
+      },
+    };
+    const flow2 = restoreStableAndConfirm(getDb(), p2.id, p2.owner_token as string, p2.attempt, paths2, new AdapterClient({baseUrl: a2.baseUrl, timeoutMs: 500}));
+    await waitFor(() => hookFired2);
+    getDb().prepare('UPDATE voice_registry_publications SET lease_expires_at_epoch_ms=1 WHERE id=?').run(p2.id);
+    const t2 = takeoverExpiredPublication(getDb(), p2.id);
+    ok(t2.kind === 'taken', 'R2-02 B takeover 成功');
+    const b2Before = getPublicationRow(getDb(), p2.id);
+    releaseGate2();
+    const o2 = await flow2;
+    ok(o2 === 'rollback_pending', `R2-02 stale owner restore → rollback_pending（实际 ${o2}）`);
+    ok(sha256Bytes(fs.readFileSync(ACTIVE_PATH)) === sha256Bytes(candidateBytes2), 'R2-02 active registry 仍 candidate bytes（未被 A 恢复覆盖）');
+    const b2After = getPublicationRow(getDb(), p2.id);
+    ok(b2After.owner_token === b2Before.owner_token && b2After.attempt === b2Before.attempt && b2After.lease_expires_at_epoch_ms === b2Before.lease_expires_at_epoch_ms, 'R2-02 B owner/attempt/lease 不变');
+    releaseAllActiveFlights();
+    await a2.stop();
+
+    // ── R2-03: snapshot race——A 在 snapshot write 前挂起 → B takeover → A 不得创建/fsync snapshot ──
+    const {pub: p3, adapter: a3} = await prepareFileDurable();
+    const snapPath3 = stableSnapshotPath(p3.generation);
+    ok(!fs.existsSync(snapPath3), 'R2-03 前置：snapshot 不存在');
+    let releaseGate3!: () => void;
+    const gate3 = new Promise<void>((resolve) => {
+      releaseGate3 = resolve;
+    });
+    let hookFired3 = false;
+    let fsyncCalls3 = 0;
+    const paths3: ActiveRegistryPaths = {
+      ...PATHS,
+      beforeSnapshotWriteHook: () => {
+        hookFired3 = true;
+        return gate3;
+      },
+      fsyncDir: async () => {
+        fsyncCalls3++;
+      },
+    };
+    const flow3 = durabilizeStableSnapshot(getDb(), p3.id, p3.owner_token as string, p3.attempt, paths3);
+    await waitFor(() => hookFired3);
+    getDb().prepare('UPDATE voice_registry_publications SET lease_expires_at_epoch_ms=1 WHERE id=?').run(p3.id);
+    const t3 = takeoverExpiredPublication(getDb(), p3.id);
+    ok(t3.kind === 'taken', 'R2-03 B takeover 成功');
+    releaseGate3();
+    await expectCode('R2-03 stale owner snapshot 写 → PUBLICATION_LEASE_EXPIRED', () => flow3, PUBLICATION_LEASE_EXPIRED);
+    ok(!fs.existsSync(snapPath3), 'R2-03 A 未创建 snapshot 文件');
+    ok(fsyncCalls3 === 0, 'R2-03 A 未执行任何 snapshot fsync');
+    const b3 = getPublicationRow(getDb(), p3.id);
+    ok(b3.status === 'file_durable' && b3.owner_token !== null, 'R2-03 publication 保持 file_durable（B 持有）');
+    releaseAllActiveFlights();
+    await a3.stop();
+
+    // ── R2-03b: snapshot existing re-durabilize race——A 不得重新 fsync 既有 snapshot ──
+    const {pub: p3b, adapter: a3b} = await prepareFileDurable();
+    const snapPath3b = stableSnapshotPath(p3b.generation);
+    await durabilizeStableSnapshot(getDb(), p3b.id, p3b.owner_token as string, p3b.attempt, PATHS);
+    ok(fs.existsSync(snapPath3b), 'R2-03b 前置：snapshot 已存在');
+    const snapBytes3b = fs.readFileSync(snapPath3b);
+    let releaseGate3b!: () => void;
+    const gate3b = new Promise<void>((resolve) => {
+      releaseGate3b = resolve;
+    });
+    let hookFired3b = false;
+    let fsyncCalls3b = 0;
+    const paths3b: ActiveRegistryPaths = {
+      ...PATHS,
+      beforeSnapshotWriteHook: () => {
+        hookFired3b = true;
+        return gate3b;
+      },
+      fsyncDir: async () => {
+        fsyncCalls3b++;
+      },
+    };
+    const flow3b = durabilizeStableSnapshot(getDb(), p3b.id, p3b.owner_token as string, p3b.attempt, paths3b);
+    await waitFor(() => hookFired3b);
+    getDb().prepare('UPDATE voice_registry_publications SET lease_expires_at_epoch_ms=1 WHERE id=?').run(p3b.id);
+    const t3b = takeoverExpiredPublication(getDb(), p3b.id);
+    ok(t3b.kind === 'taken', 'R2-03b B takeover 成功');
+    releaseGate3b();
+    await expectCode('R2-03b stale owner snapshot re-durabilize → PUBLICATION_LEASE_EXPIRED', () => flow3b, PUBLICATION_LEASE_EXPIRED);
+    ok(fsyncCalls3b === 0, 'R2-03b A 未重新 fsync snapshot（re-durabilize 未执行）');
+    ok(sha256Bytes(fs.readFileSync(snapPath3b)) === sha256Bytes(snapBytes3b), 'R2-03b snapshot bytes 不变');
+    releaseAllActiveFlights();
+    await a3b.stop();
+
+    // ── R2-04: legacy_cutover_publish indeterminate → failed（atomic legacy rollback；可创建新 publication）──
+    const rp4 = await newProjection();
+    const wav4 = wavFile();
+    fs.writeFileSync(path.join(VOICE_ROOT, 'r2-04.wav'), wav4);
+    const reg4 = writeRegistry(path.join(DATA_DIR, 'regs'), `r2-04-${crypto.randomUUID().slice(0, 6)}.json`, [
+      {voiceProfile: 'r2-04', voiceRevision: '1', speakerName: 'r2-04', referenceAssetPath: `${EMIT_ROOT}/r2-04.wav`, referenceSha256: sha256Buf(wav4)},
+    ]);
+    await importLegacyRegistry(getDb(), {registryFilePath: reg4, voiceRootDir: VOICE_ROOT, resolveReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))});
+    const entry4 = getDb().prepare("SELECT id FROM legacy_adapter_voice_entries WHERE voice_profile_key='r2-04'").get() as {id: string};
+    markMappedVerified(entry4.id, rp4.matId, 'publish_and_cutover');
+    const a4 = new MockAdapter(ACTIVE_PATH);
+    await a4.start();
+    const stable4 = fs.readFileSync(ACTIVE_PATH);
+    a4.loadedSha = sha256Bytes(stable4);
+    const out4 = await publishRegistryCandidate(getDb(), {
+      subject: {subjectType: 'legacy_cutover_publish', subjectId: entry4.id, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: sha256Bytes(stable4),
+      build: {legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))},
+    });
+    if (out4.kind !== 'completed') throw new Error(`R2-04 prepare failed: ${JSON.stringify(out4)}`);
+    const pub4 = getPublicationRow(getDb(), out4.publicationId);
+    const lve4a = getDb().prepare('SELECT mapping_status, pending_publication_id FROM legacy_adapter_voice_entries WHERE id=?').get(entry4.id) as Record<string, unknown>;
+    ok(lve4a.mapping_status === 'mapping_pending' && lve4a.pending_publication_id === pub4.id, 'R2-04 前置 mapping_pending');
+    a4.statusBehavior = 'timeout'; // poll timeout → indeterminate from activation_pending
+    const o4 = await activateRegistryPublicationFlow(getDb(), activationOpts(pub4, a4));
+    ok(o4.kind === 'indeterminate', `R2-04 → indeterminate（实际 ${o4.kind}）`);
+    const r4b = getPublicationRow(getDb(), pub4.id);
+    ok(r4b.status === 'indeterminate' && r4b.indeterminate_from_status === 'activation_pending', 'R2-04 indeterminate from activation_pending');
+    // 模拟 restore 完成：disk + adapter 恢复 stable → recovery 走 resolveIndeterminateFailedAndRollbackLegacy
+    fs.writeFileSync(ACTIVE_PATH, stable4);
+    a4.statusBehavior = 'ok';
+    a4.loadedSha = pub4.stable_registry_sha256;
+    a4.loadedGeneration = null;
+    a4.loadedPublisher = null;
+    a4.loadedSchema = '1.0';
+    const res4 = await recoverRegistryPublications(getDb(), recoveryDeps(a4), 10);
+    ok(res4.errors.length === 0, `R2-04 recover 无错误（${JSON.stringify(res4.errors)}）`);
+    ok(getPublicationRow(getDb(), pub4.id).status === 'failed', 'R2-04 indeterminate → failed');
+    const lve4b = getDb().prepare('SELECT mapping_status, pending_publication_id, candidate_source_selector, mapping_mode, mapped_voice_materialization_id FROM legacy_adapter_voice_entries WHERE id=?').get(entry4.id) as Record<string, unknown>;
+    ok(lve4b.mapping_status === 'mapped_verified', 'R2-04 legacy → mapped_verified');
+    ok(lve4b.pending_publication_id === null && lve4b.candidate_source_selector === null, 'R2-04 pending link/selector 清空');
+    ok(lve4b.mapping_mode === 'publish_and_cutover', 'R2-04 mapping_mode 保持');
+    ok(lve4b.mapped_voice_materialization_id === rp4.matId, 'R2-04 mapped materialization 保持');
+    const out4b = await publishRegistryCandidate(getDb(), {
+      subject: {subjectType: 'legacy_cutover_publish', subjectId: entry4.id, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: sha256Bytes(stable4),
+      build: {legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))},
+    });
+    ok(out4b.kind === 'completed', 'R2-04 rollback 后可创建新 publication');
+    failRow(getPublicationRow(getDb(), out4b.publicationId), 'TEST_FAIL', 'release R2-04b');
+    await a4.stop();
+
+    // ── R2-05: legacy_cutover_existing indeterminate → failed（projection published evidence 零改写）──
+    const rp5 = await newProjection();
+    const a5a = new MockAdapter(ACTIVE_PATH);
+    await a5a.start();
+    const stable5a = fs.readFileSync(ACTIVE_PATH);
+    a5a.loadedSha = sha256Bytes(stable5a);
+    const out5a = await publishRegistryCandidate(getDb(), {
+      subject: {subjectType: 'materialization_publish', subjectId: rp5.matId, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: sha256Bytes(stable5a),
+      build: {legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))},
+    });
+    if (out5a.kind !== 'completed') throw new Error(`R2-05a prepare failed: ${JSON.stringify(out5a)}`);
+    const pub5a = getPublicationRow(getDb(), out5a.publicationId);
+    const o5a = await activateRegistryPublicationFlow(getDb(), activationOpts(pub5a, a5a));
+    ok(o5a.kind === 'active', 'R2-05a 前置 projection 已激活（published_usable）');
+    await a5a.stop();
+    const wav5 = wavFile();
+    fs.writeFileSync(path.join(VOICE_ROOT, 'r2-05.wav'), wav5);
+    const reg5 = writeRegistry(path.join(DATA_DIR, 'regs'), `r2-05-${crypto.randomUUID().slice(0, 6)}.json`, [
+      {voiceProfile: 'r2-05', voiceRevision: '1', speakerName: 'r2-05', referenceAssetPath: `${EMIT_ROOT}/r2-05.wav`, referenceSha256: sha256Buf(wav5)},
+    ]);
+    await importLegacyRegistry(getDb(), {registryFilePath: reg5, voiceRootDir: VOICE_ROOT, resolveReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))});
+    const entry5 = getDb().prepare("SELECT id FROM legacy_adapter_voice_entries WHERE voice_profile_key='r2-05'").get() as {id: string};
+    markMappedVerified(entry5.id, rp5.matId, 'cutover_existing');
+    const a5 = new MockAdapter(ACTIVE_PATH);
+    await a5.start();
+    const stable5b = fs.readFileSync(ACTIVE_PATH);
+    a5.loadedSha = sha256Bytes(stable5b);
+    const out5 = await publishRegistryCandidate(getDb(), {
+      subject: {subjectType: 'legacy_cutover_existing', subjectId: entry5.id, subjectMode: 'cutover_existing'},
+      stableRegistrySha256: sha256Bytes(stable5b),
+      build: {legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))},
+    });
+    if (out5.kind !== 'completed') throw new Error(`R2-05 prepare failed: ${JSON.stringify(out5)}`);
+    const pub5 = getPublicationRow(getDb(), out5.publicationId);
+    a5.statusBehavior = 'timeout';
+    const o5 = await activateRegistryPublicationFlow(getDb(), activationOpts(pub5, a5));
+    ok(o5.kind === 'indeterminate', `R2-05 → indeterminate（实际 ${o5.kind}）`);
+    fs.writeFileSync(ACTIVE_PATH, stable5b);
+    a5.statusBehavior = 'ok';
+    a5.loadedSha = pub5.stable_registry_sha256;
+    a5.loadedGeneration = null;
+    a5.loadedPublisher = null;
+    a5.loadedSchema = '1.0';
+    const res5 = await recoverRegistryPublications(getDb(), recoveryDeps(a5), 10);
+    ok(res5.errors.length === 0, `R2-05 recover 无错误（${JSON.stringify(res5.errors)}）`);
+    ok(getPublicationRow(getDb(), pub5.id).status === 'failed', 'R2-05 indeterminate → failed');
+    const lve5 = getDb().prepare('SELECT mapping_status, pending_publication_id, mapping_mode FROM legacy_adapter_voice_entries WHERE id=?').get(entry5.id) as Record<string, unknown>;
+    ok(lve5.mapping_status === 'mapped_verified' && lve5.pending_publication_id === null, 'R2-05 legacy rollback → mapped_verified');
+    ok(lve5.mapping_mode === 'cutover_existing', 'R2-05 mapping_mode 保持');
+    const mat5 = getDb().prepare('SELECT status, published_registry_generation, published_registry_sha256, published_by_publication_id FROM voice_materializations WHERE id=?').get(rp5.matId) as Record<string, unknown>;
+    ok(mat5.status === 'published_usable', 'R2-05 projection 保持 published_usable');
+    ok(mat5.published_registry_generation === pub5a.generation && mat5.published_registry_sha256 === pub5a.candidate_registry_sha256 && mat5.published_by_publication_id === pub5a.id, 'R2-05 projection published evidence 零改写（保持前置激活）');
+    await a5.stop();
+
+    // ── R2-06: indeterminate failed 的 legacy rollback mismatch → 整事务回滚（publication 保持 indeterminate）──
+    // schema trigger（trg_lve_immutable/trg_lve_rollback）使“pending link 被破坏”状态无法通过合法
+    // UPDATE 构造——用直接 SQL 构造行（INSERT 必须 building；状态链全部 trigger-legal），
+    // entry 保持 mapped_verified（链接从未建立），模拟外部破坏/丢失的 pending link。
+    const rp6 = await newProjection();
+    const wav6 = wavFile();
+    fs.writeFileSync(path.join(VOICE_ROOT, 'r2-06.wav'), wav6);
+    const reg6 = writeRegistry(path.join(DATA_DIR, 'regs'), `r2-06-${crypto.randomUUID().slice(0, 6)}.json`, [
+      {voiceProfile: 'r2-06', voiceRevision: '1', speakerName: 'r2-06', referenceAssetPath: `${EMIT_ROOT}/r2-06.wav`, referenceSha256: sha256Buf(wav6)},
+    ]);
+    await importLegacyRegistry(getDb(), {registryFilePath: reg6, voiceRootDir: VOICE_ROOT, resolveReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))});
+    const entry6 = getDb().prepare("SELECT id FROM legacy_adapter_voice_entries WHERE voice_profile_key='r2-06'").get() as {id: string};
+    markMappedVerified(entry6.id, rp6.matId, 'publish_and_cutover');
+    const p6id = crypto.randomUUID();
+    const gen6 = (getDb().prepare('SELECT COALESCE(MAX(generation),0)+1 AS n FROM voice_registry_publications').get() as {n: number}).n;
+    const now6 = new Date().toISOString();
+    getDb().prepare(
+      `INSERT INTO voice_registry_publications
+         (id, generation, subject_type, subject_id, subject_mode, stable_registry_sha256,
+          publisher_schema_version, status, owner_token, lease_expires_at_epoch_ms, attempt, created_at, updated_at)
+       VALUES (?, ?, 'legacy_cutover_publish', ?, 'publish_and_cutover', ?, ?, 'building', ?,
+               (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)) + 600000, 1, ?, ?)`,
+    ).run(p6id, gen6, entry6.id, 'a'.repeat(64), SUPPORTED_PUB, 'tok6', now6, now6);
+    getDb().prepare(
+      `UPDATE voice_registry_publications
+          SET status='candidate_persisted', candidate_registry_sha256=?, candidate_manifest_json='{}', candidate_manifest_sha256=?, updated_at=?
+        WHERE id=? AND status='building'`,
+    ).run('b'.repeat(64), 'c'.repeat(64), now6, p6id);
+    getDb().prepare(
+      `UPDATE voice_registry_publications SET status='file_durable', file_durable_at=?, updated_at=? WHERE id=? AND status='candidate_persisted'`,
+    ).run(now6, now6, p6id);
+    getDb().prepare(
+      `UPDATE voice_registry_publications SET status='activation_pending', activation_requested_at=?, updated_at=? WHERE id=? AND status='file_durable'`,
+    ).run(now6, now6, p6id);
+    getDb().prepare(
+      `UPDATE voice_registry_publications
+          SET status='indeterminate', indeterminate_from_status='activation_pending', owner_token=NULL,
+              lease_expires_at_epoch_ms=NULL, error_code='X', error_message='constructed', updated_at=?
+        WHERE id=? AND status='activation_pending'`,
+    ).run(now6, p6id);
+    const r6pre = getPublicationRow(getDb(), p6id);
+    ok(r6pre.status === 'indeterminate' && r6pre.indeterminate_from_status === 'activation_pending', 'R2-06 indeterminate 行构造完成');
+    await expectCode('R2-06 legacy rollback mismatch → LEGACY_ROLLBACK_MISMATCH（整事务回滚）', () => {
+      resolveIndeterminateFailedAndRollbackLegacy(getDb(), {publicationId: p6id, attempt: 1, errorCode: 'TEST', errorMessage: 'R2-06'});
+    }, LEGACY_ROLLBACK_MISMATCH);
+    const r6after = getPublicationRow(getDb(), p6id);
+    ok(r6after.status === 'indeterminate', 'R2-06 publication 保持 indeterminate（failed 未提交）');
+    const lve6 = getDb().prepare('SELECT mapping_status, pending_publication_id FROM legacy_adapter_voice_entries WHERE id=?').get(entry6.id) as Record<string, unknown>;
+    ok(lve6.mapping_status === 'mapped_verified' && lve6.pending_publication_id === null, 'R2-06 legacy 保持原状（无副作用）');
+    releaseAllActiveFlights();
+
+    // ── R2-07: building legacy failure（claim 后 failPrePromotion → terminal + legacy rollback + 可重试）──
+    const rp7 = await newProjection();
+    const wav7 = wavFile();
+    fs.writeFileSync(path.join(VOICE_ROOT, 'r2-07.wav'), wav7);
+    const reg7 = writeRegistry(path.join(DATA_DIR, 'regs'), `r2-07-${crypto.randomUUID().slice(0, 6)}.json`, [
+      {voiceProfile: 'r2-07', voiceRevision: '1', speakerName: 'r2-07', referenceAssetPath: `${EMIT_ROOT}/r2-07.wav`, referenceSha256: sha256Buf(wav7)},
+    ]);
+    await importLegacyRegistry(getDb(), {registryFilePath: reg7, voiceRootDir: VOICE_ROOT, resolveReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))});
+    const entry7 = getDb().prepare("SELECT id FROM legacy_adapter_voice_entries WHERE voice_profile_key='r2-07'").get() as {id: string};
+    markMappedVerified(entry7.id, rp7.matId, 'publish_and_cutover');
+    const a7 = new MockAdapter(ACTIVE_PATH);
+    await a7.start();
+    const stable7 = fs.readFileSync(ACTIVE_PATH);
+    a7.loadedSha = sha256Bytes(stable7);
+    const claim7 = claimPublication(getDb(), {
+      subject: {subjectType: 'legacy_cutover_publish', subjectId: entry7.id, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: sha256Bytes(stable7),
+    });
+    if (claim7.kind !== 'claimed') throw new Error('R2-07 claim failed');
+    const pub7 = getPublicationRow(getDb(), claim7.publication.id);
+    ok(pub7.status === 'building', 'R2-07 publication building');
+    const lve7a = getDb().prepare('SELECT mapping_status, pending_publication_id, candidate_source_selector FROM legacy_adapter_voice_entries WHERE id=?').get(entry7.id) as Record<string, unknown>;
+    ok(lve7a.mapping_status === 'mapping_pending' && lve7a.pending_publication_id === pub7.id, 'R2-07 legacy mapping_pending');
+    failPrePromotionPublicationAndRollbackLegacy(getDb(), {publicationId: pub7.id, ownerToken: pub7.owner_token as string, attempt: pub7.attempt, errorCode: 'TEST_FAIL', errorMessage: 'R2-07'});
+    ok(getPublicationRow(getDb(), pub7.id).status === 'failed', 'R2-07 publication failed');
+    const lve7b = getDb().prepare('SELECT mapping_status, pending_publication_id, candidate_source_selector, mapping_mode FROM legacy_adapter_voice_entries WHERE id=?').get(entry7.id) as Record<string, unknown>;
+    ok(lve7b.mapping_status === 'mapped_verified' && lve7b.pending_publication_id === null && lve7b.candidate_source_selector === null, 'R2-07 legacy rollback 完成（link/selector 清空）');
+    ok(lve7b.mapping_mode === 'publish_and_cutover', 'R2-07 mapping_mode 保持');
+    const claim7b = claimPublication(getDb(), {
+      subject: {subjectType: 'legacy_cutover_publish', subjectId: entry7.id, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: sha256Bytes(stable7),
+    });
+    ok(claim7b.kind === 'claimed', 'R2-07 rollback 后可重新 claim');
+    if (claim7b.kind === 'claimed') {
+      failPrePromotionPublicationAndRollbackLegacy(getDb(), {publicationId: claim7b.publication.id, ownerToken: claim7b.publication.owner_token as string, attempt: claim7b.publication.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release R2-07b'});
+    }
+    await a7.stop();
+
+    // ── R2-08: candidate_persisted legacy failure（pre-promotion rollback）──
+    const rp8 = await newProjection();
+    const wav8 = wavFile();
+    fs.writeFileSync(path.join(VOICE_ROOT, 'r2-08.wav'), wav8);
+    const reg8 = writeRegistry(path.join(DATA_DIR, 'regs'), `r2-08-${crypto.randomUUID().slice(0, 6)}.json`, [
+      {voiceProfile: 'r2-08', voiceRevision: '1', speakerName: 'r2-08', referenceAssetPath: `${EMIT_ROOT}/r2-08.wav`, referenceSha256: sha256Buf(wav8)},
+    ]);
+    await importLegacyRegistry(getDb(), {registryFilePath: reg8, voiceRootDir: VOICE_ROOT, resolveReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))});
+    const entry8 = getDb().prepare("SELECT id FROM legacy_adapter_voice_entries WHERE voice_profile_key='r2-08'").get() as {id: string};
+    markMappedVerified(entry8.id, rp8.matId, 'publish_and_cutover');
+    const a8 = new MockAdapter(ACTIVE_PATH);
+    await a8.start();
+    const stable8 = fs.readFileSync(ACTIVE_PATH);
+    a8.loadedSha = sha256Bytes(stable8);
+    const claim8 = claimPublication(getDb(), {
+      subject: {subjectType: 'legacy_cutover_publish', subjectId: entry8.id, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: sha256Bytes(stable8),
+    });
+    if (claim8.kind !== 'claimed') throw new Error('R2-08 claim failed');
+    const pub8 = getPublicationRow(getDb(), claim8.publication.id);
+    const built8 = await buildRegistryCandidate(getDb(), {publication: pub8, legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))});
+    markCandidatePersisted(getDb(), {publicationId: pub8.id, ownerToken: pub8.owner_token as string, attempt: pub8.attempt, candidateRegistrySha256: built8.registrySha256, candidateManifestJson: built8.manifestJson, candidateManifestSha256: built8.manifestSha256});
+    ok(getPublicationRow(getDb(), pub8.id).status === 'candidate_persisted', 'R2-08 candidate_persisted 前置');
+    failPrePromotionPublicationAndRollbackLegacy(getDb(), {publicationId: pub8.id, ownerToken: pub8.owner_token as string, attempt: pub8.attempt, errorCode: 'TEST_FAIL', errorMessage: 'R2-08'});
+    ok(getPublicationRow(getDb(), pub8.id).status === 'failed', 'R2-08 publication failed');
+    const lve8b = getDb().prepare('SELECT mapping_status, pending_publication_id, candidate_source_selector FROM legacy_adapter_voice_entries WHERE id=?').get(entry8.id) as Record<string, unknown>;
+    ok(lve8b.mapping_status === 'mapped_verified' && lve8b.pending_publication_id === null && lve8b.candidate_source_selector === null, 'R2-08 legacy rollback 完成');
+    await a8.stop();
+
+    // ── R2-09: pre-promotion rollback 事务原子性（legacy link 不匹配 → publication UPDATE 也回滚）──
+    const rp9 = await newProjection();
+    const wav9 = wavFile();
+    fs.writeFileSync(path.join(VOICE_ROOT, 'r2-09.wav'), wav9);
+    const reg9 = writeRegistry(path.join(DATA_DIR, 'regs'), `r2-09-${crypto.randomUUID().slice(0, 6)}.json`, [
+      {voiceProfile: 'r2-09', voiceRevision: '1', speakerName: 'r2-09', referenceAssetPath: `${EMIT_ROOT}/r2-09.wav`, referenceSha256: sha256Buf(wav9)},
+    ]);
+    await importLegacyRegistry(getDb(), {registryFilePath: reg9, voiceRootDir: VOICE_ROOT, resolveReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))});
+    const entry9 = getDb().prepare("SELECT id FROM legacy_adapter_voice_entries WHERE voice_profile_key='r2-09'").get() as {id: string};
+    markMappedVerified(entry9.id, rp9.matId, 'publish_and_cutover');
+    const p9id = crypto.randomUUID();
+    const gen9 = (getDb().prepare('SELECT COALESCE(MAX(generation),0)+1 AS n FROM voice_registry_publications').get() as {n: number}).n;
+    const now9 = new Date().toISOString();
+    getDb().prepare(
+      `INSERT INTO voice_registry_publications
+         (id, generation, subject_type, subject_id, subject_mode, stable_registry_sha256,
+          publisher_schema_version, status, owner_token, lease_expires_at_epoch_ms, attempt, created_at, updated_at)
+       VALUES (?, ?, 'legacy_cutover_publish', ?, 'publish_and_cutover', ?, ?, 'building', ?,
+               (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)) + 600000, 1, ?, ?)`,
+    ).run(p9id, gen9, entry9.id, 'a'.repeat(64), SUPPORTED_PUB, 'tok9', now9, now9);
+    await expectCode('R2-09 legacy rollback mismatch → LEGACY_ROLLBACK_MISMATCH（整事务回滚）', () => {
+      failPrePromotionPublicationAndRollbackLegacy(getDb(), {publicationId: p9id, ownerToken: 'tok9', attempt: 1, errorCode: 'TEST', errorMessage: 'R2-09'});
+    }, LEGACY_ROLLBACK_MISMATCH);
+    const r9after = getPublicationRow(getDb(), p9id);
+    ok(r9after.status === 'building', 'R2-09 publication 保持 building（terminal UPDATE 已回滚）');
+    const lve9 = getDb().prepare('SELECT mapping_status, pending_publication_id FROM legacy_adapter_voice_entries WHERE id=?').get(entry9.id) as Record<string, unknown>;
+    ok(lve9.mapping_status === 'mapped_verified' && lve9.pending_publication_id === null, 'R2-09 legacy 保持 mapped_verified（无副作用）');
+    releaseAllActiveFlights();
+
+    // ── R2-10: exact final parent dir fsync（nested path root/sub/voice-registry.json）──
+    const {pub: p10, adapter: a10} = await prepareFileDurable();
+    const nestedAbs = path.join(ACTIVE_DIR, 'sub', 'voice-registry.json');
+    fs.mkdirSync(path.join(ACTIVE_DIR, 'sub'), {recursive: true});
+    const stable10 = fs.readFileSync(ACTIVE_PATH);
+    fs.writeFileSync(nestedAbs, stable10);
+    fs.rmSync(ACTIVE_PATH); // 只保留 nested 文件作为唯一 active registry
+    const nestedPaths: ActiveRegistryPaths = {activeRegistryPath: nestedAbs, activeRegistryRoot: ACTIVE_DIR};
+    ok((await classifyActiveDiskState(getDb(), p10.id, nestedPaths)).state === 'stable', 'R2-10 nested disk stable 前置');
+    // 记录 fsync 目标（/proc/self/fd 解析句柄对应目录）
+    const fsyncedDirs: string[] = [];
+    const subAbs = path.resolve(path.join(ACTIVE_DIR, 'sub'));
+    const recordingPaths: ActiveRegistryPaths = {
+      ...nestedPaths,
+      fsyncDir: async (fh) => {
+        fsyncedDirs.push(fs.realpathSync(`/proc/self/fd/${fh.fd}`));
+      },
+    };
+    const o10 = await promoteCandidateToActive(getDb(), p10.id, p10.owner_token as string, p10.attempt, recordingPaths);
+    ok(o10 === 'promoted', 'R2-10 nested promote 成功');
+    ok(sha256OfFile(nestedAbs) === p10.candidate_registry_sha256, 'R2-10 nested active == candidate bytes');
+    ok(fsyncedDirs.some((d) => d === subAbs), `R2-10 fsync 目标含 exact parent root/sub（实际 ${JSON.stringify(fsyncedDirs)}）`);
+    ok(!fsyncedDirs.some((d) => d === path.resolve(ACTIVE_DIR)), 'R2-10 fsync 目标不含 root（未误 fsync root）');
+    // exact parent fsync 注入失败：restore 必须失败（rollback_pending），不继续 reload
+    const reloadsBefore10 = a10.reloadCalls;
+    const failingPaths: ActiveRegistryPaths = {
+      ...nestedPaths,
+      fsyncDir: async (fh) => {
+        if (fs.realpathSync(`/proc/self/fd/${fh.fd}`) === subAbs) {
+          throw new Error('injected exact parent fsync failure');
+        }
+      },
+    };
+    const restore10 = await restoreStableAndConfirm(getDb(), p10.id, p10.owner_token as string, p10.attempt, failingPaths, new AdapterClient({baseUrl: a10.baseUrl, timeoutMs: 500}));
+    ok(restore10 === 'rollback_pending', `R2-10 exact parent fsync 失败 → restore rollback_pending（实际 ${restore10}）`);
+    ok(a10.reloadCalls === reloadsBefore10, 'R2-10 restore 失败后零 reload');
+    // exact parent fsync 注入失败：promote 必须失败（CANDIDATE_FILE_IO），不 activation
+    await expectCode('R2-10 exact parent fsync 失败 → promote CANDIDATE_FILE_IO', async () => {
+      await promoteCandidateToActive(getDb(), p10.id, p10.owner_token as string, p10.attempt, failingPaths);
+    }, 'CANDIDATE_FILE_IO');
+    ok(a10.reloadCalls === reloadsBefore10, 'R2-10 promote 失败后零 reload（不继续 activation）');
+    ok(getPublicationRow(getDb(), p10.id).status === 'file_durable', 'R2-10 publication 保持 file_durable（不 activation）');
+    failRow(getPublicationRow(getDb(), p10.id), 'TEST_FAIL', 'release R2-10');
+    await a10.stop();
   }
 
   // 清理
