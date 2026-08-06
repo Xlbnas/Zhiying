@@ -159,6 +159,10 @@ run_suite "tts-c1b1-adapter-registry" bash scripts/run-tts-c1b1-adapter-registry
 # 9. TTS-C.1C.1 provider capability snapshot + pure compiler 套件
 run_suite "tts-c1c1-capability" npx tsx scripts/test-tts-c1c1-capability.ts
 
+# 10. TTS-C.1B.2 legacy import + publisher candidate creation 套件
+# （temp DB + temp dirs；真实双进程并发；零真实 provider / 零 /reload / 零 production）
+run_suite "tts-c1b2-publisher-candidate" npx tsx scripts/test-tts-c1b2-publisher-candidate.ts
+
 echo "QUALITY_GATE_RESULT=PASS"
 echo "QUALITY_GATE_SHA=$GATE_SHA"
 echo "QUALITY_GATE_TOTAL_SUITES=$((PASS_COUNT))"
