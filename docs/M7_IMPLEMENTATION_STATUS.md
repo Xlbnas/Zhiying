@@ -9,7 +9,7 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-06T16:30Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B FROZEN（独立 Review PASS）**；**TTS-C.0 = FROZEN（独立 Review PASS）**；**TTS-C.1A = FROZEN（R7 Final Proportional Review PASS + Deployment Evidence Review PASS；production runtime 历史 = `37eaac6c8c8969239cab00848f6291454615a912`；POST remains disabled）**；**TTS-C.1B.1 = FROZEN**（Independent Review PASS + R1 blocker-specific Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS，deployment evidence `docs/evidence/tts-c-r17/deployment-c1b1-c1c1.md`）；**TTS-C.1C.1 = FROZEN**（Independent Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS）；**Deployment Evidence Review = PASS**；**TTS-C.1B.2 = FROZEN**（审计链：initial Independent Review FAIL `08be813…` → R1 blocker-specific Review PASS `bcfd29b…` → Integrated exact-SHA Review PASS → production deployment PASS → **Deployment Evidence Review = PASS**；frozen production runtime = `6874f51c717ebab1c282ee29e9301f27627deaf7`；deployment evidence docs SHA = `93cee1d5afec358cd281e97578e9a691dcbd3a7f`）；**TTS-C.1B.3 implemented on work branch `work/tts-c1b3-activation-recovery`（Independent Review FAIL → **TTS-C.1B.3.R1 blocker repair implemented**；pending blocker-specific Review；not merged；not deployed）**；production runtime = `6874f51c717ebab1c282ee29e9301f27627deaf7`；POST remains disabled；TTS-C.1B.3 not started；TTS-C.1C.2 not started；TTS-C.2 not authorized；combined quality gate suite count = 55） |
+| statusUpdatedAt | 2026-08-06T16:30Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B FROZEN（独立 Review PASS）**；**TTS-C.0 = FROZEN（独立 Review PASS）**；**TTS-C.1A = FROZEN（R7 Final Proportional Review PASS + Deployment Evidence Review PASS；production runtime 历史 = `37eaac6c8c8969239cab00848f6291454615a912`；POST remains disabled）**；**TTS-C.1B.1 = FROZEN**（Independent Review PASS + R1 blocker-specific Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS，deployment evidence `docs/evidence/tts-c-r17/deployment-c1b1-c1c1.md`）；**TTS-C.1C.1 = FROZEN**（Independent Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS）；**Deployment Evidence Review = PASS**；**TTS-C.1B.2 = FROZEN**（审计链：initial Independent Review FAIL `08be813…` → R1 blocker-specific Review PASS `bcfd29b…` → Integrated exact-SHA Review PASS → production deployment PASS → **Deployment Evidence Review = PASS**；frozen production runtime = `6874f51c717ebab1c282ee29e9301f27627deaf7`；deployment evidence docs SHA = `93cee1d5afec358cd281e97578e9a691dcbd3a7f`）；**TTS-C.1B.3 implementation in progress on work branch `work/tts-c1b3-activation-recovery`（initial Independent Review = FAIL `570c448…` → TTS-C.1B.3.R1 blocker repair implemented（R1 blocker-specific Review = FAIL）→ **TTS-C.1B.3.R2 blocker repair implemented**（active 文件 mutation 紧邻 fenced renew / indeterminate→failed atomic legacy rollback / pre-promotion（building/candidate_persisted）legacy rollback / exact final parent dir fsync；pending blocker-specific Review；not merged；not deployed）**；production runtime = `6874f51c717ebab1c282ee29e9301f27627deaf7`；POST remains disabled；TTS-C.1C.2 not started；TTS-C.2 not authorized；combined quality gate suite count = 55） |
 | reviewedCodeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（M7.3B final code/runtime；M7.3B deployment evidence docs HEAD 为 `044ac23e2524d53f41d223c37d16619425b21182`；M7.3A frozen code 为 `aa3f814…`） |
 | productionRuntimeSHA | `6874f51c717ebab1c282ee29e9301f27627deaf7`（TTS-C.1B.2 部署后容器镜像实际代码 SHA = deployed exact SHA；§2 SQL SHA `c88f64ac…` 不变 = 零 schema 迁移；**production runtime authority = deployed exact SHA + deployed image/container evidence；origin/m7 may advance independently and is not production runtime authority**；TTS-C.0 freeze 基线与 CI 证据见 §11.4） |
 | productionHostCheckoutSHA | `6874f51c717ebab1c282ee29e9301f27627deaf7`（宿主机 checkout = `ZHIYING_RELEASE_TAG`，与本轮 deployed 镜像代码 SHA 一致；可因 docs/ops commit 高于 runtime） |
@@ -1017,7 +1017,7 @@ M7.3A.2 Review 全部阻断项已修复（第二轮 hardening）。接续复核�
   Deployment evidence 文件本身未修改（`docs/evidence/tts-c-r17/deployment-c1b2.md` 保持
   deployed 时原样）。
 
-### TTS-C.1B.3 implemented on work branch（pending Independent Review；not merged；not deployed）
+### TTS-C.1B.3 initial implementation on work branch（initial Independent Review = FAIL；not merged；not deployed）
 
 - **范围**（frozen §7.3 T3/T4/T5 + §D CC-1…CC-6）：T3 active registry 原子提升 +
   adapter `POST /reload`（内部 client，fixed path 原则，rejected/network_error 严格区分）；
@@ -1054,7 +1054,7 @@ M7.3A.2 Review 全部阻断项已修复（第二轮 hardening）。接续复核�
 - **证据边界**：测试与 gate 在 agentvm 本地执行；无 GitHub Actions run/status；非 GitHub-hosted
   independent CI evidence。
 
-### TTS-C.1B.3.R1 blocker repair（pending blocker-specific Review；not merged；not deployed）
+### TTS-C.1B.3.R1 blocker repair（R1 blocker-specific Review = FAIL；R2 pending；not merged；not deployed）
 
 - **P0-A fenced enterIndeterminate**：`enterIndeterminateFenced`（单 statement：id + status==fromStatus +
   owner_token + attempt + DB_NOW<=lease + indeterminate_from_status IS NULL → indeterminate +
@@ -1090,5 +1090,51 @@ M7.3A.2 Review 全部阻断项已修复（第二轮 hardening）。接续复核�
 - **测试**：`scripts/test-tts-c1b3-activation-recovery.ts` **149 PASS ×2 独立运行**（原 107 +
   R1 新增 42；mock HTTP adapter + 真实双进程 takeover + delayed-mock 竞态 + 故障注入；零 production
   零真实 IndexTTS2）。1B.2 138 PASS ×2 保持绿；combined gate suite **56**。
+- **未执行**：production 一切操作；TTS-C.1C.2；TTS-C.2。production runtime 保持 `6874f51…`；
+  production POST remains disabled。
+
+### TTS-C.1B.3.R2 blocker repair（pending blocker-specific Review；not merged；not deployed）
+
+R1 已关闭的 fenced indeterminate、file_durable uncertainty、adapter error contract、path containment
+全部保留；本轮只修 Independent Review 确认的四个 blocker：
+
+- **P0-1 active 文件 mutation 紧邻前重新 fencing**：任何真正修改文件的操作前紧邻执行
+  `renewPublicationOrThrow(db, publicationId, ownerToken, attempt, '<exact step>')`，覆盖：
+  stable snapshot 新文件写入前 / snapshot existing re-durabilize 前 / candidate→active
+  `atomicWriteFile` 前 / stable→active `atomicWriteRawFile` restore 前。挂起 hook
+  （`beforeActiveWriteHook` / `beforeStableRestoreWriteHook` / `beforeSnapshotWriteHook`，仅测试注入）
+  在最终 renew 之前触发——stale owner 在最终 renew 处失败，renew 与 mutation 之间不再执行任何
+  HTTP/其他文件写入/可阻塞 hook。测试 R2-01（promote 竞态：A 挂起 → lease 过期 + B takeover → A
+  PUBLICATION_LEASE_EXPIRED，active registry bytes 不变、B owner/attempt/lease 不变、无 temp）、
+  R2-02（restore 竞态 → rollback_pending，disk 不被覆盖）、R2-03/03b（snapshot 新写与
+  re-durabilize 竞态 → 不创建/不 fsync snapshot）。
+- **P0-2 indeterminate→failed atomic legacy rollback**：新增 `resolveIndeterminateFailedAndRollbackLegacy`
+  （无 owner；单 BEGIN IMMEDIATE：publication indeterminate→failed（id + status='indeterminate' +
+  indeterminate_from_status='activation_pending' + attempt 精确匹配）→ legacy subject 同事务
+  mapping_pending→mapped_verified（清 pending link/selector；mapping_mode/provenance 保持）；
+  legacy changes!=1 → LEGACY_ROLLBACK_MISMATCH 整事务回滚，publication 保持 indeterminate）。
+  `reconcileIndeterminate()` 在 disk+adapter 均 stable 时改调此 helper，不再直接 UPDATE failed。
+  测试 R2-04（cutover_publish：indeterminate→failed + rollback + 可创建新 publication）、R2-05
+  （cutover_existing：projection published evidence 零改写）、R2-06（人为破坏 pending link →
+  整事务回滚，publication 保持 indeterminate；schema trigger 防篡改使该状态只能以直接 SQL 构造）。
+- **P1-1 building/candidate_persisted legacy rollback**：terminal rollback 拆分两个显式入口——
+  `failPrePromotionPublicationAndRollbackLegacy`/`cancelPrePromotion…`（building/candidate_persisted，
+  active registry 尚未被本 publication 提升，无需 stable restore）与
+  `failPostPromotionPublicationAndRollbackLegacy`/`cancelPostPromotion…`（file_durable/activation_pending，
+  调用方必须已 restoreStableAndConfirm=='confirmed'）；R1 的 `failPublicationAndRollbackLegacy` 保留为
+  post-promotion 兼容入口。测试 R2-07（building legacy failure → terminal + rollback + 可重试）、
+  R2-08（candidate_persisted legacy failure）、R2-09（legacy link 不匹配 → 整事务回滚，publication
+  保持 building）。
+- **P1-2 exact final parent directory fsync**：`durabilizeRawFile` 与 `durabilizeAndVerifyCandidate`
+  的 dir fsync 目标改为 `path.dirname(finalAbs)`（rename 实际发生的目录；lstat 校验 parent 非 symlink
+  且为目录 + O_NOFOLLOW 打开），不再无条件 fsync containment root；candidate 文件为 root 直接子文件，
+  1B.2 行为不变（138 断言保持绿）。测试 R2-10（nested `root/sub/voice-registry.json`：fsync 目标
+  = `root/sub` 而非 `root`（/proc/self/fd 解析实证）；exact parent fsync 注入失败 → restore
+  rollback_pending / promote CANDIDATE_FILE_IO，零 reload 零 activation）。
+- **测试**：`scripts/test-tts-c1b3-activation-recovery.ts` **214 PASS ×2 独立运行**（原 149 +
+  R2 新增 65；R2-01…R2-10 + R2-03b；挂起 hook 竞态 + 直接 SQL 故障构造 + fsync 目标实证；零
+  production 零真实 IndexTTS2）。1B.2 138 PASS ×2 保持绿；1B.1 34 / 1C.1 / m4b 22 /
+  TTS-C.1A（migration 22 / schema 8 / files 17 / path-security 12 / db-time-stale 9 / recovery 24 /
+  recovery-loop 9 / validation-ownership 25 / commit-seal 25）回归全绿；combined gate suite **56**。
 - **未执行**：production 一切操作；TTS-C.1C.2；TTS-C.2。production runtime 保持 `6874f51…`；
   production POST remains disabled。
