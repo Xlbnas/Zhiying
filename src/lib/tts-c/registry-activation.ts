@@ -39,6 +39,19 @@
  *         与 post-promotion（file_durable/activation_pending，须已 restore confirmed）两个入口。
  *   P1-2  dir fsync 目标改为 rename 实际发生的 exact final parent（path.dirname(finalAbs)），
  *         不再无条件 fsync containment root；lstat 校验 parent 非 symlink 且为目录。
+ *
+ * TTS-C.1B.3.R3（API-safety closure，pending final blocker-specific Review）：
+ *   post-promotion failed/cancelled 的唯一公开入口改为 async safe orchestrator
+ *   （terminalPostPromotionPublicationSafely / failPostPromotionPublicationSafely /
+ *   cancelPostPromotionPublicationSafely）：代码强制先 restoreStableAndConfirm == 'confirmed'
+ *   （stable disk restore + reload + registry-status ack），confirmed 后才执行
+ *   owner/attempt/lease-fenced terminal transaction；rollback_pending/unknown 不修改
+ *   publication/legacy、不释放 single-flight。低层同步事务 helper
+ *   terminalPostPromotionAfterRestoreConfirmed 收为模块私有——不再存在仅凭
+ *   db+publicationId+owner+attempt 即可把 file_durable/activation_pending 推进 terminal 的
+ *   公开函数。pre-promotion（building/candidate_persisted）helper 保持公开（无需 restore）。
+ *   afterRestoreConfirmedHook（仅测试注入）位于 restore confirmed 后、terminal 前，用于构造
+ *   takeover 竞态。
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -830,26 +843,94 @@ export function cancelPrePromotionPublicationAndRollbackLegacy(db: Db, options: 
   failOrCancelPublicationAndRollbackLegacyForStatuses(db, {...options, terminalStatus: 'cancelled'}, ['building', 'candidate_persisted']);
 }
 
-/** R2 P1-1：post-promotion 入口（file_durable/activation_pending）——调用方必须已 restore confirmed。 */
-export function failPostPromotionPublicationAndRollbackLegacy(db: Db, options: Omit<TerminalRollbackOptions, 'terminalStatus'>): void {
-  failOrCancelPublicationAndRollbackLegacyForStatuses(db, {...options, terminalStatus: 'failed'}, ['file_durable', 'activation_pending']);
-}
-
-export function cancelPostPromotionPublicationAndRollbackLegacy(db: Db, options: Omit<TerminalRollbackOptions, 'terminalStatus'>): void {
-  failOrCancelPublicationAndRollbackLegacyForStatuses(db, {...options, terminalStatus: 'cancelled'}, ['file_durable', 'activation_pending']);
-}
-
-/** 兼容入口（R1 语义 = post-promotion）。 */
-export function failOrCancelPublicationAndRollbackLegacy(db: Db, options: TerminalRollbackOptions): void {
+/**
+ * R3 API-safety closure：post-promotion 低层 terminal 事务——模块私有。
+ * 只允许被本模块的 safe orchestrator（terminalPostPromotionPublicationSafely）在
+ * restoreStableAndConfirm == 'confirmed' 之后调用。公开导出意味着调用方可以绕过
+ * stable disk restore + adapter reload acknowledgment，直接以 db+owner+attempt
+ * 把 file_durable/activation_pending 推进 failed/cancelled——已从模块 API 移除。
+ */
+function terminalPostPromotionAfterRestoreConfirmed(db: Db, options: TerminalRollbackOptions): void {
   failOrCancelPublicationAndRollbackLegacyForStatuses(db, options, ['file_durable', 'activation_pending']);
 }
 
-export function failPublicationAndRollbackLegacy(db: Db, options: Omit<TerminalRollbackOptions, 'terminalStatus'>): void {
-  failPostPromotionPublicationAndRollbackLegacy(db, options);
+// ── R3：post-promotion safe terminal orchestrator（代码强制 restore + reload ack 前置） ──
+
+export type SafeTerminalOutcome =
+  | {kind: 'failed'}
+  | {kind: 'cancelled'}
+  | {kind: 'rollback_pending'}
+  | {kind: 'registry_state_unknown'};
+
+export interface SafePostPromotionTerminalOptions {
+  publicationId: string;
+  ownerToken: string;
+  attempt: number;
+  terminalStatus: 'failed' | 'cancelled';
+  errorCode: string;
+  errorMessage: string;
+  paths: ActiveRegistryPaths;
+  adapter: AdapterClient;
+  /**
+   * 测试注入（仅测试）：restore confirmed 之后、最终 terminal transaction 之前挂起——
+   * 用于构造 restore/terminal 之间的 takeover 竞态（R3-04）。生产路径不设置。
+   */
+  afterRestoreConfirmedHook?: () => Promise<void> | void;
 }
 
-export function cancelPublicationAndRollbackLegacy(db: Db, options: Omit<TerminalRollbackOptions, 'terminalStatus'>): void {
-  cancelPostPromotionPublicationAndRollbackLegacy(db, options);
+/**
+ * post-promotion failed/cancelled 的唯一公开入口（async）：
+ *   1. 读取 publication，确认 status ∈ {file_durable, activation_pending}；
+ *   2. restoreStableAndConfirm(...)（restore disk → reload → registry-status ack）；
+ *   3. 仅当 confirmed：owner/attempt/lease-fenced terminal transaction + legacy rollback；
+ *   4. rollback_pending / unknown：不修改 publication、不修改 legacy、不释放 global single-flight。
+ * restore ack 之后、terminal 之前发生 takeover → 最终 fence 不命中 → PUBLICATION_NOT_OWNER
+ * 抛出（调用方按失败处理；disk/adapter 已恢复 stable 是允许的安全结果）。
+ * 不新增 publication DB 状态。
+ */
+export async function terminalPostPromotionPublicationSafely(
+  db: Db,
+  options: SafePostPromotionTerminalOptions,
+): Promise<SafeTerminalOutcome> {
+  const pub = getPublicationRow(db, options.publicationId);
+  if (pub.status !== 'file_durable' && pub.status !== 'activation_pending') {
+    throw new RegistryContractError(PUBLICATION_INVALID_STATE, `publication ${options.publicationId} 状态 ${pub.status} 不可 post-promotion terminal`);
+  }
+  const restore = await restoreStableAndConfirm(
+    db,
+    options.publicationId,
+    options.ownerToken,
+    options.attempt,
+    options.paths,
+    options.adapter,
+  );
+  if (restore === 'rollback_pending') return {kind: 'rollback_pending'};
+  if (restore === 'unknown') return {kind: 'registry_state_unknown'};
+  // restore === 'confirmed'
+  if (options.afterRestoreConfirmedHook) await options.afterRestoreConfirmedHook();
+  terminalPostPromotionAfterRestoreConfirmed(db, {
+    publicationId: options.publicationId,
+    ownerToken: options.ownerToken,
+    attempt: options.attempt,
+    terminalStatus: options.terminalStatus,
+    errorCode: options.errorCode,
+    errorMessage: options.errorMessage,
+  });
+  return {kind: options.terminalStatus === 'failed' ? 'failed' : 'cancelled'};
+}
+
+export function failPostPromotionPublicationSafely(
+  db: Db,
+  options: Omit<SafePostPromotionTerminalOptions, 'terminalStatus'>,
+): Promise<SafeTerminalOutcome> {
+  return terminalPostPromotionPublicationSafely(db, {...options, terminalStatus: 'failed'});
+}
+
+export function cancelPostPromotionPublicationSafely(
+  db: Db,
+  options: Omit<SafePostPromotionTerminalOptions, 'terminalStatus'>,
+): Promise<SafeTerminalOutcome> {
+  return terminalPostPromotionPublicationSafely(db, {...options, terminalStatus: 'cancelled'});
 }
 
 // ── R2 P0-2：indeterminate → failed 的唯一自动入口（无 owner；atomic legacy rollback） ──
