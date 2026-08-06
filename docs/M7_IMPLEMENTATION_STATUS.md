@@ -9,7 +9,7 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-06T13:00Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B FROZEN（独立 Review PASS）**；**TTS-C.0 = FROZEN（独立 Review PASS）**；**TTS-C.1A = FROZEN（R7 Final Proportional Review PASS + Deployment Evidence Review PASS；production runtime 历史 = `37eaac6c8c8969239cab00848f6291454615a912`；POST remains disabled）**；**TTS-C.1B.1 = FROZEN**（Independent Review PASS + R1 blocker-specific Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS，deployment evidence `docs/evidence/tts-c-r17/deployment-c1b1-c1c1.md`）；**TTS-C.1C.1 = FROZEN**（Independent Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS）；**Deployment Evidence Review = PASS**；**TTS-C.1B.2 = FROZEN**（审计链：initial Independent Review FAIL `08be813…` → R1 blocker-specific Review PASS `bcfd29b…` → Integrated exact-SHA Review PASS → production deployment PASS → **Deployment Evidence Review = PASS**；frozen production runtime = `6874f51c717ebab1c282ee29e9301f27627deaf7`；deployment evidence docs SHA = `93cee1d5afec358cd281e97578e9a691dcbd3a7f`）；production runtime = `6874f51c717ebab1c282ee29e9301f27627deaf7`；POST remains disabled；TTS-C.1B.3 not started；TTS-C.1C.2 not started；TTS-C.2 not authorized；combined quality gate suite count = 55） |
+| statusUpdatedAt | 2026-08-06T15:00Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B FROZEN（独立 Review PASS）**；**TTS-C.0 = FROZEN（独立 Review PASS）**；**TTS-C.1A = FROZEN（R7 Final Proportional Review PASS + Deployment Evidence Review PASS；production runtime 历史 = `37eaac6c8c8969239cab00848f6291454615a912`；POST remains disabled）**；**TTS-C.1B.1 = FROZEN**（Independent Review PASS + R1 blocker-specific Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS，deployment evidence `docs/evidence/tts-c-r17/deployment-c1b1-c1c1.md`）；**TTS-C.1C.1 = FROZEN**（Independent Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS）；**Deployment Evidence Review = PASS**；**TTS-C.1B.2 = FROZEN**（审计链：initial Independent Review FAIL `08be813…` → R1 blocker-specific Review PASS `bcfd29b…` → Integrated exact-SHA Review PASS → production deployment PASS → **Deployment Evidence Review = PASS**；frozen production runtime = `6874f51c717ebab1c282ee29e9301f27627deaf7`；deployment evidence docs SHA = `93cee1d5afec358cd281e97578e9a691dcbd3a7f`）；**TTS-C.1B.3 implemented on work branch `work/tts-c1b3-activation-recovery`（pending Independent Review；not merged；not deployed）**；production runtime = `6874f51c717ebab1c282ee29e9301f27627deaf7`；POST remains disabled；TTS-C.1B.3 not started；TTS-C.1C.2 not started；TTS-C.2 not authorized；combined quality gate suite count = 55） |
 | reviewedCodeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（M7.3B final code/runtime；M7.3B deployment evidence docs HEAD 为 `044ac23e2524d53f41d223c37d16619425b21182`；M7.3A frozen code 为 `aa3f814…`） |
 | productionRuntimeSHA | `6874f51c717ebab1c282ee29e9301f27627deaf7`（TTS-C.1B.2 部署后容器镜像实际代码 SHA = deployed exact SHA；§2 SQL SHA `c88f64ac…` 不变 = 零 schema 迁移；**production runtime authority = deployed exact SHA + deployed image/container evidence；origin/m7 may advance independently and is not production runtime authority**；TTS-C.0 freeze 基线与 CI 证据见 §11.4） |
 | productionHostCheckoutSHA | `6874f51c717ebab1c282ee29e9301f27627deaf7`（宿主机 checkout = `ZHIYING_RELEASE_TAG`，与本轮 deployed 镜像代码 SHA 一致；可因 docs/ops commit 高于 runtime） |
@@ -1016,3 +1016,40 @@ M7.3A.2 Review 全部阻断项已修复（第二轮 hardening）。接续复核�
   registry-status 不变证明（宿主 docker inspect 模板不支持 `.State.RestartCount` 字段）。
   Deployment evidence 文件本身未修改（`docs/evidence/tts-c-r17/deployment-c1b2.md` 保持
   deployed 时原样）。
+
+### TTS-C.1B.3 implemented on work branch（pending Independent Review；not merged；not deployed）
+
+- **范围**（frozen §7.3 T3/T4/T5 + §D CC-1…CC-6）：T3 active registry 原子提升 +
+  adapter `POST /reload`（内部 client，fixed path 原则，rejected/network_error 严格区分）；
+  T4 `markActivationPending` + `GET /registry-status` acknowledgment（唯一观察面；必须同时匹配
+  ready/sha/generation/publisherSchemaVersion/schemaVersion，只匹配 SHA 不足）；
+  T5 唯一 atomic activation command（`voice_registry_publication_activations` INSERT，
+  normal_owner_finalize / indeterminate_reconciliation 双 mode；应用层禁止直接 UPDATE
+  projection/legacy/publication 到 active）；lease takeover CAS（过期 attempt+1 换主；
+  indeterminate 不 takeover）；crash reconciliation（CC-1…CC-6 按 frozen journal 状态逐状态推进）；
+  `RegistryRecoveryController`（周期 sweep / 不重入 / shutdown settle / 单条隔离）+ worker wiring
+  （配置 contract：`ZHIYING_ACTIVE_REGISTRY_PATH/ROOT`、`ZHIYING_LEGACY_VOICE_ROOT_DIR`、
+  `ZHIYING_EMIT_VOICE_ROOT_PATH`、`ADAPTER_BASE_URL`；未配置 → disabled 零副作用；本轮不改
+  production compose/env）。1B.2 `publishRegistryCandidate` 增加向后兼容可选 `handle`（winner
+  续跑；无 handle 行为不变，138 断言保持绿）。
+- **真实代码入口**：`src/lib/tts-c/adapter-client.ts`（reload/registry-status client + 严格 JSON
+  shape 校验）；`src/lib/tts-c/registry-activation.ts`（promote/disk triage/markActivationPending/
+  classifyAdapterStatus/activation command/reconciliation/takeover/编排/recovery）；
+  `src/lib/tts-c/registry-recovery-controller.ts`；`src/worker/index.ts`（wiring）。
+- **测试**：`scripts/test-tts-c1b3-activation-recovery.ts` **109 PASS ×2 独立运行**（mock HTTP
+  adapter + 临时 SQLite/目录 + 真实双进程 takeover + 故障注入；零 production 零真实 IndexTTS2）：
+  A T3 reload 10 场景（promotion/幂等/unknown/篡改 fail-closed/明确拒绝 LKG/timeout→indeterminate/
+  stale owner 零副作用/symlink root/root 不可写/candidate immutable）；B T4 acknowledgment 8 场景
+  （完整 identity/部分不匹配×2/retryable/unknown/malformed/poll 前 renew 零 poll/evidence
+  write-once）；C T5 atomic activation（四 subject 全链路 + wrong owner/attempt/observed + direct
+  UPDATE 拒绝 + duplicate 拒绝）；D takeover（未过期/过期/双进程唯一 winner/attempt+1/旧 owner 全
+  失效/零副作用）；E crash matrix（file_durable crash→recover→active、active terminal 无动作、
+  candidate_persisted 文件缺失→重建→active）；F indeterminate（evidence seal/reconciliation 成功/
+  stable→failed/unknown 保持/非 activation_pending 来源不得 resolve/evidence exact/重复拒绝）；
+  G controller（周期/不重入/shutdown settle/单条隔离/terminal 无动作/无泄漏）。combined gate
+  suite **56**。
+- **未执行**：`POST /reload`（production）、activation（production）、recovery（production）、
+  legacy import / publisher（production）、TTS-C.1C.2、TTS-C.2、production 部署/拓扑/env 修改。
+  production runtime 保持 `6874f51…`；production POST remains disabled。
+- **证据边界**：测试与 gate 在 agentvm 本地执行；无 GitHub Actions run/status；非 GitHub-hosted
+  independent CI evidence。

@@ -11,8 +11,9 @@
 > closed → merged to m7（fast-forward）→ Integrated exact-SHA Review = PASS → production
 > deployment PASS（§15.17）→ **Deployment Evidence Review = PASS（2026-08-06）**；frozen
 > production runtime = `6874f51c717ebab1c282ee29e9301f27627deaf7`；测试 138 PASS；combined gate
-> suite 55）；**TTS-C.1B.3 authorized（not yet implemented）**；TTS-C.1C.2 not started；
-> TTS-C.2 not authorized；**Deployment Evidence Review = PASS**。
+> suite 55）；**TTS-C.1B.3 implemented on work branch `work/tts-c1b3-activation-recovery`
+> （pending Independent Review；not merged；not deployed；测试 109 PASS；combined gate suite 56）**；
+> TTS-C.1C.2 not started；TTS-C.2 not authorized；**Deployment Evidence Review = PASS**。
 > 本文件是 1B/1C 的唯一实施计划入口，基于 frozen contract（`docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md`
 > R13）与当前代码只读审计写成。历史基线：上一 production runtime SHA
 > `37eaac6c8c8969239cab00848f6291454615a912`（runtime code 内容
@@ -543,7 +544,7 @@ evidence、大量理论 corner case、production 真实 IndexTTS2 调用。
 |---|---|---|
 | **TTS-C.1B.1** | adapter registry/status/reload contract（§E：POST /reload + LKG + /health 扩展 + registry-status ack 面 + registry JSON 1.0/1.1 双 schema）+ mock integration tests；**不触碰 production active registry**。**FROZEN（R1 blocker-specific Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS；已部署）** | 无（可与 1C.1 并行） |
 | **TTS-C.1B.2** | legacy import（§F）+ publisher candidate creation（§C 步骤 1-3：T1 claim、candidate 构建、T2 persist 到 file_durable）+ publication 状态推进；**不 reload adapter**。**= FROZEN（审计链：initial Independent Review FAIL `08be813…` → R1 blocker-specific Review PASS `bcfd29b…` → Integrated exact-SHA Review PASS → production deployment PASS → Deployment Evidence Review PASS；测试 138 PASS；combined gate suite 55）** | 依赖 1B.1 contract（registry JSON schema 与 ack 字段冻结） |
-| **TTS-C.1B.3** | adapter reload 接入（§C 步骤 4）+ activation acknowledgment（步骤 5）+ atomic activation（步骤 6）+ recovery/reconciler（§D） | 依赖 1B.2 |
+| **TTS-C.1B.3** | adapter reload 接入（§C 步骤 4）+ activation acknowledgment（步骤 5）+ atomic activation（步骤 6）+ recovery/reconciler（§D）。**implemented on work branch `work/tts-c1b3-activation-recovery`（pending Independent Review；not merged；not deployed；测试 109 PASS；combined gate suite 56）** | 依赖 1B.2 |
 | **TTS-C.1C.1** | capability snapshot（§G）+ pure compiler（§H）+ tests（§J 1C 七项）——**FROZEN（Independent Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS；已部署）** | 无（可与 1B.1 并行） |
 | **TTS-C.1C.2** | 编译结果接入未来 C.2 payload builder（provenance 字段交接，§I）；**当前阶段不调用真实 synthesis** | 等待 C.2 authorized |
 
