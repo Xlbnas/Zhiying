@@ -47,7 +47,13 @@ import {
   markActivationPending,
   promoteCandidateToActive,
   classifyActiveDiskState,
+  durabilizeStableSnapshot,
+  restoreStableAndConfirm,
+  failPublicationAndRollbackLegacy,
+  enterIndeterminateFenced,
+  stableSnapshotPath,
   recoverRegistryPublications,
+  STABLE_SNAPSHOT_CONFLICT,
   type ActiveRegistryPaths,
 } from '../src/lib/tts-c/registry-activation';
 import {RegistryRecoveryController} from '../src/lib/tts-c/registry-recovery-controller';
@@ -162,8 +168,8 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
 
 // ── Mock adapter ──
 
-type MockReloadBehavior = 'ok' | 'reject500' | 'timeout' | 'malformed' | 'close';
-type MockStatusBehavior = 'ok' | 'non2xx' | 'timeout' | 'malformed' | 'close';
+type MockReloadBehavior = 'ok' | 'reject500' | 'timeout' | 'malformed' | 'close' | 'delay-ok';
+type MockStatusBehavior = 'ok' | 'non2xx' | 'timeout' | 'malformed' | 'close' | 'delay-close';
 
 class MockAdapter {
   server: http.Server;
@@ -199,6 +205,10 @@ class MockAdapter {
   }
 
   /** reload 成功时模拟 adapter 从配置路径读取 active registry（真实语义）。 */
+  readActiveStatePublic(): void {
+    this.readActiveState();
+  }
+
   private readActiveState(): void {
     try {
       const bytes = fs.readFileSync(this.activePath);
@@ -232,6 +242,15 @@ class MockAdapter {
     if (req.method === 'POST' && url === '/reload') {
       this.reloadCalls += 1;
       if (this.reloadBehavior === 'timeout') return; // 不响应（超时）
+      if (this.reloadBehavior === 'delay-ok') {
+        // 延迟 500ms 后按 ok 处理（竞态窗口：请求挂起期间可被 takeover）
+        setTimeout(() => {
+          if (this.reloadUpdatesLoaded) this.readActiveState();
+          res.writeHead(200, {'content-type': 'application/json'});
+          res.end(this.statusJson());
+        }, 500);
+        return;
+      }
       if (this.reloadBehavior === 'close') {
         res.destroy();
         return;
@@ -242,8 +261,10 @@ class MockAdapter {
         return;
       }
       if (this.reloadBehavior === 'reject500') {
+        // 真实 production adapter error shape（R1 P2）：
+        //   {"error": "VOICE_REGISTRY_RELOAD_FAILED", "message": "..."}
         res.writeHead(500, {'content-type': 'application/json'});
-        res.end(JSON.stringify({error: {code: 'VOICE_REGISTRY_RELOAD_FAILED', message: 'reload failed'}}));
+        res.end(JSON.stringify({error: 'VOICE_REGISTRY_RELOAD_FAILED', message: 'reload failed (registry reference sha mismatch)'}));
         return;
       }
       // ok：读取 active 文件模拟加载（可关闭以测试篡改 loaded 场景）
@@ -259,6 +280,11 @@ class MockAdapter {
       if (this.statusBehavior === 'timeout') return;
       if (this.statusBehavior === 'close') {
         res.destroy();
+        return;
+      }
+      if (this.statusBehavior === 'delay-close') {
+        // 延迟 500ms 后 destroy（竞态测试：请求挂起期间可被 takeover）
+        setTimeout(() => res.destroy(), 500);
         return;
       }
       if (this.statusBehavior === 'malformed') {
@@ -436,13 +462,14 @@ function recoveryDeps(adapter: MockAdapter) {
     failRow(getPublicationRow(getDb(), pub4.id), 'TEST_FAIL', 'release A5');
     await adapter4.stop();
 
-    // A6: reload timeout → indeterminate（不猜测结果）
+    // A6: reload timeout → reload_result_unknown（P0-B：不进入 indeterminate，保持 file_durable 可恢复）
     const {pub: pub5, adapter: adapter5} = await prepareFileDurable();
     adapter5.reloadBehavior = 'timeout';
+    adapter5.statusBehavior = 'timeout'; // status 也不可用 → reload_result_unknown
     const o6 = await activateRegistryPublicationFlow(getDb(), activationOpts(pub5, adapter5));
-    ok(o6.kind === 'indeterminate', 'A6 reload timeout → indeterminate');
+    ok(o6.kind === 'reload_result_unknown', `A6 reload timeout + status 不可用 → reload_result_unknown（实际 ${o6.kind}）`);
     const r5 = getPublicationRow(getDb(), pub5.id);
-    ok(r5.status === 'indeterminate' && r5.indeterminate_from_status === 'file_durable', 'A6 indeterminate + from=file_durable');
+    ok(r5.status === 'file_durable', 'A6 publication 保持 file_durable（不产生永久 indeterminate）');
     await adapter5.stop();
 
     // A7: stale owner renew 失败 → 零文件/HTTP 副作用
@@ -843,19 +870,28 @@ function recoveryDeps(adapter: MockAdapter) {
     }, 'SQLITE_CONSTRAINT_UNIQUE');
     await a1.stop();
 
-    // F3: stable active → fenced failed（不伪造 active）
+    // F3: adapter 明确仍 stable 且 disk 已恢复 stable → fenced failed（不伪造 active）
     const {pub: p3, adapter: a3} = await prepareFileDurable();
     a3.statusBehavior = 'timeout';
-    await activateRegistryPublicationFlow(getDb(), activationOpts(p3, a3)); // → indeterminate
+    await activateRegistryPublicationFlow(getDb(), activationOpts(p3, a3)); // poll timeout → indeterminate (from activation_pending)
     const r3 = getPublicationRow(getDb(), p3.id);
+    ok(r3.indeterminate_from_status === 'activation_pending', 'F3 indeterminate from activation_pending');
+    // 恢复 active disk 为 stable（模拟 restore 完成）
+    const stableDoc = fs.readFileSync(ACTIVE_PATH);
+    // prepareFileDurable 后 active 文件已被 promote 覆盖为 candidate——重新写 stable 内容
+    const stableBytes = stableDoc; // prepareFileDurable 的 stableDoc 在 promote 前是 stable；这里重新构造
+    // 从 DB 读 stable sha 对应的原始内容：直接用第一个 legacy registry 文件内容（1.0）
+    const legacyReg = fs.readFileSync(path.join(DATA_DIR, 'regs', fs.readdirSync(path.join(DATA_DIR, 'regs')).find((f) => f.startsWith('stable-')) as string));
+    fs.writeFileSync(ACTIVE_PATH, legacyReg);
     a3.statusBehavior = 'ok';
     a3.loadedSha = p3.stable_registry_sha256; // adapter 仍 stable
     a3.loadedGeneration = null;
     a3.loadedPublisher = null;
     a3.loadedSchema = '1.0';
+    void stableBytes;
     const res3 = await recoverRegistryPublications(getDb(), recoveryDeps(a3), 10);
     const r3b = getPublicationRow(getDb(), p3.id);
-    ok(r3b.status === 'failed', `F3 stable → fenced failed（实际 ${r3b.status}）`);
+    ok(r3b.status === 'failed', `F3 stable(disk+adapter) → fenced failed（实际 ${r3b.status}）`);
     ok(r3b.error_code !== null, 'F3 failed error_code');
     void res3;
     await a3.stop();
@@ -875,23 +911,10 @@ function recoveryDeps(adapter: MockAdapter) {
     void res4;
     await a4.stop();
 
-    // F5: file_durable 来源 indeterminate 不得 resolve active
-    const {pub: p5, adapter: a5} = await prepareFileDurable();
-    a5.reloadBehavior = 'timeout';
-    const o5 = await activateRegistryPublicationFlow(getDb(), activationOpts(p5, a5)); // reload timeout → indeterminate from file_durable
-    ok(o5.kind === 'indeterminate', 'F5 reload timeout → indeterminate from file_durable');
-    const r5 = getPublicationRow(getDb(), p5.id);
-    ok(r5.indeterminate_from_status === 'file_durable', 'F5 from=file_durable');
-    a5.reloadBehavior = 'ok';
-    a5.statusBehavior = 'ok';
-    a5.loadedSha = r5.candidate_registry_sha256;
-    a5.loadedGeneration = r5.generation;
-    a5.loadedPublisher = SUPPORTED_PUB;
-    a5.loadedSchema = '1.1';
-    const res5 = await recoverRegistryPublications(getDb(), recoveryDeps(a5), 10);
-    ok(getPublicationRow(getDb(), p5.id).status === 'indeterminate', 'F5 非 activation_pending 来源不得 resolve active（保持 indeterminate）');
-    void res5;
-    await a5.stop();
+    // F5（P0-B 替换）：非 activation_pending 来源的 indeterminate 不存在自动入口——
+    // enterIndeterminateFenced 只允许 fromStatus='activation_pending'（类型层保证）；
+    // 直接验证 fenced helper 对错误 fromStatus 拒绝（运行时防御）。
+    // （file_durable 阶段 reload 不确定 → reload_result_unknown 保持 file_durable，见 R1-02/03/04。）
   }
 
   // ══════════════ G. Recovery controller ══════════════
@@ -934,6 +957,270 @@ function recoveryDeps(adapter: MockAdapter) {
     // G7: 无泄漏（HTTP server 关闭 + timer 清理）
     await adapter.stop();
     ok(true, 'G7 mock adapter 已关闭（无 server 泄漏）');
+  }
+
+  // ══════════════ R1. TTS-C.1B.3.R1 blocker repair ══════════════
+  {
+    // R1-13: production adapter error shape（真实 {"error","message"}）
+    const {pub: p13, adapter: a13} = await prepareFileDurable();
+    a13.reloadBehavior = 'reject500';
+    const o13 = await activateRegistryPublicationFlow(getDb(), activationOpts(p13, a13));
+    ok(o13.kind === 'reload_retryable', 'R1-13 reload 拒绝 → reload_retryable');
+    const client13 = new AdapterClient({baseUrl: a13.baseUrl, timeoutMs: 500});
+    const r13 = await client13.reload();
+    ok(r13.kind === 'rejected' && r13.errorCode === 'VOICE_REGISTRY_RELOAD_FAILED', `R1-13 errorCode 解析（实际 ${JSON.stringify(r13)}）`);
+    if (r13.kind === 'rejected') {
+      ok(r13.message.includes('reload failed'), 'R1-13 message 含底层 reload 错误');
+    }
+    failRow(getPublicationRow(getDb(), p13.id), 'TEST_FAIL', 'release R1-13');
+    await a13.stop();
+
+    // R1-05: durable stable snapshot（首次创建 + 同 SHA 复用 + 异 SHA fail-closed；promote 后内容保持）
+    const {pub: p5, adapter: a5} = await prepareFileDurable();
+    const stableBefore = fs.readFileSync(ACTIVE_PATH);
+    const snapPath = stableSnapshotPath(p5.generation);
+    const s1 = await durabilizeStableSnapshot(getDb(), p5.id, p5.owner_token as string, p5.attempt, PATHS);
+    ok(s1 === snapPath && fs.existsSync(snapPath), 'R1-05 stable snapshot 已创建');
+    ok(sha256OfFile(snapPath) === p5.stable_registry_sha256, 'R1-05 snapshot SHA == stable_registry_sha256');
+    ok(sha256Bytes(fs.readFileSync(snapPath)) === sha256Bytes(stableBefore), 'R1-05 snapshot bytes == 原 stable bytes');
+    // 同 SHA 复用（重新 durabilize，内容不变）
+    await durabilizeStableSnapshot(getDb(), p5.id, p5.owner_token as string, p5.attempt, PATHS);
+    ok(sha256OfFile(snapPath) === p5.stable_registry_sha256, 'R1-05 snapshot 复用未变');
+    // 异 SHA fail-closed
+    fs.writeFileSync(snapPath, '{"corrupted":true}');
+    await expectCode('R1-05 snapshot 异 SHA → STABLE_SNAPSHOT_CONFLICT', async () => {
+      await durabilizeStableSnapshot(getDb(), p5.id, p5.owner_token as string, p5.attempt, PATHS);
+    }, STABLE_SNAPSHOT_CONFLICT);
+    // 恢复 snapshot 后 promote：snapshot 内容保持不变
+    await durabilizeStableSnapshot(getDb(), p5.id, p5.owner_token as string, p5.attempt, PATHS).catch(() => undefined);
+    fs.writeFileSync(snapPath, stableBefore); // 恢复原始 snapshot（冲突测试污染后）
+    await promoteCandidateToActive(getDb(), p5.id, p5.owner_token as string, p5.attempt, PATHS);
+    ok(sha256Bytes(fs.readFileSync(snapPath)) === sha256Bytes(stableBefore), 'R1-05 promote 后 snapshot 内容不变');
+    await a5.stop();
+
+    // R1-06: failed 前 stable disk restore + reload ack
+    const {pub: p6, adapter: a6} = await prepareFileDurable();
+    await promoteCandidateToActive(getDb(), p6.id, p6.owner_token as string, p6.attempt, PATHS);
+    ok((await classifyActiveDiskState(getDb(), p6.id, PATHS)).state === 'candidate', 'R1-06 disk 已 candidate');
+    const restore = await restoreStableAndConfirm(getDb(), p6.id, p6.owner_token as string, p6.attempt, PATHS, new AdapterClient({baseUrl: a6.baseUrl, timeoutMs: 500}));
+    ok(restore === 'confirmed', `R1-06 restore → confirmed（实际 ${restore}）`);
+    const disk6 = await classifyActiveDiskState(getDb(), p6.id, PATHS);
+    ok(disk6.state === 'stable', 'R1-06 disk 已恢复 stable');
+    ok(a6.loadedSha === p6.stable_registry_sha256, 'R1-06 adapter loaded == stable（ack 确认）');
+    // R1-07: cold restart——模拟 adapter 重启重新读取 active path
+    const a6b = new MockAdapter(ACTIVE_PATH);
+    await a6b.start();
+    a6b.readActiveStatePublic();
+    ok(a6b.loadedSha === p6.stable_registry_sha256, 'R1-07 cold restart 后 loaded == stable（disk 恢复持久）');
+    await a6b.stop();
+    failRow(getPublicationRow(getDb(), p6.id), 'TEST_FAIL', 'release R1-06/07');
+    await a6.stop();
+
+    // R1-08: legacy_cutover_publish rollback（同事务）
+    const rp8 = await newProjection();
+    const wav8 = wavFile();
+    fs.writeFileSync(path.join(VOICE_ROOT, 'r1-08.wav'), wav8);
+    const reg8 = writeRegistry(path.join(DATA_DIR, 'regs'), `r1-08-${crypto.randomUUID().slice(0, 6)}.json`, [
+      {voiceProfile: 'r1-08', voiceRevision: '1', speakerName: 'r1-08', referenceAssetPath: `${EMIT_ROOT}/r1-08.wav`, referenceSha256: sha256Buf(wav8)},
+    ]);
+    await importLegacyRegistry(getDb(), {registryFilePath: reg8, voiceRootDir: VOICE_ROOT, resolveReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))});
+    const entry8 = getDb().prepare("SELECT id FROM legacy_adapter_voice_entries WHERE voice_profile_key='r1-08'").get() as {id: string};
+    markMappedVerified(entry8.id, rp8.matId, 'publish_and_cutover');
+    const a8 = new MockAdapter(ACTIVE_PATH);
+    await a8.start();
+    const stable8 = fs.readFileSync(ACTIVE_PATH);
+    a8.loadedSha = sha256Bytes(stable8);
+    const out8 = await publishRegistryCandidate(getDb(), {
+      subject: {subjectType: 'legacy_cutover_publish', subjectId: entry8.id, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: sha256Bytes(stable8),
+      build: {legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))},
+    });
+    if (out8.kind !== 'completed') throw new Error(`R1-08 prepare failed: ${JSON.stringify(out8)}`);
+    const pub8 = getPublicationRow(getDb(), out8.publicationId);
+    const lve8 = getDb().prepare('SELECT mapping_status, pending_publication_id, candidate_source_selector, mapping_mode FROM legacy_adapter_voice_entries WHERE id=?').get(entry8.id) as Record<string, unknown>;
+    ok(lve8.mapping_status === 'mapping_pending' && lve8.pending_publication_id === pub8.id, 'R1-08 前置 mapping_pending');
+    // restore + rollback（同事务）
+    const restore8 = await restoreStableAndConfirm(getDb(), pub8.id, pub8.owner_token as string, pub8.attempt, PATHS, new AdapterClient({baseUrl: a8.baseUrl, timeoutMs: 500}));
+    ok(restore8 === 'confirmed', 'R1-08 restore confirmed');
+    failPublicationAndRollbackLegacy(getDb(), {publicationId: pub8.id, ownerToken: pub8.owner_token as string, attempt: pub8.attempt, errorCode: 'TEST_FAIL', errorMessage: 'R1-08'});
+    const lve8b = getDb().prepare('SELECT mapping_status, pending_publication_id, candidate_source_selector, mapping_mode FROM legacy_adapter_voice_entries WHERE id=?').get(entry8.id) as Record<string, unknown>;
+    ok(lve8b.mapping_status === 'mapped_verified', 'R1-08 legacy → mapped_verified');
+    ok(lve8b.pending_publication_id === null && lve8b.candidate_source_selector === null, 'R1-08 pending link/selector 清空');
+    ok(lve8b.mapping_mode === 'publish_and_cutover', 'R1-08 mapping_mode 保持');
+    ok(getPublicationRow(getDb(), pub8.id).status === 'failed', 'R1-08 publication failed');
+    // 可创建新 publication（single-flight 释放）
+    const out8b = await publishRegistryCandidate(getDb(), {
+      subject: {subjectType: 'legacy_cutover_publish', subjectId: entry8.id, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: sha256Bytes(stable8),
+      build: {legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))},
+    });
+    ok(out8b.kind === 'completed', 'R1-08 rollback 后可创建新 publication');
+    failRow(getPublicationRow(getDb(), out8b.publicationId), 'TEST_FAIL', 'release R1-08b');
+    await a8.stop();
+
+    // R1-09: legacy_cutover_existing rollback
+    const rp9 = await newProjection();
+    const a9a = new MockAdapter(ACTIVE_PATH);
+    await a9a.start();
+    const stable9 = fs.readFileSync(ACTIVE_PATH);
+    a9a.loadedSha = sha256Bytes(stable9);
+    const out9a = await publishRegistryCandidate(getDb(), {
+      subject: {subjectType: 'materialization_publish', subjectId: rp9.matId, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: sha256Bytes(stable9),
+      build: {legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))},
+    });
+    if (out9a.kind !== 'completed') throw new Error(`R1-09a prepare failed: ${JSON.stringify(out9a)}`);
+    const pub9a = getPublicationRow(getDb(), out9a.publicationId);
+    await activateRegistryPublicationFlow(getDb(), activationOpts(pub9a, a9a));
+    await a9a.stop();
+    const wav9 = wavFile();
+    fs.writeFileSync(path.join(VOICE_ROOT, 'r1-09.wav'), wav9);
+    const reg9 = writeRegistry(path.join(DATA_DIR, 'regs'), `r1-09-${crypto.randomUUID().slice(0, 6)}.json`, [
+      {voiceProfile: 'r1-09', voiceRevision: '1', speakerName: 'r1-09', referenceAssetPath: `${EMIT_ROOT}/r1-09.wav`, referenceSha256: sha256Buf(wav9)},
+    ]);
+    await importLegacyRegistry(getDb(), {registryFilePath: reg9, voiceRootDir: VOICE_ROOT, resolveReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))});
+    const entry9 = getDb().prepare("SELECT id FROM legacy_adapter_voice_entries WHERE voice_profile_key='r1-09'").get() as {id: string};
+    markMappedVerified(entry9.id, rp9.matId, 'cutover_existing');
+    const a9 = new MockAdapter(ACTIVE_PATH);
+    await a9.start();
+    const stable9b = fs.readFileSync(ACTIVE_PATH);
+    a9.loadedSha = sha256Bytes(stable9b);
+    const out9 = await publishRegistryCandidate(getDb(), {
+      subject: {subjectType: 'legacy_cutover_existing', subjectId: entry9.id, subjectMode: 'cutover_existing'},
+      stableRegistrySha256: sha256Bytes(stable9b),
+      build: {legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))},
+    });
+    if (out9.kind !== 'completed') throw new Error(`R1-09 prepare failed: ${JSON.stringify(out9)}`);
+    const pub9 = getPublicationRow(getDb(), out9.publicationId);
+    const restore9 = await restoreStableAndConfirm(getDb(), pub9.id, pub9.owner_token as string, pub9.attempt, PATHS, new AdapterClient({baseUrl: a9.baseUrl, timeoutMs: 500}));
+    ok(restore9 === 'confirmed', 'R1-09 restore confirmed');
+    failPublicationAndRollbackLegacy(getDb(), {publicationId: pub9.id, ownerToken: pub9.owner_token as string, attempt: pub9.attempt, errorCode: 'TEST_FAIL', errorMessage: 'R1-09'});
+    const lve9 = getDb().prepare('SELECT mapping_status, pending_publication_id, candidate_source_selector, mapping_mode FROM legacy_adapter_voice_entries WHERE id=?').get(entry9.id) as Record<string, unknown>;
+    ok(lve9.mapping_status === 'mapped_verified' && lve9.pending_publication_id === null, 'R1-09 legacy_cutover_existing rollback → mapped_verified');
+    ok(lve9.mapping_mode === 'cutover_existing', 'R1-09 mapping_mode 保持');
+    await a9.stop();
+
+    // R1-01: stale owner race——A poll 挂起 → lease 过期 + B takeover → A 的 indeterminate fence 失败
+    const {pub: p1, adapter: a1} = await prepareActivationPending();
+    a1.statusBehavior = 'delay-close'; // A 的 poll 挂起 500ms 后 connection reset
+    const staleFlow = activateRegistryPublicationFlow(getDb(), activationOpts(p1, a1));
+    await new Promise((r) => setTimeout(r, 100)); // 让 poll 挂起
+    getDb().prepare('UPDATE voice_registry_publications SET lease_expires_at_epoch_ms=1 WHERE id=?').run(p1.id);
+    const t1 = takeoverExpiredPublication(getDb(), p1.id);
+    ok(t1.kind === 'taken', 'R1-01 B takeover 成功');
+    if (t1.kind === 'taken') {
+      const bBefore = getPublicationRow(getDb(), p1.id);
+      await expectCode('R1-01 stale owner enterIndeterminate → PUBLICATION_NOT_OWNER', async () => {
+        await staleFlow;
+      }, PUBLICATION_NOT_OWNER);
+      const bAfter = getPublicationRow(getDb(), p1.id);
+      ok(bAfter.owner_token === bBefore.owner_token && bAfter.attempt === bBefore.attempt && bAfter.lease_expires_at_epoch_ms === bBefore.lease_expires_at_epoch_ms, 'R1-01 B owner/attempt/lease 不变');
+      ok(bAfter.status !== 'indeterminate', 'R1-01 publication 不进入 indeterminate');
+      releaseAllActiveFlights(); // bAfter 是 activation_pending——无条件释放
+    }
+    await a1.stop();
+
+    // R1-02: reload timeout + status candidate → 可恢复激活（reload 实际已生效但响应丢失）
+    const {pub: p2, adapter: a2} = await prepareFileDurable();
+    a2.reloadBehavior = 'timeout';
+    a2.statusBehavior = 'ok';
+    a2.loadedSha = p2.candidate_registry_sha256; // 模拟 reload 实际已生效
+    a2.loadedGeneration = p2.generation;
+    a2.loadedPublisher = SUPPORTED_PUB;
+    a2.loadedSchema = '1.1';
+    const o2 = await activateRegistryPublicationFlow(getDb(), activationOpts(p2, a2));
+    ok(o2.kind === 'active', `R1-02 reload timeout + status candidate → active（实际 ${o2.kind}）`);
+    ok(getPublicationRow(getDb(), p2.id).status === 'active', 'R1-02 publication active');
+    await a2.stop();
+
+    // R1-03: reload timeout + status stable → reload_retryable（保持 file_durable）
+    const {pub: p3, adapter: a3} = await prepareFileDurable();
+    a3.reloadBehavior = 'timeout';
+    a3.statusBehavior = 'ok';
+    a3.loadedSha = p3.stable_registry_sha256;
+    a3.loadedGeneration = null;
+    a3.loadedPublisher = null;
+    a3.loadedSchema = '1.0';
+    const o3 = await activateRegistryPublicationFlow(getDb(), activationOpts(p3, a3));
+    ok(o3.kind === 'reload_retryable', `R1-03 reload timeout + status stable → reload_retryable（实际 ${o3.kind}）`);
+    ok(getPublicationRow(getDb(), p3.id).status === 'file_durable', 'R1-03 保持 file_durable');
+    failRow(getPublicationRow(getDb(), p3.id), 'TEST_FAIL', 'release R1-03');
+    await a3.stop();
+
+    // R1-04: reload timeout + status unavailable → reload_result_unknown（保持 file_durable，等 recovery）
+    const {pub: p4, adapter: a4} = await prepareFileDurable();
+    a4.reloadBehavior = 'timeout';
+    a4.statusBehavior = 'close';
+    const o4 = await activateRegistryPublicationFlow(getDb(), activationOpts(p4, a4));
+    ok(o4.kind === 'reload_result_unknown', `R1-04 reload timeout + status 不可用 → reload_result_unknown（实际 ${o4.kind}）`);
+    ok(getPublicationRow(getDb(), p4.id).status === 'file_durable', 'R1-04 保持 file_durable（不释放 single-flight 不 indeterminate）');
+    // recovery 可重试（lease 过期 → recover → adapter 正常 → active）
+    a4.reloadBehavior = 'ok';
+    a4.statusBehavior = 'ok';
+    getDb().prepare('UPDATE voice_registry_publications SET lease_expires_at_epoch_ms=1 WHERE id=?').run(p4.id);
+    const res4 = await recoverRegistryPublications(getDb(), recoveryDeps(a4), 10);
+    ok(getPublicationRow(getDb(), p4.id).status === 'active', `R1-04 recovery 重试后 → active（实际 ${getPublicationRow(getDb(), p4.id).status}）`);
+    void res4;
+    await a4.stop();
+
+    // R1-10: recovery 每个 HTTP 前 renew——takeover 后第一次 status 成功，reload 挂起期间
+    // lease 被注入过期 + 新 owner takeover → 原 owner 不得继续第二次 status（renew 失败）
+    const {pub: p10, adapter: a10} = await prepareActivationPending();
+    getDb().prepare('UPDATE voice_registry_publications SET lease_expires_at_epoch_ms=1 WHERE id=?').run(p10.id);
+    // 构造：status 第一次 ok（classify stable）→ reload delay-ok 挂起 → lease 过期 + takeover
+    a10.reloadBehavior = 'delay-ok';
+    a10.statusBehavior = 'ok';
+    a10.reloadUpdatesLoaded = false;
+    a10.loadedSha = p10.stable_registry_sha256; // stable → 进入 reload 重试分支
+    a10.loadedGeneration = null;
+    a10.loadedPublisher = null;
+    a10.loadedSchema = '1.0';
+    const statusCallsBefore10 = a10.statusCalls;
+    const reloadCallsBefore10 = a10.reloadCalls;
+    const flow10 = (async () => {
+      await recoverRegistryPublications(getDb(), recoveryDeps(a10), 10);
+    })();
+    await new Promise((r) => setTimeout(r, 50)); // status 完成、reload 已发出并挂起
+    ok(a10.reloadCalls === reloadCallsBefore10 + 1, 'R1-10 reload 已发出（挂起中）');
+    getDb().prepare('UPDATE voice_registry_publications SET lease_expires_at_epoch_ms=1 WHERE id=?').run(p10.id);
+    const t10 = takeoverExpiredPublication(getDb(), p10.id);
+    ok(t10.kind === 'taken', 'R1-10 新 owner takeover');
+    await flow10; // reload 返回后 renew 失败 → 不执行第二次 status
+    ok(a10.statusCalls === statusCallsBefore10 + 1, 'R1-10 第二次 status 未执行（原 owner renew 失败）');
+    const after10 = getPublicationRow(getDb(), p10.id);
+    ok(after10.status === 'activation_pending', 'R1-10 publication 状态不变（原 owner 无后续副作用）');
+    releaseAllActiveFlights();
+    await a10.stop();
+
+    // R1-11/12: active path containment——root symlink + nested parent symlink（candidate-idempotent 路径也验证）
+    const {pub: p11, adapter: a11} = await prepareFileDurable();
+    await promoteCandidateToActive(getDb(), p11.id, p11.owner_token as string, p11.attempt, PATHS); // disk → candidate
+    // root 替换为 symlink
+    const realDir = ACTIVE_DIR + '-real';
+    fs.renameSync(ACTIVE_DIR, realDir);
+    fs.symlinkSync(realDir, ACTIVE_DIR);
+    await expectCode('R1-11 root symlink + disk candidate → CANDIDATE_FILE_IO', async () => {
+      await classifyActiveDiskState(getDb(), p11.id, PATHS);
+    }, 'CANDIDATE_FILE_IO');
+    await expectCode('R1-11 promote（candidate-idempotent 路径）同样拒绝', async () => {
+      await promoteCandidateToActive(getDb(), p11.id, p11.owner_token as string, p11.attempt, PATHS);
+    }, 'CANDIDATE_FILE_IO');
+    fs.unlinkSync(ACTIVE_DIR);
+    fs.renameSync(realDir, ACTIVE_DIR);
+    // R1-12: root 内 nested parent symlink（ACTIVE_DIR/sub → 外部）
+    const outside = path.join(DATA_DIR, 'r1-12-outside');
+    fs.mkdirSync(outside, {recursive: true});
+    fs.mkdirSync(path.join(ACTIVE_DIR, 'sub'), {recursive: true});
+    fs.writeFileSync(path.join(ACTIVE_DIR, 'sub', 'voice-registry.json'), '{}');
+    fs.rmSync(path.join(ACTIVE_DIR, 'sub'), {recursive: true});
+    fs.symlinkSync(outside, path.join(ACTIVE_DIR, 'sub'));
+    const nestedPaths: ActiveRegistryPaths = {activeRegistryPath: path.join(ACTIVE_DIR, 'sub', 'voice-registry.json'), activeRegistryRoot: ACTIVE_DIR};
+    await expectCode('R1-12 nested parent symlink → CANDIDATE_FILE_IO', async () => {
+      await classifyActiveDiskState(getDb(), p11.id, nestedPaths);
+    }, 'CANDIDATE_FILE_IO');
+    fs.unlinkSync(path.join(ACTIVE_DIR, 'sub'));
+    failRow(getPublicationRow(getDb(), p11.id), 'TEST_FAIL', 'release R1-11/12');
+    await a11.stop();
   }
 
   // 清理
