@@ -943,6 +943,13 @@ export function failPublication(db: Db, options: FailPublicationOptions): void {
 
 // ── 编排入口（T1 → T1.5 → build → Tx A → file → Tx B；幂等可重跑） ──
 
+export interface PublicationOwnerHandleShape {
+  publicationId: string;
+  generation: number;
+  ownerToken: string;
+  attempt: number;
+}
+
 export interface PublishRegistryCandidateOptions {
   subject: PublicationSubject;
   /** 当前 active registry 文件原始 bytes 的 SHA-256（调用方读取 active registry 文件计算；active 文件不被修改）。 */
@@ -950,6 +957,13 @@ export interface PublishRegistryCandidateOptions {
   /** T1 用；默认 15min。 */
   leaseMs?: number;
   build: Omit<BuildCandidateOptions, 'publication'>;
+  /**
+   * TTS-C.1B.3 向后兼容扩展（不改变 1B.2 无 handle 行为）：已 claim 的 winner handle
+   * （同进程/恢复续跑 building/candidate_persisted/file_durable）。subscriber（无 handle）
+   * 只能得到 already_in_flight / already_file_durable。handle 必须与 DB owner_token+attempt
+   * 精确匹配，否则 PUBLICATION_NOT_OWNER。
+   */
+  handle?: PublicationOwnerHandleShape;
 }
 
 /**
@@ -965,42 +979,57 @@ export async function publishRegistryCandidate(
   db: Db,
   options: PublishRegistryCandidateOptions,
 ): Promise<PublishRegistryCandidateResult> {
-  const claimed = claimPublication(db, {subject: options.subject, stableRegistrySha256: options.stableRegistrySha256, leaseMs: options.leaseMs});
+  let pub: PublicationRow;
+  let ownerToken: string;
+  let attempt: number;
 
-  // loser 分流：零写副作用
-  if (claimed.kind === 'already_in_flight') {
-    const pub = claimed.publication;
-    if (pub.status === 'file_durable') {
-      // 只读 durable verification（不续租、不更新 DB；P0-B acceptance 重新建立 durability）
-      const filePath = candidateRegistryPath(pub.generation);
-      await durabilizeAndVerifyCandidate({
-        rootDir: candidateRegistryDir(),
-        finalPath: filePath,
-        expectedSha256: pub.candidate_registry_sha256 as string,
-        expectedGeneration: pub.generation,
-      });
+  if (options.handle) {
+    // 1B.3 扩展：winner 续跑——handle 必须与 DB owner_token+attempt 精确匹配
+    const row = getPublicationRow(db, options.handle.publicationId);
+    if (row.owner_token !== options.handle.ownerToken || row.attempt !== options.handle.attempt) {
+      throw new RegistryContractError(PUBLICATION_NOT_OWNER, `handle 不再权威（owner 被接管/替换）: ${row.id}`);
+    }
+    pub = row;
+    ownerToken = options.handle.ownerToken;
+    attempt = options.handle.attempt;
+  } else {
+    const claimed = claimPublication(db, {subject: options.subject, stableRegistrySha256: options.stableRegistrySha256, leaseMs: options.leaseMs});
+
+    // loser 分流：零写副作用
+    if (claimed.kind === 'already_in_flight') {
+      const p = claimed.publication;
+      if (p.status === 'file_durable') {
+        // 只读 durable verification（不续租、不更新 DB；P0-B acceptance 重新建立 durability）
+        const filePath = candidateRegistryPath(p.generation);
+        await durabilizeAndVerifyCandidate({
+          rootDir: candidateRegistryDir(),
+          finalPath: filePath,
+          expectedSha256: p.candidate_registry_sha256 as string,
+          expectedGeneration: p.generation,
+        });
+        return {
+          kind: 'already_file_durable',
+          publicationId: p.id,
+          generation: p.generation,
+          status: 'file_durable',
+          candidateRegistrySha256: p.candidate_registry_sha256 as string,
+          candidateFilePath: filePath,
+        };
+      }
+      // building / candidate_persisted / activation_pending / indeterminate：立即返回，零副作用
       return {
-        kind: 'already_file_durable',
-        publicationId: pub.id,
-        generation: pub.generation,
-        status: 'file_durable',
-        candidateRegistrySha256: pub.candidate_registry_sha256 as string,
-        candidateFilePath: filePath,
+        kind: 'already_in_flight',
+        publicationId: p.id,
+        generation: p.generation,
+        status: p.status as 'building' | 'candidate_persisted' | 'activation_pending' | 'indeterminate',
       };
     }
-    // building / candidate_persisted / activation_pending / indeterminate：立即返回，零副作用
-    return {
-      kind: 'already_in_flight',
-      publicationId: pub.id,
-      generation: pub.generation,
-      status: pub.status as 'building' | 'candidate_persisted' | 'activation_pending' | 'indeterminate',
-    };
-  }
 
-  // winner 路径（持有 owner token 的唯一调用方）
-  const pub = claimed.publication;
-  const ownerToken = pub.owner_token;
-  const attempt = pub.attempt;
+    // winner 路径（持有 owner token 的唯一调用方）
+    pub = claimed.publication;
+    ownerToken = pub.owner_token as string;
+    attempt = pub.attempt;
+  }
   if (!ownerToken) throw new RegistryContractError(PUBLICATION_NOT_OWNER, 'publication 无 owner');
 
   if (pub.status === 'file_durable') {
