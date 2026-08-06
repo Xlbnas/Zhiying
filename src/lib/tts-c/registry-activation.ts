@@ -25,6 +25,20 @@
  *   P1-B  active path 全链 containment（root realpath + 逐级 parent 无 symlink + final no-follow），
  *          candidate-idempotent 路径同样执行。
  *   P2    adapter error shape（真实 {"error","message"} 优先）在 adapter-client 完成。
+ *
+ * TTS-C.1B.3.R2（blocker repair，pending blocker-specific Review）：
+ *   P0-1  每个 active 文件 mutation（stable snapshot 新写 / snapshot re-durabilize / candidate→active
+ *          promote / stable restore）紧邻前重新 fenced renew（renewPublicationOrThrow），
+ *          renew 与 mutation 之间不再执行任何 HTTP/其他文件副作用；测试注入
+ *          beforeActiveWriteHook / beforeStableRestoreWriteHook / beforeSnapshotWriteHook
+ *          在最终 renew 之前挂起，证明 stale owner 在 renew 处失败、零文件副作用。
+ *   P0-2  indeterminate→failed 只能走 resolveIndeterminateFailedAndRollbackLegacy（单 BEGIN IMMEDIATE：
+ *          publication indeterminate→failed + legacy subject 同事务 mapping_pending→mapped_verified；
+ *          legacy 不命中整事务回滚）；reconcileIndeterminate 不再直接 UPDATE failed。
+ *   P1-1  terminal rollback 拆 pre-promotion（building/candidate_persisted，无需 stable restore）
+ *         与 post-promotion（file_durable/activation_pending，须已 restore confirmed）两个入口。
+ *   P1-2  dir fsync 目标改为 rename 实际发生的 exact final parent（path.dirname(finalAbs)），
+ *         不再无条件 fsync containment root；lstat 校验 parent 非 symlink 且为目录。
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -73,6 +87,17 @@ export interface ActiveRegistryPaths {
   activeRegistryPath: string;
   /** active registry 所在目录（containment root；非 symlink + realpath 固定）。 */
   activeRegistryRoot: string;
+  /**
+   * 测试注入（仅测试；R2 P0-1）：文件 mutation 前的挂起 hook——在最终 fenced renew 之前触发，
+   * 用于证明 stale owner 在最终 renew 处失败、不再产生任何文件副作用。
+   */
+  beforeActiveWriteHook?: () => Promise<void> | void;
+  beforeStableRestoreWriteHook?: () => Promise<void> | void;
+  beforeSnapshotWriteHook?: () => Promise<void> | void;
+  /** 测试注入（仅测试；R2 P1-2）：final 文件 fsync hook（active 提升用）。 */
+  fsyncFile?: (fh: fsPromises.FileHandle) => Promise<void>;
+  /** 测试注入（仅测试；R2 P1-2）：exact final parent 目录 fsync hook（active 写/restore/snapshot 共用）。 */
+  fsyncDir?: (fh: fsPromises.FileHandle) => Promise<void>;
 }
 
 /** stable snapshot 确定性路径（权威绑定 = generation + stable_registry_sha256 + path）。 */
@@ -248,8 +273,15 @@ async function readDurableCandidateBytes(db: Db, publicationId: string): Promise
   return bytes;
 }
 
-/** 原子写文件（temp 同目录 O_EXCL → write → fsync → rename → 统一 acceptance）。 */
-async function atomicWriteFile(root: string, finalAbs: string, bytes: Buffer, expectedSha256: string, expectedGeneration: number): Promise<void> {
+/** 原子写文件（temp 同目录 O_EXCL → write → fsync → rename → 统一 acceptance）。hooks 仅测试注入。 */
+async function atomicWriteFile(
+  root: string,
+  finalAbs: string,
+  bytes: Buffer,
+  expectedSha256: string,
+  expectedGeneration: number,
+  hooks?: {fsyncFile?: (fh: fsPromises.FileHandle) => Promise<void>; fsyncDir?: (fh: fsPromises.FileHandle) => Promise<void>},
+): Promise<void> {
   const tempAbs = stagingTempPath(finalAbs);
   let fh: fsPromises.FileHandle | null = null;
   try {
@@ -265,6 +297,8 @@ async function atomicWriteFile(root: string, finalAbs: string, bytes: Buffer, ex
       expectedSha256,
       expectedLength: bytes.length,
       expectedGeneration,
+      fsyncFile: hooks?.fsyncFile,
+      fsyncDir: hooks?.fsyncDir,
     });
   } catch (err) {
     if (fh !== null) {
@@ -284,16 +318,31 @@ async function atomicWriteFile(root: string, finalAbs: string, bytes: Buffer, ex
   }
 }
 
-/** stable snapshot 等非 1.1 文件用的 raw durability（fsync final + dir fsync + reread SHA；无 JSON 语义校验）。 */
-async function durabilizeRawFile(root: string, finalAbs: string, expectedSha256: string, expectedLength: number): Promise<void> {
+/**
+ * stable snapshot 等非 1.1 文件用的 raw durability（fsync final + reread SHA；无 JSON 语义校验）。
+ * R2 P1-2：dir fsync 目标 = path.dirname(finalAbs)（rename 实际发生的目录），
+ * 不再无条件 fsync containment root；lstat 校验 parent 非 symlink 且为目录。
+ */
+async function durabilizeRawFile(
+  root: string,
+  finalAbs: string,
+  expectedSha256: string,
+  expectedLength: number,
+  hooks?: {fsyncDir?: (fh: fsPromises.FileHandle) => Promise<void>},
+): Promise<void> {
+  const rootAbs = path.resolve(root);
+  const finalAbsResolved = path.resolve(finalAbs);
+  if (!finalAbsResolved.startsWith(rootAbs + path.sep)) {
+    throw new RegistryContractError(CANDIDATE_FILE_IO, `final path 越出 root: ${finalAbsResolved}`);
+  }
   let fh: fsPromises.FileHandle;
   try {
-    fh = await fsPromises.open(finalAbs, OPEN_FLAGS.readNoFollow);
+    fh = await fsPromises.open(finalAbsResolved, OPEN_FLAGS.readNoFollow);
   } catch (err) {
     if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
-      throw new RegistryContractError(CANDIDATE_FILE_IO, `文件缺失: ${finalAbs}`);
+      throw new RegistryContractError(CANDIDATE_FILE_IO, `文件缺失: ${finalAbsResolved}`);
     }
-    throw new RegistryContractError(CANDIDATE_FILE_IO, `文件不可打开: ${finalAbs}`);
+    throw new RegistryContractError(CANDIDATE_FILE_IO, `文件不可打开: ${finalAbsResolved}`);
   }
   try {
     const st = await fh.stat();
@@ -307,14 +356,32 @@ async function durabilizeRawFile(root: string, finalAbs: string, expectedSha256:
   } finally {
     await fh.close();
   }
-  const dirFh = await fsPromises.open(root, OPEN_FLAGS.parentReadNoFollow);
+  // exact final parent directory fsync（no-follow）
+  const finalParent = path.dirname(finalAbsResolved);
+  let parentSt: fs.Stats;
   try {
-    await dirFh.sync();
+    parentSt = await fsPromises.lstat(finalParent);
+  } catch (err) {
+    throw new RegistryContractError(CANDIDATE_FILE_IO, `final parent 不可 stat: ${finalParent}`);
+  }
+  if (parentSt.isSymbolicLink() || !parentSt.isDirectory()) {
+    throw new RegistryContractError(CANDIDATE_FILE_IO, 'final parent 是 symlink 或非目录');
+  }
+  const dirFh = await fsPromises.open(finalParent, OPEN_FLAGS.parentReadNoFollow);
+  try {
+    if (hooks?.fsyncDir) {
+      await hooks.fsyncDir(dirFh);
+    } else {
+      await dirFh.sync();
+    }
+  } catch (err) {
+    if (err instanceof RegistryContractError) throw err;
+    throw new RegistryContractError(CANDIDATE_FILE_IO, `final parent dir fsync 失败: ${(err as Error).message}`);
   } finally {
     await dirFh.close();
   }
   // fsync 后 reread 复核
-  const rereadFh = await fsPromises.open(finalAbs, OPEN_FLAGS.readNoFollow);
+  const rereadFh = await fsPromises.open(finalAbsResolved, OPEN_FLAGS.readNoFollow);
   try {
     const bytes = await rereadFh.readFile();
     if (sha256Bytes(bytes) !== expectedSha256) throw new RegistryContractError(CANDIDATE_FILE_IO, 'reread SHA 与预期不符');
@@ -323,8 +390,14 @@ async function durabilizeRawFile(root: string, finalAbs: string, expectedSha256:
   }
 }
 
-/** raw 原子写（temp→write→fsync→rename→raw durability）。 */
-async function atomicWriteRawFile(root: string, finalAbs: string, bytes: Buffer, expectedSha256: string): Promise<void> {
+/** raw 原子写（temp→write→fsync→rename→raw durability）。hooks 仅测试注入。 */
+async function atomicWriteRawFile(
+  root: string,
+  finalAbs: string,
+  bytes: Buffer,
+  expectedSha256: string,
+  hooks?: {fsyncDir?: (fh: fsPromises.FileHandle) => Promise<void>},
+): Promise<void> {
   const tempAbs = stagingTempPath(finalAbs);
   let fh: fsPromises.FileHandle | null = null;
   try {
@@ -334,7 +407,7 @@ async function atomicWriteRawFile(root: string, finalAbs: string, bytes: Buffer,
     await fh.close();
     fh = null;
     await fsPromises.rename(tempAbs, finalAbs);
-    await durabilizeRawFile(root, finalAbs, expectedSha256, bytes.length);
+    await durabilizeRawFile(root, finalAbs, expectedSha256, bytes.length, hooks);
   } catch (err) {
     if (fh !== null) {
       try {
@@ -398,10 +471,17 @@ export async function durabilizeStableSnapshot(db: Db, publicationId: string, ow
       throw new RegistryContractError(STABLE_SNAPSHOT_CONFLICT, `stable snapshot 已存在不同 bytes（fail-closed，不覆盖）`);
     }
     // 同 SHA：重新建立 durability 后复用（raw——stable 是 1.0 格式，无 1.1 语义校验）
-    await durabilizeRawFile(root, finalAbs, disk.sha, disk.bytes.length);
+    // R2 P0-1：挂起 hook 在最终 renew 之前（stale owner 必须在最终 renew 处失败）；
+    // renew 与 mutation 之间不再执行任何 HTTP/其他文件写入/可阻塞 hook。
+    if (paths.beforeSnapshotWriteHook) await paths.beforeSnapshotWriteHook();
+    renewPublicationOrThrow(db, publicationId, ownerToken, attempt, 'stable snapshot re-durabilize');
+    await durabilizeRawFile(root, finalAbs, disk.sha, disk.bytes.length, {fsyncDir: paths.fsyncDir});
     return finalAbs;
   }
-  await atomicWriteRawFile(root, finalAbs, disk.bytes, disk.sha);
+  // R2 P0-1：挂起 hook 在最终 renew 之前；renew 紧邻新文件写入
+  if (paths.beforeSnapshotWriteHook) await paths.beforeSnapshotWriteHook();
+  renewPublicationOrThrow(db, publicationId, ownerToken, attempt, 'stable snapshot write');
+  await atomicWriteRawFile(root, finalAbs, disk.bytes, disk.sha, {fsyncDir: paths.fsyncDir});
   return finalAbs;
 }
 
@@ -433,11 +513,15 @@ export async function promoteCandidateToActive(
     // 幂等：不重写（P1-B：classify 已执行全链验证）
     return 'idempotent';
   }
-  // stable → 先持久化 stable snapshot（P0-C），再原子提升
+  // stable → 先持久化 stable snapshot（P0-C，内部已 renew + hook），再原子提升
   await durabilizeStableSnapshot(db, publicationId, ownerToken, attempt, paths);
   const root = await validateActivePathSafe(paths);
   const finalAbs = path.resolve(paths.activeRegistryPath);
-  await atomicWriteFile(root, finalAbs, bytes, pub.candidate_registry_sha256 as string, pub.generation);
+  // R2 P0-1：挂起 hook 在最终 renew 之前（stale owner 必须在最终 renew 处失败）；
+  // 最终 renew 紧邻 active 文件写入——此后不再执行任何 HTTP/其他文件写入/可阻塞 hook
+  if (paths.beforeActiveWriteHook) await paths.beforeActiveWriteHook();
+  renewPublicationOrThrow(db, publicationId, ownerToken, attempt, 'active registry promotion write');
+  await atomicWriteFile(root, finalAbs, bytes, pub.candidate_registry_sha256 as string, pub.generation, {fsyncFile: paths.fsyncFile, fsyncDir: paths.fsyncDir});
   return 'promoted';
 }
 
@@ -490,9 +574,13 @@ export async function restoreStableAndConfirm(
         throw new RegistryContractError(STABLE_SNAPSHOT_CONFLICT, `stable snapshot SHA 与 stable_registry_sha256 不符`);
       }
       // 原子恢复 active 文件（raw durability——stable 是 1.0 格式，无 1.1 语义校验）
+      // R2 P0-1：挂起 hook 在最终 renew 之前（stale owner 必须在最终 renew 处失败）；
+      // 最终 renew 紧邻 restore 写——此后不再执行其他副作用
       const root = await validateActivePathSafe(paths);
       const finalAbs = path.resolve(paths.activeRegistryPath);
-      await atomicWriteRawFile(root, finalAbs, snapshotBytes, pub.stable_registry_sha256);
+      if (paths.beforeStableRestoreWriteHook) await paths.beforeStableRestoreWriteHook();
+      renewPublicationOrThrow(db, publicationId, ownerToken, attempt, 'stable restore write');
+      await atomicWriteRawFile(root, finalAbs, snapshotBytes, pub.stable_registry_sha256, {fsyncDir: paths.fsyncDir});
       // reload + ack
       if (!renewPublicationLease(db, publicationId, ownerToken, attempt)) return 'rollback_pending';
       const reload = await adapter.reload();
@@ -682,27 +770,36 @@ export interface TerminalRollbackOptions {
 }
 
 /**
- * fenced publication → failed/cancelled + （legacy subject）同事务 legacy entry
- * mapping_pending→mapped_verified（清 pending link + selector；mapping_mode/provenance 保持）。
- * legacy UPDATE changes!=1 → 整事务回滚（不得只提交 publication terminal）。
- * 调用方必须已 restoreStableAndConfirm == 'confirmed'（stable disk + adapter ack）后才可调用。
+ * R2 P1-1：shared tx 实现——publication fenced terminal（failed_at/error 必填；owner/lease 清空）+
+ * （legacy subject）同事务 legacy entry mapping_pending→mapped_verified
+ * （清 pending link + selector；mapping_mode/provenance 保持；frozen trg_lve_rollback 要求
+ * publication 已在同事务内 failed/cancelled——先更新 publication 再更新 legacy）。
+ * legacy UPDATE changes!=1 → LEGACY_ROLLBACK_MISMATCH 整事务回滚（不得只提交 publication terminal）。
+ * allowedStatuses 区分：
+ *   pre-promotion（building/candidate_persisted）——active registry 尚未被本 publication 提升，
+ *     无需 stable restore；
+ *   post-promotion（file_durable/activation_pending）——调用方必须已
+ *     restoreStableAndConfirm == 'confirmed'（stable disk + adapter ack）后才可调用。
  */
-export function failOrCancelPublicationAndRollbackLegacy(db: Db, options: TerminalRollbackOptions): void {
+function failOrCancelPublicationAndRollbackLegacyForStatuses(
+  db: Db,
+  options: TerminalRollbackOptions,
+  allowedStatuses: readonly ('building' | 'candidate_persisted' | 'file_durable' | 'activation_pending')[],
+): void {
   const tx = db.transaction((): void => {
     const now = nowIso();
-    const terminalCol = options.terminalStatus === 'failed' ? 'failed_at' : 'failed_at'; // cancelled 用 failed_at 亦允许（frozen cancelled shape: failed_at NULL?）
-    // cancelled shape（frozen）：owner NULL/lease NULL/activated_at NULL（failed_at 允许非 NULL？CHECK: cancelled AND owner NULL AND lease NULL AND activated_at NULL——未约束 failed_at）
+    const placeholders = allowedStatuses.map(() => '?').join(',');
     const res = db
       .prepare(
         `UPDATE voice_registry_publications
-            SET status=?, ${terminalCol}=?, error_code=?, error_message=?,
+            SET status=?, failed_at=?, error_code=?, error_message=?,
                 owner_token=NULL, lease_expires_at_epoch_ms=NULL, updated_at=?
-          WHERE id=? AND status IN ('file_durable','activation_pending')
+          WHERE id=? AND status IN (${placeholders})
             AND owner_token=? AND attempt=?
             AND (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)) <= lease_expires_at_epoch_ms`,
       )
       .run(options.terminalStatus, now, options.errorCode, options.errorMessage, now,
-        options.publicationId, options.ownerToken, options.attempt);
+        options.publicationId, ...allowedStatuses, options.ownerToken, options.attempt);
     if (res.changes !== 1) {
       throw new RegistryContractError(PUBLICATION_NOT_OWNER, `publication ${options.publicationId} 无法推进 ${options.terminalStatus}（fence 不命中）`);
     }
@@ -724,12 +821,87 @@ export function failOrCancelPublicationAndRollbackLegacy(db: Db, options: Termin
   tx.immediate();
 }
 
+/** R2 P1-1：pre-promotion 入口（building/candidate_persisted）——无需 stable restore。 */
+export function failPrePromotionPublicationAndRollbackLegacy(db: Db, options: Omit<TerminalRollbackOptions, 'terminalStatus'>): void {
+  failOrCancelPublicationAndRollbackLegacyForStatuses(db, {...options, terminalStatus: 'failed'}, ['building', 'candidate_persisted']);
+}
+
+export function cancelPrePromotionPublicationAndRollbackLegacy(db: Db, options: Omit<TerminalRollbackOptions, 'terminalStatus'>): void {
+  failOrCancelPublicationAndRollbackLegacyForStatuses(db, {...options, terminalStatus: 'cancelled'}, ['building', 'candidate_persisted']);
+}
+
+/** R2 P1-1：post-promotion 入口（file_durable/activation_pending）——调用方必须已 restore confirmed。 */
+export function failPostPromotionPublicationAndRollbackLegacy(db: Db, options: Omit<TerminalRollbackOptions, 'terminalStatus'>): void {
+  failOrCancelPublicationAndRollbackLegacyForStatuses(db, {...options, terminalStatus: 'failed'}, ['file_durable', 'activation_pending']);
+}
+
+export function cancelPostPromotionPublicationAndRollbackLegacy(db: Db, options: Omit<TerminalRollbackOptions, 'terminalStatus'>): void {
+  failOrCancelPublicationAndRollbackLegacyForStatuses(db, {...options, terminalStatus: 'cancelled'}, ['file_durable', 'activation_pending']);
+}
+
+/** 兼容入口（R1 语义 = post-promotion）。 */
+export function failOrCancelPublicationAndRollbackLegacy(db: Db, options: TerminalRollbackOptions): void {
+  failOrCancelPublicationAndRollbackLegacyForStatuses(db, options, ['file_durable', 'activation_pending']);
+}
+
 export function failPublicationAndRollbackLegacy(db: Db, options: Omit<TerminalRollbackOptions, 'terminalStatus'>): void {
-  failOrCancelPublicationAndRollbackLegacy(db, {...options, terminalStatus: 'failed'});
+  failPostPromotionPublicationAndRollbackLegacy(db, options);
 }
 
 export function cancelPublicationAndRollbackLegacy(db: Db, options: Omit<TerminalRollbackOptions, 'terminalStatus'>): void {
-  failOrCancelPublicationAndRollbackLegacy(db, {...options, terminalStatus: 'cancelled'});
+  cancelPostPromotionPublicationAndRollbackLegacy(db, options);
+}
+
+// ── R2 P0-2：indeterminate → failed 的唯一自动入口（无 owner；atomic legacy rollback） ──
+
+export interface ResolveIndeterminateFailedOptions {
+  publicationId: string;
+  /** 必须与当前 publication.attempt 精确匹配（evidence 一致性 fence；indeterminate 无 owner）。 */
+  attempt: number;
+  errorCode: string;
+  errorMessage: string;
+}
+
+/**
+ * indeterminate → failed 的唯一自动入口（无 owner；不匹配则整事务回滚）：
+ *   单 BEGIN IMMEDIATE：publication indeterminate→failed（id + status='indeterminate' +
+ *   indeterminate_from_status='activation_pending' + attempt 精确匹配；candidate/stable evidence
+ *   不变——frozen trg_vrp_immutable），随后 legacy subject 同事务 mapping_pending→mapped_verified
+ *   （清 pending link + selector；mapping_mode/mapped_voice_materialization_id/import provenance
+ *   保持）。legacy UPDATE changes!=1 → LEGACY_ROLLBACK_MISMATCH 整事务回滚（publication 保持
+ *   indeterminate）。materialization_publish / registry_rebuild 不更新 legacy 表。
+ * 调用方必须已确认 active disk == stable 且 adapter loaded == stable（reconcileIndeterminate）。
+ */
+export function resolveIndeterminateFailedAndRollbackLegacy(db: Db, options: ResolveIndeterminateFailedOptions): void {
+  const tx = db.transaction((): void => {
+    const now = nowIso();
+    const res = db
+      .prepare(
+        `UPDATE voice_registry_publications
+            SET status='failed', failed_at=?, error_code=?, error_message=?, updated_at=?
+          WHERE id=? AND status='indeterminate'
+            AND indeterminate_from_status='activation_pending'
+            AND attempt=?`,
+      )
+      .run(now, options.errorCode, options.errorMessage, now, options.publicationId, options.attempt);
+    if (res.changes !== 1) {
+      throw new RegistryContractError(ACTIVATION_INVALID_STATE, `publication ${options.publicationId} 无法 indeterminate→failed（fence 不命中）`);
+    }
+    const pub = getPublicationRow(db, options.publicationId);
+    if (pub.subject_type === 'legacy_cutover_publish' || pub.subject_type === 'legacy_cutover_existing') {
+      const lve = db
+        .prepare(
+          `UPDATE legacy_adapter_voice_entries
+              SET mapping_status='mapped_verified', pending_publication_id=NULL, candidate_source_selector=NULL
+            WHERE id=? AND mapping_status='mapping_pending' AND pending_publication_id=?`,
+        )
+        .run(pub.subject_id, options.publicationId);
+      if (lve.changes !== 1) {
+        throw new RegistryContractError(LEGACY_ROLLBACK_MISMATCH, `legacy entry ${pub.subject_id} rollback 不匹配（整事务回滚）`);
+      }
+    }
+  });
+  tx.immediate();
 }
 
 // ── P1-A：fenced renew helper（每个 HTTP 副作用前） ──
@@ -932,17 +1104,15 @@ async function reconcileIndeterminate(db: Db, pub: PublicationRow, deps: Registr
     // adapter 明确仍 stable。indeterminate 无 owner——不得执行 reload/restore 副作用（P1-A）；
     // 仅当 active disk 也已 stable（无任何文件/HTTP 副作用需要）时允许显式 failed，
     // 否则保持 indeterminate（不得出现 failed + adapter stable + disk candidate）。
+    // R2 P0-2：failed 必须走 atomic legacy rollback helper（单事务；legacy 不命中整事务回滚）。
     const disk = await readActiveRegistryFile(deps.paths);
     if (disk !== null && disk.sha === pub.stable_registry_sha256) {
-      const now = nowIso();
-      const res = db
-        .prepare(
-          `UPDATE voice_registry_publications
-              SET status='failed', failed_at=?, error_code=?, error_message=?, updated_at=?
-            WHERE id=? AND status='indeterminate'`,
-        )
-        .run(now, REGISTRY_STATE_UNKNOWN, 'indeterminate resolved failed: disk+adapter stable', now, pub.id);
-      if (res.changes !== 1) throw new RegistryContractError(ACTIVATION_INVALID_STATE, 'indeterminate failed resolve 失败');
+      resolveIndeterminateFailedAndRollbackLegacy(db, {
+        publicationId: pub.id,
+        attempt: pub.attempt,
+        errorCode: REGISTRY_STATE_UNKNOWN,
+        errorMessage: 'indeterminate resolved failed: disk+adapter stable',
+      });
       return 'resolved_failed';
     }
     return 'kept'; // disk 仍 candidate——无法安全 failed，保持 indeterminate（人工/后续裁决）

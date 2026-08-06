@@ -696,8 +696,10 @@ export interface VerifyDurableCandidateOptions {
  * 统一 final acceptance（R1 P0-B + P2 方案 A）——新文件与 existing-final 共用：
  *   O_NOFOLLOW 打开 → fstat 普通文件 → 从 fd 读取 bytes → length → SHA →
  *   parse registry JSON → schemaVersion "1.1" → registryGeneration == expected →
- *   publisherSchemaVersion 精确 → final fsync → parent dir fsync（no-follow）。
+ *   publisherSchemaVersion 精确 → final fsync → exact final parent dir fsync（no-follow）。
  * 全部成功才返回；同 SHA 不得直接 return（必须重新建立 durability）。
+ * R2 P1-2：dir fsync 目标 = path.dirname(finalPath)（rename 实际发生的目录），
+ * 不再无条件 fsync containment root（candidate 文件为 root 直接子文件，行为不变）。
  */
 export async function durabilizeAndVerifyCandidate(options: VerifyDurableCandidateOptions): Promise<void> {
   const root = path.resolve(options.rootDir);
@@ -753,12 +755,22 @@ export async function durabilizeAndVerifyCandidate(options: VerifyDurableCandida
     await fh.close();
   }
 
-  // parent directory fsync（no-follow）——错误统一包装为 CANDIDATE_FILE_IO
+  // exact final parent directory fsync（no-follow）——R2 P1-2：fsync rename 实际发生的目录
+  const finalParent = path.dirname(finalAbs);
+  let parentSt: fs.Stats;
+  try {
+    parentSt = await fsPromises.lstat(finalParent);
+  } catch (err) {
+    throw new RegistryContractError(CANDIDATE_FILE_IO, `candidate final parent 不可 stat: ${finalParent}`);
+  }
+  if (parentSt.isSymbolicLink() || !parentSt.isDirectory()) {
+    throw new RegistryContractError(CANDIDATE_FILE_IO, 'candidate final parent 是 symlink 或非目录');
+  }
   let dirFh: fsPromises.FileHandle;
   try {
-    dirFh = await fsPromises.open(root, OPEN_FLAGS.parentReadNoFollow);
+    dirFh = await fsPromises.open(finalParent, OPEN_FLAGS.parentReadNoFollow);
   } catch (err) {
-    throw new RegistryContractError(CANDIDATE_FILE_IO, `candidate parent dir 不可打开: ${(err as Error).message}`);
+    throw new RegistryContractError(CANDIDATE_FILE_IO, `candidate final parent dir 不可打开: ${(err as Error).message}`);
   }
   try {
     if (options.fsyncDir) {
@@ -768,7 +780,7 @@ export async function durabilizeAndVerifyCandidate(options: VerifyDurableCandida
     }
   } catch (err) {
     if (err instanceof RegistryContractError) throw err;
-    throw new RegistryContractError(CANDIDATE_FILE_IO, `candidate parent dir fsync 失败: ${(err as Error).message}`);
+    throw new RegistryContractError(CANDIDATE_FILE_IO, `candidate final parent dir fsync 失败: ${(err as Error).message}`);
   } finally {
     await dirFh.close();
   }
