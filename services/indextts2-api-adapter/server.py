@@ -16,8 +16,10 @@ TTS-C.1B.1 registry publication contract（向后兼容，publisher 未实现）
 registry schema 双支持："1.0"（legacy，production 现状，无 generation/publisher
 字段）与 "1.1"（publisher 输出，必须携带 registryGeneration positive integer +
 publisherSchemaVersion 精确值）。绝不自动改写 registry 文件。
-reload 失败：有 LKG → 保持旧 state/旧 voices + degraded=true + lastReloadError；
-无 LKG → ready=false + synthesize 503。
+reload/启动加载在给出任何 OK/ack 前，对每个 voice 的 reference 文件做完整验证
+（存在 + 普通文件 + 可读 + 实际 SHA-256 == referenceSha256）；任一失败 → 本次加载
+非 OK。reload 失败：有 LKG → 保持旧 state/旧 voices + degraded=true + lastReloadError
+（旧 voice 继续 synthesize）；无 LKG → ready=false + synthesize 503。
 
 设计约束：
 - 极薄：不 import torch、不加载模型、不占 GPU（真实 GPU 只由 upstream 进程使用）
@@ -185,6 +187,41 @@ class _RegistryLoad:
         self.schema_version = schema_version
 
 
+def _validate_reference_file(voice: VoiceEntry) -> str:
+    """验证单个 reference 文件：存在 + 普通文件 + 可读 + 实际 SHA-256 == registry
+    referenceSha256。返回 "" 表示可用，否则返回错误码：
+      REFERENCE_VOICE_MISSING   — 不存在 / 非普通文件 / 不可读（reference 不可用）
+      REFERENCE_SHA256_MISMATCH — 内容与 registry 声明不一致
+    带 (mtime_ns, size) 缓存；校验通过时顺便填充 voice._sig / _actual_sha256 /
+    expected_md5，避免成功 reload 后第一次 synthesize 重复读同一文件。
+    错误码复用既有 frozen 语义（synthesize/health 的 REFERENCE_* 码，m4b 测试锁定），
+    不引入新码——避免 ack / health / synthesize 三处错误码面漂移。"""
+    try:
+        st = os.stat(voice.reference_path)
+    except OSError:
+        return "REFERENCE_VOICE_MISSING"
+    if not os.path.isfile(voice.reference_path):
+        return "REFERENCE_VOICE_MISSING"
+    sig = (st.st_mtime_ns, st.st_size)
+    if sig != voice._sig:
+        sha = hashlib.sha256()
+        md5 = hashlib.md5()  # noqa: S324 — upstream cache compatibility，非密码学用途
+        try:
+            with open(voice.reference_path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    sha.update(chunk)
+                    md5.update(chunk)
+        except OSError:
+            # 不可读与缺失同属「reference 不可用」：沿用 MISSING 码（既有 frozen 语义）
+            return "REFERENCE_VOICE_MISSING"
+        voice._sig = sig
+        voice._actual_sha256 = sha.hexdigest()
+        voice.expected_md5 = md5.hexdigest()
+    if voice._actual_sha256 != voice.reference_sha256:
+        return "REFERENCE_SHA256_MISMATCH"
+    return ""
+
+
 def _load_registry_file() -> _RegistryLoad:
     """读取并完整验证配置的固定 registry 路径（ADAPTER_VOICE_REGISTRY_PATH）。
     任何非法 → 非 OK（不 crash，由 HTTP 层表达 unready/degraded）。
@@ -247,7 +284,14 @@ def _load_registry_file() -> _RegistryLoad:
         real = os.path.realpath(ref_path)
         if real != root_real and os.path.commonpath([root_real, real]) != root_real:
             return _RegistryLoad("VOICE_REGISTRY_INVALID")
-        result[key] = VoiceEntry(profile, revision, speaker_name, real, ref_sha)
+        voice = VoiceEntry(profile, revision, speaker_name, real, ref_sha)
+        # reference 文件完整验证（存在/普通文件/可读/SHA-256）——reload ack 与
+        # 启动 ready 的前提：任一失败 → 本次加载非 OK（有 LKG → degraded 保留旧 ack；
+        # 无 LKG → unready）。绝不带着坏 reference 给出 OK/ack。
+        bad = _validate_reference_file(voice)
+        if bad:
+            return _RegistryLoad(bad)
+        result[key] = voice
     return _RegistryLoad("OK", result, file_sha256, generation, publisher_version, schema_version)
 
 
@@ -339,28 +383,9 @@ async def reload_registry() -> Response:
 
 
 def _check_voice(voice: VoiceEntry) -> str:
-    """文件存在性 + SHA-256 校验（带 mtime+size 缓存）。返回 "" 表示可用，
-    否则返回 detail 错误码。绝不静默接受变更文件。"""
-    try:
-        st = os.stat(voice.reference_path)
-    except OSError:
-        return "REFERENCE_VOICE_MISSING"
-    if not os.path.isfile(voice.reference_path):
-        return "REFERENCE_VOICE_MISSING"
-    sig = (st.st_mtime_ns, st.st_size)
-    if sig != voice._sig:
-        sha = hashlib.sha256()
-        md5 = hashlib.md5()  # noqa: S324 — upstream cache compatibility，非密码学用途
-        with open(voice.reference_path, "rb") as fh:
-            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-                sha.update(chunk)
-                md5.update(chunk)
-        voice._sig = sig
-        voice._actual_sha256 = sha.hexdigest()
-        voice.expected_md5 = md5.hexdigest()
-    if voice._actual_sha256 != voice.reference_sha256:
-        return "REFERENCE_SHA256_MISMATCH"
-    return ""
+    """synthesize/health 用 reference 校验（兼容包装，错误码为既有 frozen 语义）。
+    文件在校验后被篡改时按 (mtime_ns, size) 缓存失效重算，fail-closed。"""
+    return _validate_reference_file(voice)
 
 
 # ---------- /health ----------
@@ -478,6 +503,11 @@ async def synthesize(req: SynthesizeRequest) -> Response:
         return _err(422, "INVALID_REQUEST", "text 必须非空")
     st = REGISTRY  # 快照：本请求自始至终读同一完整 state（reload 原子替换安全）
     if st.status != "OK":
+        # REFERENCE_*（reference 文件问题）透传既有码（m4b frozen 语义，冷启动
+        # reference 缺失/SHA 错误时 synthesize 保持原 503 码）；
+        # VOICE_REGISTRY_*（registry 自身问题）对外统一 VOICE_REGISTRY_INVALID（既有语义）
+        if st.status in ("REFERENCE_VOICE_MISSING", "REFERENCE_SHA256_MISMATCH"):
+            return _err(503, st.status, f"voice registry 不可用（{st.status}）")
         return _err(503, "VOICE_REGISTRY_INVALID", f"voice registry 不可用（{st.status}）")
     revision = req.voiceRevision or ""
     voice = st.voices.get(f"{req.voiceProfile}@{revision}")
