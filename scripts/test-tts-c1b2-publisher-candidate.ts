@@ -24,6 +24,7 @@ import {
 } from '../src/lib/tts-c/legacy-import';
 import {
   claimPublication,
+  durabilizeAndVerifyCandidate,
   buildRegistryCandidate,
   persistCandidateFile,
   markCandidatePersisted,
@@ -174,6 +175,17 @@ function markMappedVerified(entryId: string, matId: string, mappingMode: 'publis
   if (res.changes !== 1) throw new Error(`markMappedVerified failed for ${entryId}`);
 }
 
+/** 原版 fenced failPublication 签名（对象参数）——从完整 row 构造。 */
+function failRow(row: PublicationRow, errorCode: string, errorMessage: string): void {
+  failPublication(getDb(), {
+    publicationId: row.id,
+    ownerToken: row.owner_token as string,
+    attempt: row.attempt,
+    errorCode,
+    errorMessage,
+  });
+}
+
 function rowCount(table: string): number {
   return (getDb().prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as {n: number}).n;
 }
@@ -207,9 +219,9 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
   closeDb();
   getDb(); // 应用 migration
   fx = await setupC1aFixture(TAG);
-  // setupC1aFixture 重建了 dataDir——重建后的 voice root / mat root
-  VOICE_ROOT = path.join(DATA_DIR, 'voices');
-  MAT_ROOT = path.join(DATA_DIR, 'voice-materializations');
+  // setupC1aFixture 重建了 dataDir——重建后的 voice root / mat root（绝对路径契约）
+  VOICE_ROOT = path.resolve(path.join(DATA_DIR, 'voices'));
+  MAT_ROOT = path.resolve(path.join(DATA_DIR, 'voice-materializations'));
   fs.mkdirSync(VOICE_ROOT, {recursive: true});
   fs.mkdirSync(MAT_ROOT, {recursive: true});
   // 幂等：setupC1aFixture 后重新 close/getDb 保持单一连接视角
@@ -379,7 +391,8 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
       stableRegistrySha256: stableSha,
     });
     ok(claimM.kind === 'claimed', 'B1 materialization_publish claim claimed');
-    const pm = claimM.kind === 'claimed' ? claimM.publication : claimM.publication;
+    if (claimM.kind !== 'claimed') throw new Error('B1 claim 未成功');
+    const pm = claimM.publication;
     ok(pm.status === 'building' && pm.generation === 1, `B1 building + generation=1（实际 ${pm.generation}）`);
     ok(pm.owner_token !== null && pm.lease_expires_at_epoch_ms !== null && pm.attempt === 1, 'B1 owner/lease/attempt=1');
     ok(pm.stable_registry_sha256 === stableSha, 'B1 stable_registry_sha256 记录');
@@ -401,7 +414,8 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
       stableRegistrySha256: stableSha,
     });
     ok(claimL2.kind === 'claimed', 'B2 legacy_cutover_publish claim claimed');
-    const pl = claimL2.kind === 'claimed' ? claimL2.publication : claimL2.publication;
+    if (claimL2.kind !== 'claimed') throw new Error('B2 claim 未成功');
+    const pl = claimL2.publication;
     const lve = getDb().prepare('SELECT mapping_status, pending_publication_id, candidate_source_selector FROM legacy_adapter_voice_entries WHERE id=?').get(cutoverEntry.id) as Record<string, string | null>;
     ok(lve.mapping_status === 'mapping_pending', 'B2 entry mapping_pending');
     ok(lve.pending_publication_id === pl.id, 'B2 pending_publication_id = 本 publication');
@@ -425,7 +439,8 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
       stableRegistrySha256: stableSha,
     });
     ok(claimR.kind === 'claimed', 'B4 registry_rebuild claim claimed');
-    const pr = claimR.kind === 'claimed' ? claimR.publication : claimR.publication;
+    if (claimR.kind !== 'claimed') throw new Error('B4 claim 未成功');
+    const pr = claimR.publication;
     ok(pr.generation === 3 && pr.subject_id === 'global', 'B4 generation=3 + subject_id=global');
 
     // B6: 相同 request/subject 重放 → already_in_flight（复用）——在 pr 释放前立即重放
@@ -434,6 +449,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
       stableRegistrySha256: stableSha,
     });
     ok(replay.kind === 'already_in_flight' && replay.publication.id === pr.id, 'B6 同 subject 重放 → already_in_flight 复用');
+    ok(!('owner_token' in replay.publication) && !('ownerToken' in replay.publication), 'B6 already_in_flight DTO 不含 owner token（P0-A）');
     ok(publicationRowCount() === 3, 'B6 不新建 publication row');
 
     // B5: subject_type/subject_mode 非法组合被拒绝
@@ -483,6 +499,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
       stableRegistrySha256: stableSha,
     });
     ok(after.kind === 'claimed' && after.publication.generation === maxBeforeB8b + 1, `B8b A 终态后 B claim 成功（generation=${after.publication.generation}=max+1）`);
+    if (after.kind !== 'claimed') throw new Error('B8b claim 未成功');
     failPublication(getDb(), {publicationId: after.publication.id, ownerToken: after.publication.owner_token!, attempt: after.publication.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release'});
 
     // B9: projection 状态不满足时 fail-closed（materialization 非 file_ready_unpublished）
@@ -524,6 +541,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
       subject: {subjectType: 'legacy_cutover_publish', subjectId: entryC.id, subjectMode: 'publish_and_cutover'},
       stableRegistrySha256: stableSha,
     });
+    if (c1.kind !== 'claimed') throw new Error('C1 claim 未成功');
     const pub = c1.publication;
 
     // C1: 相同输入重复构建 → 逐字节一致
@@ -559,6 +577,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
       subject: {subjectType: 'materialization_publish', subjectId: p3.matId, subjectMode: 'publish_and_cutover'},
       stableRegistrySha256: stableSha,
     });
+    if (c3b.kind !== 'claimed') throw new Error('C3 claim 未成功');
     await expectCode('C3 候选 key 冲突 → CANDIDATE_KEY_CONFLICT（fail-closed 不静默覆盖）', async () => {
       await buildRegistryCandidate(getDb(), {publication: c3b.publication, legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (p) => path.join(VOICE_ROOT, p.replace(/^\/voices\//, ''))});
     }, CANDIDATE_KEY_CONFLICT);
@@ -625,7 +644,8 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
         resolveLegacyReferencePath: (p) => path.join(VOICE_ROOT, p.replace(/^\/voices\//, '')),
       },
     });
-    ok(outcome.status === 'file_durable', 'D1 编排到达 file_durable', outcome.status);
+    ok(outcome.kind === 'completed' && outcome.status === 'file_durable', 'D1 编排到达 file_durable', outcome.status);
+    if (outcome.kind !== 'completed') throw new Error('D1 未 completed');
     const filePath = outcome.candidateFilePath;
     ok(fs.existsSync(filePath), 'D1 candidate 文件存在');
     ok(fs.readdirSync(candidateRegistryDir()).filter((f) => f.endsWith('.tmp')).length === 0, 'D1 无 .tmp 残留');
@@ -648,7 +668,8 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
         resolveLegacyReferencePath: (p) => path.join(VOICE_ROOT, p.replace(/^\/voices\//, '')),
       },
     });
-    ok(outcome2.publicationId === outcome.publicationId && outcome2.candidateRegistrySha256 === outcome.candidateRegistrySha256, 'D13 重跑复用同一 publication + 同一 candidate');
+    ok(outcome2.kind === 'already_file_durable' && outcome2.publicationId === outcome.publicationId && outcome2.candidateRegistrySha256 === outcome.candidateRegistrySha256, 'D13 重跑复用同一 publication + 同一 candidate（already_file_durable）');
+    if (outcome2.kind !== 'already_file_durable') throw new Error('D13 未 already_file_durable');
     ok(publicationRowCount() === pubCountBeforeD + 1, 'D13 重跑不新建 publication row');
     ok(sha256OfFile(filePath) === fileSha, 'D13 durable 文件未变');
 
@@ -670,6 +691,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
       subject: {subjectType: 'materialization_publish', subjectId: newMat, subjectMode: 'publish_and_cutover'},
       stableRegistrySha256: stableSha,
     });
+    if (claimT.kind !== 'claimed') throw new Error('D3 claim 未成功');
     const pubT = claimT.publication;
     const built = await buildRegistryCandidate(getDb(), {publication: pubT, legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (p) => path.join(VOICE_ROOT, p.replace(/^\/voices\//, ''))});
     markCandidatePersisted(getDb(), {publicationId: pubT.id, ownerToken: pubT.owner_token!, attempt: pubT.attempt, candidateRegistrySha256: built.registrySha256, candidateManifestJson: built.manifestJson, candidateManifestSha256: built.manifestSha256});
@@ -760,6 +782,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
       subject: {subjectType: 'legacy_cutover_publish', subjectId: entryForD12.id, subjectMode: 'publish_and_cutover'},
       stableRegistrySha256: stableSha,
     });
+    if (claimD12.kind !== 'claimed') throw new Error('D12 claim 未成功');
     const pubD12 = claimD12.publication;
     const builtD12 = await buildRegistryCandidate(getDb(), {publication: pubD12, legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (p) => path.join(VOICE_ROOT, p.replace(/^\/voices\//, ''))});
     markCandidatePersisted(getDb(), {publicationId: pubD12.id, ownerToken: pubD12.owner_token!, attempt: pubD12.attempt, candidateRegistrySha256: builtD12.registrySha256, candidateManifestJson: builtD12.manifestJson, candidateManifestSha256: builtD12.manifestSha256});
@@ -778,6 +801,183 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
     // D15: 无残留（process/fd/temp 目录）
     ok(fs.readdirSync(candidateRegistryDir()).every((f) => f.endsWith('.json')), 'D15 candidate root 仅含 final json（无 temp/staging）');
     ok(legacyCount() >= 0, 'D15 legacy 表可读');
+  }
+
+  // ══════════════ R1. TTS-C.1B.2.R1 blocker repair ══════════════
+  {
+    const stableSha = sha256Bytes(fs.readFileSync(path.join(DATA_DIR, 'regs', 'cutover-src.json')));
+
+    // R1-01: 双进程完整 orchestrator——同 subject 恰好一个 winner，loser 零写副作用
+    // 前置：释放 D 段遗留的 active flight（D12 file_durable）
+    const d12Active = getDb().prepare("SELECT * FROM voice_registry_publications WHERE status='file_durable' ORDER BY generation DESC LIMIT 1").get() as PublicationRow | undefined;
+    if (d12Active) failRow(d12Active, 'TEST_FAIL', 'release before R1-01');
+    const pubBefore = publicationRowCount();
+    const [p1, p2] = await Promise.all([
+      runChild([DATA_DIR, 'publish', 'registry_rebuild', 'global', 'none', stableSha, VOICE_ROOT, MAT_ROOT, EMIT_ROOT]),
+      runChild([DATA_DIR, 'publish', 'registry_rebuild', 'global', 'none', stableSha, VOICE_ROOT, MAT_ROOT, EMIT_ROOT]),
+    ]);
+    ok(p1.ok === true && p2.ok === true, `R1-01 双进程 publish 均成功返回 p1=${JSON.stringify(p1).slice(0,200)} p2=${JSON.stringify(p2).slice(0,200)}`);
+    const kinds = [p1, p2].filter((x) => x.ok).map((x) => x.kind);
+    ok(kinds.filter((k) => k === 'completed').length === 1, 'R1-01 恰好一个 completed winner');
+    ok(kinds.some((k) => k === 'already_in_flight' || k === 'already_file_durable'), 'R1-01 另一个为 already_in_flight / already_file_durable');
+    ok(pubBefore + 1 === publicationRowCount(), 'R1-01 publication row 只有 1 条新增');
+    const winner = p1.kind === 'completed' ? p1 : p2;
+    const loser = p1.kind === 'completed' ? p2 : p1;
+    if (winner.kind !== 'completed') throw new Error('R1-01 无 completed winner');
+    ok(!('ownerToken' in winner) && !('ownerToken' in loser), 'R1-01 输出不携带 owner token');
+    ok(Number(winner.generation) === (getDb().prepare('SELECT MAX(generation) AS n FROM voice_registry_publications').get() as {n: number}).n, 'R1-01 generation 只分配 1 个（winner 的 generation 为当前 max）');
+    const winRow = getPublicationRow(getDb(), String(winner.publicationId));
+    ok(winRow.status === 'file_durable' && winRow.candidate_registry_sha256 !== null, 'R1-01 winner DB 到 file_durable + evidence');
+    const winnerFile = candidateRegistryPath(Number(winner.generation));
+    ok(fs.existsSync(winnerFile), 'R1-01 最终只有一个合法 candidate 文件存在');
+    ok(sha256OfFile(winnerFile) === winRow.candidate_registry_sha256, 'R1-01 DB evidence 与 candidate SHA 一致');
+    ok(fs.readdirSync(candidateRegistryDir()).filter((f) => f.endsWith('.tmp')).length === 0, 'R1-01 无额外 temp 文件');
+    // 释放 R1-01 flight（供后续 subject 使用）
+    failRow(winRow, 'TEST_FAIL', 'release after R1-01');
+
+    // R1-02/03: loser 不 renew/build/write/fail——不推进 DB，不新建文件，lease 不变
+    const {matId: r1MatId} = await newProjection();
+    const w = claimPublication(getDb(), {
+      subject: {subjectType: 'materialization_publish', subjectId: r1MatId, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: stableSha,
+    });
+    ok(w.kind === 'claimed', 'R1-02 winner claim 成功');
+    if (w.kind !== 'claimed') throw new Error('R1-02 winner claim 未成功');
+    const winnerRow = w.publication;
+    const winnerHandle = {publicationId: winnerRow.id, generation: winnerRow.generation, ownerToken: winnerRow.owner_token as string, attempt: winnerRow.attempt};
+    const leaseBefore = getPublicationRow(getDb(), winnerRow.id).lease_expires_at_epoch_ms;
+    const filesBefore = fs.readdirSync(candidateRegistryDir());
+    const loserResult = await publishRegistryCandidate(getDb(), {
+      subject: {subjectType: 'materialization_publish', subjectId: r1MatId, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: stableSha,
+      build: {legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (p) => path.join(VOICE_ROOT, p.replace(/^\/voices\//, ''))},
+    });
+    ok(loserResult.kind === 'already_in_flight', 'R1-02 loser 得到 already_in_flight');
+    const loserRowAfter = getPublicationRow(getDb(), winnerRow.id);
+    ok(loserRowAfter.status === 'building', 'R1-02 loser 未推进 DB（仍 building）');
+    ok(loserRowAfter.lease_expires_at_epoch_ms === leaseBefore, 'R1-03 loser 未续租（lease 不变）');
+    ok(JSON.stringify(fs.readdirSync(candidateRegistryDir())) === JSON.stringify(filesBefore), 'R1-03 loser 未写 candidate 文件');
+    ok(publicationRowCount() === pubBefore + 2, 'R1-03 loser 未新建 publication row（仅 R1-01/R1-02 winner 两行）');
+    ok(!('ownerToken' in loserResult), 'R1-02 loser 结果不含 owner token');
+    failPublication(getDb(), {publicationId: winnerHandle.publicationId, ownerToken: winnerHandle.ownerToken, attempt: winnerHandle.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release after R1-02'});
+
+    // R1-04/05: dir-fsync 失败 → existing-final 重跑重新建立 durability（组合流程）
+    const r1p = await newProjection();
+    const claimR1 = claimPublication(getDb(), {
+      subject: {subjectType: 'materialization_publish', subjectId: r1p.matId, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: stableSha,
+    });
+    if (claimR1.kind !== 'claimed') throw new Error('R1-04 claim 未成功');
+    const r1pub = claimR1.publication;
+    const r1Handle = {publicationId: r1pub.id, generation: r1pub.generation, ownerToken: r1pub.owner_token as string, attempt: r1pub.attempt};
+    const r1built = await buildRegistryCandidate(getDb(), {publication: getPublicationRow(getDb(), r1pub.id), legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (p) => path.join(VOICE_ROOT, p.replace(/^\/voices\//, ''))});
+    markCandidatePersisted(getDb(), {publicationId: r1pub.id, ownerToken: r1pub.owner_token as string, attempt: r1pub.attempt, candidateRegistrySha256: r1built.registrySha256, candidateManifestJson: r1built.manifestJson, candidateManifestSha256: r1built.manifestSha256});
+    // 第一次：rename 成功，parent dir fsync 注入失败
+    await expectCode('R1-04 第一次 dir fsync 失败 → CANDIDATE_FILE_IO', async () => {
+      await persistCandidateFile({generation: r1pub.generation, candidateBytes: r1built.registryBytes, expectedSha256: r1built.registrySha256, fsyncDir: async () => { throw new Error('injected dir fsync failure'); }});
+    }, CANDIDATE_FILE_IO);
+    ok(getPublicationRow(getDb(), r1pub.id).status === 'candidate_persisted', 'R1-04 第一次失败后 DB 保持 candidate_persisted');
+    const r1Final = candidateRegistryPath(r1pub.generation);
+    ok(fs.existsSync(r1Final), 'R1-04 第一次失败后 final 文件存在（rename 已成功）');
+    // 第二次：existing-final 重跑——必须重新 fsync final + parent dir
+    let finalFsyncCalls = 0;
+    let dirFsyncCalls = 0;
+    await persistCandidateFile({
+      generation: r1pub.generation,
+      candidateBytes: r1built.registryBytes,
+      expectedSha256: r1built.registrySha256,
+      fsyncFile: async () => { finalFsyncCalls++; },
+      fsyncDir: async () => { dirFsyncCalls++; },
+    });
+    ok(finalFsyncCalls === 1 && dirFsyncCalls === 1, `R1-04 重跑重新 fsync final + parent dir（final=${finalFsyncCalls}, dir=${dirFsyncCalls}）`);
+    markFileDurable(getDb(), r1pub.id, r1pub.owner_token as string, r1pub.attempt);
+    ok(getPublicationRow(getDb(), r1pub.id).status === 'file_durable', 'R1-04 重跑成功后 DB → file_durable');
+    failRow(getPublicationRow(getDb(), r1pub.id), 'TEST_FAIL', 'release after R1-04');
+
+    // R1-05: 重跑 dir fsync 仍失败 → DB 继续保持 candidate_persisted
+    const r1p5 = await newProjection();
+    const claimR5 = claimPublication(getDb(), {
+      subject: {subjectType: 'materialization_publish', subjectId: r1p5.matId, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: stableSha,
+    });
+    if (claimR5.kind !== 'claimed') throw new Error('R1-05 claim 未成功');
+    const r5pub = claimR5.publication;
+    const r5built = await buildRegistryCandidate(getDb(), {publication: getPublicationRow(getDb(), r5pub.id), legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (p) => path.join(VOICE_ROOT, p.replace(/^\/voices\//, ''))});
+    markCandidatePersisted(getDb(), {publicationId: r5pub.id, ownerToken: r5pub.owner_token as string, attempt: r5pub.attempt, candidateRegistrySha256: r5built.registrySha256, candidateManifestJson: r5built.manifestJson, candidateManifestSha256: r5built.manifestSha256});
+    await expectCode('R1-05 第一次 dir fsync 失败 → CANDIDATE_FILE_IO', async () => {
+      await persistCandidateFile({generation: r5pub.generation, candidateBytes: r5built.registryBytes, expectedSha256: r5built.registrySha256, fsyncDir: async () => { throw new Error('injected dir fsync failure'); }});
+    }, CANDIDATE_FILE_IO);
+    await expectCode('R1-05 重跑 dir fsync 仍失败 → CANDIDATE_FILE_IO（DB 不前进）', async () => {
+      await persistCandidateFile({generation: r5pub.generation, candidateBytes: r5built.registryBytes, expectedSha256: r5built.registrySha256, fsyncDir: async () => { throw new Error('injected dir fsync failure again'); }});
+    }, CANDIDATE_FILE_IO);
+    ok(getPublicationRow(getDb(), r5pub.id).status === 'candidate_persisted', 'R1-05 重跑失败后 DB 仍 candidate_persisted');
+    failRow(getPublicationRow(getDb(), r5pub.id), 'TEST_FAIL', 'release after R1-05');
+
+    // R1-06: existing final 的 generation 语义校验（方案 A）——SHA 一致但 generation 不匹配 → 拒绝
+    const genMismatch = 9200;
+    const mismatchDoc = JSON.stringify({schemaVersion: '1.1', registryGeneration: 7777, publisherSchemaVersion: 'tts-c-registry-publisher@1', voices: [{voiceProfile: 'x', voiceRevision: '1', speakerName: 'x', referenceAssetPath: '/voices/x.wav', referenceSha256: 'a'.repeat(64)}]}) + '\n';
+    const mismatchBytes = Buffer.from(mismatchDoc, 'utf8');
+    fs.writeFileSync(candidateRegistryPath(genMismatch), mismatchBytes);
+    await expectCode('R1-06 existing final generation 不匹配 → CANDIDATE_FILE_IO', async () => {
+      await persistCandidateFile({generation: genMismatch, candidateBytes: mismatchBytes, expectedSha256: sha256Bytes(mismatchBytes)});
+    }, CANDIDATE_FILE_IO);
+    fs.unlinkSync(candidateRegistryPath(genMismatch));
+
+    // R1-07: resolver 返回 voice root 外路径 → 拒绝（containment 不被 resolver 绕过）
+    const wavOutside = path.join(DATA_DIR, 'outside-ref.wav');
+    fs.writeFileSync(wavOutside, wavFile());
+    const regOutside = writeRegistry(path.join(DATA_DIR, 'regs'), 'r1-outside.json', [
+      {voiceProfile: 'out', voiceRevision: '1', speakerName: 'out', referenceAssetPath: `${EMIT_ROOT}/x.wav`, referenceSha256: sha256OfFile(wavOutside)},
+    ]);
+    await expectCode('R1-07 resolver 越出 voice root → REFERENCE_VOICE_MISSING', async () => {
+      await importLegacyRegistry(getDb(), {registryFilePath: regOutside, voiceRootDir: VOICE_ROOT, resolveReferencePath: () => wavOutside});
+    }, 'REFERENCE_VOICE_MISSING');
+    ok(!getDb().prepare("SELECT 1 FROM legacy_adapter_voice_entries WHERE voice_profile_key='out'").get(), 'R1-07 失败零 DB 副作用');
+
+    // R1-08: voice root 内 parent symlink 指向 root 外 → 拒绝
+    const outsideDir = path.join(DATA_DIR, 'outside-dir');
+    fs.mkdirSync(outsideDir, {recursive: true});
+    fs.writeFileSync(path.join(outsideDir, 'ref.wav'), wavFile());
+    const linkDir = path.join(VOICE_ROOT, 'linkdir');
+    fs.symlinkSync(outsideDir, linkDir);
+    const regLink = writeRegistry(path.join(DATA_DIR, 'regs'), 'r1-link.json', [
+      {voiceProfile: 'lnk', voiceRevision: '1', speakerName: 'lnk', referenceAssetPath: `${EMIT_ROOT}/linkdir/ref.wav`, referenceSha256: sha256OfFile(path.join(outsideDir, 'ref.wav'))},
+    ]);
+    await expectCode('R1-08 voice root 内 parent symlink → REFERENCE_VOICE_MISSING', async () => {
+      await importLegacyRegistry(getDb(), {registryFilePath: regLink, voiceRootDir: VOICE_ROOT, resolveReferencePath: (p) => path.join(VOICE_ROOT, p.replace(/^\/voices\//, ''))});
+    }, 'REFERENCE_VOICE_MISSING');
+
+    // R1-10: final symlink reference → 拒绝
+    const realWav = path.join(VOICE_ROOT, 'real-ref.wav');
+    fs.writeFileSync(realWav, wavFile());
+    const linkWav = path.join(VOICE_ROOT, 'link-ref.wav');
+    fs.symlinkSync(realWav, linkWav);
+    const regSymFinal = writeRegistry(path.join(DATA_DIR, 'regs'), 'r1-symfinal.json', [
+      {voiceProfile: 'sf', voiceRevision: '1', speakerName: 'sf', referenceAssetPath: `${EMIT_ROOT}/link-ref.wav`, referenceSha256: sha256OfFile(realWav)},
+    ]);
+    await expectCode('R1-10 final symlink reference → REFERENCE_VOICE_MISSING', async () => {
+      await importLegacyRegistry(getDb(), {registryFilePath: regSymFinal, voiceRootDir: VOICE_ROOT, resolveReferencePath: (p) => path.join(VOICE_ROOT, p.replace(/^\/voices\//, ''))});
+    }, 'REFERENCE_VOICE_MISSING');
+    fs.unlinkSync(linkWav);
+    fs.unlinkSync(linkDir);
+
+    // R1-09: materialization projection parent symlink → candidate 构建拒绝
+    const r1p9 = await newProjection();
+    const realMatParent = path.join(MAT_ROOT, `${r1p9.profileId}-real`);
+    fs.renameSync(path.join(MAT_ROOT, r1p9.profileId), realMatParent);
+    fs.symlinkSync(realMatParent, path.join(MAT_ROOT, r1p9.profileId));
+    const claimR9 = claimPublication(getDb(), {
+      subject: {subjectType: 'materialization_publish', subjectId: r1p9.matId, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: stableSha,
+    });
+    if (claimR9.kind !== 'claimed') throw new Error('R1-09 claim 未成功');
+    const r9pub = claimR9.publication;
+    await expectCode('R1-09 materialization parent symlink → 构建拒绝', async () => {
+      await buildRegistryCandidate(getDb(), {publication: getPublicationRow(getDb(), r9pub.id), legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (p) => path.join(VOICE_ROOT, p.replace(/^\/voices\//, ''))});
+    }, 'CONTAINMENT');
+    fs.unlinkSync(path.join(MAT_ROOT, r1p9.profileId));
+    fs.renameSync(realMatParent, path.join(MAT_ROOT, r1p9.profileId));
+    failRow(getPublicationRow(getDb(), r9pub.id), 'TEST_FAIL', 'release after R1-09');
   }
 
   // 清理

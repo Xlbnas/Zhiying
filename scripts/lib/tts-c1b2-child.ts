@@ -9,7 +9,7 @@ import process from 'node:process';
 import path from 'node:path';
 import {closeDb, getDb} from '../../src/lib/db';
 import {importLegacyRegistry} from '../../src/lib/tts-c/legacy-import';
-import {claimPublication} from '../../src/lib/tts-c/registry-publisher';
+import {claimPublication, publishRegistryCandidate} from '../../src/lib/tts-c/registry-publisher';
 
 async function main(): Promise<void> {
   const [, , dataDir, op, ...rest] = process.argv;
@@ -24,6 +24,29 @@ async function main(): Promise<void> {
         resolveReferencePath: emitRoot ? (p) => path.join(voiceRootDir, p.replace(new RegExp('^' + emitRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/'), '')) : undefined,
       });
       process.stdout.write(JSON.stringify({ok: true, inserted: result.inserted, reused: result.reused, keys: result.keys}));
+    } else if (op === 'publish') {
+      const [subjectType, subjectId, subjectMode, stableSha, voiceRootDir, matRootDir, emitRoot] = rest;
+      const result = await publishRegistryCandidate(db, {
+        subject: {subjectType: subjectType as never, subjectId, subjectMode: subjectMode as never},
+        stableRegistrySha256: stableSha,
+        build: {
+          legacyVoiceRootDir: voiceRootDir,
+          materializationRootDir: matRootDir,
+          emitVoiceRootPath: emitRoot,
+          resolveLegacyReferencePath: (p) => path.join(voiceRootDir, p.replace(new RegExp('^' + emitRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/'), '')),
+        },
+      });
+      process.stdout.write(
+        JSON.stringify({
+          ok: true,
+          kind: result.kind,
+          publicationId: result.publicationId,
+          generation: result.generation,
+          status: result.status,
+          candidateRegistrySha256: 'candidateRegistrySha256' in result ? result.candidateRegistrySha256 : undefined,
+          hasOwnerToken: false,
+        }),
+      );
     } else if (op === 'claim') {
       const [subjectType, subjectId, subjectMode, stableSha] = rest;
       const result = claimPublication(db, {
