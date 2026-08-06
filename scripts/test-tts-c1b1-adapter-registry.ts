@@ -3,13 +3,19 @@
  *
  * 用法：npx tsx scripts/test-tts-c1b1-adapter-registry.ts
  *
- * 覆盖（对应任务书六个最小场景）：
+ * 覆盖（对应任务书六个最小场景 + TTS-C.1B.1.R1 reference 验证前置）：
  *   场景1 legacy 1.0 启动完全兼容（T01-T03）
  *   场景2 /registry-status 对 1.0 返回 generation=null（T02）
  *   场景3 reload 合法 1.1 → sha/generation/schema/speakerCount 更新 + 新 voice 可用（T04-T07）
  *   场景4 reload 非法 → 非 2xx + LKG 不变 + 旧 voice 可用（T08-T14）
  *   场景5 首次加载失败无 LKG → ready=false + synthesize 503（T17-T19）
  *   场景6 重复 reload 同一文件幂等无副作用（T15-T16、T20 冷启动失败后 reload 恢复）
+ *   R1   reload 前 reference 文件完整验证（TTS-C.1B.1.R1）：
+ *        R01 已有 LKG + reference 缺失 → reload 非 2xx + LKG 不变 + degraded + 旧 voice 200
+ *        R02 已有 LKG + referenceSha256 不符 → reload 非 2xx + LKG 不变 + lastReloadError 精确
+ *        R03 冷启动 reference 缺失 → ready=false + synthesize 503 REFERENCE_VOICE_MISSING
+ *        R04 冷启动 reference SHA 错误 → ready=false + synthesize 503 REFERENCE_SHA256_MISMATCH
+ *        R05 修复文件与 SHA 后 reload → 200 ready=true degraded=false
  */
 
 import {spawn, type ChildProcess} from 'node:child_process';
@@ -372,6 +378,78 @@ async function main(): Promise<void> {
         {reload: r2.status, speakerCount: s.speakerCount, uploadCount: state.uploadCount});
     }
 
+    // ---- R1：reload 前 reference 文件完整验证（TTS-C.1B.1.R1）----
+    // R01：已有 LKG，registry 引用不存在文件 → reload 非 2xx + LKG 不变 + 旧 voice 200
+    writeRegistry({
+      schemaVersion: '1.1',
+      registryGeneration: 9,
+      publisherSchemaVersion: PUBLISHER_VERSION,
+      voices: [{...VOICE_DEFAULT, referenceAssetPath: path.join(TMP_DIR, 'missing.wav')}],
+    });
+    {
+      const r = await reload();
+      ok(r.status === 500 && r.body.error === 'VOICE_REGISTRY_RELOAD_FAILED',
+        'R01a LKG + reference 缺失 → reload 非 2xx VOICE_REGISTRY_RELOAD_FAILED', r.body);
+      const s = await statusJson();
+      ok(
+        s.ready === true && s.degraded === true &&
+        s.loadedRegistrySha256 === sha11FileAgain &&
+        s.loadedRegistryGeneration === 7 &&
+        s.speakerCount === 2 &&
+        s.lastReloadError === 'REFERENCE_VOICE_MISSING',
+        'R01b LKG 不变（sha/generation/count 全旧值）degraded=true lastReloadError=REFERENCE_VOICE_MISSING', s);
+      const r2 = await post('default', '1');
+      const r3 = await post('alt', '1');
+      ok(r2.status === 200 && r3.status === 200, 'R01c 旧 voice 在 degraded LKG 下仍 synthesize 200',
+        {default: r2.status, alt: r3.status});
+    }
+
+    // R02：已有 LKG，referenceSha256 与真实文件不符 → reload 非 2xx + LKG 不变 + 错误精确
+    writeRegistry({
+      schemaVersion: '1.1',
+      registryGeneration: 10,
+      publisherSchemaVersion: PUBLISHER_VERSION,
+      voices: [{...VOICE_DEFAULT, referenceSha256: SHA_B}], // ref-a.wav 实际内容 SHA_A
+    });
+    {
+      const r = await reload();
+      ok(r.status === 500 && r.body.error === 'VOICE_REGISTRY_RELOAD_FAILED',
+        'R02a LKG + referenceSha256 不符 → reload 非 2xx VOICE_REGISTRY_RELOAD_FAILED', r.body);
+      const s = await statusJson();
+      ok(
+        s.ready === true && s.degraded === true &&
+        s.loadedRegistrySha256 === sha11FileAgain &&
+        s.loadedRegistryGeneration === 7 &&
+        s.speakerCount === 2 &&
+        s.lastReloadError === 'REFERENCE_SHA256_MISMATCH',
+        'R02b LKG 不变 degraded=true lastReloadError=REFERENCE_SHA256_MISMATCH', s);
+    }
+
+    // R05：恢复正确文件与正确 SHA 后 reload → 200 ready=true degraded=false
+    fs.writeFileSync(path.join(TMP_DIR, 'ref-c.wav'), WAV_B); // 修复 R01 的缺失文件
+    writeRegistry({
+      schemaVersion: '1.1',
+      registryGeneration: 11,
+      publisherSchemaVersion: PUBLISHER_VERSION,
+      voices: [
+        {
+          ...VOICE_DEFAULT,
+          referenceAssetPath: path.join(TMP_DIR, 'ref-c.wav'),
+          referenceSha256: SHA_B,
+        },
+      ],
+    });
+    {
+      const r = await reload();
+      const s = await statusJson();
+      ok(r.status === 200 && r.body.ready === true && r.body.degraded === false &&
+        r.body.lastReloadError === null &&
+        s.loadedRegistryGeneration === 11 && s.speakerCount === 1,
+        'R05a 修复 reference 文件与 SHA 后 reload → 200 ready=true degraded=false', r.body);
+      const r2 = await post('default', '1');
+      ok(r2.status === 200, 'R05b 修复后新 voice default@1（ref-c）synthesize → 200', {status: r2.status});
+    }
+
     await stopAdapter();
 
     // ============ 进程 B：首次加载失败、无 LKG ============
@@ -408,6 +486,51 @@ async function main(): Promise<void> {
       ok(r2.status === 200, 'T20b 场景5 恢复后 synthesize → 200', {status: r2.status});
     }
 
+    await stopAdapter();
+
+    // ============ 进程 C：冷启动 reference 文件缺失 / SHA 错误（TTS-C.1B.1.R1）============
+    // R03：冷启动 registry reference 文件缺失 → ready=false + synthesize 503
+    writeRegistry({
+      schemaVersion: '1.1',
+      registryGeneration: 20,
+      publisherSchemaVersion: PUBLISHER_VERSION,
+      voices: [{...VOICE_DEFAULT, referenceAssetPath: path.join(TMP_DIR, 'missing.wav')}],
+    });
+    await startAdapter(REGISTRY_PATH);
+    {
+      const s = await statusJson();
+      const h = await healthJson();
+      ok(s.ready === false && s.detail === 'REFERENCE_VOICE_MISSING' && s.speakerCount === 0,
+        'R03a 冷启动 reference 缺失 → registry-status ready=false detail=REFERENCE_VOICE_MISSING', s);
+      ok(h.ready === false && h.detail === 'REFERENCE_VOICE_MISSING',
+        'R03b 冷启动 reference 缺失 → /health ready=false', h);
+      const r = await post('default', '1');
+      const j = (await r.json()) as {error?: string};
+      ok(r.status === 503 && j.error === 'REFERENCE_VOICE_MISSING',
+        'R03c 冷启动 reference 缺失 → synthesize 503 REFERENCE_VOICE_MISSING', j);
+    }
+    await stopAdapter();
+
+    // R04：冷启动 registry referenceSha256 与真实文件不符 → ready=false + synthesize 503
+    writeRegistry({
+      schemaVersion: '1.1',
+      registryGeneration: 21,
+      publisherSchemaVersion: PUBLISHER_VERSION,
+      voices: [{...VOICE_DEFAULT, referenceSha256: SHA_B}], // ref-a.wav 实际内容 SHA_A
+    });
+    await startAdapter(REGISTRY_PATH);
+    {
+      const s = await statusJson();
+      const h = await healthJson();
+      ok(s.ready === false && s.detail === 'REFERENCE_SHA256_MISMATCH' && s.speakerCount === 0,
+        'R04a 冷启动 reference SHA 错误 → registry-status ready=false detail=REFERENCE_SHA256_MISMATCH', s);
+      ok(h.ready === false && h.detail === 'REFERENCE_SHA256_MISMATCH',
+        'R04b 冷启动 reference SHA 错误 → /health ready=false', h);
+      const r = await post('default', '1');
+      const j = (await r.json()) as {error?: string};
+      ok(r.status === 503 && j.error === 'REFERENCE_SHA256_MISMATCH',
+        'R04c 冷启动 reference SHA 错误 → synthesize 503 REFERENCE_SHA256_MISMATCH', j);
+    }
     await stopAdapter();
   } finally {
     await stopAdapter();
