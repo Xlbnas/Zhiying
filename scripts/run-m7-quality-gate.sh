@@ -149,6 +149,15 @@ run_suite "tts-c1a-r4-hardening" npx tsx scripts/test-tts-c1a-r4-hardening.ts
 run_suite "tts-c1a-r5-hardening" npx tsx scripts/test-tts-c1a-r5-hardening.ts
 # TTS-C.1A.R6 新增 1 套（private reuse authority / record-only SHA seal / one-shot consumption / real POST integrity / production hook guard）
 run_suite "tts-c1a-r6-hardening" npx tsx scripts/test-tts-c1a-r6-hardening.ts
+# TTS-C.1B.1 新增 1 套（adapter registry reload contract：1.0/1.1 双 schema / LKG / atomic swap / registry-status ack）
+# adapter venv 为 gitignored 本地环境（ci.yml 同款创建方式）；缺失时现场创建，
+# 创建失败则 suite 失败、gate FAIL（fail-closed，不静默跳过）
+if [ ! -x "services/indextts2-api-adapter/.venv/bin/python" ]; then
+  echo "adapter venv 缺失，按 requirements.txt 现场创建" >> "$GATE_LOG"
+  python3 -m venv services/indextts2-api-adapter/.venv >> "$GATE_LOG" 2>&1
+  services/indextts2-api-adapter/.venv/bin/pip install -q -r services/indextts2-api-adapter/requirements.txt >> "$GATE_LOG" 2>&1
+fi
+run_suite "tts-c1b1-adapter-registry" npx tsx scripts/test-tts-c1b1-adapter-registry.ts
 # TTS-C.1A.R7 STRONG-only mutation runner（12 项 mutation；耗时，不入 gate）—— 独立运行
 # `npx tsx scripts/test-tts-c1a-r7-mutations.ts`，输出 /tmp/r7-mutation-output.txt + docs/evidence/tts-c-r17/mutation-output.txt
 
