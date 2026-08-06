@@ -10,6 +10,15 @@
     GET  /health
     POST /v1/synthesize  → audio/wav bytes
 
+TTS-C.1B.1 registry publication contract（向后兼容，publisher 未实现）：
+    GET  /registry-status  → 唯一 activation acknowledgment 观察面
+    POST /reload           → 重新读取配置的固定 registry 路径，验证后一次性原子替换
+registry schema 双支持："1.0"（legacy，production 现状，无 generation/publisher
+字段）与 "1.1"（publisher 输出，必须携带 registryGeneration positive integer +
+publisherSchemaVersion 精确值）。绝不自动改写 registry 文件。
+reload 失败：有 LKG → 保持旧 state/旧 voices + degraded=true + lastReloadError；
+无 LKG → ready=false + synthesize 503。
+
 设计约束：
 - 极薄：不 import torch、不加载模型、不占 GPU（真实 GPU 只由 upstream 进程使用）
 - useRandom=false 语义 = 不启用 emotion random sampling；不声称 byte deterministic
@@ -30,6 +39,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 from typing import Dict, Optional, Tuple
 
 import httpx
@@ -47,14 +57,22 @@ VOICE_REGISTRY_PATH = os.environ.get("ADAPTER_VOICE_REGISTRY_PATH", "")
 # reference WAV 允许根目录（containment 边界）
 VOICE_ROOT = os.environ.get("ADAPTER_VOICE_ROOT", "/voices")
 
-SUPPORTED_SCHEMA_VERSION = "1.0"
+# registry schema 双支持（TTS-C.1B.1）：
+#   "1.0" legacy（production 现状；无 generation/publisher 字段 → 内部状态 None）
+#   "1.1" publisher（未来 publisher 输出；必须携带 registryGeneration positive
+#         integer + publisherSchemaVersion 精确值）
+LEGACY_REGISTRY_SCHEMA_VERSION = "1.0"
+PUBLISHER_REGISTRY_SCHEMA_VERSION = "1.1"
+SUPPORTED_REGISTRY_SCHEMA_VERSIONS = (LEGACY_REGISTRY_SCHEMA_VERSION, PUBLISHER_REGISTRY_SCHEMA_VERSION)
+# 1.1 唯一支持的 publisherSchemaVersion 值
+SUPPORTED_PUBLISHER_SCHEMA_VERSION = "tts-c-registry-publisher@1"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 MODEL_NAME = "IndexTTS-2"
 # upstreamApiVersion / deploymentImage 记录在 README/log，绝不填进 repoCommit
 UPSTREAM_API_VERSION = "2.2.0"
 
-app = FastAPI(title="Zhiying IndexTTS2 API Adapter", version="1.1.0")
+app = FastAPI(title="Zhiying IndexTTS2 API Adapter", version="1.2.0")
 
 _client: Optional[httpx.AsyncClient] = None
 _voice_locks: Dict[str, asyncio.Lock] = {}
@@ -118,67 +136,206 @@ class VoiceEntry:
 
 
 class RegistryState:
-    __slots__ = ("status", "voices")
+    """当前生效 registry 的完整状态（TTS-C.1B.1）。
 
-    def __init__(self, status: str, voices: Optional[Dict[str, VoiceEntry]] = None) -> None:
-        # status: "OK" 或 VOICE_REGISTRY_* 错误码
+    任何变更 = 整体不可变替换（单引用赋值 + threading.Lock）；reader 只持有一次
+    快照引用，绝不看到半构造状态。无 capability/WeakMap/token/形式化状态机。"""
+
+    __slots__ = (
+        "status",  # "OK" 或 VOICE_REGISTRY_* 错误码
+        "voices",
+        "loaded_registry_sha256",  # 当前加载文件原始 bytes 的单一 SHA-256（frozen registry identity，无额外 hash 层）
+        "loaded_registry_generation",  # 1.1 的 registryGeneration；1.0/未加载 → None
+        "publisher_schema_version",  # 1.1 的 publisherSchemaVersion；1.0/未加载 → None
+        "schema_version",  # 当前加载文件的 schemaVersion；未加载 → None
+        "last_reload_error",  # 最近一次失败 reload 的 VOICE_REGISTRY_* 码；无 → None
+        "degraded",  # True = 上次 reload 失败，正以 LKG 运行
+    )
+
+    def __init__(self, status: str, voices: Optional[Dict[str, VoiceEntry]] = None, *,
+                 loaded_registry_sha256: Optional[str] = None,
+                 loaded_registry_generation: Optional[int] = None,
+                 publisher_schema_version: Optional[str] = None,
+                 schema_version: Optional[str] = None,
+                 last_reload_error: Optional[str] = None,
+                 degraded: bool = False) -> None:
         self.status = status
         self.voices = voices or {}
+        self.loaded_registry_sha256 = loaded_registry_sha256
+        self.loaded_registry_generation = loaded_registry_generation
+        self.publisher_schema_version = publisher_schema_version
+        self.schema_version = schema_version
+        self.last_reload_error = last_reload_error
+        self.degraded = degraded
 
 
-def _load_registry() -> RegistryState:
-    """启动时加载并严格验证 registry。任何非法 → 非 OK（ready=false，不 crash，
-    以便 Docker healthcheck 表达 unready 而不是进程退出）。"""
+class _RegistryLoad:
+    """_load_registry_file 的结果；status != "OK" 时其余字段无意义。"""
+
+    __slots__ = ("status", "voices", "sha256", "generation", "publisher_version", "schema_version")
+
+    def __init__(self, status: str, voices: Optional[Dict[str, VoiceEntry]] = None,
+                 sha256: Optional[str] = None, generation: Optional[int] = None,
+                 publisher_version: Optional[str] = None, schema_version: Optional[str] = None) -> None:
+        self.status = status
+        self.voices = voices
+        self.sha256 = sha256
+        self.generation = generation
+        self.publisher_version = publisher_version
+        self.schema_version = schema_version
+
+
+def _load_registry_file() -> _RegistryLoad:
+    """读取并完整验证配置的固定 registry 路径（ADAPTER_VOICE_REGISTRY_PATH）。
+    任何非法 → 非 OK（不 crash，由 HTTP 层表达 unready/degraded）。
+    只读：绝不自动改写 registry 文件。"""
     if not VOICE_REGISTRY_PATH:
-        return RegistryState("VOICE_REGISTRY_NOT_CONFIGURED")
+        return _RegistryLoad("VOICE_REGISTRY_NOT_CONFIGURED")
     try:
-        with open(VOICE_REGISTRY_PATH, "r", encoding="utf-8") as fh:
-            raw = fh.read()
+        with open(VOICE_REGISTRY_PATH, "rb") as fh:
+            raw_bytes = fh.read()
     except OSError:
-        return RegistryState("VOICE_REGISTRY_UNREADABLE")
+        return _RegistryLoad("VOICE_REGISTRY_UNREADABLE")
+    file_sha256 = hashlib.sha256(raw_bytes).hexdigest()
     try:
-        data = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return RegistryState("VOICE_REGISTRY_INVALID")
-    if not isinstance(data, dict) or data.get("schemaVersion") != SUPPORTED_SCHEMA_VERSION:
-        return RegistryState("VOICE_REGISTRY_UNSUPPORTED_SCHEMA")
+        data = json.loads(raw_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return _RegistryLoad("VOICE_REGISTRY_INVALID")
+    schema_version = data.get("schemaVersion") if isinstance(data, dict) else None
+    if schema_version not in SUPPORTED_REGISTRY_SCHEMA_VERSIONS:
+        return _RegistryLoad("VOICE_REGISTRY_UNSUPPORTED_SCHEMA")
+    generation: Optional[int] = None
+    publisher_version: Optional[str] = None
+    if schema_version == PUBLISHER_REGISTRY_SCHEMA_VERSION:
+        raw_generation = data.get("registryGeneration")
+        # bool 是 int 子类——显式排除；registryGeneration 必须 positive integer
+        if not (isinstance(raw_generation, int) and not isinstance(raw_generation, bool) and raw_generation >= 1):
+            return _RegistryLoad("VOICE_REGISTRY_INVALID")
+        generation = raw_generation
+        publisher_version = data.get("publisherSchemaVersion")
+        if publisher_version != SUPPORTED_PUBLISHER_SCHEMA_VERSION:
+            return _RegistryLoad("VOICE_REGISTRY_INVALID")
     voices = data.get("voices")
     if not isinstance(voices, list) or len(voices) == 0:
-        return RegistryState("VOICE_REGISTRY_INVALID")
+        return _RegistryLoad("VOICE_REGISTRY_INVALID")
 
     root_real = os.path.realpath(VOICE_ROOT)
     result: Dict[str, VoiceEntry] = {}
     for item in voices:
         if not isinstance(item, dict):
-            return RegistryState("VOICE_REGISTRY_INVALID")
+            return _RegistryLoad("VOICE_REGISTRY_INVALID")
         profile = item.get("voiceProfile")
         revision = item.get("voiceRevision")
         speaker_name = item.get("speakerName")
         ref_path = item.get("referenceAssetPath")
         ref_sha = item.get("referenceSha256")
         if not (isinstance(profile, str) and profile.strip()):
-            return RegistryState("VOICE_REGISTRY_INVALID")
+            return _RegistryLoad("VOICE_REGISTRY_INVALID")
         if not (isinstance(revision, str) and revision.strip()):
-            return RegistryState("VOICE_REGISTRY_INVALID")
+            return _RegistryLoad("VOICE_REGISTRY_INVALID")
         if not (isinstance(speaker_name, str) and speaker_name.strip()):
-            return RegistryState("VOICE_REGISTRY_INVALID")
+            return _RegistryLoad("VOICE_REGISTRY_INVALID")
         if not (isinstance(ref_path, str) and os.path.isabs(ref_path)):
             # 相对路径与 ../ 逃逸一并拒绝（realpath 后 containment 再兜底）
-            return RegistryState("VOICE_REGISTRY_INVALID")
+            return _RegistryLoad("VOICE_REGISTRY_INVALID")
         if not (isinstance(ref_sha, str) and SHA256_RE.match(ref_sha)):
-            return RegistryState("VOICE_REGISTRY_INVALID")
+            return _RegistryLoad("VOICE_REGISTRY_INVALID")
         key = f"{profile}@{revision}"
         if key in result:
-            return RegistryState("VOICE_REGISTRY_INVALID")
+            return _RegistryLoad("VOICE_REGISTRY_INVALID")
         # realpath 解析 symlink 后做 containment——symlink 逃逸在此被拒绝
         real = os.path.realpath(ref_path)
         if real != root_real and os.path.commonpath([root_real, real]) != root_real:
-            return RegistryState("VOICE_REGISTRY_INVALID")
+            return _RegistryLoad("VOICE_REGISTRY_INVALID")
         result[key] = VoiceEntry(profile, revision, speaker_name, real, ref_sha)
-    return RegistryState("OK", result)
+    return _RegistryLoad("OK", result, file_sha256, generation, publisher_version, schema_version)
 
 
-REGISTRY = _load_registry()
+def _initial_registry() -> RegistryState:
+    """启动时加载。失败 → 非 OK（ready=false，不 crash，以便 Docker healthcheck
+    表达 unready 而不是进程退出）。"""
+    load = _load_registry_file()
+    if load.status != "OK":
+        return RegistryState(load.status)
+    return RegistryState(
+        "OK", load.voices,
+        loaded_registry_sha256=load.sha256,
+        loaded_registry_generation=load.generation,
+        publisher_schema_version=load.publisher_version,
+        schema_version=load.schema_version,
+    )
+
+
+REGISTRY = _initial_registry()
+_registry_lock = threading.Lock()
+
+
+def _registry_status_body(st: RegistryState) -> Dict[str, object]:
+    return {
+        "ready": st.status == "OK",
+        "degraded": st.degraded,
+        "schemaVersion": st.schema_version,
+        "loadedRegistrySha256": st.loaded_registry_sha256,
+        "loadedRegistryGeneration": st.loaded_registry_generation,
+        "publisherSchemaVersion": st.publisher_schema_version,
+        "speakerCount": len(st.voices),
+        "detail": None if st.status == "OK" else st.status,
+        "lastReloadError": st.last_reload_error,
+    }
+
+
+# ---------- /registry-status + /reload（TTS-C.1B.1）----------
+
+
+@app.get("/registry-status")
+async def registry_status() -> Response:
+    """唯一 activation acknowledgment 观察面：loaded registry identity（内容
+    SHA-256）+ generation + speakerCount + degraded/lastReloadError。始终 200。"""
+    return JSONResponse(_registry_status_body(REGISTRY))
+
+
+@app.post("/reload")
+async def reload_registry() -> Response:
+    """重新读取配置的固定 registry 路径并完整验证，成功后一次性原子替换内存
+    state。不接受 caller 提供的任何路径/内容。
+    失败且有 LKG：保持旧 state/旧 voices（synthesize 不受影响），degraded=true +
+    lastReloadError，返回非 2xx；失败且无 LKG：维持 ready=false。"""
+    load = _load_registry_file()
+    global REGISTRY
+    if load.status == "OK":
+        new_state = RegistryState(
+            "OK", load.voices,
+            loaded_registry_sha256=load.sha256,
+            loaded_registry_generation=load.generation,
+            publisher_schema_version=load.publisher_version,
+            schema_version=load.schema_version,
+        )
+        with _registry_lock:
+            REGISTRY = new_state
+        return JSONResponse(_registry_status_body(new_state))
+    with _registry_lock:
+        current = REGISTRY
+        if current.status == "OK":
+            # LKG：旧 state/旧 voices 完全保留，仅标记 degraded + 记录错误
+            REGISTRY = RegistryState(
+                current.status, current.voices,
+                loaded_registry_sha256=current.loaded_registry_sha256,
+                loaded_registry_generation=current.loaded_registry_generation,
+                publisher_schema_version=current.publisher_schema_version,
+                schema_version=current.schema_version,
+                last_reload_error=load.status,
+                degraded=True,
+            )
+            kept_lkg = True
+        else:
+            # 无 LKG：更新为最新失败状态，维持 unready
+            REGISTRY = RegistryState(load.status, last_reload_error=load.status)
+            kept_lkg = False
+    return _err(
+        500,
+        "VOICE_REGISTRY_RELOAD_FAILED",
+        f"registry reload 失败（{load.status}）；{'保持 LKG 继续服务' if kept_lkg else '无可用 LKG，synthesize 维持 503'}",
+    )
 
 
 def _check_voice(voice: VoiceEntry) -> str:
@@ -213,7 +370,9 @@ def _check_voice(voice: VoiceEntry) -> str:
 async def health() -> Response:
     """ready=true 当且仅当：upstream 可达 AND registry 有效 AND 每个 voice 的
     reference 文件存在且 SHA-256 与 registry 一致。进程存活但任一条件不满足
-    时 ready=false（Adapter 自身仍 200 返回 JSON）。"""
+    时 ready=false（Adapter 自身仍 200 返回 JSON）。LKG degraded 运行视为
+    healthy（ready=true + degraded=true + detail=最近 reload 失败码）。"""
+    st = REGISTRY  # 单次快照引用：reload 原子替换中途绝不看到半构造状态
     upstream_ok = False
     try:
         client = _client_or_create()
@@ -223,10 +382,10 @@ async def health() -> Response:
         upstream_ok = False
 
     detail = ""
-    if REGISTRY.status != "OK":
-        detail = REGISTRY.status
+    if st.status != "OK":
+        detail = st.status
     else:
-        for voice in REGISTRY.voices.values():
+        for voice in st.voices.values():
             detail = _check_voice(voice)
             if detail:
                 break
@@ -236,9 +395,12 @@ async def health() -> Response:
         "ready": ready,
         "provider": "indextts2",
         "model": MODEL_NAME,
+        "degraded": st.degraded,
     }
     if not ready:
         body["detail"] = detail or "UPSTREAM_UNAVAILABLE"
+    elif st.degraded and st.last_reload_error:
+        body["detail"] = st.last_reload_error
     return JSONResponse(body)
 
 
@@ -314,12 +476,13 @@ async def synthesize(req: SynthesizeRequest) -> Response:
     # ---- 严格输入验证（不 silent ignore）----
     if not req.text or not req.text.strip():
         return _err(422, "INVALID_REQUEST", "text 必须非空")
-    if REGISTRY.status != "OK":
-        return _err(503, "VOICE_REGISTRY_INVALID", f"voice registry 不可用（{REGISTRY.status}）")
+    st = REGISTRY  # 快照：本请求自始至终读同一完整 state（reload 原子替换安全）
+    if st.status != "OK":
+        return _err(503, "VOICE_REGISTRY_INVALID", f"voice registry 不可用（{st.status}）")
     revision = req.voiceRevision or ""
-    voice = REGISTRY.voices.get(f"{req.voiceProfile}@{revision}")
+    voice = st.voices.get(f"{req.voiceProfile}@{revision}")
     if voice is None:
-        if any(v.profile == req.voiceProfile for v in REGISTRY.voices.values()):
+        if any(v.profile == req.voiceProfile for v in st.voices.values()):
             return _err(404, "VOICE_REVISION_NOT_FOUND", f"未知 voiceRevision: {revision!r}")
         return _err(404, "VOICE_PROFILE_NOT_FOUND", f"未知 voiceProfile: {req.voiceProfile!r}")
     if req.useRandom is not False:
