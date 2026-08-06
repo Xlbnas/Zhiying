@@ -163,6 +163,10 @@ run_suite "tts-c1c1-capability" npx tsx scripts/test-tts-c1c1-capability.ts
 # （temp DB + temp dirs；真实双进程并发；零真实 provider / 零 /reload / 零 production）
 run_suite "tts-c1b2-publisher-candidate" npx tsx scripts/test-tts-c1b2-publisher-candidate.ts
 
+# 11. TTS-C.1B.3 activation/reload/ack/atomic activation/recovery 套件
+# （temp SQLite + mock HTTP adapter + 真实双进程 takeover + 故障注入；零 production / 零真实 IndexTTS2）
+run_suite "tts-c1b3-activation-recovery" npx tsx scripts/test-tts-c1b3-activation-recovery.ts
+
 echo "QUALITY_GATE_RESULT=PASS"
 echo "QUALITY_GATE_SHA=$GATE_SHA"
 echo "QUALITY_GATE_TOTAL_SUITES=$((PASS_COUNT))"

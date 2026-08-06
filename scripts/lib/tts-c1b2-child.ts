@@ -10,6 +10,7 @@ import path from 'node:path';
 import {closeDb, getDb} from '../../src/lib/db';
 import {importLegacyRegistry} from '../../src/lib/tts-c/legacy-import';
 import {claimPublication, publishRegistryCandidate} from '../../src/lib/tts-c/registry-publisher';
+import {takeoverExpiredPublication} from '../../src/lib/tts-c/registry-activation';
 
 async function main(): Promise<void> {
   const [, , dataDir, op, ...rest] = process.argv;
@@ -45,6 +46,16 @@ async function main(): Promise<void> {
           status: result.status,
           candidateRegistrySha256: 'candidateRegistrySha256' in result ? result.candidateRegistrySha256 : undefined,
           hasOwnerToken: false,
+        }),
+      );
+    } else if (op === 'takeover') {
+      const [publicationId] = rest;
+      const result = takeoverExpiredPublication(db, publicationId);
+      process.stdout.write(
+        JSON.stringify({
+          ok: true,
+          kind: result.kind,
+          ...(result.kind === 'taken' ? {handle: result.handle} : {reason: result.reason}),
         }),
       );
     } else if (op === 'claim') {
