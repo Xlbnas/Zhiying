@@ -119,12 +119,12 @@
 
 ## Final state
 - **TTS-C.1B.1 = FROZEN**（Independent Review PASS + R1 blocker-specific Review PASS +
-  Integrated exact-SHA Review PASS；production 部署验证 PASS）
+  Integrated exact-SHA Review PASS；production 部署验证 PASS；Deployment Evidence Review PASS）
 - **TTS-C.1C.1 = FROZEN**（Independent Review PASS + Integrated exact-SHA Review PASS；
-  production 部署验证 PASS）
+  production 部署验证 PASS；Deployment Evidence Review PASS）
 - production runtime = `01f8536b4bac1661aa86ad57f90985ec56c8aaa5`
 - POST remains disabled；registry unchanged；DB zero-change
-- Deployment Evidence Review **pending**（已并入 evidence，等待独立 Review）
+- Deployment Evidence Review **PASS**
 - TTS-C.1B.2 / 1B.3 not started
 - TTS-C.1C.2 not started
 - TTS-C.2 not authorized
@@ -142,3 +142,14 @@
   OPS-AUDIT-BRIDGE 不可用，production 状态**不是** independently verified。
 - 与之前 1A.R7 部署相同口径：production 状态不是 independently verified（无
   OPS-AUDIT-BRIDGE）。
+
+## Deployment Evidence Review closure
+
+- Initial Review: FAIL — evidence provenance wording only.
+- R1 docs SHA:
+  `b5b97805a90d1a80b4f42e597fd1ba76aa4480de`
+- R1 blocker-specific Review: PASS.
+- Production runtime was not accessed, rolled back, rebuilt, or redeployed during R1.
+- Final production runtime remains:
+  `01f8536b4bac1661aa86ad57f90985ec56c8aaa5`
+- Production POST remains disabled.

@@ -1,11 +1,13 @@
 # TTS-C.1B / TTS-C.1C 执行计划（代码入口审计 + 最小实施计划）
 
 > 状态（2026-08-06 update）：**TTS-C.1B.1 = FROZEN**（Independent Review PASS + R1 blocker-specific
-> Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS，deployment evidence：
-> `docs/evidence/tts-c-r17/deployment-c1b1-c1c1.md`）；**TTS-C.1C.1 = FROZEN**（Independent Review PASS +
-> Integrated exact-SHA Review PASS + Production deployment PASS）；deployed production SHA
+> Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence
+> Review PASS，deployment evidence：`docs/evidence/tts-c-r17/deployment-c1b1-c1c1.md`）；
+> **TTS-C.1C.1 = FROZEN**（Independent Review PASS + Integrated exact-SHA Review PASS + Production
+> deployment PASS + Deployment Evidence Review PASS）；deployed production SHA
 > `01f8536b4bac1661aa86ad57f90985ec56c8aaa5`；TTS-C.0 / TTS-C.1A = FROZEN；production POST remains
-> disabled；TTS-C.1B.2 / 1B.3 / 1C.2 not started；TTS-C.2 not authorized；**Deployment Evidence Review pending**。
+> disabled；TTS-C.1B.2 / 1B.3 not started；TTS-C.1C.2 not started；TTS-C.2 not authorized；
+> **Deployment Evidence Review = PASS**。
 > 本文件是 1B/1C 的唯一实施计划入口，基于 frozen contract（`docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md`
 > R13）与当前代码只读审计写成。历史基线：上一 production runtime SHA
 > `37eaac6c8c8969239cab00848f6291454615a912`（runtime code 内容
@@ -241,7 +243,7 @@ subject 为 `registry_rebuild`（subject_id=`'global'`）时跳过 projection/le
 
 ---
 
-## E. adapter contract（1B.1，已实现；R1 blocker-specific Review PASS；已集成到 m7；pending integrated exact-SHA Review）
+## E. adapter contract（1B.1，已实现；R1 blocker-specific Review PASS；Integrated exact-SHA Review PASS；已部署；FROZEN）
 
 1B.1 已按本节实施（`services/indextts2-api-adapter/server.py`，app version 1.2.0），最终落地形态：
 
@@ -463,10 +465,10 @@ evidence、大量理论 corner case、production 真实 IndexTTS2 调用。
 
 | 子阶段 | 内容 | 依赖 |
 |---|---|---|
-| **TTS-C.1B.1** | adapter registry/status/reload contract（§E：POST /reload + LKG + /health 扩展 + registry-status ack 面 + registry JSON 1.0/1.1 双 schema）+ mock integration tests；**不触碰 production active registry**。**已实现（R1 blocker-specific Review PASS；已集成到 m7；pending integrated exact-SHA Review；not deployed）** | 无（可与 1C.1 并行） |
+| **TTS-C.1B.1** | adapter registry/status/reload contract（§E：POST /reload + LKG + /health 扩展 + registry-status ack 面 + registry JSON 1.0/1.1 双 schema）+ mock integration tests；**不触碰 production active registry**。**FROZEN（R1 blocker-specific Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS；已部署）** | 无（可与 1C.1 并行） |
 | **TTS-C.1B.2** | legacy import（§F）+ publisher candidate creation（§C 步骤 1-3：T1 claim、candidate 构建、T2 persist 到 file_durable）+ publication 状态推进；**不 reload adapter** | 依赖 1B.1 contract（registry JSON schema 与 ack 字段冻结） |
 | **TTS-C.1B.3** | adapter reload 接入（§C 步骤 4）+ activation acknowledgment（步骤 5）+ atomic activation（步骤 6）+ recovery/reconciler（§D） | 依赖 1B.2 |
-| **TTS-C.1C.1** | capability snapshot（§G）+ pure compiler（§H）+ tests（§J 1C 七项）——**implemented（Independent Review PASS；已集成到 m7；pending integrated exact-SHA Review；not deployed）** | 无（可与 1B.1 并行） |
+| **TTS-C.1C.1** | capability snapshot（§G）+ pure compiler（§H）+ tests（§J 1C 七项）——**FROZEN（Independent Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS；已部署）** | 无（可与 1B.1 并行） |
 | **TTS-C.1C.2** | 编译结果接入未来 C.2 payload builder（provenance 字段交接，§I）；**当前阶段不调用真实 synthesis** | 等待 C.2 authorized |
 
 并行关系：**1B.1 ∥ 1C.1**；1B.2 依赖 1B.1 contract；1B.3 依赖 1B.2；1C.2 等待 C.2。
