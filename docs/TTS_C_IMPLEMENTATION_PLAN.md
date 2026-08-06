@@ -1,7 +1,10 @@
-# TTS-C 实施计划（TTS-C.0 冻结；TTS-C.1A 实施基线）
+# TTS-C 实施计划（TTS-C.0 冻结；TTS-C.1A 冻结；TTS-C.1B / 1C 规划基线）
 
 > 状态：**TTS-C.0 = FROZEN（独立 Review PASS；冻结基线 commit `ae7a93d…`、§2 SQL SHA `c88f64ac…`）；
-> TTS-C runtime implementation baseline = not started；TTS-C.1A / 1B / 1C not started**。
+> TTS-C.1A = FROZEN（R7 Final Proportional Review PASS + Deployment Evidence Review PASS；production
+> runtime `37eaac6c8c8969239cab00848f6291454615a912`；POST remains disabled）；
+> TTS-C.1B / 1C planning authorized（implementation not started；代码入口审计与最小实施计划见
+> `docs/TTS_C_1B_1C_EXECUTION_PLAN.md`）；TTS-C.2 not authorized**。
 > 本计划按 TTS-C.0.R13 Review 闭环更新。R13 关闭独立 Review 对 R12 的 FAIL 发现（docs-only，零 runtime/零 migration/零 schema）：
 > **P0-D**（terminal claim evidence 可篡改：R12 的 attempt fence 只保护执行期状态，generated
 > terminal（succeeded/failed/cancelled）的 `validation_attempt` 可直接 UPDATE 篡改（不推进 head、
@@ -286,8 +289,9 @@ execution_transitions applied-command chain（execution head + previous_command_
 五类 command）+ direct mutation fence 绑定 NEW head + terminal shape + 全生命周期多 transition +
 voice_revision compat closure）。
 
-**建议首先实现**：**TTS-C.1A**（零音频风险、解锁 materialization、为 1B cutover 提供 DB 基础）——但 1A 未开始，
-须待本 R13 独立 Review PASS。
+**建议首先实现**：**TTS-C.1A**（零音频风险、解锁 materialization、为 1B cutover 提供 DB 基础）——已完成并
+**FROZEN**（R7；见状态行）。当前下一实现目标：**TTS-C.1B**（依赖 1A 的 DB projection + legacy cutover 表，
+实施计划见 `docs/TTS_C_1B_1C_EXECUTION_PLAN.md`）。
 
 ## 并行开发矩阵（冻结：并行开发，串行集成/Review/部署）
 

@@ -1,6 +1,8 @@
 # TTS-C.1A — Durable Voice Materialization Foundation（实施文档）
 
-> 状态：TTS-C.0 = FROZEN（reviewed contract commit `ae7a93d…`、§2 SQL SHA `c88f64ac…`）；
+> 状态：**TTS-C.1A = FROZEN（R7 Final Proportional Review PASS + Deployment Evidence Review PASS；
+> production runtime `37eaac6c8c8969239cab00848f6291454615a912`；POST remains disabled，§16）**；
+> TTS-C.0 = FROZEN（reviewed contract commit `ae7a93d…`、§2 SQL SHA `c88f64ac…`）；
 > 本阶段只实现 **Durable Voice Materialization Foundation**，终点 = `voice_materializations.status =
 > file_ready_unpublished`。不发布 registry、不激活 adapter、不 cutover、不合成 TTS。
 > 1A schema 严格按 frozen §2 相关片段提取（migration SQL 与 frozen §2 片段 hash 绑定，见
@@ -309,3 +311,22 @@ R7 是 TTS-C.1A 防御复杂度上限。后续独立 Review 使用 proportional-
 真实可复现的 production blocker 才构成 FAIL（见 AGENTS.md「工程复杂度、验证强度与威胁
 模型」）；不得启动 R8；不得继续扩展 SHA、capability、inode seal 或 mutation gate。
 本裁决不提前授予 R7 Review PASS，也不提前冻结 1A——1A 冻结与否由后续独立 Review 决定。
+
+## 16. TTS-C.1A Freeze Closure（正式冻结）
+
+- **TTS-C.1A.R7 Final Proportional Review = PASS**：按 proportional-risk rubric（AGENTS.md
+  「工程复杂度、验证强度与威胁模型」）完成最终独立 Review，无真实可复现的 production blocker；
+  R7 确认为 1A 防御复杂度上限，不启动 R8，不再扩展 SHA、capability、inode seal 或 mutation gate。
+- **TTS-C.1A.R7 Deployment Evidence Review = PASS**：部署证据
+  `docs/evidence/tts-c-r17/deployment.md`（evidence commit
+  `c29801b3b313a41560e4e0547033c2a409ed244c`）。
+- **TTS-C.1A = FROZEN**：
+  - production runtime = `37eaac6c8c8969239cab00848f6291454615a912`（runtime code 内容来自
+    `17d40787ce70c025d7daa012c04a76bc69c10a2b`，`37eaac6…` 仅多 complexity-policy docs）；
+  - **production POST remains disabled**（`TTS_C1A_MATERIALIZATION_POST_ENABLED` 未设置，
+    POST 503 `MATERIALIZATION_NOT_ENABLED`）；
+  - 冻结语义不变：projection 止于 `file_ready_unpublished`；不发布 registry、不激活 adapter、
+    不 cutover、不合成 TTS；publication/activation/legacy 三表保持 0 行写入；
+  - 后续阶段不得顺带重构 1A 冻结实现；冻结 SQL（§2）不变。
+- **后续授权**：TTS-C.1B / TTS-C.1C planning authorized（implementation not started；代码入口
+  审计与最小实施计划见 `docs/TTS_C_1B_1C_EXECUTION_PLAN.md`）；**TTS-C.2 not authorized**。
