@@ -1,7 +1,8 @@
 # TTS-C.1B / TTS-C.1C 执行计划（代码入口审计 + 最小实施计划）
 
-> 状态：**TTS-C.1C.1 implemented（pending independent Review，等待 integrator 合并）；1B / 1C.2
-> planning authorized，implementation not started**。本文件是 1B/1C 的唯一实施计划入口，
+> 状态：**TTS-C.1C.1（Independent Review PASS）与 TTS-C.1B.1（R1 blocker-specific Review PASS）已集成到
+> m7（pending integrated exact-SHA Review；not deployed）；TTS-C.1B.2 / 1B.3 not started；
+> TTS-C.1C.2 not started；TTS-C.2 not authorized**。本文件是 1B/1C 的唯一实施计划入口，
 > 基于 frozen contract（`docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md` R13）与当前代码只读审计写成。
 > 权威基线：deployed production SHA `37eaac6c8c8969239cab00848f6291454615a912`（runtime code 内容
 > `17d40787ce70c025d7daa012c04a76bc69c10a2b`）；deployment evidence commit
@@ -237,7 +238,7 @@ subject 为 `registry_rebuild`（subject_id=`'global'`）时跳过 projection/le
 
 ---
 
-## E. adapter contract（1B.1，已实现；pending independent Review；branch `work/tts-c1b1-adapter-contract`）
+## E. adapter contract（1B.1，已实现；R1 blocker-specific Review PASS；已集成到 m7；pending integrated exact-SHA Review）
 
 1B.1 已按本节实施（`services/indextts2-api-adapter/server.py`，app version 1.2.0），最终落地形态：
 
@@ -283,7 +284,7 @@ auth（内部受控网络，同现有 client 威胁模型）。
 
 测试：`scripts/test-tts-c1b1-adapter-registry.ts`（34 PASS，六场景 + R1 reference 验证前置
 R01-R05，mock upstream + 临时目录，独立运行 ×2 无进程/端口泄漏），已并入
-`scripts/run-m7-quality-gate.sh`（suite 数 52→53）；venv bootstrap 由
+`scripts/run-m7-quality-gate.sh`（combined gate suite 54）；venv bootstrap 由
 `scripts/run-tts-c1b1-adapter-registry.sh` 管理（gitignored 本地环境，缺失时按 ci.yml 同款
 方式现场创建，bootstrap 失败 → 标准 FAILED_SUITE/FAILED_COMMAND/QUALITY_GATE_RESULT=FAIL，
 fail-closed 不静默跳过）。
@@ -328,7 +329,7 @@ production 拓扑变更；未部署（无 production build / compose up / regist
 
 普通 TypeScript 常量 + zod schema（`src/lib/tts-c/provider-capability.ts`），**不新建数据库
 表**——frozen 契约未要求 1C 落库，现有 artifact/payload 机制足以承载（§I）。已实现
-（TTS-C.1C.1，pending Review）。
+（TTS-C.1C.1，Independent Review PASS，已集成到 m7）。
 
 ```text
 ProviderCapabilitySnapshotV1 = {
@@ -365,7 +366,7 @@ useRandom/emotion 显式 422）——当前全部表现力 control 为 unsupport
 ## H. 1C compiler
 
 纯函数模块 `src/lib/tts-c/capability-compiler.ts`，零 DB、零 IO、零时钟、零环境变量、
-零随机数依赖（TTS-C.1C.1 已实现，pending Review）：
+零随机数依赖（TTS-C.1C.1 已实现，Independent Review PASS，已集成到 m7）：
 
 ```text
 compilePerformanceToProvider(input: CapabilityCompileInput, snapshot: ProviderCapabilitySnapshotV1)
@@ -459,10 +460,10 @@ evidence、大量理论 corner case、production 真实 IndexTTS2 调用。
 
 | 子阶段 | 内容 | 依赖 |
 |---|---|---|
-| **TTS-C.1B.1** | adapter registry/status/reload contract（§E：POST /reload + LKG + /health 扩展 + registry-status ack 面 + registry JSON 1.0/1.1 双 schema）+ mock integration tests；**不触碰 production active registry**。**已实现（branch `work/tts-c1b1-adapter-contract`，pending independent Review，not merged / not deployed）** | 无（可与 1C.1 并行） |
+| **TTS-C.1B.1** | adapter registry/status/reload contract（§E：POST /reload + LKG + /health 扩展 + registry-status ack 面 + registry JSON 1.0/1.1 双 schema）+ mock integration tests；**不触碰 production active registry**。**已实现（R1 blocker-specific Review PASS；已集成到 m7；pending integrated exact-SHA Review；not deployed）** | 无（可与 1C.1 并行） |
 | **TTS-C.1B.2** | legacy import（§F）+ publisher candidate creation（§C 步骤 1-3：T1 claim、candidate 构建、T2 persist 到 file_durable）+ publication 状态推进；**不 reload adapter** | 依赖 1B.1 contract（registry JSON schema 与 ack 字段冻结） |
 | **TTS-C.1B.3** | adapter reload 接入（§C 步骤 4）+ activation acknowledgment（步骤 5）+ atomic activation（步骤 6）+ recovery/reconciler（§D） | 依赖 1B.2 |
-| **TTS-C.1C.1** | capability snapshot（§G）+ pure compiler（§H）+ tests（§J 1C 七项）——**implemented，pending independent Review / integrator merge** | 无（可与 1B.1 并行） |
+| **TTS-C.1C.1** | capability snapshot（§G）+ pure compiler（§H）+ tests（§J 1C 七项）——**implemented（Independent Review PASS；已集成到 m7；pending integrated exact-SHA Review；not deployed）** | 无（可与 1B.1 并行） |
 | **TTS-C.1C.2** | 编译结果接入未来 C.2 payload builder（provenance 字段交接，§I）；**当前阶段不调用真实 synthesis** | 等待 C.2 authorized |
 
 并行关系：**1B.1 ∥ 1C.1**；1B.2 依赖 1B.1 contract；1B.3 依赖 1B.2；1C.2 等待 C.2。
