@@ -119,11 +119,19 @@ export class AdapterClient {
       let message = `HTTP ${res.status}`;
       try {
         const body = (await res.json()) as Record<string, unknown>;
-        if (typeof body?.error === 'object' && body.error !== null && typeof (body.error as Record<string, unknown>).code === 'string') {
-          code = (body.error as Record<string, unknown>).code as string;
+        // P2 (R1)：真实 production adapter error shape 优先——
+        //   {"error": "VOICE_REGISTRY_RELOAD_FAILED", "message": "..."}
+        if (typeof body?.error === 'string') {
+          code = body.error;
         }
-        if (typeof body?.error === 'object' && body.error !== null && typeof (body.error as Record<string, unknown>).message === 'string') {
-          message = (body.error as Record<string, unknown>).message as string;
+        if (typeof body?.message === 'string') {
+          message = body.message;
+        }
+        // 兼容历史 mock 的嵌套结构 {"error": {"code", "message"}}（非唯一支持）
+        if (code === null && body?.error !== null && typeof body?.error === 'object') {
+          const nested = body.error as Record<string, unknown>;
+          if (typeof nested.code === 'string') code = nested.code;
+          if (typeof nested.message === 'string') message = nested.message;
         }
       } catch {
         // body 非 JSON——保留 HTTP 状态

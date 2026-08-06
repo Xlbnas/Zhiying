@@ -1033,7 +1033,12 @@ export async function publishRegistryCandidate(
   if (!ownerToken) throw new RegistryContractError(PUBLICATION_NOT_OWNER, 'publication 无 owner');
 
   if (pub.status === 'file_durable') {
-    // winner 幂等重跑：只读 durable verification 后复用结果
+    // R1 P1-A：winner 续跑（handle 路径）执行 fsync 副作用前先 fenced renew；
+    // 普通 subscriber 的只读复用行为保持 1B.2 frozen 语义（无 handle → loser 分支已返回）。
+    if (!renewPublicationLease(db, pub.id, ownerToken, attempt)) {
+      throw new RegistryContractError(PUBLICATION_LEASE_EXPIRED, `publication ${pub.id} lease 过期/被接管（re-durabilize 前）`);
+    }
+    // winner 幂等重跑：durable verification（重新建立 durability）后复用结果
     const filePath = candidateRegistryPath(pub.generation);
     await durabilizeAndVerifyCandidate({
       rootDir: candidateRegistryDir(),
