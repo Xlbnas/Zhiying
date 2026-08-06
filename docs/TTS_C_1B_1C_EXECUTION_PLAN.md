@@ -256,6 +256,18 @@ subject 为 `registry_rebuild`（subject_id=`'global'`）时跳过 projection/le
   保持旧 state/旧 voices + `degraded=true` + `lastReloadError`，返回
   `500 VOICE_REGISTRY_RELOAD_FAILED`（body message 含底层 `VOICE_REGISTRY_*` 码）；
   失败无 LKG → 维持 `ready=false`、synthesize 503。
+- **reference 文件验证前置（TTS-C.1B.1.R1 blocker fixed）**：`_load_registry_file()` 在给出
+  任何 OK/ack 前，对每个 voice 的 reference 文件做完整验证（存在 + 普通文件 + 可读 +
+  实际 SHA-256 == registry `referenceSha256`），统一走 `_validate_reference_file()` helper
+  （带 `(mtime_ns, size)` 缓存，通过时填充 `_sig/_actual_sha256/expected_md5`，成功 reload
+  后首次 synthesize 不重复读同一文件）。任一 reference 失败 → 本次加载非 OK：有 LKG →
+  reload 非 2xx + degraded + `lastReloadError` 精确到
+  `REFERENCE_VOICE_MISSING`（缺失/非普通文件/不可读）或 `REFERENCE_SHA256_MISMATCH`，
+  旧 voice 继续 synthesize；无 LKG（冷启动）→ `ready=false`（registry-status 与 /health
+  detail 同码）+ synthesize 503 原码透传。错误码**复用既有 frozen 语义**（m4b T09/T10
+  锁定 `REFERENCE_VOICE_MISSING` / `REFERENCE_SHA256_MISMATCH`；不引入新码，避免
+  ack/health/synthesize 三处错误码面漂移）；synthesize 对 `REFERENCE_*` 状态透传原码，
+  对 `VOICE_REGISTRY_*` 保持既有 `VOICE_REGISTRY_INVALID` 聚合码。
 - **`GET /registry-status`**（唯一 activation acknowledgment endpoint，始终 200）：
   `ready / degraded / schemaVersion / loadedRegistrySha256 / loadedRegistryGeneration /
   publisherSchemaVersion / speakerCount / detail / lastReloadError`。
@@ -268,9 +280,12 @@ ack identity = registry **文件字节的单一 SHA-256**（frozen 列 `observed
 的对应物）——这是 frozen contract 已有 registry SHA 语义，不新增 hash 层。不新增签名、token、
 auth（内部受控网络，同现有 client 威胁模型）。
 
-测试：`scripts/test-tts-c1b1-adapter-registry.ts`（21 PASS，六场景，mock upstream + 临时目录，
-独立运行 ×2 无进程/端口泄漏），已并入 `scripts/run-m7-quality-gate.sh`（suite 数 52→53；
-adapter venv 为 gitignored 本地环境，缺失时 gate 按 ci.yml 同款方式现场创建，失败 fail-closed）。
+测试：`scripts/test-tts-c1b1-adapter-registry.ts`（34 PASS，六场景 + R1 reference 验证前置
+R01-R05，mock upstream + 临时目录，独立运行 ×2 无进程/端口泄漏），已并入
+`scripts/run-m7-quality-gate.sh`（suite 数 52→53）；venv bootstrap 由
+`scripts/run-tts-c1b1-adapter-registry.sh` 管理（gitignored 本地环境，缺失时按 ci.yml 同款
+方式现场创建，bootstrap 失败 → 标准 FAILED_SUITE/FAILED_COMMAND/QUALITY_GATE_RESULT=FAIL，
+fail-closed 不静默跳过）。
 **1B.1 未实现**：publisher、legacy import、DB publication 写入、activation、recovery、
 production 拓扑变更；未部署（无 production build / compose up / registry 修改 / /reload 调用）。
 
