@@ -152,6 +152,9 @@ run_suite "tts-c1a-r6-hardening" npx tsx scripts/test-tts-c1a-r6-hardening.ts
 # TTS-C.1A.R7 STRONG-only mutation runner（12 项 mutation；耗时，不入 gate）—— 独立运行
 # `npx tsx scripts/test-tts-c1a-r7-mutations.ts`，输出 /tmp/r7-mutation-output.txt + docs/evidence/tts-c-r17/mutation-output.txt
 
+# 9. TTS-C.1C.1 provider capability snapshot + pure compiler 套件
+run_suite "tts-c1c1-capability" npx tsx scripts/test-tts-c1c1-capability.ts
+
 echo "QUALITY_GATE_RESULT=PASS"
 echo "QUALITY_GATE_SHA=$GATE_SHA"
 echo "QUALITY_GATE_TOTAL_SUITES=$((PASS_COUNT))"
