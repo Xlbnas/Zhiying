@@ -1,6 +1,7 @@
 # TTS-C.1B / TTS-C.1C 执行计划（代码入口审计 + 最小实施计划）
 
-> 状态：**planning authorized，implementation not started**。本文件是 1B/1C 的唯一实施计划入口，
+> 状态：**TTS-C.1C.1 implemented（pending independent Review，等待 integrator 合并）；1B / 1C.2
+> planning authorized，implementation not started**。本文件是 1B/1C 的唯一实施计划入口，
 > 基于 frozen contract（`docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md` R13）与当前代码只读审计写成。
 > 权威基线：deployed production SHA `37eaac6c8c8969239cab00848f6291454615a912`（runtime code 内容
 > `17d40787ce70c025d7daa012c04a76bc69c10a2b`）；deployment evidence commit
@@ -294,39 +295,49 @@ client 威胁模型）。
 
 ## G. 1C capability snapshot
 
-普通 TypeScript 结构 + zod schema（新模块，如 `src/lib/tts-c/capability.ts`），**不新建数据库
-表**——frozen 契约未要求 1C 落库，现有 artifact/payload 机制足以承载（§I）。
+普通 TypeScript 常量 + zod schema（`src/lib/tts-c/provider-capability.ts`），**不新建数据库
+表**——frozen 契约未要求 1C 落库，现有 artifact/payload 机制足以承载（§I）。已实现
+（TTS-C.1C.1，pending Review）。
 
 ```text
-ProviderCapabilitySnapshot = {
+ProviderCapabilitySnapshotV1 = {
   provider: 'indextts2';                        // 与 tts_jobs.provider 取值一致
   adapterCompatibilityKey: 'indextts2-adapter-registry@1';
   snapshotVersion: 'indextts2-capability@1';    // 版本化常量，变更即新版
-  controls: {                                   // 逐项声明支持面
-    delivery:   { supported: false },
-    pace:       { supported: false },
-    energy:     { supported: false },
-    emotionSemantic: { supported: false },
-    emotionVector:   { supported: false },      // 扩展位（前提订正 2）
-    emotionAlpha:    { supported: false },      // 扩展位
-    emotionReferenceAudio: { supported: false },// 扩展位
-    useRandom:  { supported: false },
+  controls: {                                   // v1 仅 4 项，逐项声明支持面
+    deliveryOverride: { supported: false },
+    pace:             { supported: false },
+    energy:           { supported: false },
+    emotionSemantic:  { supported: false },
   };
   // 未来某 control 转 supported 时在此补 ranges/enums（如 pace: {enum:[...]} 或 {min,max}）
 }
 ```
+
+v1 **不含** emotionVector / emotionAlpha / emotionReferenceAudio / useRandom——它们是后续
+产品增强需求（见 §G.1），不是 v1 schema 的扩展位。controls 对象 `.strict()`：v1 中出现这些
+control 键即显式拒绝，杜绝静默未知键。
 
 snapshot v1 内容**如实反映 adapter 现状**（§A.4：`SynthesizeRequest` 仅 5 字段，非默认
 useRandom/emotion 显式 422）——当前全部表现力 control 为 unsupported。snapshot 的「固化」=
 版本化 TS 常量 + 随编译结果进 provenance 字段；「执行前比对」在 C.2 执行链首次消费时落地
 （执行时 snapshot version 必须与编译时记录一致，不一致 fail-closed）。
 
+### G.1 Future requirements retained（TTS-C.1C.1 记录）
+
+- 当前代码 schema（TTS-B frozen `src/lib/tts-b/performance-schema.ts` 与 v1 snapshot）**不含**
+  emotionAlpha / 八维情绪向量 / emotion text / emotion reference audio / useRandom。
+- 它们仍是**后续产品增强需求**，TTS-C.1C.1 **未取消**这些需求；等真实 schema 引入时，通过
+  **新的 snapshotVersion / compilerVersion** 扩展（v1 保持冻结不变）。
+- 不得把当前实现缺失解释为永久取消。
+
 ## H. 1C compiler
 
-纯函数模块（如 `src/lib/tts-c/capability-compiler.ts`），零 DB、零 IO、零时钟依赖：
+纯函数模块 `src/lib/tts-c/capability-compiler.ts`，零 DB、零 IO、零时钟、零环境变量、
+零随机数依赖（TTS-C.1C.1 已实现，pending Review）：
 
 ```text
-compilePerformanceToProvider(input: PerformanceControls, snapshot: ProviderCapabilitySnapshot)
+compilePerformanceToProvider(input: CapabilityCompileInput, snapshot: ProviderCapabilitySnapshotV1)
   → { providerParams: Record<string,unknown>,   // 仅含 supported 且 non-neutral 的编译结果
       unsupportedFlags: UnsupportedControl[],   // 每个 non-neutral 但无通道的输入一项
       compilerVersion: '1.0',
@@ -348,8 +359,11 @@ compilePerformanceToProvider(input: PerformanceControls, snapshot: ProviderCapab
 5. **确定性**：同 input + 同 snapshot → 逐字节同输出（canonical JSON 序列化后比较）。
 
 输入面 = TTS-B 冻结字段（§A.4：`deliveryOverride / pace / energy / emotion{none|semantic×6}`），
-接口类型同时接纳 `TtsRequest.emotion` 契约的 `'text'|'vector'` mode 与扩展位（emotionAlpha /
-向量 / 参考音频）——当前 snapshot v1 下它们全部走规则 3。delivery 编译策略采用冻结计划的推荐
+接口类型为 `Pick<PerformanceItemV1, 'deliveryOverride'|'pace'|'energy'|'emotion'>`，输入 schema
+`.strict()`：**未知字段显式拒绝**（含 unitId 及任何 v1 之外的键）。`TtsRequest.emotion` 的
+`'text'|'vector'` mode 与 emotionAlpha / 向量 / 参考音频**不属于 v1 输入**——它们仍是后续
+产品增强需求（§G.1），真实 schema 引入时 bump snapshot/compiler version，compiler 届时按新
+版本扩展。delivery 编译策略采用冻结计划的推荐
 （`docs/TTS_C_IMPLEMENTATION_PLAN.md:312` 未决事项①）：**显式 unsupported**，不做文本改写。
 对 snapshot v1（全 control unsupported）：所有 non-neutral 输入 → explicit unsupported；neutral
 输入 → no-op——这正是 1C.1 测试矩阵的实际期望值。
@@ -394,13 +408,19 @@ evidence、大量理论 corner case、production 真实 IndexTTS2 调用。
 6. **legacy import 幂等**：重复导入零变化；同 key 异内容 fail-closed；import 后 active
    registry / publication / projection 零变化。
 
-**1C 核心测试（5 项）**：
+**1C 核心测试（TTS-C.1C.1 已实现，`scripts/test-tts-c1c1-capability.ts`，53 PASS）**：
 
-1. **neutral no-op**：全 neutral 输入 → providerParams 空、unsupportedFlags 空。
-2. **supported 编译正确**：构造 snapshot 变体打开某 control → 参数映射/range 校验正确。
-3. **unsupported 明确失败**：non-neutral 无通道 → unsupportedFlags 逐项齐全、不错进 params。
-4. **编译结果稳定**：同输入同 snapshot 多次编译逐字节一致。
-5. **不静默丢字段**：输入每个键 ∈ providerParams ∪ unsupportedFlags；schema 外键显式拒绝。
+1. **neutral no-op**：全 neutral 输入 → providerParams 空、unsupportedFlags 空（不因
+   supported:false 报 unsupported）。
+2. **supported 编译正确**：构造 synthetic snapshot 打开部分 control → 参数直接映射正确、
+   不进入 unsupportedFlags。
+3. **unsupported 明确失败**：每个 control non-neutral 无通道 → 对应 flag
+   {control, inputValue, snapshotVersion} 逐项齐全、不错进 params。
+4. **固定顺序**：多个 unsupported → flags 按 deliveryOverride/pace/energy/emotionSemantic
+   固定顺序、无遗漏。
+5. **编译结果稳定**：同输入同 snapshot 重复编译逐字节一致（JSON 序列化）。
+6. **schema 外字段显式拒绝**：unitId / 未知键 / 非法枚举 / 非法 snapshot → ZodError。
+7. **输入不被修改**：深冻结输入与 snapshot 编译后原对象逐字节不变。
 
 ---
 
@@ -411,7 +431,7 @@ evidence、大量理论 corner case、production 真实 IndexTTS2 调用。
 | **TTS-C.1B.1** | adapter registry/status/reload contract（§E：POST /reload + LKG + /health 扩展 + registry-status ack 面 + registry JSON generation 字段）+ mock integration tests；**不触碰 production active registry** | 无（可与 1C.1 并行） |
 | **TTS-C.1B.2** | legacy import（§F）+ publisher candidate creation（§C 步骤 1-3：T1 claim、candidate 构建、T2 persist 到 file_durable）+ publication 状态推进；**不 reload adapter** | 依赖 1B.1 contract（registry JSON schema 与 ack 字段冻结） |
 | **TTS-C.1B.3** | adapter reload 接入（§C 步骤 4）+ activation acknowledgment（步骤 5）+ atomic activation（步骤 6）+ recovery/reconciler（§D） | 依赖 1B.2 |
-| **TTS-C.1C.1** | capability snapshot（§G）+ pure compiler（§H）+ unit/integration tests（§J 1C 五项） | 无（可与 1B.1 并行） |
+| **TTS-C.1C.1** | capability snapshot（§G）+ pure compiler（§H）+ tests（§J 1C 七项）——**implemented，pending independent Review / integrator merge** | 无（可与 1B.1 并行） |
 | **TTS-C.1C.2** | 编译结果接入未来 C.2 payload builder（provenance 字段交接，§I）；**当前阶段不调用真实 synthesis** | 等待 C.2 authorized |
 
 并行关系：**1B.1 ∥ 1C.1**；1B.2 依赖 1B.1 contract；1B.3 依赖 1B.2；1C.2 等待 C.2。
@@ -441,7 +461,9 @@ evidence、大量理论 corner case、production 真实 IndexTTS2 调用。
 - 不改变 adapter `/v1/synthesize` 行为；不新增 auth/token/签名机制。
 - 不做 UI（后续出现真实 UI 需求时另行评审）。
 - 不自动迁移/改写 351 行历史 `tts_jobs`；不自动重新生成任何音频；不切换任何项目到 m7。
-- 不实现 emotionAlpha / 八维情绪向量 / 情绪参考音频通道（TTS-B frozen 输入面不含，前提订正 2）。
+- 不实现 emotionAlpha / 八维情绪向量 / emotion text / 情绪参考音频 / useRandom 通道（TTS-B
+  frozen 输入面与 v1 snapshot 均不含，前提订正 2 + §G.1）——**仍是后续产品增强需求，1C.1
+  未取消**；真实 schema 引入时必须 bump snapshotVersion / compilerVersion。
 - delivery 不做文本改写（采用显式 unsupported，冻结计划未决事项①的推荐）。
 - 1B.1 不触碰 production active registry；1B.2 不 reload adapter；1C.2 不调用真实 synthesis。
 - compose/部署拓扑变更（§E 记录项）不在本计划实施，仅随 1B 部署 gate 独立评审。

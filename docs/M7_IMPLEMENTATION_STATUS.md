@@ -534,6 +534,7 @@
 - `scripts/test-tts-c1a-r6-mutations.ts`（R6 mutation runner）：实测 **2/10 STRONG、1/10 PARTIAL、7/10 no expected failure**——R6 报告曾按宽松标准写 10/10，属 runner/workflow 接受 bug（no observable effect / PARTIAL 被计为 PASS），R7 已订正
 - `scripts/test-tts-c1a-r6-hardening.ts`（TTS-C.1A.R6 hardening，含 R7 项，39 PASS）：CAP-06/07 / REUSE-AUTH-01..05 / REUSE-DIR-01..04 / REUSE-ONCE-01..05 / FD-01..06 / POST-R6-01..06 / RESP-02 / HOOK-01..03 / **ONCE-R7-01（并发两次 consume，callback count=1）/ FD-R7-HOOK-01（hook throw 必关闭）/ ISSUE-R7-01/02/03（issuance realpath/lstat/candidate-hash 故障均 held closed）**
 - `scripts/test-tts-c1a-r7-mutations.ts`（R7 STRONG-only mutation runner，12 项 mutation 输出 `/tmp/r7-mutation-output.txt` + docs/evidence/tts-c-r17/mutation-output.txt）：MUT-R7-01..12 每项必须 diffApplied + shaMutated≠before + typecheck 通过 + child 非零退出 + 无 fatal + expected FAIL 全覆盖 + restore SHA 一致 + git diff clean；任一非 STRONG → exit 1
+- `scripts/test-tts-c1c1-capability.ts`（TTS-C.1C.1 新增，53 PASS）：provider capability snapshot v1 + pure compiler（零 DB/IO/时钟/env/随机数）——S snapshot schema 边界（v1 仅 4 control、拒绝 useRandom 扩展键/非 v1 version）/ T1-2 全 neutral no-op / T3 每 control non-neutral+unsupported → 对应 flag / T4-5 多 unsupported 固定顺序无遗漏 / T6-8 synthetic supported snapshot → providerParams 正确且不进 flags / T9 neutral 不因 supported 产生参数 / T10 重复 20 次编译逐字节一致 / T11-12 schema 外字段与非法 snapshot ZodError 拒绝 / T13-14 深冻结输入与 snapshot 不被修改；gate suite 数 52→53
 - `.github/workflows/tts-c-r7-mutation.yml`（TTS-C R7 Mutation Gate CI）：fail-closed——TOTAL=12 PASS=12 FAIL=0 STRONG=12、禁止 no observable effect/PARTIAL、git diff --exit-code + git status 干净
 - `scripts/test-llm-dispatch.ts`
 - `scripts/test-workflow-stages.ts`
@@ -579,6 +580,7 @@
 | `test-m3a-narration-plan.ts` | 50 | 0 | plan build/stale |
 | `test-m3b-tts.ts` | 99 | 0 | 完整 ffmpeg（/tmp 静态 GPL 构建）下全绿；normalization 不再失败 |
 | `test-m3c-subtitle-timing.ts` | 82 | 0 | 同上环境限制消除 |
+| `test-tts-c1c1-capability.ts` | 53 | 0 | TTS-C.1C.1 新增（snapshot v1 + pure compiler） |
 | `test-llm-dispatch.ts` | 57 | 0 | Worker dispatch |
 | `test-workflow-stages.ts` | 56 | 0 | 工作流状态机/DAG 兼容 |
 | `test-m6310-usage.ts` | 54 | 0 | usage 统计 |
