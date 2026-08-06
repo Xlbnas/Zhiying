@@ -23,6 +23,9 @@ import {describeRenderPerfConfig, loadRenderPerfConfig} from '@/lib/render/rende
 import {probeNvencSupport} from '@/lib/render/nvenc';
 import {recoverStaleTtsJobs} from '@/lib/tts-jobs';
 import {MaterializationRecoveryController} from '@/lib/tts-c/recovery-controller';
+import {RegistryRecoveryController} from '@/lib/tts-c/registry-recovery-controller';
+import {AdapterClient} from '@/lib/tts-c/adapter-client';
+import type {ActiveRegistryPaths} from '@/lib/tts-c/registry-activation';
 import {recordJobComputeUsage, snapshotComputeStart} from '@/lib/usage/compute';
 import {recoverStaleAssetGenerationJobs} from '@/lib/assets/generation-jobs';
 import {releaseExpiredLeases} from '@/lib/resources/leases';
@@ -103,6 +106,7 @@ let shuttingDown = false;
 /** 并行调度循环句柄（main 内创建；信号处理器经它 abort 全部 running 任务）。 */
 let activeLoop: ParallelLoop | null = null;
 let activeRecoveryController: MaterializationRecoveryController | null = null;
+let activeRegistryRecoveryController: RegistryRecoveryController | null = null;
 
 function log(...args: unknown[]): void {
   console.log(`[${new Date().toISOString()}] [${WORKER_ID}]`, ...args);
@@ -719,6 +723,43 @@ async function main(): Promise<void> {
   });
   recoveryController.start();
   activeRecoveryController = recoveryController;
+
+  // TTS-C.1B.3：registry publication recovery controller（配置 contract——本轮不修改
+  // production compose/env；未配置时 disabled 零副作用）：
+  //   ZHIYING_ACTIVE_REGISTRY_PATH / ZHIYING_ACTIVE_REGISTRY_ROOT（active registry 文件与目录）
+  //   ZHIYING_LEGACY_VOICE_ROOT_DIR（legacy reference 本机 root）
+  //   ZHIYING_EMIT_VOICE_ROOT_PATH（registry 文档 referenceAssetPath 前缀，默认 /voices）
+  //   ADAPTER_BASE_URL（默认复用 INDEXTTS2_BASE_URL）
+  const activeRegistryPath = process.env.ZHIYING_ACTIVE_REGISTRY_PATH;
+  const activeRegistryRoot = process.env.ZHIYING_ACTIVE_REGISTRY_ROOT;
+  const legacyVoiceRootDir = process.env.ZHIYING_LEGACY_VOICE_ROOT_DIR;
+  const adapterBaseUrl = process.env.ADAPTER_BASE_URL ?? process.env.INDEXTTS2_BASE_URL;
+  if (activeRegistryPath && activeRegistryRoot && legacyVoiceRootDir && adapterBaseUrl) {
+    const registryPaths: ActiveRegistryPaths = {activeRegistryPath, activeRegistryRoot};
+    const adapter = new AdapterClient({baseUrl: adapterBaseUrl});
+    const registryRecoveryController = new RegistryRecoveryController(
+      {
+        db: getDb(),
+        paths: registryPaths,
+        adapter,
+        build: {
+          legacyVoiceRootDir,
+          materializationRootDir: path.join(getDataDir(), 'voice-materializations'),
+          emitVoiceRootPath: process.env.ZHIYING_EMIT_VOICE_ROOT_PATH ?? '/voices',
+        },
+      },
+      {
+        intervalMs: Number(process.env.ZHIYING_REGISTRY_RECOVERY_INTERVAL_MS ?? 10000),
+        limit: Number(process.env.ZHIYING_REGISTRY_RECOVERY_LIMIT ?? 10),
+        log,
+      },
+    );
+    registryRecoveryController.start();
+    activeRegistryRecoveryController = registryRecoveryController;
+    log('tts-c1b3 registry recovery controller started');
+  } else {
+    log('tts-c1b3 registry recovery controller disabled（缺少 ZHIYING_ACTIVE_REGISTRY_PATH / ROOT / LEGACY_VOICE_ROOT_DIR / ADAPTER_BASE_URL 配置）');
+  }
   const expiredLeases = releaseExpiredLeases(STALE_TIMEOUT_MS);
   if (expiredLeases > 0) {
     log(`released ${expiredLeases} expired resource lease(s)`);
@@ -754,6 +795,11 @@ async function main(): Promise<void> {
   if (activeRecoveryController) {
     await activeRecoveryController.stop();
     activeRecoveryController = null;
+  }
+  // TTS-C.1B.3：停止 registry recovery timer 并等待 in-flight sweep settle
+  if (activeRegistryRecoveryController) {
+    await activeRegistryRecoveryController.stop();
+    activeRegistryRecoveryController = null;
   }
   // 优雅退出：abort 已在 requestShutdown 发出，等全部 running 任务 settle
   await loop.settle();
