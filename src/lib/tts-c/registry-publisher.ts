@@ -39,6 +39,7 @@ import {
 import {RegistryContractError} from './registry-contract-error';
 import {dbNowMs, nowIso} from './materialization';
 import {verifyReferenceFile} from './legacy-import';
+import {validateMaterializedFileSnapshot} from './materialized-file-validator';
 import {OPEN_FLAGS, stagingTempPath} from './paths';
 
 export const PUBLICATION_LEASE_MS = 15 * 60 * 1000; // 与 1A generation lease 15min 对齐
@@ -98,9 +99,24 @@ export interface PublicationRow {
   updated_at: string;
 }
 
+/**
+ * 普通 publication status DTO（R1 P0-A 最小收窄）——不含 owner_token。
+ * already_in_flight 只返回此形状，调用方无法读取/误用 owner token。
+ * 字段保持 snake_case 与 DB 一致，避免重构 publication API。
+ */
+export interface PublicationStatusDto {
+  id: string;
+  generation: number;
+  status: PublicationStatus;
+  subject_type: PublicationSubjectType;
+  subject_id: string;
+  subject_mode: PublicationSubjectMode;
+  candidate_registry_sha256: string | null;
+}
+
 export type ClaimResult =
   | {kind: 'claimed'; publication: PublicationRow}
-  | {kind: 'already_in_flight'; publication: PublicationRow};
+  | {kind: 'already_in_flight'; publication: PublicationStatusDto};
 
 export interface ClaimOptions {
   subject: PublicationSubject;
@@ -152,21 +168,36 @@ export interface BuildCandidateOptions {
   resolveLegacyReferencePath?: (registryPath: string) => string;
 }
 
-export interface PublishOutcome {
-  publicationId: string;
-  generation: number;
-  status: 'file_durable';
-  candidateRegistrySha256: string;
-  candidateFilePath: string;
-}
+export type PublishRegistryCandidateResult =
+  | {
+      kind: 'completed';
+      publicationId: string;
+      generation: number;
+      status: 'file_durable';
+      candidateRegistrySha256: string;
+      candidateFilePath: string;
+    }
+  | {
+      kind: 'already_in_flight';
+      publicationId: string;
+      generation: number;
+      status: 'building' | 'candidate_persisted' | 'activation_pending' | 'indeterminate';
+    }
+  | {
+      kind: 'already_file_durable';
+      publicationId: string;
+      generation: number;
+      status: 'file_durable';
+      candidateRegistrySha256: string;
+      candidateFilePath: string;
+    };
 
 // ── 错误码（操作语义；不新增 hash/checksum 层） ──
 export const PUBLICATION_CONFLICT = 'PUBLICATION_CONFLICT'; // 不同 subject active-flight 冲突
 export const PUBLICATION_NOT_OWNER = 'PUBLICATION_NOT_OWNER'; // owner/attempt/lease fence 不命中
 export const PUBLICATION_INVALID_STATE = 'PUBLICATION_INVALID_STATE'; // 状态不满足步骤前置
 export const CANDIDATE_EVIDENCE_MISMATCH = 'CANDIDATE_EVIDENCE_MISMATCH'; // 已持久 evidence 与重算候选不一致
-export const CANDIDATE_REFERENCE_MISSING = 'CANDIDATE_REFERENCE_MISSING'; // candidate 引用文件缺失
-export const CANDIDATE_REFERENCE_SHA_MISMATCH = 'CANDIDATE_REFERENCE_SHA_MISMATCH';
+export const CANDIDATE_REFERENCE_MISSING = 'CANDIDATE_REFERENCE_MISSING'; // candidate 引用（DB 行/文件）缺失
 export const CANDIDATE_KEY_CONFLICT = 'CANDIDATE_KEY_CONFLICT'; // 同 key 多 source / subject key 冲突
 export const CANDIDATE_BYTES_CONFLICT = 'CANDIDATE_BYTES_CONFLICT'; // 同 generation 已存在不同 bytes
 export const CANDIDATE_FILE_IO = 'CANDIDATE_FILE_IO'; // temp/fsync/rename/reread 故障
@@ -241,7 +272,19 @@ export function claimPublication(db: Db, options: ClaimOptions): ClaimResult {
         inFlight.subject_type === options.subject.subjectType &&
         inFlight.subject_id === options.subject.subjectId &&
         inFlight.subject_mode === options.subject.subjectMode;
-      if (sameSubject) return {kind: 'already_in_flight', publication: inFlight};
+      if (sameSubject) {
+        // R1 P0-A：already_in_flight 只返回无 owner_token 的收窄 DTO
+        const dto: PublicationStatusDto = {
+          id: inFlight.id,
+          generation: inFlight.generation,
+          status: inFlight.status,
+          subject_type: inFlight.subject_type,
+          subject_id: inFlight.subject_id,
+          subject_mode: inFlight.subject_mode,
+          candidate_registry_sha256: inFlight.candidate_registry_sha256,
+        };
+        return {kind: 'already_in_flight', publication: dto};
+      }
       throw new RegistryContractError(
         PUBLICATION_CONFLICT,
         `active publication ${inFlight.id} (subject ${inFlight.subject_type}/${inFlight.subject_id}) 在飞，`
@@ -335,14 +378,10 @@ interface MaterializationRow {
   published_by_publication_id: string | null;
 }
 
+/** resolver 只做 path translation；containment/symlink/no-follow 由 verifyReferenceFile(rootDir) 强制（R1 P1-A）。 */
 function resolveLegacyLocal(registryPath: string, options: BuildCandidateOptions): string {
   if (options.resolveLegacyReferencePath) return options.resolveLegacyReferencePath(registryPath);
-  const root = path.resolve(options.legacyVoiceRootDir);
-  const abs = path.resolve(registryPath);
-  if (!abs.startsWith(root + path.sep)) {
-    throw new RegistryContractError(CANDIDATE_REFERENCE_MISSING, `legacy reference 越出 voice root: ${registryPath}`);
-  }
-  return abs;
+  return path.resolve(registryPath);
 }
 
 /** 构造并验证单个 TTS-A source 的 registry voice（projection 文件校验）。 */
@@ -361,8 +400,17 @@ async function buildMaterializationVoice(
     referenceAssetPath,
     referenceSha256: mat.source_canonical_sha256,
   };
+  // R1 P1-A：复用现有 hardened validator（materialized-file-validator.ts）——
+  // relativePath shape（uuid/uuid/reference.wav、非绝对/无 ../、无反斜杠）+ parent 逐级 symlink
+  // containment + O_NOFOLLOW fd 读取 + SHA + WAV 头校验；verify 模式零 mkdir。
+  await validateMaterializedFileSnapshot({
+    relativePath: mat.destination_voice_root_relative_path,
+    voiceProfileId: mat.voice_profile_id,
+    voiceProfileRevisionId: mat.voice_profile_revision_id,
+    expectedSha256: mat.source_canonical_sha256,
+    adapterCompatibilityKey: 'indextts2-adapter-registry@1',
+  });
   const localPath = path.resolve(options.materializationRootDir, mat.destination_voice_root_relative_path);
-  await verifyReferenceFile(localPath, mat.source_canonical_sha256);
   return {voice, localPath};
 }
 
@@ -441,7 +489,7 @@ export async function buildRegistryCandidate(
         referenceSha256: row.reference_sha256,
       };
       const localPath = resolveLegacyLocal(voice.referenceAssetPath, options);
-      await verifyReferenceFile(localPath, voice.referenceSha256);
+      await verifyReferenceFile(localPath, voice.referenceSha256, options.legacyVoiceRootDir);
       if (entries.has(key)) throw new RegistryContractError(CANDIDATE_KEY_CONFLICT, `stable view 重复 key: ${key}`);
       entries.set(key, {key, emittedSource: 'legacy', sourceRowId: row.id, voice});
       speakerNames.set(key, row.speaker_name);
@@ -628,7 +676,103 @@ export function markCandidatePersisted(db: Db, options: MarkCandidatePersistedOp
   }
 }
 
-// ── T2：candidate 文件持久化（temp→fsync→rename→dir fsync→reread 复核） ──
+// ── T2：candidate 文件持久化（统一 durable acceptance；R1 P0-B + P2 方案 A） ──
+
+export interface VerifyDurableCandidateOptions {
+  /** candidate registry root（containment 基准；必须已由 ensureCandidateRootSafe 验证）。 */
+  rootDir: string;
+  /** final 绝对路径（rootDir 内）。 */
+  finalPath: string;
+  expectedSha256: string;
+  /** 已知时校验长度（loser file_durable 验证路径可省略）。 */
+  expectedLength?: number;
+  expectedGeneration: number;
+  /** 测试注入（仅测试；1A materialization.ts 同款先例）。 */
+  fsyncFile?: (fh: fsPromises.FileHandle) => Promise<void>;
+  fsyncDir?: (fh: fsPromises.FileHandle) => Promise<void>;
+}
+
+/**
+ * 统一 final acceptance（R1 P0-B + P2 方案 A）——新文件与 existing-final 共用：
+ *   O_NOFOLLOW 打开 → fstat 普通文件 → 从 fd 读取 bytes → length → SHA →
+ *   parse registry JSON → schemaVersion "1.1" → registryGeneration == expected →
+ *   publisherSchemaVersion 精确 → final fsync → parent dir fsync（no-follow）。
+ * 全部成功才返回；同 SHA 不得直接 return（必须重新建立 durability）。
+ */
+export async function durabilizeAndVerifyCandidate(options: VerifyDurableCandidateOptions): Promise<void> {
+  const root = path.resolve(options.rootDir);
+  const finalAbs = path.resolve(options.finalPath);
+  if (!finalAbs.startsWith(root + path.sep)) {
+    throw new RegistryContractError(CANDIDATE_FILE_IO, `final path 越出 candidate root: ${finalAbs}`);
+  }
+
+  let fh: fsPromises.FileHandle;
+  try {
+    fh = await fsPromises.open(finalAbs, OPEN_FLAGS.readNoFollow);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      throw new RegistryContractError(CANDIDATE_FILE_IO, `candidate final 缺失: ${finalAbs}`);
+    }
+    throw new RegistryContractError(CANDIDATE_FILE_IO, `candidate final 不可打开: ${finalAbs}`);
+  }
+  try {
+    const st = await fh.stat();
+    if (st.isSymbolicLink() || !st.isFile()) {
+      throw new RegistryContractError(CANDIDATE_FILE_IO, 'candidate final 是 symlink 或非普通文件');
+    }
+    const bytes = await fh.readFile();
+    if (options.expectedLength !== undefined && bytes.length !== options.expectedLength) {
+      throw new RegistryContractError(CANDIDATE_FILE_IO, `candidate length 不符（${bytes.length} != ${options.expectedLength}）`);
+    }
+    if (sha256Bytes(bytes) !== options.expectedSha256) {
+      throw new RegistryContractError(CANDIDATE_FILE_IO, 'candidate SHA 与预期不符');
+    }
+    // P2 方案 A：final bytes 语义校验（persist 内部，非测试外部）
+    const parsed = parseAndValidateRegistry(bytes);
+    if (parsed.doc.schemaVersion !== PUBLISHER_REGISTRY_SCHEMA_VERSION) {
+      throw new RegistryContractError(CANDIDATE_FILE_IO, 'candidate schemaVersion 必须 1.1');
+    }
+    if (parsed.doc.schemaVersion === '1.1' && parsed.doc.registryGeneration !== options.expectedGeneration) {
+      throw new RegistryContractError(CANDIDATE_FILE_IO, `candidate registryGeneration 不符（${parsed.doc.registryGeneration} != ${options.expectedGeneration}）`);
+    }
+    if (parsed.doc.schemaVersion === '1.1' && parsed.doc.publisherSchemaVersion !== SUPPORTED_PUBLISHER_SCHEMA_VERSION) {
+      throw new RegistryContractError(CANDIDATE_FILE_IO, 'candidate publisherSchemaVersion 必须 tts-c-registry-publisher@1');
+    }
+    // final fsync（重新建立 durability）
+    try {
+      if (options.fsyncFile) {
+        await options.fsyncFile(fh);
+      } else {
+        await fh.sync();
+      }
+    } catch (err) {
+      if (err instanceof RegistryContractError) throw err;
+      throw new RegistryContractError(CANDIDATE_FILE_IO, `candidate final fsync 失败: ${(err as Error).message}`);
+    }
+  } finally {
+    await fh.close();
+  }
+
+  // parent directory fsync（no-follow）——错误统一包装为 CANDIDATE_FILE_IO
+  let dirFh: fsPromises.FileHandle;
+  try {
+    dirFh = await fsPromises.open(root, OPEN_FLAGS.parentReadNoFollow);
+  } catch (err) {
+    throw new RegistryContractError(CANDIDATE_FILE_IO, `candidate parent dir 不可打开: ${(err as Error).message}`);
+  }
+  try {
+    if (options.fsyncDir) {
+      await options.fsyncDir(dirFh);
+    } else {
+      await dirFh.sync();
+    }
+  } catch (err) {
+    if (err instanceof RegistryContractError) throw err;
+    throw new RegistryContractError(CANDIDATE_FILE_IO, `candidate parent dir fsync 失败: ${(err as Error).message}`);
+  } finally {
+    await dirFh.close();
+  }
+}
 
 export interface PersistCandidateFileOptions {
   generation: number;
@@ -642,7 +786,9 @@ export interface PersistCandidateFileOptions {
 
 /**
  * 写入 durable candidate 文件。同 generation 已存在：
- *   bytes 完全一致 → 复用（幂等重跑）；bytes 不一致 → CANDIDATE_BYTES_CONFLICT fail-closed（不覆盖）。
+ *   bytes 完全一致 → 重新建立 durability（R1 P0-B：fsync final + parent dir）后返回；
+ *   bytes 不一致 → CANDIDATE_BYTES_CONFLICT fail-closed（不覆盖）。
+ * 新文件路径与 existing 路径共用 durabilizeAndVerifyCandidate 最终 acceptance。
  */
 export async function persistCandidateFile(options: PersistCandidateFileOptions): Promise<string> {
   const root = await ensureCandidateRootSafe(candidateRegistryDir());
@@ -651,7 +797,7 @@ export async function persistCandidateFile(options: PersistCandidateFileOptions)
     throw new RegistryContractError(CANDIDATE_FILE_IO, 'candidate final path 与约定不一致');
   }
 
-  // 已存在：同 bytes 复用；异 bytes fail-closed
+  // 已存在分支：同 bytes → 重新建立 durability 后复用；异 bytes → fail-closed
   let existingSt: fs.Stats | null = null;
   try {
     existingSt = await fsPromises.lstat(finalAbs);
@@ -664,18 +810,37 @@ export async function persistCandidateFile(options: PersistCandidateFileOptions)
     if (existingSt.isSymbolicLink() || !existingSt.isFile()) {
       throw new RegistryContractError(CANDIDATE_FILE_IO, 'candidate final 是 symlink 或非普通文件');
     }
-    const existingBytes = await fsPromises.readFile(finalAbs);
-    const existingSha = sha256Bytes(existingBytes);
-    if (existingSha !== options.expectedSha256) {
+    let existingBytes: Buffer;
+    try {
+      const fh = await fsPromises.open(finalAbs, OPEN_FLAGS.readNoFollow);
+      try {
+        existingBytes = await fh.readFile();
+      } finally {
+        await fh.close();
+      }
+    } catch {
+      throw new RegistryContractError(CANDIDATE_FILE_IO, `candidate final 不可读: ${finalAbs}`);
+    }
+    if (sha256Bytes(existingBytes) !== options.expectedSha256) {
       throw new RegistryContractError(
         CANDIDATE_BYTES_CONFLICT,
         `同 generation ${options.generation} 已存在不同 bytes 的 candidate（fail-closed，不覆盖）`,
       );
     }
+    // 同 SHA：不得直接 return——重新建立 durability（P0-B）
+    await durabilizeAndVerifyCandidate({
+      rootDir: root,
+      finalPath: finalAbs,
+      expectedSha256: options.expectedSha256,
+      expectedLength: options.candidateBytes.length,
+      expectedGeneration: options.generation,
+      fsyncFile: options.fsyncFile,
+      fsyncDir: options.fsyncDir,
+    });
     return finalAbs;
   }
 
-  // 全新写入：temp 独占 → write → fsync → rename → dir fsync → reread 复核
+  // 全新写入：temp 独占 → write → fsync → rename → 统一 acceptance
   const tempAbs = stagingTempPath(finalAbs);
   let fh: fsPromises.FileHandle | null = null;
   try {
@@ -695,32 +860,16 @@ export async function persistCandidateFile(options: PersistCandidateFileOptions)
       await options.afterRenameHook();
     }
 
-    const dirFh = await fsPromises.open(root, OPEN_FLAGS.parentReadNoFollow);
-    try {
-      if (options.fsyncDir) {
-        await options.fsyncDir(dirFh);
-      } else {
-        await dirFh.sync();
-      }
-    } finally {
-      await dirFh.close();
-    }
-
-    // rename 后重新读取最终文件，复算实际 SHA
-    const finalFh = await fsPromises.open(finalAbs, OPEN_FLAGS.readNoFollow);
-    let reread: Buffer;
-    try {
-      reread = await finalFh.readFile();
-    } finally {
-      await finalFh.close();
-    }
-    const actualSha = sha256Bytes(reread);
-    if (actualSha !== options.expectedSha256) {
-      throw new RegistryContractError(CANDIDATE_FILE_IO, `rename 后 reread SHA 与预期不符（${actualSha}）`);
-    }
-    if (reread.length !== options.candidateBytes.length) {
-      throw new RegistryContractError(CANDIDATE_FILE_IO, 'rename 后 reread 长度与预期不符');
-    }
+    // 统一 acceptance（final fsync + dir fsync + P2 语义校验）
+    await durabilizeAndVerifyCandidate({
+      rootDir: root,
+      finalPath: finalAbs,
+      expectedSha256: options.expectedSha256,
+      expectedLength: options.candidateBytes.length,
+      expectedGeneration: options.generation,
+      fsyncFile: options.fsyncFile,
+      fsyncDir: options.fsyncDir,
+    });
   } catch (err) {
     // 清理可能残留的 temp（final 已 durable 时绝不删除 authoritative candidate）
     if (fh !== null) {
@@ -804,42 +953,85 @@ export interface PublishRegistryCandidateOptions {
 }
 
 /**
- * 完整 T1+T2 编排：claim → renew → 构建 candidate → candidate_persisted → durable 文件 → file_durable。
- * 幂等：同 subject active-flight 复用；candidate_persisted 重跑续写文件；file_durable 重跑复用。
+ * 完整 T1+T2 编排（R1 P0-A 最小分流）：claim → 分流：
+ *   - already_in_flight（loser）：不 renew / 不 build / 不写 DB / 不写文件 / 不 failPublication；
+ *     file_durable → 只读 durable verification（P0-B acceptance）→ already_file_durable；
+ *     building / candidate_persisted / activation_pending / indeterminate → 立即 already_in_flight
+ *     （activation_pending/indeterminate 属 1B.3 范围外，不启动）。
+ *   - claimed（winner）：renew → 构建 candidate → candidate_persisted → durable 文件 → file_durable。
+ * 幂等：同 subject 重跑 → loser 语义；过期 owner 的 takeover/recovery 留给 1B.3。
  */
 export async function publishRegistryCandidate(
   db: Db,
   options: PublishRegistryCandidateOptions,
-): Promise<PublishOutcome> {
+): Promise<PublishRegistryCandidateResult> {
   const claimed = claimPublication(db, {subject: options.subject, stableRegistrySha256: options.stableRegistrySha256, leaseMs: options.leaseMs});
+
+  // loser 分流：零写副作用
+  if (claimed.kind === 'already_in_flight') {
+    const pub = claimed.publication;
+    if (pub.status === 'file_durable') {
+      // 只读 durable verification（不续租、不更新 DB；P0-B acceptance 重新建立 durability）
+      const filePath = candidateRegistryPath(pub.generation);
+      await durabilizeAndVerifyCandidate({
+        rootDir: candidateRegistryDir(),
+        finalPath: filePath,
+        expectedSha256: pub.candidate_registry_sha256 as string,
+        expectedGeneration: pub.generation,
+      });
+      return {
+        kind: 'already_file_durable',
+        publicationId: pub.id,
+        generation: pub.generation,
+        status: 'file_durable',
+        candidateRegistrySha256: pub.candidate_registry_sha256 as string,
+        candidateFilePath: filePath,
+      };
+    }
+    // building / candidate_persisted / activation_pending / indeterminate：立即返回，零副作用
+    return {
+      kind: 'already_in_flight',
+      publicationId: pub.id,
+      generation: pub.generation,
+      status: pub.status as 'building' | 'candidate_persisted' | 'activation_pending' | 'indeterminate',
+    };
+  }
+
+  // winner 路径（持有 owner token 的唯一调用方）
   const pub = claimed.publication;
   const ownerToken = pub.owner_token;
   const attempt = pub.attempt;
   if (!ownerToken) throw new RegistryContractError(PUBLICATION_NOT_OWNER, 'publication 无 owner');
 
-  // 终态或已激活 → 1B.2 范围外（1B.3 负责 activation 消费）
-  if (pub.status === 'activation_pending') {
-    throw new RegistryContractError(PUBLICATION_INVALID_STATE, `publication ${pub.id} 已在 activation_pending（1B.3 范围）`);
-  }
-  if (pub.status === 'active' || pub.status === 'failed' || pub.status === 'cancelled' || pub.status === 'indeterminate') {
-    throw new RegistryContractError(PUBLICATION_INVALID_STATE, `publication ${pub.id} 已处于终态 ${pub.status}`);
-  }
-
   if (pub.status === 'file_durable') {
-    // 幂等重跑：验证 durable 文件存在且 SHA 与 DB evidence 一致
+    // winner 幂等重跑：只读 durable verification 后复用结果
     const filePath = candidateRegistryPath(pub.generation);
-    const st = await fsPromises.lstat(filePath).catch((err) => {
-      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
-      throw err;
+    await durabilizeAndVerifyCandidate({
+      rootDir: candidateRegistryDir(),
+      finalPath: filePath,
+      expectedSha256: pub.candidate_registry_sha256 as string,
+      expectedGeneration: pub.generation,
     });
-    if (!st || st.isSymbolicLink() || !st.isFile() || !pub.candidate_registry_sha256) {
-      throw new RegistryContractError(CANDIDATE_FILE_IO, `file_durable 但 candidate 文件缺失/异常: ${filePath}`);
-    }
-    const bytes = await fsPromises.readFile(filePath);
-    if (sha256Bytes(bytes) !== pub.candidate_registry_sha256) {
-      throw new RegistryContractError(CANDIDATE_EVIDENCE_MISMATCH, 'file_durable 后文件 SHA 与 DB evidence 不符');
-    }
-    return {publicationId: pub.id, generation: pub.generation, status: 'file_durable', candidateRegistrySha256: pub.candidate_registry_sha256, candidateFilePath: filePath};
+    return {
+      kind: 'already_file_durable',
+      publicationId: pub.id,
+      generation: pub.generation,
+      status: 'file_durable',
+      candidateRegistrySha256: pub.candidate_registry_sha256 as string,
+      candidateFilePath: filePath,
+    };
+  }
+  if (pub.status === 'activation_pending' || pub.status === 'indeterminate') {
+    // 1B.3 范围外状态：不启动 activation
+    return {
+      kind: 'already_in_flight',
+      publicationId: pub.id,
+      generation: pub.generation,
+      status: pub.status,
+    };
+  }
+  if (pub.status !== 'building' && pub.status !== 'candidate_persisted') {
+    throw new RegistryContractError(PUBLICATION_INVALID_STATE, `publication ${pub.id} 已处于终态 ${pub.status}`);
   }
 
   if (!renewPublicationLease(db, pub.id, ownerToken, attempt, options.leaseMs)) {
@@ -879,6 +1071,7 @@ export async function publishRegistryCandidate(
 
   const final = getPublicationRow(db, fresh.id);
   return {
+    kind: 'completed',
     publicationId: final.id,
     generation: final.generation,
     status: 'file_durable',

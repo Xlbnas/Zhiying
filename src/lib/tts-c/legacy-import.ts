@@ -27,6 +27,7 @@ import {
 } from './registry-schema';
 import {RegistryContractError} from './registry-contract-error';
 import {nowIso} from './materialization';
+import {OPEN_FLAGS} from './paths';
 
 export const LEGACY_IMPORT_CONFLICT = 'LEGACY_IMPORT_CONFLICT';
 
@@ -62,41 +63,97 @@ interface LegacyEntryRow {
   source_registry_sha256: string;
 }
 
-/** 校验 reference 文件：存在 + 普通文件 + 可读 + 实际 SHA-256 与 registry 声明一致（只读）。 */
-export async function verifyReferenceFile(localPath: string, expectedSha256: string): Promise<void> {
-  let st: fs.Stats;
+/**
+ * 校验 reference 文件（R1 P1-A 最小修复）：resolver 结果必须重新经过 containment/no-follow 校验。
+ * 传入 rootDir 时执行完整校验：
+ *   root 绝对/存在/目录/非 symlink + realpath 固定 → mappedPath 绝对且 lexical 位于 root 内 →
+ *   逐级 parent lstat 无 symlink → final O_NOFOLLOW 打开 → fstat 普通文件 → fd 读取 → SHA 精确比对。
+ * 错误码复用 frozen 语义（containment/symlink/非普通文件/不可读 → REFERENCE_VOICE_MISSING；
+ * SHA 不符 → REFERENCE_SHA256_MISMATCH）。只读，零 DB/文件副作用。
+ */
+export async function verifyReferenceFile(localPath: string, expectedSha256: string, rootDir?: string): Promise<void> {
+  const finalAbs = path.resolve(localPath);
+
+  if (rootDir) {
+    if (!path.isAbsolute(rootDir)) throw new RegistryContractError(REFERENCE_VOICE_MISSING, 'root 必须绝对路径');
+    const rootResolved = path.resolve(rootDir);
+    let rootSt: fs.Stats;
+    try {
+      rootSt = await fsPromises.lstat(rootResolved);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        throw new RegistryContractError(REFERENCE_VOICE_MISSING, `voice root 缺失: ${rootResolved}`);
+      }
+      throw new RegistryContractError(REFERENCE_VOICE_MISSING, `voice root 不可 stat: ${rootResolved}`);
+    }
+    if (rootSt.isSymbolicLink() || !rootSt.isDirectory()) {
+      throw new RegistryContractError(REFERENCE_VOICE_MISSING, 'voice root 是 symlink 或非目录');
+    }
+    let rootReal: string;
+    try {
+      rootReal = await fsPromises.realpath(rootResolved);
+    } catch {
+      throw new RegistryContractError(REFERENCE_VOICE_MISSING, 'voice root realpath 不可解析');
+    }
+    if (rootReal !== rootResolved) {
+      throw new RegistryContractError(REFERENCE_VOICE_MISSING, 'voice root realpath 漂移（symlink 逃逸）');
+    }
+    if (!finalAbs.startsWith(rootResolved + path.sep)) {
+      throw new RegistryContractError(REFERENCE_VOICE_MISSING, `reference 越出 voice root: ${localPath}`);
+    }
+    const rel = finalAbs.slice(rootResolved.length + 1);
+    const parts = rel.split('/');
+    if (parts.some((p) => p === '..' || p === '.' || p === '')) {
+      throw new RegistryContractError(REFERENCE_VOICE_MISSING, `reference 路径段非法: ${rel}`);
+    }
+    // 逐级 parent lstat：任何 symlink 拒绝
+    let cur = rootResolved;
+    for (const seg of parts.slice(0, -1)) {
+      cur = path.join(cur, seg);
+      let segSt: fs.Stats;
+      try {
+        segSt = await fsPromises.lstat(cur);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+          throw new RegistryContractError(REFERENCE_VOICE_MISSING, `reference parent 缺失: ${cur}`);
+        }
+        throw new RegistryContractError(REFERENCE_VOICE_MISSING, `reference parent 不可 stat: ${cur}`);
+      }
+      if (segSt.isSymbolicLink()) throw new RegistryContractError(REFERENCE_VOICE_MISSING, `reference parent 是 symlink: ${cur}`);
+      if (!segSt.isDirectory()) throw new RegistryContractError(REFERENCE_VOICE_MISSING, `reference parent 非目录: ${cur}`);
+    }
+  }
+
+  // final：O_NOFOLLOW 打开 + fstat 普通文件 + 从 fd 读取
+  let fh: fsPromises.FileHandle;
   try {
-    st = await fsPromises.lstat(localPath);
+    fh = await fsPromises.open(finalAbs, OPEN_FLAGS.readNoFollow);
   } catch (err) {
     if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
-      throw new RegistryContractError(REFERENCE_VOICE_MISSING, `reference 文件缺失: ${localPath}`);
+      throw new RegistryContractError(REFERENCE_VOICE_MISSING, `reference 文件缺失: ${finalAbs}`);
     }
-    throw new RegistryContractError(REFERENCE_VOICE_MISSING, `reference 文件不可访问: ${localPath}`);
-  }
-  if (st.isSymbolicLink() || !st.isFile()) {
-    throw new RegistryContractError(REFERENCE_VOICE_MISSING, `reference 非普通文件: ${localPath}`);
+    throw new RegistryContractError(REFERENCE_VOICE_MISSING, `reference 文件不可打开: ${finalAbs}`);
   }
   let buf: Buffer;
   try {
-    buf = await fsPromises.readFile(localPath);
-  } catch {
-    throw new RegistryContractError(REFERENCE_VOICE_MISSING, `reference 不可读: ${localPath}`);
+    const st = await fh.stat();
+    if (st.isSymbolicLink() || !st.isFile()) {
+      throw new RegistryContractError(REFERENCE_VOICE_MISSING, `reference 非普通文件: ${finalAbs}`);
+    }
+    buf = await fh.readFile();
+  } finally {
+    await fh.close();
   }
   const actual = sha256Bytes(buf);
   if (actual !== expectedSha256) {
-    throw new RegistryContractError(REFERENCE_SHA256_MISMATCH, `reference SHA-256 不符: ${localPath}`);
+    throw new RegistryContractError(REFERENCE_SHA256_MISMATCH, `reference SHA-256 不符: ${finalAbs}`);
   }
 }
 
+/** resolver 只做 path translation；containment/symlink/no-follow 由 verifyReferenceFile(rootDir) 强制（R1 P1-A）。 */
 function resolveReferenceLocal(registryPath: string, options: LegacyImportOptions): string {
   if (options.resolveReferencePath) return options.resolveReferencePath(registryPath);
-  // 默认：registry 路径必须是绝对路径且直接落在 voiceRootDir 内
-  const root = path.resolve(options.voiceRootDir);
-  const abs = path.resolve(registryPath);
-  if (!abs.startsWith(root + path.sep)) {
-    throw new RegistryContractError(REFERENCE_VOICE_MISSING, `reference 越出 voice root: ${registryPath}`);
-  }
-  return abs;
+  return path.resolve(registryPath);
 }
 
 /**
@@ -120,7 +177,7 @@ export async function importLegacyRegistry(
   const verified: Array<{voice: (typeof voices)[number]; localPath: string}> = [];
   for (const voice of voices) {
     const localPath = resolveReferenceLocal(voice.referenceAssetPath, options);
-    await verifyReferenceFile(localPath, voice.referenceSha256);
+    await verifyReferenceFile(localPath, voice.referenceSha256, options.voiceRootDir);
     verified.push({voice, localPath});
   }
 
