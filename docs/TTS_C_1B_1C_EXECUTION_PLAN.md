@@ -6,7 +6,9 @@
 > **TTS-C.1C.1 = FROZEN**（Independent Review PASS + Integrated exact-SHA Review PASS + Production
 > deployment PASS + Deployment Evidence Review PASS）；deployed production SHA
 > `01f8536b4bac1661aa86ad57f90985ec56c8aaa5`；TTS-C.0 / TTS-C.1A = FROZEN；production POST remains
-> disabled；TTS-C.1B.2 / 1B.3 not started；TTS-C.1C.2 not started；TTS-C.2 not authorized；
+> disabled；**TTS-C.1B.2 implemented on work branch `work/tts-c1b2-publisher-candidate`
+> （pending independent Review；not merged；not deployed；测试 106 PASS；combined gate suite 55）**；
+> TTS-C.1B.3 not started；TTS-C.1C.2 not started；TTS-C.2 not authorized；
 > **Deployment Evidence Review = PASS**。
 > 本文件是 1B/1C 的唯一实施计划入口，基于 frozen contract（`docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md`
 > R13）与当前代码只读审计写成。历史基线：上一 production runtime SHA
@@ -188,6 +190,23 @@ frozen 语义，§C/§D 是它们的代码落地规划，不重述设计。
 
 ## C. 1B 最小正常路径（publisher）
 
+> **1B.2 已实现（2026-08-06，work branch `work/tts-c1b2-publisher-candidate`；pending independent
+> Review；not merged；not deployed）**：步骤 1-3 落地于 `src/lib/tts-c/registry-publisher.ts`——
+> `claimPublication`（T1：BEGIN IMMEDIATE + generation=MAX+1 + subject 四态冻结 + owner/lease/attempt=1 +
+> legacy_cutover 同事务 entry→mapping_pending；同 subject 已 active → `already_in_flight` 复用；
+> 异 subject 在飞 → `PUBLICATION_CONFLICT`）、`renewPublicationLease`（T1.5 fenced verify/renew）、
+> `buildRegistryCandidate`（stable view 投影 + subject key 换入；全量 1.1 文档 canonical JSON；
+> manifest 逐 key emitted source/sourceRowId/referenceSHA/adapterKey；candidate 引用文件复算 SHA；
+> key 冲突 fail-closed）、`markCandidatePersisted`（Tx A fenced）、`persistCandidateFile`
+> （temp O_EXCL→write→fsync→rename→dir fsync→reread 复算 SHA + JSON/generation 复核；同 generation
+> 同 bytes 复用 / 异 bytes fail-closed）、`markFileDurable`（Tx B fenced）、`publishRegistryCandidate`
+> （T1→T1.5→build→Tx A→file→Tx B 幂等编排）、`failPublication`（fenced failed 终态，recovery 复用）。
+> 常量：`PUBLICATION_LEASE_MS=15min`（与 1A generation lease 对齐）；candidate 文件约定
+> `<dataDir>/voice-registries/candidate-<generation>.json`（temp 同目录 stagingTempPath 范式；
+> registry 目录挂载拓扑变更属 1B 部署 gate 独立 review，本轮未实施）。**1B.2 结束点 = publication
+> `file_durable` + candidate 文件 durable；不 reload adapter（T3）、不 activation（T4/T5）、
+> 不 recovery（§D，1B.3）。**
+
 一条清晰正常路径，严格映射 frozen T1-T5；publisher 运行于 **Worker**（唯一文件 writer，同 1A
 边界）；全部 DB 写走 `db.transaction(fn).immediate()`；每个外部副作用前 fenced verify/renew
 （T1.5，复用 `materialization-executor.ts:83-104` 模式）。
@@ -310,6 +329,18 @@ production 拓扑变更；未部署（无 production build / compose up / regist
 
 ## F. legacy import（1B.2）
 
+> **已实现（2026-08-06，work branch `work/tts-c1b2-publisher-candidate`；pending independent Review；
+> not merged；not deployed）**：`src/lib/tts-c/legacy-import.ts` `importLegacyRegistry(db, {registryFilePath,
+> voiceRootDir, resolveReferencePath})`——单 BEGIN IMMEDIATE 事务（任一冲突整批回滚零写入）；确定性身份 =
+> frozen `UNIQUE(voice_profile_key, voice_revision_key)`（不依赖数组顺序/时间）；同 key 同内容
+> （speaker/path/SHA 全等）→ no-op 复用（保留首次 imported_at 与 source_registry_sha256 provenance）；
+> 同 key 异内容 → `LEGACY_IMPORT_CONFLICT` fail-closed；reference 文件前置验证
+> （存在/普通文件/可读/实际 SHA-256 == referenceSha256，错误码复用 frozen
+> `REFERENCE_VOICE_MISSING`/`REFERENCE_SHA256_MISMATCH`）；registry 文件与 reference 文件零修改；
+> 只 INSERT `mapping_status='unmapped'` 行。registry 路径（容器形态如 `/voices/x.wav`）→ 本机文件的
+> 映射由调用方 `resolveReferencePath` 提供（生产宿主路径形态不同时传入显式映射；默认要求路径直接落在
+> voiceRootDir 内）。测试见 §J（106 PASS）。
+
 - **数据源**：宿主机 registry JSON（§A.3；实施前宿主机只读核实实际路径与内容）+ 每个条目
   reference 文件字节（只读重算 SHA-256）。
 - **字段映射**（直接来自 legacy registry 文件）：`voice_profile_key`←`voiceProfile`；
@@ -326,7 +357,8 @@ production 拓扑变更；未部署（无 production build / compose up / regist
 - **副作用边界**：import 只 INSERT `legacy_adapter_voice_entries`（unmapped）；不改变 active
   registry；不创建 publication；不触碰 adapter；不触碰 `voice_materializations`。
 - 形态：Worker/lib 侧普通函数 + 显式操作入口（script 或 gated API），非自动后台任务；
-  production 首次运行在 1B 部署 gate 之后由人工触发。
+  本轮实现为 lib 函数 + 测试入口（`scripts/lib/tts-c1b2-child.ts` 供真实双进程并发测试），
+  未挂 worker/API，未新增 public POST。
 
 ---
 
@@ -425,6 +457,22 @@ compilePerformanceToProvider(input: CapabilityCompileInput, snapshot: ProviderCa
 
 ## J. 测试计划（最小充分；普通 unit/integration；零真实 provider）
 
+> **1B.2 测试已实现（2026-08-06）**：`scripts/test-tts-c1b2-publisher-candidate.ts` **106 PASS ×2
+> 独立运行**（零进程/fd/temp/端口泄漏；真实双进程并发 via `scripts/lib/tts-c1b2-child.ts`）。
+> A legacy import 10 场景（首次导入/重跑幂等/双进程单权威/一致复用/内容冲突整批回滚/reference
+> 缺失/SHA 不符/未知 schema/重复 key/registry+reference 零修改）；B T1 claim 10 场景
+> （materialization_publish、legacy_cutover_publish、legacy_cutover_existing frozen gate、
+> registry_rebuild、非法 subject 组合、重放复用、双进程唯一 winner、异 subject 单飞冲突 +
+> 终态后串行、projection 状态 fail-closed、冲突零新行）；C candidate 确定性 10 场景（重复构建
+> 逐字节一致/manifest 排序/key 冲突 fail-closed/generation MAX+1/1.1 字段完整/publisherSchemaVersion
+> 精确/SHA==bytes/无多余字段/legacy+materialization 合并裁决/输入对象零修改）；D durable file
+> 15 场景（正常 temp→fsync→rename→dir fsync、文件 SHA==DB evidence、fsync/fsyncDir/rename/
+> reread/SHA-mismatch 故障注入、symlink root/final 拒绝、escape 拒绝、DB 不先于文件、
+> 文件 durable 后 DB finalize 失败留 recoverable evidence、重跑复用、同 generation 异 bytes
+> fail-closed、无残留）。combined gate suite **55**。`legacy_cutover_existing` 的合法前置
+> （projection published_usable）只能经 T5 activation command 产生（1B.3），1B.2 断言 frozen
+> gate ABORT（`SQLITE_CONSTRAINT_TRIGGER` subject invalid）——合法路径由 1B.3 测试覆盖。
+
 形态：临时 registry 目录 + Mock adapter（Node 起 HTTP server 模拟 /reload、/health、
 /registry-status）+ 临时 SQLite DB（复用 1A 测试的 temp DB 模式）。新 suites 按既有纪律并入
 `scripts/run-m7-quality-gate.sh`（suite 数真实增加）。禁止：mutation workflow、多层 checksum
@@ -466,7 +514,7 @@ evidence、大量理论 corner case、production 真实 IndexTTS2 调用。
 | 子阶段 | 内容 | 依赖 |
 |---|---|---|
 | **TTS-C.1B.1** | adapter registry/status/reload contract（§E：POST /reload + LKG + /health 扩展 + registry-status ack 面 + registry JSON 1.0/1.1 双 schema）+ mock integration tests；**不触碰 production active registry**。**FROZEN（R1 blocker-specific Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS；已部署）** | 无（可与 1C.1 并行） |
-| **TTS-C.1B.2** | legacy import（§F）+ publisher candidate creation（§C 步骤 1-3：T1 claim、candidate 构建、T2 persist 到 file_durable）+ publication 状态推进；**不 reload adapter** | 依赖 1B.1 contract（registry JSON schema 与 ack 字段冻结） |
+| **TTS-C.1B.2** | legacy import（§F）+ publisher candidate creation（§C 步骤 1-3：T1 claim、candidate 构建、T2 persist 到 file_durable）+ publication 状态推进；**不 reload adapter**。**implemented on work branch `work/tts-c1b2-publisher-candidate`（pending independent Review；not merged；not deployed；测试 106 PASS；combined gate suite 55）** | 依赖 1B.1 contract（registry JSON schema 与 ack 字段冻结） |
 | **TTS-C.1B.3** | adapter reload 接入（§C 步骤 4）+ activation acknowledgment（步骤 5）+ atomic activation（步骤 6）+ recovery/reconciler（§D） | 依赖 1B.2 |
 | **TTS-C.1C.1** | capability snapshot（§G）+ pure compiler（§H）+ tests（§J 1C 七项）——**FROZEN（Independent Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS；已部署）** | 无（可与 1B.1 并行） |
 | **TTS-C.1C.2** | 编译结果接入未来 C.2 payload builder（provenance 字段交接，§I）；**当前阶段不调用真实 synthesis** | 等待 C.2 authorized |
