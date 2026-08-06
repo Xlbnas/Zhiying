@@ -125,10 +125,20 @@
 - production runtime = `01f8536b4bac1661aa86ad57f90985ec56c8aaa5`
 - POST remains disabled；registry unchanged；DB zero-change
 - Deployment Evidence Review **pending**（已并入 evidence，等待独立 Review）
-- TTS-C.1B.2 / 1B.3 / 1C.2 / C.2 not authorized
+- TTS-C.1B.2 / 1B.3 not started
+- TTS-C.1C.2 not started
+- TTS-C.2 not authorized
 
 ## 证据口径（Evidence boundary）
-- 本次部署 production 证据由 Agent 现场命令采集（命令级输出在 backup dir 持久化）；
-  与之前 1A.R7 部署相同口径：production 状态不是 independently verified（无 OPS-AUDIT-BRIDGE）。
-- agentvm 上的 1B.1 + 1C.1 + integrated exact-SHA CI 证据在 GitHub Actions（独立验证）：
-  见 `docs/M7_IMPLEMENTATION_STATUS.md` §15.x（部署前 prior CI runs）。
+- branch-specific suites 与 integrated full gate 由 agentvm 本地执行；Integrated exact-SHA
+  Review 已核对两个 reviewed 分支（`work/tts-c1b1-adapter-contract`、
+  `work/tts-c1c1-capability-compiler`）的核心 blob identity、集成范围、gate 接线及本地
+  54/54 执行报告。
+- exact runtime SHA `01f8536b4bac1661aa86ad57f90985ec56c8aaa5` 未产生新的 GitHub Actions
+  workflow run 或 commit status，因此上述 gate 证据**不得**表述为 GitHub-hosted
+  independent CI evidence。
+- production evidence 由 Agent 现场命令采集并持久化到
+  `/vol1/1000/backups/zhiying/tts-c1b1-c1c1-20260806T063951Z-37eaac6c8c8969239cab00848f6291454615a912`。
+  OPS-AUDIT-BRIDGE 不可用，production 状态**不是** independently verified。
+- 与之前 1A.R7 部署相同口径：production 状态不是 independently verified（无
+  OPS-AUDIT-BRIDGE）。
