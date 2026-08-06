@@ -237,27 +237,43 @@ subject 为 `registry_rebuild`（subject_id=`'global'`）时跳过 projection/le
 
 ---
 
-## E. adapter contract（1B.1，最小接口）
+## E. adapter contract（1B.1，已实现；pending independent Review；branch `work/tts-c1b1-adapter-contract`）
 
-以现有 adapter 代码为基线增量演进，不凭空新增多套 endpoint。最终字段名以实施时 adapter 代码
-为准，但最小集合冻结为：
+1B.1 已按本节实施（`services/indextts2-api-adapter/server.py`，app version 1.2.0），最终落地形态：
 
-- **`POST /reload`**（新建）：重新读取 `ADAPTER_VOICE_REGISTRY_PATH` 指向的文件，复用
-  `_load_registry()` 现有校验链（schema/containment/SHA 格式），**原子 swap** 内存 registry；
-  失败保持 LKG（last-known-good），返回错误。无 LKG（首次加载失败）→ `ready=false` +
-  synthesize 503（同现有行为）。
-- **`GET /health`**（扩展现有）：保持 `{ready, provider, model, detail}` 兼容，增加
-  `degraded`（LKG 运行中）与 registry 摘要；Docker healthcheck 视 LKG degraded 为 healthy
-  （frozen 语义：`docs/TTS_C_IMPLEMENTATION_PLAN.md:145-147`）。
-- **`GET /registry-status`**（或并入 /health，实施时二选一，不两套并存）：activation ack 观察面，
-  至少返回 **loaded registry generation、loaded registry identity（文件内容 SHA-256）、
-  speaker count、success/failure（degraded/detail）**。
+- **registry schema 双支持**：`"1.0"` legacy（production 现状；内部状态
+  `generation/publisherSchemaVersion=null`）与 `"1.1"` publisher（`registryGeneration` 必须
+  positive integer（bool 显式排除）、`publisherSchemaVersion` 必须精确等于
+  `tts-c-registry-publisher@1`；voices 复用既有严格校验链）。未知 schemaVersion →
+  `VOICE_REGISTRY_UNSUPPORTED_SCHEMA`；1.1 字段缺失/非法 → `VOICE_REGISTRY_INVALID`。
+  adapter 绝不自动改写 registry 文件。
+- **runtime state**：`RegistryState` 不可变整体替换——`status / voices /
+  loadedRegistrySha256（当前加载文件原始 bytes 的单一 SHA-256，frozen registry identity，
+  无额外 hash 层）/ loadedRegistryGeneration / publisherSchemaVersion / schemaVersion /
+  lastReloadError / degraded`；swap = 单引用赋值 + `threading.Lock`，reader（health/synthesize/
+  status）只持一次快照引用，绝不看到半构造状态。无 capability/WeakMap/token/形式化状态机。
+- **`POST /reload`**：只读取 `ADAPTER_VOICE_REGISTRY_PATH` 固定配置路径（不接受 caller 任何
+  路径/内容），完整验证后一次性原子替换并返回新 registry status（200）。失败有 LKG →
+  保持旧 state/旧 voices + `degraded=true` + `lastReloadError`，返回
+  `500 VOICE_REGISTRY_RELOAD_FAILED`（body message 含底层 `VOICE_REGISTRY_*` 码）；
+  失败无 LKG → 维持 `ready=false`、synthesize 503。
+- **`GET /registry-status`**（唯一 activation acknowledgment endpoint，始终 200）：
+  `ready / degraded / schemaVersion / loadedRegistrySha256 / loadedRegistryGeneration /
+  publisherSchemaVersion / speakerCount / detail / lastReloadError`。
+- **`GET /health`**：保持 `{ready, provider, model, detail}` 兼容，仅增加 `degraded`；
+  LKG degraded 视为 healthy（`ready=true + degraded=true + detail=最近 reload 失败码`）。
+  registry 完整 status 不复制进 `/health`，activation 用 `/registry-status`。
+- **`POST /v1/synthesize`**：请求/响应语义不变（Pydantic extra-field 行为未触碰）。
 
-registry JSON 增量：`registryGeneration` + `publisherSchemaVersion` 两字段（frozen 设计要求，
-`docs/TTS_C_IMPLEMENTATION_PLAN.md:143-144`）；adapter 校验时接受并暴露。ack identity = registry
-**文件字节的单一 SHA-256**（frozen 列 `observed_active_registry_sha256` 的对应物）——这是 frozen
-contract 已有 registry SHA 语义，不新增 hash 层。不新增签名、token、auth（内部受控网络，同现有
-client 威胁模型）。
+ack identity = registry **文件字节的单一 SHA-256**（frozen 列 `observed_active_registry_sha256`
+的对应物）——这是 frozen contract 已有 registry SHA 语义，不新增 hash 层。不新增签名、token、
+auth（内部受控网络，同现有 client 威胁模型）。
+
+测试：`scripts/test-tts-c1b1-adapter-registry.ts`（21 PASS，六场景，mock upstream + 临时目录，
+独立运行 ×2 无进程/端口泄漏），已并入 `scripts/run-m7-quality-gate.sh`（suite 数 52→53；
+adapter venv 为 gitignored 本地环境，缺失时 gate 按 ci.yml 同款方式现场创建，失败 fail-closed）。
+**1B.1 未实现**：publisher、legacy import、DB publication 写入、activation、recovery、
+production 拓扑变更；未部署（无 production build / compose up / registry 修改 / /reload 调用）。
 
 **部署拓扑记录项（本计划只记录，不在现阶段实施）**：
 1. 当前 registry 是**单文件 bind mount**——publisher 的 temp→rename 原子替换在单文件 mount 上会
@@ -428,7 +444,7 @@ evidence、大量理论 corner case、production 真实 IndexTTS2 调用。
 
 | 子阶段 | 内容 | 依赖 |
 |---|---|---|
-| **TTS-C.1B.1** | adapter registry/status/reload contract（§E：POST /reload + LKG + /health 扩展 + registry-status ack 面 + registry JSON generation 字段）+ mock integration tests；**不触碰 production active registry** | 无（可与 1C.1 并行） |
+| **TTS-C.1B.1** | adapter registry/status/reload contract（§E：POST /reload + LKG + /health 扩展 + registry-status ack 面 + registry JSON 1.0/1.1 双 schema）+ mock integration tests；**不触碰 production active registry**。**已实现（branch `work/tts-c1b1-adapter-contract`，pending independent Review，not merged / not deployed）** | 无（可与 1C.1 并行） |
 | **TTS-C.1B.2** | legacy import（§F）+ publisher candidate creation（§C 步骤 1-3：T1 claim、candidate 构建、T2 persist 到 file_durable）+ publication 状态推进；**不 reload adapter** | 依赖 1B.1 contract（registry JSON schema 与 ack 字段冻结） |
 | **TTS-C.1B.3** | adapter reload 接入（§C 步骤 4）+ activation acknowledgment（步骤 5）+ atomic activation（步骤 6）+ recovery/reconciler（§D） | 依赖 1B.2 |
 | **TTS-C.1C.1** | capability snapshot（§G）+ pure compiler（§H）+ tests（§J 1C 七项）——**implemented，pending independent Review / integrator merge** | 无（可与 1B.1 并行） |
