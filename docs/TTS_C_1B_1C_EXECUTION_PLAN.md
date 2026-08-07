@@ -11,7 +11,7 @@
 > closed → merged to m7（fast-forward）→ Integrated exact-SHA Review = PASS → production
 > deployment PASS（§15.17）→ **Deployment Evidence Review = PASS（2026-08-06）**；frozen
 > production runtime = `6874f51c717ebab1c282ee29e9301f27627deaf7`；测试 138 PASS；combined gate
-> suite 55）；**TTS-C.1B.3 implementation in progress on work branch `work/tts-c1b3-activation-recovery`（initial Independent Review = FAIL `570c448…` → TTS-C.1B.3.R1 blocker repair implemented（R1 blocker-specific Review = FAIL）→ TTS-C.1B.3.R2 blocker repair implemented（R2 blocker-specific Review = FAIL）→ TTS-C.1B.3.R3 API-safety closure implemented（R3 final blocker-specific Review = FAIL：`registry-publisher.failPublication` 仍允许 file_durable direct terminal）→ TTS-C.1B.3.R4 exported-API closure implemented（公开 `failPublication` 已移除——不存在仅凭 db+publicationId+owner+attempt 即可把 file_durable/activation_pending 推进 terminal 的公开函数；legacy pre-promotion 只能走 fail/cancelPrePromotionPublicationAndRollbackLegacy）→ TTS-C.1B.3.R4 Final Blocker-Specific Review = PASS；ALL IDENTIFIED 1B.3 BLOCKERS CLOSED；READY FOR INTEGRATION TO m7；reviewed implementation SHA = `aad06c0c89ffc795c366df6f98c5eba54cffa4f1`；测试 259 PASS；combined gate suite 56）→ **Integrated exact-SHA Review = PASS（integrated SHA `8203ec99f8434709fca30d6bdd75f3adf63f20c1`）→ TTS-C.1B.3 Deployment Topology Closure implemented（§M2）→ Topology-Specific Review = FAIL（R0：/voices/tts-a child bind 致 source identity 可漂移 + worker registry target 与 /app/data 重叠）→ Deployment Topology Closure R1 implemented（single unified voice root / 无 child bind / registry 独立 /registry / empty-publication no-op proof；PENDING TOPOLOGY-SPECIFIC REVIEW；NOT MERGED；NOT DEPLOYED；NOT FROZEN）**；
+> suite 55）；**TTS-C.1B.3 implementation in progress on work branch `work/tts-c1b3-activation-recovery`（initial Independent Review = FAIL `570c448…` → TTS-C.1B.3.R1 blocker repair implemented（R1 blocker-specific Review = FAIL）→ TTS-C.1B.3.R2 blocker repair implemented（R2 blocker-specific Review = FAIL）→ TTS-C.1B.3.R3 API-safety closure implemented（R3 final blocker-specific Review = FAIL：`registry-publisher.failPublication` 仍允许 file_durable direct terminal）→ TTS-C.1B.3.R4 exported-API closure implemented（公开 `failPublication` 已移除——不存在仅凭 db+publicationId+owner+attempt 即可把 file_durable/activation_pending 推进 terminal 的公开函数；legacy pre-promotion 只能走 fail/cancelPrePromotionPublicationAndRollbackLegacy）→ TTS-C.1B.3.R4 Final Blocker-Specific Review = PASS；ALL IDENTIFIED 1B.3 BLOCKERS CLOSED；READY FOR INTEGRATION TO m7；reviewed implementation SHA = `aad06c0c89ffc795c366df6f98c5eba54cffa4f1`；测试 259 PASS；combined gate suite 56）→ **Integrated exact-SHA Review = PASS（integrated SHA `8203ec99f8434709fca30d6bdd75f3adf63f20c1`）→ TTS-C.1B.3 Deployment Topology Closure implemented（§M2）→ Topology-Specific Review = FAIL（R0：/voices/tts-a child bind 致 source identity 可漂移 + worker registry target 与 /app/data 重叠）→ Deployment Topology Closure R1 implemented（single unified voice root / 无 child bind / registry 独立 /registry / empty-publication no-op proof；R1 三个原始 blocker 关闭）→ Topology R1 Review = FAIL（唯一剩余 P1：materialization rollback 未包含反向 relocation）→ **Deployment Topology R2 rollback procedure closure implemented（docs-only：reverse relocation / collision handling / inventory-SHA equality / old runtime visibility / rollback boundary / pre-deploy backup；PENDING FINAL TOPOLOGY-SPECIFIC REVIEW；NOT MERGED；NOT DEPLOYED；NOT FROZEN）**；
 > TTS-C.1C.2 not started；TTS-C.2 not authorized；**Deployment Evidence Review = PASS**。
 > 本文件是 1B/1C 的唯一实施计划入口，基于 frozen contract（`docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md`
 > R13）与当前代码只读审计写成。历史基线：上一 production runtime SHA
@@ -732,20 +732,173 @@ DB                          = integrity ok / FK 0 / publications 0 / activations
 若目标已有 `tts-a` legacy namespace 内容：不得覆盖；FAIL 并报告 collision（preflight 已确认
 当前无冲突）。
 
-### M2.6 Topology rollback plan（可执行）
+### M2.6 Topology rollback plan（R2：Materialization Rollback Procedure Closure）
+
+**R1 Review FAIL 原因**：rollback plan 未包含 materialization 反向 relocation——恢复旧
+release/compose 后，旧 runtime 继续从 `OLD_MAT_ROOT`（`data/voice-materializations`）读取，
+而新 topology 的 materialization tree 位于 `NEW_MAT_ROOT`（`voices/tts-a`），旧 runtime 将看不到
+数据。R2 补齐完整 fail-closed rollback procedure（docs-only）。
 
 ```text
+OLD_MAT_ROOT = /vol1/1000/docker/zhiying/data/voice-materializations
+NEW_MAT_ROOT = /vol1/1000/docker/zhiying/voices/tts-a
+
 previous production runtime: 6874f51c717ebab1c282ee29e9301f27627deaf7
 previous compose/env topology: single-file registry bind + data/voice-materializations
 previous registry host file/path: /vol1/1000/docker/zhiying/voice-registry.json
 previous registry SHA: 1dab4a313689736aad081b2b0367f9b036eeec0f9a751647192498ce9ee21827
 ```
 
-未来 topology deployment 失败时：停止新 topology container → 恢复旧 compose/env → 恢复旧
-release tag（`6874f51c…`）→ 恢复旧 single-file mount（`ZHIYING_HOST_VOICE_REGISTRY`）→ 确认
-registry 原始 SHA（1dab4a31…）→ 重启旧 runtime → health/status/synthesis smoke。**注意**：在
-真正 publication/reload 启用前，rollback 可回旧 single-file topology；一旦未来产生新 publication
-并用 rename 更新 registry 后，不得把旧 topology 当长期兼容路径（rename 与单文件 bind 不兼容）。
+**部署前备份（补充要求）**：deployment 前备份 `docker-compose.production.yml`、
+`.env.production`、当前 release tag、当前 `docker inspect` mount map；记录备份路径与
+SHA/permissions。**不得把 secret 内容写入 repo/evidence**——只记录 path / mode / SHA（如安全）。
+
+**完整回滚顺序（R2）**：
+
+```text
+1. quiesce writers
+   1a. 停止新 topology 的 web/worker（至少确保所有 materialization writer 已停止）
+   1b. 确认 worker 进程不再运行
+   1c. 不执行 publication / reload / synthesis
+   1d. 记录 rollback 前 NEW_MAT_ROOT inventory（见 4.2）
+   —— 不得在 writer 运行时移动 materialization tree
+2. NEW_MAT_ROOT inventory + 安全校验（见 4.2，即使为空目录也必须执行同一 procedure）
+3. OLD_MAT_ROOT collision check（见 4.3；fail-closed，禁止覆盖/rm -rf/静默合并）
+4. materialization reverse relocation（NEW_MAT_ROOT → OLD_MAT_ROOT；见 4.4；
+   只读 preflight 已证明同 filesystem（dev=40），优先 same-filesystem atomic rename）
+5. reverse relocation verification（见 4.5：before-NEW inventory == after-OLD inventory，
+   NEW_MAT_ROOT 不得再作为第二份 mutable tree 存在）
+6. registry rollback：恢复旧 single-file registry topology → 恢复旧 registry host file
+   → 确认 SHA == 1dab4a313689736aad081b2b0367f9b036eeec0f9a751647192498ce9ee21827
+7. 恢复旧 compose/env（含 ZHIYING_HOST_VOICE_REGISTRY、ZHIYING_HOST_MATERIALIZATIONS_DIR
+   引用回退——如旧 compose 使用；旧 release tag 恢复 6874f51…）
+8. 旧 runtime 启动前必须已确认 OLD_MAT_ROOT 完整数据（若顺序需 compose/env 先切换但不启动
+   亦可，但旧 runtime 启动前 OLD_MAT_ROOT 必须已恢复）
+9. docker start 旧 runtime（旧 release tag 6874f51…）
+10. 旧 runtime smoke（见 4.7）
+```
+
+#### 4.1 Rollback 前 quiesce writers
+
+```text
+1. 停止新 topology 的 web/worker（至少确保所有 materialization writer 已停止）
+2. 确认 worker 进程不再运行（pgrep/container state）
+3. 不执行 publication / reload / synthesis
+4. 记录 rollback 前 NEW_MAT_ROOT inventory
+```
+
+不得在 writer 运行时移动 materialization tree。
+
+#### 4.2 NEW materialization inventory
+
+对 `NEW_MAT_ROOT=/vol1/1000/docker/zhiying/voices/tts-a` 记录完整：
+
+```text
+relative path / file type / size / SHA-256
+```
+
+并执行：
+
+```text
+lstat / realpath containment / no symlink escape
+```
+
+**即使当前 deployment preflight 显示 0 文件，也必须使用同一 procedure**——空目录只是当前
+事实，不是 rollback contract；不得写「当前为空，所以 rollback 无需处理」。
+
+#### 4.3 OLD target collision check
+
+对 `OLD_MAT_ROOT=/vol1/1000/docker/zhiying/data/voice-materializations`：
+
+```text
+* 不存在    → 允许创建 parent 后执行 relocation
+* 存在且空  → 允许作为目标，但必须明确处理（记录为空、relocation 后 inventory 核对）
+* 存在非空  → 与 NEW inventory 完全一致才允许采用明确的幂等策略；否则 FAIL，禁止覆盖
+```
+
+不得：
+
+```text
+rm -rf OLD_MAT_ROOT
+覆盖非空目录
+静默合并两棵 mutable tree
+```
+
+#### 4.4 Reverse relocation
+
+只读 preflight 已证明 source/target 同 filesystem（dev=40），**优先 same-filesystem atomic
+rename/move**：
+
+```text
+NEW_MAT_ROOT → OLD_MAT_ROOT
+```
+
+不得长期保留第二份 mutable copy。如必须临时 copy（极端情况）：
+
+```text
+copy → fsync files → fsync destination dirs → inventory/SHA equality → only then retire source
+```
+
+但优先 rename。
+
+#### 4.5 Reverse relocation verification
+
+完成后重新生成 OLD_MAT_ROOT inventory，要求逐项相等：
+
+```text
+before rollback NEW inventory == after rollback OLD inventory
+（relative path / type / size / SHA-256）
+```
+
+并证明 `NEW_MAT_ROOT` 不再作为第二份 mutable tree 存在（允许保留空 parent `voices/`，但不得
+留下另一份 materialization data）。
+
+#### 4.6 Registry rollback
+
+保留现有 registry rollback（恢复旧 single-file registry topology → 恢复旧 registry host file
+→ 确认 SHA == `1dab4a31…`），执行顺序按「完整回滚顺序」第 6-8 步：registry rollback 在
+materialization reverse relocation 之后、compose/env 恢复之后、旧 runtime 启动之前；**旧 runtime
+启动前 OLD_MAT_ROOT 已恢复完整数据**。
+
+#### 4.7 旧 runtime smoke
+
+```text
+web health（GET /api/projects 200）
+worker liveness（pgrep src/worker/index.ts）
+adapter /health（ready=true）
+adapter /registry-status（loaded SHA == registry SHA == 1dab4a31…）
+```
+
+并增加 materialization visibility smoke：
+
+```text
+* rollback inventory 非空：随机/确定选择至少 1 个 materialization file，
+  host OLD_MAT_ROOT SHA == old worker container /app/data/voice-materializations/<rel> SHA
+* inventory 为空：old worker /app/data/voice-materializations 存在且为空
+```
+
+**不得因为为空跳过 mount correctness 验证。**
+
+#### 4.8 Rollback boundary
+
+在以下条件**全部**成立时，允许退回旧 single-file topology：
+
+```text
+production POST remains disabled
+no publication/reload has occurred
+no registry generation has advanced
+```
+
+如果已经发生：
+
+```text
+new publication activation
+registry rename update
+materialization state transition requiring new topology
+```
+
+则旧 topology **不再是普通 rollback target**，必须进入单独 recovery / forward-fix procedure。
+**不要把旧 topology 描述成永久 rollback 方案。**
 
 ### M2.7 agentvm gate intermittency（非阻断观察，独立 test-infra debt）
 
