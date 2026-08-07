@@ -9,7 +9,7 @@
 |---|---|
 | 字段 | 值 |
 |---|---|
-| statusUpdatedAt | 2026-08-07T03:08Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B FROZEN（独立 Review PASS）**；**TTS-C.0 = FROZEN（独立 Review PASS）**；**TTS-C.1A = FROZEN（R7 Final Proportional Review PASS + Deployment Evidence Review PASS；production runtime 历史 = `37eaac6c8c8969239cab00848f6291454615a912`；POST remains disabled）**；**TTS-C.1B.1 = FROZEN**（Independent Review PASS + R1 blocker-specific Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS，deployment evidence `docs/evidence/tts-c-r17/deployment-c1b1-c1c1.md`）；**TTS-C.1C.1 = FROZEN**（Independent Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS）；**Deployment Evidence Review = PASS**；**TTS-C.1B.2 = FROZEN**（审计链：initial Independent Review FAIL `08be813…` → R1 blocker-specific Review PASS `bcfd29b…` → Integrated exact-SHA Review PASS → production deployment PASS → **Deployment Evidence Review = PASS**；frozen production runtime = `6874f51c717ebab1c282ee29e9301f27627deaf7`；deployment evidence docs SHA = `93cee1d5afec358cd281e97578e9a691dcbd3a7f`）；**TTS-C.1B.3 implementation in progress on work branch `work/tts-c1b3-activation-recovery`（initial Independent Review = FAIL `570c448…` → TTS-C.1B.3.R1 blocker repair implemented（R1 blocker-specific Review = FAIL）→ TTS-C.1B.3.R2 blocker repair implemented（R2 blocker-specific Review = FAIL）→ TTS-C.1B.3.R3 API-safety closure implemented（R3 final blocker-specific Review = FAIL：`registry-publisher.failPublication` 仍允许 file_durable direct terminal）→ TTS-C.1B.3.R4 exported-API closure implemented（公开 `failPublication` 已移除——不再存在仅凭 db+publicationId+owner+attempt 即可把 file_durable/activation_pending 推进 terminal 的公开函数；legacy pre-promotion 只能走 fail/cancelPrePromotionPublicationAndRollbackLegacy）→ TTS-C.1B.3.R4 Final Blocker-Specific Review = PASS；ALL IDENTIFIED 1B.3 BLOCKERS CLOSED；TTS-C.1B.3 READY FOR INTEGRATION TO m7；reviewed implementation SHA = `aad06c0c89ffc795c366df6f98c5eba54cffa4f1`；not yet deployed；not yet frozen）→ **TTS-C.1B.3 Integrated exact-SHA Review = PASS（integrated SHA `8203ec99f8434709fca30d6bdd75f3adf63f20c1`）→ TTS-C.1B.3 Deployment Topology Closure implemented（registry 目录 mount / adapter materialization 可见性 / worker recovery env 接线；PENDING TOPOLOGY-SPECIFIC REVIEW；NOT DEPLOYED；NOT FROZEN）**；production runtime = `6874f51c717ebab1c282ee29e9301f27627deaf7`；POST remains disabled；TTS-C.1C.2 not started；TTS-C.2 not authorized；combined quality gate suite count = 56） |
+| statusUpdatedAt | 2026-08-07T03:50Z（M7.3B FROZEN；**TTS-A FROZEN**；**TTS-B FROZEN（独立 Review PASS）**；**TTS-C.0 = FROZEN（独立 Review PASS）**；**TTS-C.1A = FROZEN（R7 Final Proportional Review PASS + Deployment Evidence Review PASS；production runtime 历史 = `37eaac6c8c8969239cab00848f6291454615a912`；POST remains disabled）**；**TTS-C.1B.1 = FROZEN**（Independent Review PASS + R1 blocker-specific Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS，deployment evidence `docs/evidence/tts-c-r17/deployment-c1b1-c1c1.md`）；**TTS-C.1C.1 = FROZEN**（Independent Review PASS + Integrated exact-SHA Review PASS + Production deployment PASS + Deployment Evidence Review PASS）；**Deployment Evidence Review = PASS**；**TTS-C.1B.2 = FROZEN**（审计链：initial Independent Review FAIL `08be813…` → R1 blocker-specific Review PASS `bcfd29b…` → Integrated exact-SHA Review PASS → production deployment PASS → **Deployment Evidence Review = PASS**；frozen production runtime = `6874f51c717ebab1c282ee29e9301f27627deaf7`；deployment evidence docs SHA = `93cee1d5afec358cd281e97578e9a691dcbd3a7f`）；**TTS-C.1B.3 implementation in progress on work branch `work/tts-c1b3-activation-recovery`（initial Independent Review = FAIL `570c448…` → TTS-C.1B.3.R1 blocker repair implemented（R1 blocker-specific Review = FAIL）→ TTS-C.1B.3.R2 blocker repair implemented（R2 blocker-specific Review = FAIL）→ TTS-C.1B.3.R3 API-safety closure implemented（R3 final blocker-specific Review = FAIL：`registry-publisher.failPublication` 仍允许 file_durable direct terminal）→ TTS-C.1B.3.R4 exported-API closure implemented（公开 `failPublication` 已移除——不再存在仅凭 db+publicationId+owner+attempt 即可把 file_durable/activation_pending 推进 terminal 的公开函数；legacy pre-promotion 只能走 fail/cancelPrePromotionPublicationAndRollbackLegacy）→ TTS-C.1B.3.R4 Final Blocker-Specific Review = PASS；ALL IDENTIFIED 1B.3 BLOCKERS CLOSED；TTS-C.1B.3 READY FOR INTEGRATION TO m7；reviewed implementation SHA = `aad06c0c89ffc795c366df6f98c5eba54cffa4f1`；not yet deployed；not yet frozen）→ TTS-C.1B.3 Integrated exact-SHA Review = PASS（integrated SHA `8203ec99f8434709fca30d6bdd75f3adf63f20c1`）→ TTS-C.1B.3 Deployment Topology Closure implemented（R0）→ Topology-Specific Review = FAIL（R0：`/voices/tts-a` child bind 致 Worker/Adapter host-source identity 可漂移 + worker registry target 与 `/app/data` 重叠）→ **TTS-C.1B.3 Deployment Topology Closure R1 implemented（single unified voice root、无 /voices child bind、materializations 物理位于 voice-root/tts-a、registry 独立 /registry target、empty-publication no-op proof；PENDING TOPOLOGY-SPECIFIC REVIEW；NOT MERGED；NOT DEPLOYED；NOT FROZEN）**；production runtime = `6874f51c717ebab1c282ee29e9301f27627deaf7`；POST remains disabled；TTS-C.1C.2 not started；TTS-C.2 not authorized；combined quality gate suite count = 56） |
 | reviewedCodeSHA | `e3bd60a879cb279c6bd19b1c2d5013073b7155d3`（M7.3B final code/runtime；M7.3B deployment evidence docs HEAD 为 `044ac23e2524d53f41d223c37d16619425b21182`；M7.3A frozen code 为 `aa3f814…`） |
 | productionRuntimeSHA | `6874f51c717ebab1c282ee29e9301f27627deaf7`（TTS-C.1B.2 部署后容器镜像实际代码 SHA = deployed exact SHA；§2 SQL SHA `c88f64ac…` 不变 = 零 schema 迁移；**production runtime authority = deployed exact SHA + deployed image/container evidence；origin/m7 may advance independently and is not production runtime authority**；TTS-C.0 freeze 基线与 CI 证据见 §11.4） |
 | productionHostCheckoutSHA | `6874f51c717ebab1c282ee29e9301f27627deaf7`（宿主机 checkout = `ZHIYING_RELEASE_TAG`，与本轮 deployed 镜像代码 SHA 一致；可因 docs/ops commit 高于 runtime） |
@@ -1217,7 +1217,47 @@ stable restore、adapter acknowledgment 和 legacy rollback。R4 关闭该剩余
   TTS-C.1B.3 READY FOR INTEGRATION TO m7；not yet deployed；not yet frozen。未执行：production
   一切操作；TTS-C.1C.2；TTS-C.2。production runtime 保持 `6874f51…`；production POST remains disabled。
 
-### TTS-C.1B.3 Deployment Topology Closure（2026-08-07；配置闭环；PENDING TOPOLOGY-SPECIFIC REVIEW）
+### TTS-C.1B.3 Deployment Topology Closure R1（2026-08-07；配置闭环；PENDING TOPOLOGY-SPECIFIC REVIEW）
+
+**R0 Review FAIL 原因**：R0 topology 将 adapter materializations 作为 `/voices/tts-a` child
+bind——`/voices/tts-a` 是 `/voices` 的 child mount，同一 absolute registry path
+（`/voices/tts-a/<rel>`）在 Worker（`/app/data/voice-materializations`）与 Adapter
+（`/voices/tts-a`）中对应的 host source 可漂移（path shadowing）；同时 worker registry target
+`/app/data/registry` 是 `/app/data` 的 descendant（路径重叠）。R1 只改 compose / host layout /
+tests / docs，零 runtime TS/Python 修改。
+
+- **P1-1 single unified host voice root**：materialization host root =
+  `${ZHIYING_HOST_VOICES_DIR}/tts-a`（单一 voice root 内）；adapter 只保留一个
+  `${ZHIYING_HOST_VOICES_DIR}:/voices:ro` mount，**删除 `/voices/tts-a` child bind**；
+  `ZHIYING_HOST_MATERIALIZATIONS_DIR` env 移除（worker/web materialization source 直接派生
+  `${ZHIYING_HOST_VOICES_DIR}/tts-a`，无独立可漂移 source）。worker `/voices` source ==
+  adapter `/voices` source——Worker 与 Adapter 对任意 `/voices/...` absolute path 看到同一
+  host tree。
+- **P1-2 registry 独立 container target**：worker registry mount 改为
+  `${ZHIYING_HOST_REGISTRY_DIR}:/registry:rw`（不再是 `/app/data` 的 descendant、与其他
+  worker volume target 无重叠）；`ZHIYING_ACTIVE_REGISTRY_ROOT=/registry`、
+  `ZHIYING_ACTIVE_REGISTRY_PATH=/registry/voice-registry.json`；adapter
+  `/config:ro` 与 `ADAPTER_VOICE_REGISTRY_PATH=/config/voice-registry.json` 保持。
+- **P1-3 empty-publication no-op proof（G0，测试实证）**：publications=0 / activations=0 +
+  确定 bytes 的 active registry + mock adapter → `recoverRegistryPublications` handled=0
+  errors=[]；`RegistryRecoveryController.runNow()` → 0；reload/status 调用 0；active registry
+  bytes/SHA 不变；无 stable-before-*.json；无新 candidate/temp 文件。
+- **只读 production preflight（R1 扩展）**：voices tree 无 `tts-a` 名称冲突；materializations
+  空（0 文件）；voices 与 materializations 同一 filesystem（dev=40）；无第三方 consumer；
+  registry 仅 legacy referenceAssetPath `/voices/default-v1.wav`；DB legacy=0/publications=0。
+  当前 production 上 materialization host relocation（`data/voice-materializations` →
+  `voices/tts-a`）安全（空、同 fs、无 consumer、无冲突）——未执行，procedure 见执行计划
+  §M2.5。
+- **测试**：`scripts/test-tts-c1a-compose-mounts.ts` 重写为 **39 PASS ×2**（CM-01…06 保留 +
+  TOP-R1-01…10：adapter 唯一 /voices mount、无 child volume、worker/adapter /voices source
+  identity、materialization source == voice-root/tts-a、emit 前缀映射、registry /registry 独立、
+  无 single-file bind、recovery env 精确一致、compose config 渲染级 proof）；1B.3 suite 增至
+  **267 PASS ×2**（G0 +8）；1B.2 138 / 1B.1 34 保持。combined gate suite **56**。
+- **未执行**：production 一切写操作（file move/copy/mkdir、.env 修改、compose
+  build/up/restart、registry write、/reload、publication/import、DB write、synthesis）；
+  TTS-C.1C.2；TTS-C.2。production runtime 保持 `6874f51…`；production POST remains disabled。
+
+### TTS-C.1B.3 Deployment Topology Closure R0（2026-08-07；配置闭环；R0 历史记录）
 
 **前置**：TTS-C.1B.3 Integrated exact-SHA Review = PASS（integrated SHA
 `8203ec99f8434709fca30d6bdd75f3adf63f20c1`）。本轮为 deployment gate 配置闭环（非 production

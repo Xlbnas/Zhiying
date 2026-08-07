@@ -11,7 +11,7 @@
 > closed → merged to m7（fast-forward）→ Integrated exact-SHA Review = PASS → production
 > deployment PASS（§15.17）→ **Deployment Evidence Review = PASS（2026-08-06）**；frozen
 > production runtime = `6874f51c717ebab1c282ee29e9301f27627deaf7`；测试 138 PASS；combined gate
-> suite 55）；**TTS-C.1B.3 implementation in progress on work branch `work/tts-c1b3-activation-recovery`（initial Independent Review = FAIL `570c448…` → TTS-C.1B.3.R1 blocker repair implemented（R1 blocker-specific Review = FAIL）→ TTS-C.1B.3.R2 blocker repair implemented（R2 blocker-specific Review = FAIL）→ TTS-C.1B.3.R3 API-safety closure implemented（R3 final blocker-specific Review = FAIL：`registry-publisher.failPublication` 仍允许 file_durable direct terminal）→ TTS-C.1B.3.R4 exported-API closure implemented（公开 `failPublication` 已移除——不存在仅凭 db+publicationId+owner+attempt 即可把 file_durable/activation_pending 推进 terminal 的公开函数；legacy pre-promotion 只能走 fail/cancelPrePromotionPublicationAndRollbackLegacy）→ TTS-C.1B.3.R4 Final Blocker-Specific Review = PASS；ALL IDENTIFIED 1B.3 BLOCKERS CLOSED；READY FOR INTEGRATION TO m7；reviewed implementation SHA = `aad06c0c89ffc795c366df6f98c5eba54cffa4f1`；测试 259 PASS；combined gate suite 56）→ **Integrated exact-SHA Review = PASS（integrated SHA `8203ec99f8434709fca30d6bdd75f3adf63f20c1`）→ TTS-C.1B.3 Deployment Topology Closure implemented（registry 目录 mount / adapter materialization 可见性 / worker recovery env 接线；§M2；PENDING TOPOLOGY-SPECIFIC REVIEW；NOT DEPLOYED；NOT FROZEN）**；
+> suite 55）；**TTS-C.1B.3 implementation in progress on work branch `work/tts-c1b3-activation-recovery`（initial Independent Review = FAIL `570c448…` → TTS-C.1B.3.R1 blocker repair implemented（R1 blocker-specific Review = FAIL）→ TTS-C.1B.3.R2 blocker repair implemented（R2 blocker-specific Review = FAIL）→ TTS-C.1B.3.R3 API-safety closure implemented（R3 final blocker-specific Review = FAIL：`registry-publisher.failPublication` 仍允许 file_durable direct terminal）→ TTS-C.1B.3.R4 exported-API closure implemented（公开 `failPublication` 已移除——不存在仅凭 db+publicationId+owner+attempt 即可把 file_durable/activation_pending 推进 terminal 的公开函数；legacy pre-promotion 只能走 fail/cancelPrePromotionPublicationAndRollbackLegacy）→ TTS-C.1B.3.R4 Final Blocker-Specific Review = PASS；ALL IDENTIFIED 1B.3 BLOCKERS CLOSED；READY FOR INTEGRATION TO m7；reviewed implementation SHA = `aad06c0c89ffc795c366df6f98c5eba54cffa4f1`；测试 259 PASS；combined gate suite 56）→ **Integrated exact-SHA Review = PASS（integrated SHA `8203ec99f8434709fca30d6bdd75f3adf63f20c1`）→ TTS-C.1B.3 Deployment Topology Closure implemented（§M2）→ Topology-Specific Review = FAIL（R0：/voices/tts-a child bind 致 source identity 可漂移 + worker registry target 与 /app/data 重叠）→ Deployment Topology Closure R1 implemented（single unified voice root / 无 child bind / registry 独立 /registry / empty-publication no-op proof；PENDING TOPOLOGY-SPECIFIC REVIEW；NOT MERGED；NOT DEPLOYED；NOT FROZEN）**；
 > TTS-C.1C.2 not started；TTS-C.2 not authorized；**Deployment Evidence Review = PASS**。
 > 本文件是 1B/1C 的唯一实施计划入口，基于 frozen contract（`docs/TTS_C_INCREMENTAL_NARRATION_DESIGN.md`
 > R13）与当前代码只读审计写成。历史基线：上一 production runtime SHA
@@ -584,9 +584,24 @@ evidence、大量理论 corner case、production 真实 IndexTTS2 调用。
 ## M2. TTS-C.1B.3 Deployment Topology Closure（2026-08-07；配置闭环，非 production 部署）
 
 状态：**TTS-C.1B.3 Integrated exact-SHA Review = PASS（integrated SHA
-`8203ec99f8434709fca30d6bdd75f3adf63f20c1`）→ Deployment Topology Closure implemented；
-PENDING TOPOLOGY-SPECIFIC REVIEW；NOT DEPLOYED；NOT FROZEN**。production runtime 保持
+`8203ec99f8434709fca30d6bdd75f3adf63f20c1`）→ Deployment Topology Closure implemented（R0）
+→ Topology-Specific Review = FAIL → **Deployment Topology Closure R1 implemented（PENDING
+TOPOLOGY-SPECIFIC REVIEW；NOT MERGED；NOT DEPLOYED；NOT FROZEN）**。production runtime 保持
 `6874f51c717ebab1c282ee29e9301f27627deaf7`；production POST remains disabled。
+
+### M2.0 R0 Review FAIL 原因（本轮关闭项）
+
+```text
+R0 topology 将 adapter materializations 作为 /voices/tts-a child bind：
+  - /voices/tts-a 是 /voices 的 child mount，同一 absolute registry path
+    （/voices/tts-a/<rel>）在 Worker（/app/data/voice-materializations）与 Adapter
+    （/voices/tts-a）中对应的 host source 可漂移（path shadowing）；
+  - worker registry target /app/data/registry 是 /app/data 的 descendant（路径重叠）。
+```
+
+R1 修复：single unified host voice root（materializations 物理位于
+`${ZHIYING_HOST_VOICES_DIR}/tts-a`，adapter 只有一个 `/voices:ro` mount、无 child bind）；
+worker registry target 独立为 `/registry`；新增 empty-publication no-op proof（G0）。
 
 ### M2.1 冻结 topology requirements（关闭两项）
 
@@ -595,36 +610,39 @@ PENDING TOPOLOGY-SPECIFIC REVIEW；NOT DEPLOYED；NOT FROZEN**。production runt
 registry 目录：Worker 同目录 RW、Adapter 同目录 RO」。Adapter 固定路径
 `ADAPTER_VOICE_REGISTRY_PATH=/config/voice-registry.json` 保持（不接受 caller-controlled path）。
 **B. materialized references 对 adapter 可见**：candidate registry 引用 TTS-A materialization
-时，adapter 必须只读访问相同 reference bytes——materializations 以 `/voices/tts-a` 非重叠子
-命名空间挂入 adapter（与 legacy `/voices` 平铺无重叠），零第二份可变副本。
+时，adapter 必须只读访问相同 reference bytes——materializations 物理位于
+`${ZHIYING_HOST_VOICES_DIR}/tts-a`（单一 voice root 内），adapter 经同一 `/voices` mount
+（`/voices/tts-a/<rel>`）只读访问，零第二份可变副本、零 child bind。
 
-### M2.2 Final topology（resolved）
+### M2.2 Final topology（resolved，R1）
 
 | Component | Host source | Container target | Mode | Purpose |
 |---|---|---|---|---|
 | worker | `${ZHIYING_HOST_DATA_DIR}` | `/app/data` | rw | SQLite/artifacts（既有） |
-| worker | `${ZHIYING_HOST_MATERIALIZATIONS_DIR}` | `/app/data/voice-materializations` | rw | projection 唯一 rw writer（既有） |
-| worker | `${ZHIYING_HOST_REGISTRY_DIR}` | `/app/data/registry` | rw | active registry 目录（rename 原子替换） |
-| worker | `${ZHIYING_HOST_VOICES_DIR}` | `/voices` | ro | legacy reference 只读（registry 文档 `/voices/x` 直接解析） |
-| web | `${ZHIYING_HOST_MATERIALIZATIONS_DIR}` | `/app/data/voice-materializations` | ro | projection 只读校验（既有） |
+| worker | `${ZHIYING_HOST_VOICES_DIR}/tts-a` | `/app/data/voice-materializations` | rw | projection 唯一 rw writer |
+| worker | `${ZHIYING_HOST_REGISTRY_DIR}` | `/registry` | rw | active registry 目录（独立 target；rename 原子替换） |
+| worker | `${ZHIYING_HOST_VOICES_DIR}` | `/voices` | ro | legacy references（`/voices/x` 直接解析） |
+| web | `${ZHIYING_HOST_VOICES_DIR}/tts-a` | `/app/data/voice-materializations` | ro | projection 只读校验 |
 | adapter | `${ZHIYING_HOST_REGISTRY_DIR}` | `/config` | ro | registry 目录只读（固定 `/config/voice-registry.json`） |
-| adapter | `${ZHIYING_HOST_VOICES_DIR}` | `/voices` | ro | legacy references（既有） |
-| adapter | `${ZHIYING_HOST_MATERIALIZATIONS_DIR}` | `/voices/tts-a` | ro | materialized references（非重叠子命名空间） |
+| adapter | `${ZHIYING_HOST_VOICES_DIR}` | `/voices` | ro | 唯一 voice mount（legacy 平铺 + tts-a/ 同一 host tree） |
 
-关键证明（compose test TOP-01…TOP-09 渲染级断言）：
-- registry source worker == adapter（同一 `${ZHIYING_HOST_REGISTRY_DIR}`）；**无 single-file
-  registry bind**（`/config/voice-registry.json` 不再是 volume target）；
-- worker `ZHIYING_ACTIVE_REGISTRY_ROOT=/app/data/registry`、
-  `ZHIYING_ACTIVE_REGISTRY_PATH=/app/data/registry/voice-registry.json` 与 mount 一致；
-- materializations source adapter（`/voices/tts-a`）== worker（`/app/data/voice-materializations`）——
-  同一 bytes 可见，adapter 全 ro；
-- adapter 无 `/app/data` 暴露、无 RW、无 privileged、无 docker.sock、无 rootfs 放宽。
+关键证明（compose test TOP-R1-01…10 渲染级断言）：
+- **adapter 恰好一个 `/voices` mount，无任何 `/voices/*` child volume**（TOP-R1-01/02）；
+- worker `/voices` source == adapter `/voices` source（TOP-R1-03）；
+- **materialization host source == voice-root/tts-a**（worker rw + web ro 同一 source；
+  TOP-R1-04）——同一 host tree，无独立可漂移 source；`ZHIYING_HOST_MATERIALIZATIONS_DIR`
+  env 已移除；
+- emitted `/voices/tts-a/<rel>` == voice-root/tts-a/<rel>（TOP-R1-05）；
+- **worker registry target=/registry**（非 `/app/data` descendant、与其他 volume target 无
+  重叠；TOP-R1-06/07）；registry source worker == adapter（TOP-R1-10c）；
+- 无 single-file registry bind（TOP-07/08）；recovery env 与 `/registry` 精确一致
+  （TOP-R1-09/10d）；adapter rootfs read_only、无 privileged、无 docker.sock（TOP-06c-e）。
 
 ### M2.3 Recovery controller wiring（topology 显式配置；业务入口保持关闭）
 
 ```text
-ZHIYING_ACTIVE_REGISTRY_PATH     = /app/data/registry/voice-registry.json
-ZHIYING_ACTIVE_REGISTRY_ROOT     = /app/data/registry
+ZHIYING_ACTIVE_REGISTRY_PATH     = /registry/voice-registry.json
+ZHIYING_ACTIVE_REGISTRY_ROOT     = /registry
 ZHIYING_LEGACY_VOICE_ROOT_DIR    = /voices
 ZHIYING_EMIT_VOICE_ROOT_PATH     = /voices/tts-a
 adapter URL                      = 既有 INDEXTTS2_BASE_URL=http://127.0.0.1:9880
@@ -634,13 +652,16 @@ adapter URL                      = 既有 INDEXTTS2_BASE_URL=http://127.0.0.1:98
 Worker legacy reference 解析无需 runtime 修改：`resolveLegacyLocal` 默认
 `path.resolve(registryPath)` 把 registry 文档 `/voices/x` 直接映射到 worker 容器内 `/voices`
 （host voices 目录 RO mount），`verifyReferenceFile` containment root 即
-`ZHIYING_LEGACY_VOICE_ROOT_DIR=/voices`。**零 runtime TS/Python 修改**（本 topology 未触发
-TOPOLOGY_CONTRACT_MISMATCH）。
+`ZHIYING_LEGACY_VOICE_ROOT_DIR=/voices`。materialization 验证继续用
+`/app/data/voice-materializations`（mount source = voice-root/tts-a）。**零 runtime
+TS/Python 修改**（未触发 TOPOLOGY_CONTRACT_MISMATCH）。
 
 POST / business 入口继续关闭：`TTS_C1A_MATERIALIZATION_POST_ENABLED` 未设置；无自动 publisher
-/ legacy import / publication / activation / reload / synthesis。当前 production DB 零 publication
-（preflight 实证 publications=0 / activations=0 / legacy=0），RegistryRecoveryController 即使接线，
-启动 sweep 亦为 no-op（zero publication → zero registry mutation）。
+/ legacy import / publication / activation / reload / synthesis。**empty-publication no-op
+proof（G0，测试实证）**：publications=0 / activations=0 时
+`recoverRegistryPublications` → handled=0 errors=[]；`RegistryRecoveryController.runNow()` → 0；
+adapter reload/status 调用 0；active registry bytes/SHA 不变；无 stable-before-*.json；无新
+candidate/temp 文件——接线后的 recovery sweep 在 production 零 publication 时不会写 registry。
 
 ### M2.4 Materialized reference path proof（synthetic）
 
@@ -649,13 +670,14 @@ DB destination_voice_root_relative_path = <profileId>/<revisionId>/reference.wav
 → emitted referenceAssetPath             = /voices/tts-a/<profileId>/<revisionId>/reference.wav
                                           （ZHIYING_EMIT_VOICE_ROOT_PATH=/voices/tts-a）
 → adapter container absolute path        = /voices/tts-a/<profileId>/<revisionId>/reference.wav
-                                          （/voices/tts-a → ${ZHIYING_HOST_MATERIALIZATIONS_DIR}:ro）
-→ host source                            = ${ZHIYING_HOST_MATERIALIZATIONS_DIR}/<profileId>/<revisionId>/reference.wav
+                                          （同一 ${ZHIYING_HOST_VOICES_DIR}:/voices:ro mount）
+→ host source                            = ${ZHIYING_HOST_VOICES_DIR}/tts-a/<profileId>/<revisionId>/reference.wav
 ```
 
-worker 侧同一 host source 经 `/app/data/voice-materializations`（rw）验证 SHA；
-adapter 侧 realpath containment（/voices）与 `_validate_reference_file` SHA-256 复核同一文件——
-同一 bytes 可见（TOP-09d 渲染级 source identity 断言）。
+worker 侧同一 host source 经 `/app/data/voice-materializations`（rw，source 亦为
+voice-root/tts-a）验证 SHA；adapter 侧 realpath containment（/voices）与
+`_validate_reference_file` SHA-256 复核同一文件——**Worker 与 Adapter 对任意 `/voices/...`
+absolute path 看到同一 host tree**（TOP-R1-03/04/05 渲染级断言）。
 
 ### M2.5 Host migration procedure（本轮只写 procedure，不在 production 执行）
 
@@ -663,19 +685,18 @@ Preflight 实测（2026-08-07，只读）：
 
 ```text
 current registry host path = /vol1/1000/docker/zhiying/voice-registry.json
-parent                     = /vol1/1000/docker/zhiying（deployment root——不可整体挂给 adapter，
-                             故 registry 需独立子目录）
+parent                     = /vol1/1000/docker/zhiying（deployment root——不可整体挂给 adapter）
 file                        = regular, size=322, inode=71982, mtime=2026-07-25 22:18:19 +0800
 SHA-256                     = 1dab4a313689736aad081b2b0367f9b036eeec0f9a751647192498ce9ee21827
-adapter mount               = /vol1/1000/docker/zhiying/voice-registry.json -> /config/voice-registry.json (ro)
-voices mount                = /vol1/1000/docker/zhiying/voices -> /voices (ro)
-materializations            = /vol1/1000/docker/zhiying/data/voice-materializations
-                              -> /app/data/voice-materializations (rw)（worker 唯一）
-adapter /health             = ready=true；/registry-status = 1.0 / 1dab4a31… / speakerCount=1
+voices dir                  = /vol1/1000/docker/zhiying/voices（default-v1.wav 平铺；无 tts-a 名称冲突）
+materializations            = /vol1/1000/docker/zhiying/data/voice-materializations（空：0 文件；dev=40）
+same filesystem             = voices 与 materializations 均 dev=40（同一 filesystem）
+consumers                   = worker/web（materializations）、adapter（voices）；无第三方 consumer
+registry referenceAssetPath = 仅 /voices/default-v1.wav（legacy；无 materialization 引用）
 DB                          = integrity ok / FK 0 / publications 0 / activations 0 / legacy 0 / tts_jobs 351
 ```
 
-未来迁移（零内容变化；由独立 Deployment Gate 执行，本轮不执行）：
+**Registry migration（零内容变化）**：
 
 ```text
 1. backup：cp -a 当前 registry 文件到 backup 目录（记录 SHA/size/mtime/inode）
@@ -690,11 +711,32 @@ DB                          = integrity ok / FK 0 / publications 0 / activations
    ZHIYING_HOST_REGISTRY_DIR=/vol1/1000/docker/zhiying/voice-registry）
 ```
 
+**Materialization host relocation（本轮不执行；preflight 显示当前为空、同 filesystem、
+无第三方 consumer、tts-a 无冲突——安全）**：
+
+```text
+1. backup 原 materialization tree（当前为空目录）
+2. 记录完整 file inventory：relative path / type / size / SHA-256
+3. 确认目标 ${ZHIYING_HOST_VOICES_DIR}/tts-a 不存在冲突（preflight：不存在）
+4. 确认 source/target 同 filesystem（preflight：dev=40 相同）
+5. deployment maintenance window 停止 writer 后才迁移（Worker 是唯一 writer）
+6. 优先 same-filesystem rename/move；禁止产生第二份长期 mutable copy
+7. 迁移后重新 inventory + SHA compare
+8. lstat/realpath：目录和文件不得 symlink escape
+9. 更新 compose/env：ZHIYING_HOST_MATERIALIZATIONS_DIR 引用改为
+   ${ZHIYING_HOST_VOICES_DIR}/tts-a（env 变量本身移除）
+10. container smoke 证明：worker /app/data/voice-materializations 与 adapter /voices/tts-a
+    指向相同 host bytes
+```
+
+若目标已有 `tts-a` legacy namespace 内容：不得覆盖；FAIL 并报告 collision（preflight 已确认
+当前无冲突）。
+
 ### M2.6 Topology rollback plan（可执行）
 
 ```text
 previous production runtime: 6874f51c717ebab1c282ee29e9301f27627deaf7
-previous compose/env topology: single-file registry bind
+previous compose/env topology: single-file registry bind + data/voice-materializations
 previous registry host file/path: /vol1/1000/docker/zhiying/voice-registry.json
 previous registry SHA: 1dab4a313689736aad081b2b0367f9b036eeec0f9a751647192498ce9ee21827
 ```
@@ -709,10 +751,11 @@ registry 原始 SHA（1dab4a31…）→ 重启旧 runtime → health/status/synt
 
 Integration candidate gate 曾出现跨不同 TTS-C.1A suite 的 staging EOF（ffmpeg 读
 `.staging/original.bin` 报 `End of file`；失败 suite 各不同：tts-c1a-recovery / tts-c1a-worker /
-tts-c1a-r6-hardening）。同一 exact SHA（`8203ec99…`）后续 candidate gate + integrated m7 gate
-均 56/56 PASS。调查：失败 suite 单独重跑全部通过；60×ffmpeg 与 30×完整 ingest 压力测试 0 失败；
-内存/磁盘/inode/fd/负载监控正常；无残留进程；本次 commit 为 docs-only。**目前 exact root cause
-未证明；不归因于 1B.3 runtime；保留为独立 test-infra debt**。不得宣称已 root-caused。
+tts-c1a-r6-hardening / tts-c1a-resource-cleanup）。同一 exact SHA 后续 candidate gate +
+integrated m7 gate 均 56/56 PASS。调查：失败 suite 单独重跑全部通过；60×ffmpeg 与 30×完整
+ingest 压力测试 0 失败；内存/磁盘/inode/fd/负载监控正常；无残留进程；相关 commit 为
+docs-only/compose-only。**目前 exact root cause 未证明；不归因于 1B.3 runtime；保留为独立
+test-infra debt**。不得宣称已 root-caused。
 
 ## M. 推荐模型分工
 
