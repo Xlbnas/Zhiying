@@ -167,6 +167,12 @@ run_suite "tts-c1b2-publisher-candidate" npx tsx scripts/test-tts-c1b2-publisher
 # （temp SQLite + mock HTTP adapter + 真实双进程 takeover + 故障注入；零 production / 零真实 IndexTTS2）
 run_suite "tts-c1b3-activation-recovery" npx tsx scripts/test-tts-c1b3-activation-recovery.ts
 
+# 12. TTS-C.2 synthesis orchestration + TTS-C.1C.2 payload builder 套件
+# （request envelope / claim fan-in / validation reuse / zero-subscriber / atomic dispatch /
+#   execution commands / attempts / immutable artifact / capability provenance；
+#   temp SQLite + temp fs；Mock provider；零 production / 零真实 synthesis）
+run_suite "tts-c2-synthesis" npx tsx scripts/test-tts-c2-synthesis.ts
+
 echo "QUALITY_GATE_RESULT=PASS"
 echo "QUALITY_GATE_SHA=$GATE_SHA"
 echo "QUALITY_GATE_TOTAL_SUITES=$((PASS_COUNT))"

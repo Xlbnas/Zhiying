@@ -76,14 +76,14 @@ for (const t of ['voice_materialization_requests', 'voice_materialization_jobs',
   const c = (db.prepare(`SELECT count(*) c FROM ${t}`).get() as {c: number}).c;
   ok(c === 0, `${t} 0 行`, c);
 }
-// 7) C.2 表不存在（未提前落 production schema）
+// 7) C.2 表由 TTS-C.2 migration 提供（getDb 自动应用 1A→C.2；1A migration 本身不建 C.2 表）
 for (const t of ['tts_audio_requests', 'tts_synthesis_claims', 'tts_claim_generation_dispatches', 'tts_job_execution_transitions', 'tts_generation_attempts', 'sentence_audio_artifacts']) {
   const row = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(t);
-  ok(row === undefined, `C.2 表 ${t} 不存在`);
+  ok(row !== undefined, `C.2 表 ${t} 存在（TTS-C.2 migration 提供）`);
 }
-// tts_jobs 无 TTS-C 列
+// tts_jobs 的 TTS-C 列由 C.2 migration 添加（frozen §2.0 additive；legacy 行双向 NULL 兼容）
 const tjsCols = (db.prepare('PRAGMA table_info(tts_jobs)').all() as Array<{name: string}>).map((c) => c.name);
-ok(!tjsCols.includes('claim_id') && !tjsCols.includes('execution_command_seq'), 'tts_jobs 无 TTS-C 列');
+ok(tjsCols.includes('claim_id') && tjsCols.includes('execution_command_seq'), 'tts_jobs 含 TTS-C 列（C.2 additive migration）');
 
 closeDb();
 fs.rmSync(DATA_DIR, {recursive: true, force: true});
