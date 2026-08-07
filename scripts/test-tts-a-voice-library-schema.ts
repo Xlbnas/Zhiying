@@ -197,15 +197,6 @@ async function main(): Promise<void> {
            'tts', ?, ?, 'm6', NULL)`,
       )
       .run(now, now);
-    const insertJob = legacy.prepare(
-      `INSERT INTO tts_jobs
-         (id, project_id, narration_plan_artifact_id, narration_plan_version, unit_id, provider,
-          voice_profile_id, voice_profile_revision, status, payload_json, output_path,
-          duration_ms, audio_sha256, result_json, queued_at, started_at, finished_at,
-          claimed_by, claimed_at, heartbeat_at, attempt, max_attempts, progress,
-          error_code, error_message, cancel_requested)
-       VALUES (?, 'legacy-p1', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
     const legacyJobs = [
       ['legacy-job-1', 'plan-art-1', 3, 'N001', 'mock', 'default', '1', 'succeeded',
         '{"text":"第一句"}', 'tts/legacy-p1/N001.wav', 1234, 'aaaa'.repeat(16),
@@ -217,11 +208,23 @@ async function main(): Promise<void> {
         '{"text":"第三句"}', null, null, null, null, now, null, null, null, null, null, 0, 2, 0,
         null, null, 1],
     ] as const;
+    // C.2 后 tts_jobs 含 FK（voice_profile_revision_id/claim_id/result_artifact_id REFERENCES），
+    // prepare 严格要求被引用表存在——先 getDb 重开补建 TTS-A 表，再 prepare/write legacy 行
+    // （legacy 行新列全 NULL，FK 零约束；与 production 升级路径一致：voice 表先于 C.2 存在）。
+    getDb();
+    const insertJob = legacy.prepare(
+      `INSERT INTO tts_jobs
+         (id, project_id, narration_plan_artifact_id, narration_plan_version, unit_id, provider,
+          voice_profile_id, voice_profile_revision, status, payload_json, output_path,
+          duration_ms, audio_sha256, result_json, queued_at, started_at, finished_at,
+          claimed_by, claimed_at, heartbeat_at, attempt, max_attempts, progress,
+          error_code, error_message, cancel_requested)
+       VALUES (?, 'legacy-p1', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
     for (const row of legacyJobs) insertJob.run(...row);
     legacy.close();
 
-    // 重新走 getDb 迁移（TTS-A 对象由 CREATE TABLE/TRIGGER IF NOT EXISTS 补建）
-    getDb();
+    // 重新走 getDb 迁移（TTS-A 对象由 CREATE TABLE/TRIGGER IF NOT EXISTS 补建——已在上一步补建）
     const tablesAfter = sqliteMasterNames('table');
     ok(
       tablesAfter.includes('voice_profiles') && tablesAfter.includes('voice_profile_revisions'),
