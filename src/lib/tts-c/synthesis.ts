@@ -32,6 +32,8 @@ export const SYNTHESIS_INVALID_STATE = 'SYNTHESIS_INVALID_STATE';
 export const SYNTHESIS_ZERO_SUBSCRIBER = 'SYNTHESIS_ZERO_SUBSCRIBER';
 export const SYNTHESIS_NOT_FOUND = 'SYNTHESIS_NOT_FOUND';
 export const SYNTHESIS_CONFLICT = 'SYNTHESIS_CONFLICT';
+/** 同 (project_id, request_id) 已存在且 frozen identity 不同。 */
+export const REQUEST_ID_CONFLICT = 'REQUEST_ID_CONFLICT';
 
 export interface SynthesisRequestInput {
   requestId: string;
@@ -155,11 +157,46 @@ export function createSynthesisRequests(
     projectId: string;
     requests: SynthesisRequestInput[];
   },
-): Array<{requestId: string; claimId: string; status: 'waiting'}> {
-  const tx = db.transaction((): Array<{requestId: string; claimId: string; status: 'waiting'}> => {
-    const out: Array<{requestId: string; claimId: string; status: 'waiting'}> = [];
+): Array<{requestId: string; claimId: string | null; status: string; replayed: boolean}> {
+  const tx = db.transaction((): Array<{requestId: string; claimId: string | null; status: string; replayed: boolean}> => {
+    const out: Array<{requestId: string; claimId: string | null; status: string; replayed: boolean}> = [];
     for (const req of options.requests) {
       const now = nowIso();
+      const generationVariantId = req.generationVariantId ?? 'default';
+      // P1-4：requestId replay / conflict（frozen scope = (project_id, request_id)）——
+      // 同 requestId + exact 同 identity → replay（不 INSERT 第二行、不建第二 claim、不抛 raw UNIQUE）；
+      // 同 requestId + identity 不同 → REQUEST_ID_CONFLICT（不暴露 SQLite UNIQUE error）。
+      const existing = db
+        .prepare(
+          `SELECT id, unit_id, exact_source_fingerprint, synthesis_payload_fingerprint,
+                  final_tts_input_fingerprint, generation_variant_id, status, claim_id
+             FROM tts_audio_requests WHERE project_id = ? AND request_id = ?`,
+        )
+        .get(options.projectId, req.requestId) as
+        | {
+            id: string;
+            unit_id: string;
+            exact_source_fingerprint: string;
+            synthesis_payload_fingerprint: string;
+            final_tts_input_fingerprint: string;
+            generation_variant_id: string;
+            status: string;
+            claim_id: string | null;
+          }
+        | undefined;
+      if (existing) {
+        const sameIdentity =
+          existing.unit_id === req.unitId &&
+          existing.exact_source_fingerprint === req.exactSourceFingerprint &&
+          existing.synthesis_payload_fingerprint === req.synthesisPayloadFingerprint &&
+          existing.final_tts_input_fingerprint === req.finalTtsInputFingerprint &&
+          existing.generation_variant_id === generationVariantId;
+        if (!sameIdentity) {
+          throw new RegistryContractError(REQUEST_ID_CONFLICT, `requestId ${req.requestId} 已存在且 frozen identity 不同`);
+        }
+        out.push({requestId: req.requestId, claimId: existing.claim_id, status: existing.status, replayed: true});
+        continue;
+      }
       const requestId = crypto.randomUUID();
       db.prepare(
         `INSERT INTO tts_audio_requests
@@ -175,12 +212,11 @@ export function createSynthesisRequests(
         req.exactSourceFingerprint,
         req.synthesisPayloadFingerprint,
         req.finalTtsInputFingerprint,
-        req.generationVariantId ?? 'default',
+        generationVariantId,
         now,
         now,
       );
       // fan-in：同 key active claim 复用；否则创建（validating_reuse 初始态）
-      const generationVariantId = req.generationVariantId ?? 'default';
       const active = db
         .prepare(
           `SELECT id FROM tts_synthesis_claims
@@ -239,7 +275,7 @@ export function createSynthesisRequests(
         )
         .run(claimId, now, requestId);
       if (res.changes !== 1) throw new RegistryContractError(SYNTHESIS_INVALID_STATE, `request ${req.requestId} 无法推进 waiting`);
-      out.push({requestId: req.requestId, claimId, status: 'waiting'});
+      out.push({requestId: req.requestId, claimId, status: 'waiting', replayed: false});
     }
     return out;
   });
@@ -269,7 +305,11 @@ export interface DispatchJobContext {
  * Validation resolve（fenced）：candidate usable → 复用（claim→succeeded + request→succeeded，
  * 不建 provider job）；unusable + subscriber>0 → 原子 dispatch（单条 INSERT command，
  * trigger 建唯一 queued job + claim→generation_pending）；unusable + subscriber=0 → claim cancelled。
- * 调用方必须持有 claim.validation_owner_token / validation_attempt（stale owner 被 trigger fence 拒绝）。
+ * 调用方必须持有 claim.validation_owner_token / validation_attempt / 本次 exact validation
+ * snapshot（candidateArtifactId / candidateMetadataHash，NULL 用 SQLite IS 语义）。
+ * usable 与 zero-subscriber 的 terminal UPDATE 均为 frozen §3.1 exact fenced CAS
+ * （id + status + owner + attempt + DB_NOW<=lease + candidate IS + hash IS；changes=1；
+ * 不命中 → STALE_VALIDATION_OWNER 整事务回滚零副作用）。
  */
 export function resolveClaimValidation(
   db: Db,
@@ -278,6 +318,9 @@ export function resolveClaimValidation(
     validationOwnerToken: string;
     validationAttempt: number;
     candidateUsable: boolean;
+    /** 本次 exact validation snapshot（frozen §3.1；NULL 用 IS 语义）。 */
+    candidateArtifactId?: string | null;
+    candidateMetadataHash?: string | null;
     /** unusable + subscriber>0 时必填（dispatch command 的 job 身份字段）。 */
     jobContext?: DispatchJobContext;
   },
@@ -290,36 +333,55 @@ export function resolveClaimValidation(
     if (claim.validation_owner_token !== options.validationOwnerToken || claim.validation_attempt !== options.validationAttempt) {
       throw new RegistryContractError(VALIDATION_STALE_OWNER, `claim ${options.claimId} validation owner/attempt 不匹配`);
     }
+    const snapshotCandidateId = options.candidateArtifactId === undefined ? claim.candidate_artifact_id : options.candidateArtifactId;
+    const snapshotCandidateHash = options.candidateMetadataHash === undefined ? claim.candidate_artifact_metadata_hash : options.candidateMetadataHash;
     const subscribers = countClaimSubscribers(db, options.claimId);
+    const now = nowIso();
     if (options.candidateUsable) {
-      if (!claim.candidate_artifact_id) {
+      if (!snapshotCandidateId) {
         throw new RegistryContractError(SYNTHESIS_INVALID_STATE, 'candidateUsable 但 claim 无 candidate');
       }
-      // 复用：claim→succeeded + result link；全部 waiting/running request → succeeded + result
-      const now = nowIso();
-      db.prepare(
-        `UPDATE tts_synthesis_claims
-            SET status='succeeded', result_artifact_id=?,
-                validation_owner_token=NULL, validation_lease_expires_at_epoch_ms=NULL,
-                updated_at=?
-          WHERE id=? AND status='validating_reuse'`,
-      ).run(claim.candidate_artifact_id, now, options.claimId);
+      // 复用：frozen §3.1 exact fenced CAS → claim succeeded + result link；全部 active request → succeeded
+      const res = db
+        .prepare(
+          `UPDATE tts_synthesis_claims
+              SET status='succeeded', result_artifact_id=?,
+                  validation_owner_token=NULL, validation_lease_expires_at_epoch_ms=NULL,
+                  updated_at=?
+            WHERE id=? AND status='validating_reuse'
+              AND validation_owner_token=? AND validation_attempt=?
+              AND (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))
+                  <= validation_lease_expires_at_epoch_ms
+              AND candidate_artifact_id IS ? AND candidate_artifact_metadata_hash IS ?`,
+        )
+        .run(snapshotCandidateId, now, options.claimId, options.validationOwnerToken, options.validationAttempt, snapshotCandidateId, snapshotCandidateHash);
+      if (res.changes !== 1) {
+        throw new RegistryContractError(VALIDATION_STALE_OWNER, `claim ${options.claimId} usable finalize fence 不命中（stale owner/lease/candidate）`);
+      }
       db.prepare(
         `UPDATE tts_audio_requests
             SET status='succeeded', result_artifact_id=?, updated_at=?
           WHERE claim_id=? AND status IN ('waiting','running')`,
-      ).run(claim.candidate_artifact_id, now, options.claimId);
-      return {kind: 'reused', claimId: options.claimId, artifactId: claim.candidate_artifact_id};
+      ).run(snapshotCandidateId, now, options.claimId);
+      return {kind: 'reused', claimId: options.claimId, artifactId: snapshotCandidateId};
     }
     if (subscribers === 0) {
-      // zero-subscriber：claim cancelled，零 provider job
-      const now = nowIso();
-      db.prepare(
-        `UPDATE tts_synthesis_claims
-            SET status='cancelled', validation_owner_token=NULL, validation_lease_expires_at_epoch_ms=NULL,
-                updated_at=?
-          WHERE id=? AND status='validating_reuse'`,
-      ).run(now, options.claimId);
+      // zero-subscriber：frozen §3.1 exact fenced CAS → claim cancelled，零 provider job
+      const res = db
+        .prepare(
+          `UPDATE tts_synthesis_claims
+              SET status='cancelled', validation_owner_token=NULL, validation_lease_expires_at_epoch_ms=NULL,
+                  updated_at=?
+            WHERE id=? AND status='validating_reuse'
+              AND validation_owner_token=? AND validation_attempt=?
+              AND (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))
+                  <= validation_lease_expires_at_epoch_ms
+              AND candidate_artifact_id IS ? AND candidate_artifact_metadata_hash IS ?`,
+        )
+        .run(now, options.claimId, options.validationOwnerToken, options.validationAttempt, snapshotCandidateId, snapshotCandidateHash);
+      if (res.changes !== 1) {
+        throw new RegistryContractError(VALIDATION_STALE_OWNER, `claim ${options.claimId} zero-subscriber cancel fence 不命中`);
+      }
       return {kind: 'cancelled', claimId: options.claimId};
     }
     // 原子 dispatch：单条 INSERT command（trg_tcgd_dispatch 完成 fenced 验证 + zero-subscriber
@@ -350,8 +412,8 @@ export function resolveClaimValidation(
       jobId,
       options.validationOwnerToken,
       options.validationAttempt,
-      claim.candidate_artifact_id,
-      claim.candidate_artifact_metadata_hash,
+      snapshotCandidateId,
+      snapshotCandidateHash,
       claim.project_id,
       claim.unit_id,
       ctx.narrationPlanArtifactId,
@@ -366,7 +428,7 @@ export function resolveClaimValidation(
       ctx.synthesisPayloadFingerprint,
       claim.final_tts_input_fingerprint,
       claim.generation_variant_id,
-      nowIso(),
+      now,
     );
     return {kind: 'dispatched', claimId: options.claimId, jobId};
   });
@@ -374,9 +436,40 @@ export function resolveClaimValidation(
 }
 
 /**
- * Validation takeover（frozen §6）：validation lease 过期后 fenced CAS 接管——
- * 新 validation owner + attempt+1 + 新 lease；changes=1 才获得 ownership（单裁决）。
- * 旧 validator 后续 resolve 因 owner/attempt 不匹配 → STALE_VALIDATION_OWNER。
+ * Validation renewal（frozen §3.3 最小 DB primitive）：validating_reuse 同态续租——
+ * status + owner + attempt exact + 旧 lease >= DB_NOW_MS；新 lease > DB_NOW_MS。
+ * changes=1 才成功；旧 owner / lease expired → STALE_VALIDATION_OWNER 零副作用。
+ */
+export function renewClaimValidation(
+  db: Db,
+  options: {claimId: string; validationOwnerToken: string; validationAttempt: number; leaseMs?: number},
+): {claimId: string; newLease: number} {
+  const tx = db.transaction((): {claimId: string; newLease: number} => {
+    const newLease = dbNowMs(db) + (options.leaseMs ?? SYNTHESIS_VALIDATION_LEASE_MS);
+    const res = db
+      .prepare(
+        `UPDATE tts_synthesis_claims
+            SET validation_lease_expires_at_epoch_ms=?, updated_at=?
+          WHERE id=? AND status='validating_reuse'
+            AND validation_owner_token=? AND validation_attempt=?
+            AND validation_lease_expires_at_epoch_ms IS NOT NULL
+            AND (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))
+                <= validation_lease_expires_at_epoch_ms`,
+      )
+      .run(newLease, nowIso(), options.claimId, options.validationOwnerToken, options.validationAttempt);
+    if (res.changes !== 1) {
+      throw new RegistryContractError(VALIDATION_STALE_OWNER, `claim ${options.claimId} validation renew 不命中（stale owner/lease）`);
+    }
+    return {claimId: options.claimId, newLease};
+  });
+  return tx.immediate();
+}
+
+/**
+ * Validation takeover（frozen §3.2）：validation lease 过期后 fenced CAS 接管——
+ * 新 validation owner + attempt+1 + 新 lease + validation_started_at=当前 attempt 开始时间；
+ * changes=1 才获得 ownership（单裁决）。旧 validator 后续 resolve 因 owner/attempt
+ * 不匹配 → STALE_VALIDATION_OWNER。
  */
 export function takeoverClaimValidation(
   db: Db,
@@ -389,13 +482,13 @@ export function takeoverClaimValidation(
       .prepare(
         `UPDATE tts_synthesis_claims
             SET validation_owner_token=?, validation_lease_expires_at_epoch_ms=?,
-                validation_attempt=validation_attempt+1, updated_at=?
+                validation_attempt=validation_attempt+1, validation_started_at=?, updated_at=?
           WHERE id=? AND status='validating_reuse'
             AND validation_lease_expires_at_epoch_ms IS NOT NULL
             AND (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))
                 > validation_lease_expires_at_epoch_ms`,
       )
-      .run(options.newValidationOwnerToken, lease, now, options.claimId);
+      .run(options.newValidationOwnerToken, lease, now, now, options.claimId);
     if (res.changes !== 1) {
       throw new RegistryContractError(VALIDATION_STALE_OWNER, `claim ${options.claimId} validation takeover 不命中（lease 未过期/状态非 validating_reuse）`);
     }

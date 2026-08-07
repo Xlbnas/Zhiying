@@ -23,14 +23,21 @@
  *     与 job/claim 一致）+ capability provenance（snapshot/compiled_payload/compiler_version）。
  */
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import type {Db} from '../db';
 import {dbNowMs, nowIso} from './materialization';
 import {RegistryContractError} from './registry-contract-error';
+import {computeSynthesisPayloadFingerprint} from './synthesis-payload';
 
 export const EXECUTION_NOT_OWNER = 'EXECUTION_NOT_OWNER';
 export const EXECUTION_INVALID_STATE = 'EXECUTION_INVALID_STATE';
 export const EXECUTION_LEASE_EXPIRED = 'EXECUTION_LEASE_EXPIRED';
 export const EXECUTION_NOT_FOUND = 'EXECUTION_NOT_FOUND';
+/** 成功终局时 active subscriber = 0（frozen cancel priority：不得 INSERT artifact/succeeded）。 */
+export const EXECUTION_ZERO_SUBSCRIBER = 'EXECUTION_ZERO_SUBSCRIBER';
+/** exact reread 不一致（source artifact hash / voice revision / fingerprint / output evidence）。 */
+export const REQUEST_STATE_INCONSISTENT = 'REQUEST_STATE_INCONSISTENT';
 
 export const EXECUTION_LEASE_MS = 15 * 60 * 1000;
 
@@ -155,10 +162,14 @@ export function claimSynthesisJob(
   const tx = db.transaction((): {claimId: string; attemptId: string} => {
     const job = getTtsCJob(db, options.jobId);
     if (job.status !== 'queued') throw new RegistryContractError(EXECUTION_INVALID_STATE, `job ${options.jobId} 状态 ${job.status} 不可 claim`);
-    const claim = db.prepare('SELECT status, project_id FROM tts_synthesis_claims WHERE id=?').get(job.claim_id) as {status: string; project_id: string} | undefined;
+    const claim = db.prepare('SELECT status, validation_attempt FROM tts_synthesis_claims WHERE id=?').get(job.claim_id) as {status: string; validation_attempt: number} | undefined;
     if (!claim || claim.status !== 'generation_pending') {
       throw new RegistryContractError(EXECUTION_INVALID_STATE, `claim ${job.claim_id} 状态非 generation_pending`);
     }
+    // P1-3：generated execution attempt == claim.validation_attempt（validation takeover 后
+    // 可能 2,3,...；不得重置为 1）。command.worker_attempt / job.attempt /
+    // generation_attempt.attempt_number 使用同一 generated execution attempt。
+    const workerAttempt = claim.validation_attempt;
     const now = nowIso();
     const lease = dbNowMs(db) + (options.leaseMs ?? EXECUTION_LEASE_MS);
     const {commandId, seq} = insertExecutionCommand(db, {
@@ -171,7 +182,7 @@ export function claimSynthesisJob(
       toJobStatus: 'running',
       workerOwnerToken: options.workerOwnerToken,
       workerLease: lease,
-      workerAttempt: 1,
+      workerAttempt,
       claimedAt: now,
       heartbeatAt: now,
     });
@@ -188,15 +199,15 @@ export function claimSynthesisJob(
           SET status='running', claimed_by=?, claimed_at=?, heartbeat_at=?, attempt=?,
               started_at=?, last_execution_command_id=?, execution_command_seq=?
         WHERE id=? AND claim_id=? AND status='queued'`,
-    ).run(options.workerOwnerToken, now, now, 1, now, commandId, seq, job.id, job.claim_id);
-    // attempt（phase=created；provider/model/request 证据）
+    ).run(options.workerOwnerToken, now, now, workerAttempt, now, commandId, seq, job.id, job.claim_id);
+    // attempt（phase=created；provider/model/request 证据；attempt_number = generated execution attempt）
     const attemptId = crypto.randomUUID();
     db.prepare(
       `INSERT INTO tts_generation_attempts
          (id, job_id, attempt_number, provider, model, request_hash, request_json,
           execution_phase, started_at)
-       VALUES (?, ?, 1, ?, ?, ?, ?, 'created', ?)`,
-    ).run(attemptId, job.id, job.provider, options.model, options.providerRequestHash, options.providerRequestJson, now);
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'created', ?)`,
+    ).run(attemptId, job.id, workerAttempt, job.provider, options.model, options.providerRequestHash, options.providerRequestJson, now);
     return {claimId: job.claim_id, attemptId};
   });
   return tx.immediate();
@@ -307,6 +318,10 @@ export function prestartTerminalSynthesisJob(
   const tx = db.transaction((): void => {
     const job = getTtsCJob(db, options.jobId);
     if (job.status !== 'queued') throw new RegistryContractError(EXECUTION_INVALID_STATE, `job ${options.jobId} 状态 ${job.status} 不可 prestart terminal`);
+    // P1-3：prestart command.worker_attempt = claim.validation_attempt（frozen D5：
+    // prestart 无 Worker execution——job.attempt 保持 0，不因 command.worker_attempt 修改）。
+    const claim = db.prepare('SELECT validation_attempt FROM tts_synthesis_claims WHERE id=?').get(job.claim_id) as {validation_attempt: number} | undefined;
+    if (!claim) throw new RegistryContractError(EXECUTION_NOT_FOUND, `claim ${job.claim_id} 缺失`);
     const now = nowIso();
     const {commandId, seq} = insertExecutionCommand(db, {
       jobId: job.id,
@@ -316,7 +331,7 @@ export function prestartTerminalSynthesisJob(
       toClaimStatus: options.terminal,
       fromJobStatus: 'queued',
       toJobStatus: options.terminal,
-      workerAttempt: 1,
+      workerAttempt: claim.validation_attempt,
       errorCode: options.errorCode ?? null,
       errorMessage: options.errorMessage ?? null,
       reason: options.reason ?? null,
@@ -351,12 +366,77 @@ export interface AttemptEvidence {
   ffprobeDurationMs?: number;
 }
 
-export function getGenerationAttempt(db: Db, attemptId: string): {execution_phase: string; job_id: string} {
-  const row = db.prepare('SELECT execution_phase, job_id FROM tts_generation_attempts WHERE id=?').get(attemptId) as
-    | {execution_phase: string; job_id: string}
+export function getGenerationAttempt(db: Db, attemptId: string): {execution_phase: string; job_id: string; attempt_number: number; audio_sha256: string | null; output_size: number | null; codec: string | null; sample_rate: number | null; channels: number | null; ffprobe_duration_ms: number | null; final_relative_path: string | null} {
+  const row = db.prepare('SELECT execution_phase, job_id, attempt_number, audio_sha256, output_size, codec, sample_rate, channels, ffprobe_duration_ms, final_relative_path FROM tts_generation_attempts WHERE id=?').get(attemptId) as
+    | {execution_phase: string; job_id: string; attempt_number: number; audio_sha256: string | null; output_size: number | null; codec: string | null; sample_rate: number | null; channels: number | null; ffprobe_duration_ms: number | null; final_relative_path: string | null}
     | undefined;
   if (!row) throw new RegistryContractError(EXECUTION_NOT_FOUND, `attempt 不存在: ${attemptId}`);
   return row;
+}
+
+// ── P1-1：事务内同步 exact reread helpers（复用项目 O_NOFOLLOW/containment 模式；无新 validator 框架） ──
+
+function sha256hex(s: string): string {
+  return crypto.createHash('sha256').update(s, 'utf8').digest('hex');
+}
+
+/** containment：rel 非绝对、无 .. / 反斜杠；resolve 后必须位于 rootAbs 内。 */
+function resolveContainedSync(rootAbs: string, rel: string): string {
+  const root = path.resolve(rootAbs);
+  if (path.isAbsolute(rel) || rel.includes('..') || rel.includes('\\') || rel.startsWith('/') || rel.length === 0) {
+    throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `output relative path 非法: ${rel}`);
+  }
+  const abs = path.resolve(root, rel);
+  if (!abs.startsWith(root + path.sep)) {
+    throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `output path 越出 root: ${abs}`);
+  }
+  // parent 链逐级 lstat：symlink 拒绝（复用 paths.ts containment 语义）
+  let cur = root;
+  const parts = rel.split('/');
+  for (const seg of parts.slice(0, -1)) {
+    cur = path.join(cur, seg);
+    let st: fs.Stats;
+    try {
+      st = fs.lstatSync(cur);
+    } catch {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `output parent 缺失: ${cur}`);
+    }
+    if (st.isSymbolicLink() || !st.isDirectory()) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `output parent 是 symlink 或非目录: ${cur}`);
+    }
+  }
+  return abs;
+}
+
+/** O_NOFOLLOW 打开 + fstat regular + 读取 bytes → SHA/size（事务内同步 exact output reread）。 */
+function readFileExactSync(absPath: string, expectedSha256: string): {sha: string; size: number} {
+  let fd: number;
+  try {
+    fd = fs.openSync(absPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  } catch (err) {
+    throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `output 文件不可打开: ${absPath}`);
+  }
+  try {
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'output 非普通文件');
+    const bytes = fs.readFileSync(fd);
+    const sha = crypto.createHash('sha256').update(bytes).digest('hex');
+    if (sha !== expectedSha256) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'output SHA 与 file_durable evidence 不符');
+    }
+    return {sha, size: st.size};
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** source artifact canonical content hash（artifacts 行 canonical JSON；按 exact IDs 重读重算）。 */
+function sourceArtifactContentHashSync(db: Db, artifactId: string, projectId: string, kind: string): string {
+  const row = db
+    .prepare('SELECT id, project_id, kind, created_at FROM artifacts WHERE id=? AND project_id=? AND kind=?')
+    .get(artifactId, projectId, kind) as {id: string; project_id: string; kind: string; created_at: string} | undefined;
+  if (!row) throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `source artifact 缺失: ${artifactId}（${kind}）`);
+  return sha256hex(JSON.stringify({id: row.id, project_id: row.project_id, kind: row.kind, created_at: row.created_at}));
 }
 
 /** 推进 attempt phase（created→provider_in_flight→response_persisted→file_validated→file_durable）。 */
@@ -412,6 +492,8 @@ export interface FinalizeSuccessOptions {
   jobId: string;
   workerOwnerToken: string;
   attemptId: string;
+  /** 输出文件 root（containment 基准；final_relative_path 必须位于其内且 parent 无 symlink）。 */
+  outputRootDir: string;
   attemptEvidence: AttemptEvidence & {audioSha256: string; finalRelativePath: string; outputSize: number; codec: string; sampleRate: number; channels: number; ffprobeDurationMs: number};
   /** artifact provenance（frozen §2.4；narration/assignment/performance plan + capability 三件套）。 */
   artifact: {
@@ -432,8 +514,23 @@ export interface FinalizeSuccessOptions {
   };
 }
 
+/**
+ * Atomic terminal closure（frozen §8.2；P1-1）——同一个 BEGIN IMMEDIATE 内完成：
+ *   1. fenced reread claim/job/current attempt/subscribers
+ *   2. active subscriber / cancel priority（subscriber=0 → EXECUTION_ZERO_SUBSCRIBER 回滚，
+ *      不得 INSERT artifact/succeeded）
+ *   3. attempt file_durable → succeeded（changes=1）
+ *   4. exact application-level rereads（output 文件 SHA/size/containment；source artifact
+ *      canonical hash；voice revision exact；synthesis_payload_fingerprint 重算）
+ *   5. INSERT immutable artifact
+ *   6. state_transition succeeded command
+ *   7. fan-out active requests（全部 → succeeded + 同一 result artifact）
+ *   8. COMMIT
+ * 任一步失败 → 整个事务 rollback（不存在 artifact/claim/job succeeded 而 request 仍 waiting）。
+ */
 export function finalizeSynthesisJobSuccess(db: Db, options: FinalizeSuccessOptions): {claimId: string; artifactId: string} {
   const tx = db.transaction((): {claimId: string; artifactId: string} => {
+    // 1) fenced reread
     const job = getTtsCJob(db, options.jobId);
     if (job.status !== 'running' && job.status !== 'indeterminate') {
       throw new RegistryContractError(EXECUTION_INVALID_STATE, `job ${options.jobId} 状态 ${job.status} 不可 finalize`);
@@ -448,37 +545,96 @@ export function finalizeSynthesisJobSuccess(db: Db, options: FinalizeSuccessOpti
     if (attempt.job_id !== job.id || attempt.execution_phase !== 'file_durable') {
       throw new RegistryContractError(EXECUTION_INVALID_STATE, `attempt ${options.attemptId} 必须 file_durable 且属于 job`);
     }
+    if (attempt.attempt_number !== job.attempt) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `attempt_number ${attempt.attempt_number} != job.attempt ${job.attempt}`);
+    }
     const now = nowIso();
-    // 1) attempt → succeeded（evidence write-once + terminal 冻结）
-    db.prepare(
-      `UPDATE tts_generation_attempts
-          SET execution_phase='succeeded', finished_at=?,
-              provider_request_id=COALESCE(?, provider_request_id),
-              final_relative_path=COALESCE(?, final_relative_path),
-              audio_sha256=COALESCE(?, audio_sha256),
-              output_size=COALESCE(?, output_size),
-              codec=COALESCE(?, codec),
-              sample_rate=COALESCE(?, sample_rate),
-              channels=COALESCE(?, channels),
-              ffprobe_duration_ms=COALESCE(?, ffprobe_duration_ms)
-        WHERE id=? AND execution_phase='file_durable'`,
-    ).run(
-      now,
-      options.attemptEvidence.providerRequestId ?? null,
-      options.attemptEvidence.finalRelativePath,
-      options.attemptEvidence.audioSha256,
-      options.attemptEvidence.outputSize,
-      options.attemptEvidence.codec,
-      options.attemptEvidence.sampleRate,
-      options.attemptEvidence.channels,
-      options.attemptEvidence.ffprobeDurationMs,
-      options.attemptId,
-    );
-    // 2) artifact INSERT（trg_saa_provenance 验证 attempt succeeded + 逐项 identity 闭包；
+
+    // 2) active subscriber / cancel priority + frozen identity 一致性
+    const activeCount = (
+      db.prepare("SELECT COUNT(*) n FROM tts_audio_requests WHERE claim_id=? AND status IN ('waiting','running')").get(job.claim_id) as {n: number}
+    ).n;
+    if (activeCount === 0) {
+      throw new RegistryContractError(EXECUTION_ZERO_SUBSCRIBER, `claim ${job.claim_id} active subscriber=0——不得 succeeded（frozen cancel priority）`);
+    }
+    const identityMismatch = (
+      db.prepare(
+        `SELECT COUNT(*) n FROM tts_audio_requests
+          WHERE claim_id=? AND status IN ('waiting','running')
+            AND (project_id<>? OR unit_id<>? OR exact_source_fingerprint<>?
+                 OR synthesis_payload_fingerprint<>? OR final_tts_input_fingerprint<>?
+                 OR generation_variant_id<>?)`,
+      ).get(job.claim_id, job.project_id, claim.unit_id, job.exact_source_fingerprint ?? '', job.synthesis_payload_fingerprint ?? '', claim.final_tts_input_fingerprint, claim.generation_variant_id) as {n: number}
+    ).n;
+    if (identityMismatch > 0) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'active subscriber 与 claim/job frozen identity 不一致');
+    }
+
+    // 4) exact application-level rereads
+    // 4a) 输出文件：containment + parent 无 symlink + O_NOFOLLOW + regular + SHA + size
+    const outputAbs = resolveContainedSync(options.outputRootDir, options.attemptEvidence.finalRelativePath);
+    const fileRead = readFileExactSync(outputAbs, options.attemptEvidence.audioSha256);
+    if (fileRead.size !== options.attemptEvidence.outputSize) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `output size ${fileRead.size} != evidence ${options.attemptEvidence.outputSize}`);
+    }
+    // 4b) source artifact canonical hash（按 exact IDs 重读重算，不信任 caller 直传）
+    const npHash = sourceArtifactContentHashSync(db, options.artifact.narrationPlanArtifactId, job.project_id, 'narration_plan_v2');
+    const asgHash = sourceArtifactContentHashSync(db, options.artifact.assignmentArtifactId, job.project_id, 'project_voice_assignment');
+    const ppHash = sourceArtifactContentHashSync(db, options.artifact.performancePlanArtifactId, job.project_id, 'narration_performance_plan');
+    if (npHash !== options.artifact.narrationPlanContentHash || asgHash !== options.artifact.assignmentContentHash || ppHash !== options.artifact.performancePlanContentHash) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'source artifact canonical hash 与待写 provenance 不一致');
+    }
+    // 4c) voice revision exact（DB 侧 pair/provider + canonical_audio_sha256；canonical 文件 SHA 同步复核）
+    const rev = db.prepare('SELECT voice_profile_id, provider, canonical_audio_sha256, canonical_audio_path FROM voice_profile_revisions WHERE id=?').get(options.artifact.voiceProfileRevisionId) as
+      | {voice_profile_id: string; provider: string; canonical_audio_sha256: string; canonical_audio_path: string}
+      | undefined;
+    if (!rev || rev.voice_profile_id !== options.artifact.voiceProfileId || rev.provider !== job.provider) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'voice revision exact pair/provider 不一致');
+    }
+    const canonicalAbs = path.resolve(process.env.ZHIYING_DATA_DIR ?? 'data', rev.canonical_audio_path);
+    const canonicalRead = readFileExactSync(canonicalAbs, rev.canonical_audio_sha256);
+    void canonicalRead;
+    // 4d) synthesis_payload_fingerprint 语义重算（payload_json canonical → fingerprint 与 persisted 一致）
+    if (!job.payload_json) throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'job payload_json 缺失');
+    const recomputedFp = computeSynthesisPayloadFingerprint(job.payload_json);
+    if (recomputedFp !== (job.synthesis_payload_fingerprint ?? '')) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'synthesis_payload_fingerprint 重算与 persisted 不一致');
+    }
+
+    // 3) attempt file_durable → succeeded（changes=1；file_durable 后不补写 byte evidence）
+    const attemptUpd = db
+      .prepare(
+        `UPDATE tts_generation_attempts
+            SET execution_phase='succeeded', finished_at=?,
+                provider_request_id=COALESCE(?, provider_request_id),
+                final_relative_path=COALESCE(?, final_relative_path),
+                audio_sha256=COALESCE(?, audio_sha256),
+                output_size=COALESCE(?, output_size),
+                codec=COALESCE(?, codec),
+                sample_rate=COALESCE(?, sample_rate),
+                channels=COALESCE(?, channels),
+                ffprobe_duration_ms=COALESCE(?, ffprobe_duration_ms)
+          WHERE id=? AND execution_phase='file_durable'`,
+      )
+      .run(
+        now,
+        options.attemptEvidence.providerRequestId ?? null,
+        options.attemptEvidence.finalRelativePath,
+        options.attemptEvidence.audioSha256,
+        options.attemptEvidence.outputSize,
+        options.attemptEvidence.codec,
+        options.attemptEvidence.sampleRate,
+        options.attemptEvidence.channels,
+        options.attemptEvidence.ffprobeDurationMs,
+        options.attemptId,
+      );
+    if (attemptUpd.changes !== 1) {
+      throw new RegistryContractError(EXECUTION_INVALID_STATE, `attempt ${options.attemptId} file_durable→succeeded changes!=1`);
+    }
+
+    // 5) artifact INSERT（trg_saa_provenance 验证 attempt succeeded + 逐项 identity 闭包；
     //    canonical_audio_sha256 必须 == voice_profile_revisions.canonical_audio_sha256）
     const artifactId = crypto.randomUUID();
-    const revisionSha = (db.prepare('SELECT canonical_audio_sha256 FROM voice_profile_revisions WHERE id=?').get(options.artifact.voiceProfileRevisionId) as {canonical_audio_sha256: string} | undefined)?.canonical_audio_sha256;
-    if (!revisionSha) throw new RegistryContractError(EXECUTION_INVALID_STATE, 'voice revision 缺失');
     db.prepare(
       `INSERT INTO sentence_audio_artifacts
          (id, project_id, unit_id, narration_plan_artifact_id, narration_plan_content_hash,
@@ -504,7 +660,7 @@ export function finalizeSynthesisJobSuccess(db: Db, options: FinalizeSuccessOpti
       options.artifact.performancePlanContentHash,
       options.artifact.voiceProfileId,
       options.artifact.voiceProfileRevisionId,
-      revisionSha,
+      rev.canonical_audio_sha256,
       job.exact_source_fingerprint ?? '',
       job.synthesis_payload_fingerprint ?? '',
       claim.final_tts_input_fingerprint,
@@ -529,7 +685,7 @@ export function finalizeSynthesisJobSuccess(db: Db, options: FinalizeSuccessOpti
       claim.generation_variant_id,
       now,
     );
-    // 3) state_transition succeeded command + 双侧 terminal
+    // 6) state_transition succeeded command + 双侧 terminal
     const {commandId, seq} = insertExecutionCommand(db, {
       jobId: job.id,
       claimId: job.claim_id,
@@ -554,6 +710,21 @@ export function finalizeSynthesisJobSuccess(db: Db, options: FinalizeSuccessOpti
               last_execution_command_id=?, execution_command_seq=?
         WHERE id=? AND claim_id=? AND status=?`,
     ).run(artifactId, now, commandId, seq, job.id, job.claim_id, job.status);
+    // 7) request fan-out（全部 active subscriber → succeeded + 同一 result artifact）
+    const fanOut = db
+      .prepare(
+        `UPDATE tts_audio_requests
+            SET status='succeeded', result_artifact_id=?, updated_at=?
+          WHERE claim_id=? AND status IN ('waiting','running')`,
+      )
+      .run(artifactId, now, job.claim_id);
+    if (fanOut.changes !== activeCount) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `request fan-out changes ${fanOut.changes} != active ${activeCount}`);
+    }
+    const leftover = (db.prepare("SELECT COUNT(*) n FROM tts_audio_requests WHERE claim_id=? AND status IN ('waiting','running')").get(job.claim_id) as {n: number}).n;
+    if (leftover !== 0) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'fan-out 后仍有 active request');
+    }
     return {claimId: job.claim_id, artifactId};
   });
   return tx.immediate();
