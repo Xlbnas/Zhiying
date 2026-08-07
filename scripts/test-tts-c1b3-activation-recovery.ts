@@ -459,6 +459,51 @@ function recoveryDeps(adapter: MockAdapter) {
 (async () => {
   await setup();
 
+  // ══════════════ G0. P1-3 empty-publication no-op proof（R1 topology） ══════════════
+  // production DB 零 publication 时，接线后的 recovery controller 启动 sweep 必须是
+  // no-op：零 HTTP、零 registry 字节变化、零 filesystem 副作用。
+  {
+    ok(
+      (getDb().prepare('SELECT COUNT(*) n FROM voice_registry_publications').get() as {n: number}).n === 0 &&
+        (getDb().prepare('SELECT COUNT(*) n FROM voice_registry_publication_activations').get() as {n: number}).n === 0,
+      'G0 前置：publications=0 / activations=0',
+    );
+    // 确定 bytes 的 active registry + mock adapter（loaded=同 bytes）
+    const stableDoc = JSON.stringify({schemaVersion: '1.0', voices: [{voiceProfile: 'g0', voiceRevision: '1', speakerName: 'g0', referenceAssetPath: '/voices/g0-v.wav', referenceSha256: 'a'.repeat(64)}]}, null, 2) + '\n';
+    fs.writeFileSync(ACTIVE_PATH, stableDoc);
+    const g0Adapter = new MockAdapter(ACTIVE_PATH);
+    await g0Adapter.start();
+    g0Adapter.loadedSha = sha256Bytes(Buffer.from(stableDoc));
+    g0Adapter.loadedSchema = '1.0';
+    const shaBefore = sha256OfFile(ACTIVE_PATH);
+    const sizeBefore = fs.statSync(ACTIVE_PATH).size;
+    const candDirBefore = fs.existsSync(candidateRegistryDir()) ? fs.readdirSync(candidateRegistryDir()).sort() : [];
+    const reloadsBefore = g0Adapter.reloadCalls;
+    const statusBefore = g0Adapter.statusCalls;
+
+    // 1) recoverRegistryPublications 直接调用
+    const res = await recoverRegistryPublications(getDb(), recoveryDeps(g0Adapter), 10);
+    ok(res.handled === 0 && res.errors.length === 0, 'G0 recoverRegistryPublications → handled=0 errors=[]', res);
+    // 2) RegistryRecoveryController.runNow() 至少一次
+    const controller = new RegistryRecoveryController(recoveryDeps(g0Adapter), {intervalMs: 40, limit: 10});
+    const runNowCount = await controller.runNow();
+    ok(runNowCount === 0, 'G0 controller.runNow() → 0（sweep no-op）');
+    await controller.stop();
+
+    // 3) 零副作用断言
+    ok(g0Adapter.reloadCalls === reloadsBefore && g0Adapter.statusCalls === statusBefore, 'G0 零 HTTP 调用（reload/status 均未增加）');
+    ok(
+      (getDb().prepare('SELECT COUNT(*) n FROM voice_registry_publications').get() as {n: number}).n === 0 &&
+        (getDb().prepare('SELECT COUNT(*) n FROM voice_registry_publication_activations').get() as {n: number}).n === 0,
+      'G0 publications/activations 保持 0',
+    );
+    ok(sha256OfFile(ACTIVE_PATH) === shaBefore && fs.statSync(ACTIVE_PATH).size === sizeBefore, 'G0 active registry bytes/SHA 不变');
+    const candDirAfter = fs.existsSync(candidateRegistryDir()) ? fs.readdirSync(candidateRegistryDir()).sort() : [];
+    ok(JSON.stringify(candDirAfter) === JSON.stringify(candDirBefore), 'G0 无新 candidate/snapshot/temp 文件', {candDirBefore, candDirAfter});
+    ok(!candDirAfter.some((f) => f.startsWith('stable-before-')), 'G0 无 stable-before-*.json');
+    await g0Adapter.stop();
+  }
+
   // ══════════════ A. T3 reload ══════════════
   {
     const {pub, built, adapter} = await prepareFileDurable();
