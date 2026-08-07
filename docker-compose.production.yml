@@ -11,8 +11,7 @@
 #
 # .env.production（chmod 600，不入 Git）需提供：
 #   DEEPSEEK_API_KEY / ZHIYING_HOST_DATA_DIR / ZHIYING_HOST_PUBLIC_DIR /
-#   ZHIYING_HOST_VOICES_DIR / ZHIYING_HOST_REGISTRY_DIR /
-#   ZHIYING_HOST_MATERIALIZATIONS_DIR / ZHIYING_RELEASE_TAG
+#   ZHIYING_HOST_VOICES_DIR / ZHIYING_HOST_REGISTRY_DIR / ZHIYING_RELEASE_TAG
 
 name: zhiying-production
 
@@ -47,8 +46,11 @@ services:
       - ${ZHIYING_HOST_DATA_DIR:?ZHIYING_HOST_DATA_DIR required}:/app/data
       - ${ZHIYING_HOST_PUBLIC_DIR:?ZHIYING_HOST_PUBLIC_DIR required}:/app/public:ro
       - ${ZHIYING_HOST_ASSETS_DIR:?ZHIYING_HOST_ASSETS_DIR required}:/app/public/assets:rw
-      # TTS-C.1A.R1：Web 对 materialization root 只读（Worker 唯一 rw writer）
-      - ${ZHIYING_HOST_MATERIALIZATIONS_DIR:?ZHIYING_HOST_MATERIALIZATIONS_DIR required}:/app/data/voice-materializations:ro
+      # TTS-C.1A.R1：Web 对 materialization root 只读（Worker 唯一 rw writer）；
+      # TTS-C.1B.3.R1：materialization host source 派生自单一 voice root
+      # （${ZHIYING_HOST_VOICES_DIR}/tts-a）——与 adapter /voices 同一 host tree，
+      # 无独立可漂移 materialization source
+      - ${ZHIYING_HOST_VOICES_DIR:?ZHIYING_HOST_VOICES_DIR required}/tts-a:/app/data/voice-materializations:ro
     container_name: zhiying-web
     # M6.2.1: host network for Wikimedia TLS (Docker bridge blocks TLS to Wikimedia CDN)
     network_mode: host
@@ -81,11 +83,15 @@ services:
       - ${ZHIYING_HOST_DATA_DIR:?ZHIYING_HOST_DATA_DIR required}:/app/data
       - ${ZHIYING_HOST_PUBLIC_DIR:?ZHIYING_HOST_PUBLIC_DIR required}:/app/public:ro
       - ${ZHIYING_HOST_ASSETS_DIR:?ZHIYING_HOST_ASSETS_DIR required}:/app/public/assets:rw
-      # TTS-C.1A.R1：Worker 是 materialization root 唯一 rw writer
-      - ${ZHIYING_HOST_MATERIALIZATIONS_DIR:?ZHIYING_HOST_MATERIALIZATIONS_DIR required}:/app/data/voice-materializations:rw
+      # TTS-C.1A.R1：Worker 是 materialization root 唯一 rw writer；
+      # TTS-C.1B.3.R1：materialization host source 派生自单一 voice root
+      # （${ZHIYING_HOST_VOICES_DIR}/tts-a）——同一 host tree，无独立可漂移 source
+      - ${ZHIYING_HOST_VOICES_DIR:?ZHIYING_HOST_VOICES_DIR required}/tts-a:/app/data/voice-materializations:rw
       # TTS-C.1B.3 topology：active registry 目录（Worker 唯一 rw writer；adapter 对同一
-      # host 目录 :ro——TOP-03 host source identity 由同一 env 保证）
-      - ${ZHIYING_HOST_REGISTRY_DIR:?ZHIYING_HOST_REGISTRY_DIR required}:/app/data/registry:rw
+      # host 目录 :ro——TOP-03 host source identity 由同一 env 保证）。
+      # R1：container target 独立为 /registry（不再是 /app/data 的 descendant，
+      # 消除与 /app/data 主挂载的路径重叠）
+      - ${ZHIYING_HOST_REGISTRY_DIR:?ZHIYING_HOST_REGISTRY_DIR required}:/registry:rw
       # TTS-C.1B.3 topology：legacy voice references 只读——worker 容器内 /voices 与
       # registry 文档 referenceAssetPath（/voices/x）直接对应（resolveLegacyLocal 默认
       # path.resolve 语义，无需 runtime resolver 修改）
@@ -115,8 +121,8 @@ services:
       # TTS-C.1B.3 topology：registry recovery controller 显式接线
       # （仅使 runtime infrastructure 具备能力；POST/business 入口保持关闭——
       # 当前 production DB 零 publication，启动 sweep 为 no-op）
-      ZHIYING_ACTIVE_REGISTRY_ROOT: /app/data/registry
-      ZHIYING_ACTIVE_REGISTRY_PATH: /app/data/registry/voice-registry.json
+      ZHIYING_ACTIVE_REGISTRY_ROOT: /registry
+      ZHIYING_ACTIVE_REGISTRY_PATH: /registry/voice-registry.json
       ZHIYING_LEGACY_VOICE_ROOT_DIR: /voices
       ZHIYING_EMIT_VOICE_ROOT_PATH: /voices/tts-a
       # ADAPTER_BASE_URL 未单独设置——复用既有 INDEXTTS2_BASE_URL=http://127.0.0.1:9880
@@ -160,10 +166,10 @@ services:
       # TTS-C.1B.3 topology：registry 目录挂载（publisher temp→fsync→rename 需要目录；
       # 单文件 bind 的目标 inode 不能安全作为 rename replacement，已退役）
       - ${ZHIYING_HOST_REGISTRY_DIR:?ZHIYING_HOST_REGISTRY_DIR required}:/config:ro
+      # TTS-C.1B.3.R1：adapter 只有一个 voice mount——${ZHIYING_HOST_VOICES_DIR}:/voices:ro。
+      # 该 host tree 同时含 legacy 平铺文件与 tts-a/（materialization root）；
+      # 不再有 /voices 下的 child bind（消除 path shadowing / source identity 漂移）。
       - ${ZHIYING_HOST_VOICES_DIR:?ZHIYING_HOST_VOICES_DIR required}:/voices:ro
-      # TTS-C.1B.3 topology：materialization projection 对 adapter 只读可见——
-      # 落入 /voices/tts-a 非重叠子命名空间（referenceAssetPath=/voices/tts-a/<uuid>/<uuid>/reference.wav）
-      - ${ZHIYING_HOST_MATERIALIZATIONS_DIR:?ZHIYING_HOST_MATERIALIZATIONS_DIR required}:/voices/tts-a:ro
     networks:
       - zhiying-app-net
       - zhiying-tts-net
