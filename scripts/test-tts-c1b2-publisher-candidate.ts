@@ -30,7 +30,6 @@ import {
   markCandidatePersisted,
   markFileDurable,
   publishRegistryCandidate,
-  failPublication,
   candidateRegistryDir,
   candidateRegistryPath,
   getPublicationRow,
@@ -175,9 +174,30 @@ function markMappedVerified(entryId: string, matId: string, mappingMode: 'publis
   if (res.changes !== 1) throw new Error(`markMappedVerified failed for ${entryId}`);
 }
 
-/** 原版 fenced failPublication 签名（对象参数）——从完整 row 构造。 */
+/**
+ * 测试清理专用：fenced 推进 failed（等价原 registry-publisher `failPublication` SQL 语义；
+ * R4 起该函数不再是公开 API，测试本地保留等价 SQL 用于释放 active-flight 行）。
+ * 仅 building/candidate_persisted/file_durable 可进 failed（trg_vrp_transition）；
+ * fence 不命中抛错（测试失败可见）。
+ */
+function releasePublicationForTest(db: ReturnType<typeof getDb>, opts: {publicationId: string; ownerToken: string; attempt: number; errorCode: string; errorMessage: string}): void {
+  const now = new Date().toISOString();
+  const res = db
+    .prepare(
+      `UPDATE voice_registry_publications
+          SET status='failed', failed_at=?, error_code=?, error_message=?,
+              owner_token=NULL, lease_expires_at_epoch_ms=NULL, updated_at=?
+        WHERE id=? AND status IN ('building','candidate_persisted','file_durable')
+          AND owner_token=? AND attempt=?
+          AND (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)) <= lease_expires_at_epoch_ms`,
+    )
+    .run(now, opts.errorCode, opts.errorMessage, now, opts.publicationId, opts.ownerToken, opts.attempt);
+  if (res.changes !== 1) throw new Error(`releasePublicationForTest fence 不命中: ${opts.publicationId}`);
+}
+
+/** 原版 releasePublicationForTest 签名（对象参数）——从完整 row 构造。 */
 function failRow(row: PublicationRow, errorCode: string, errorMessage: string): void {
-  failPublication(getDb(), {
+  releasePublicationForTest(getDb(), {
     publicationId: row.id,
     ownerToken: row.owner_token as string,
     attempt: row.attempt,
@@ -400,7 +420,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
 
     // B2: legacy_cutover_publish claim 成功（entry → mapping_pending；matId2 是 cutover 目标）
     // 需要先让 B1 结束（global single-flight）——fenced fail 释放
-    failPublication(getDb(), {publicationId: pm.id, ownerToken: pm.owner_token!, attempt: pm.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for B2'});
+    releasePublicationForTest(getDb(), {publicationId: pm.id, ownerToken: pm.owner_token!, attempt: pm.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for B2'});
     const {matId: matId2} = await newProjection();
     await importLegacyRegistry(getDb(), {
       registryFilePath: regForCutover,
@@ -423,7 +443,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
 
     // B3: legacy_cutover_existing 前置（published_usable projection）在 1B.2 不可达 → frozen gate ABORT
     // （published_usable 仅能经 T5 activation command 产生，属 1B.3；1B.2 断言 frozen 门禁拒绝）
-    failPublication(getDb(), {publicationId: pl.id, ownerToken: pl.owner_token!, attempt: pl.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for B3'});
+    releasePublicationForTest(getDb(), {publicationId: pl.id, ownerToken: pl.owner_token!, attempt: pl.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for B3'});
     rollbackToMappedVerified(cutoverEntry.id); // 恢复 mapped_verified（frozen rollback；后续 D 段复用该 entry）
     const existingEntry = getDb().prepare("SELECT id FROM legacy_adapter_voice_entries WHERE voice_profile_key='default'").get() as {id: string};
     await expectCode('B3 legacy_cutover_existing 前置未满足 → subject invalid ABORT（published_usable 属 1B.3）', () => {
@@ -453,7 +473,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
     ok(publicationRowCount() === 3, 'B6 不新建 publication row');
 
     // B5: subject_type/subject_mode 非法组合被拒绝
-    failPublication(getDb(), {publicationId: pr.id, ownerToken: pr.owner_token!, attempt: pr.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for B5'});
+    releasePublicationForTest(getDb(), {publicationId: pr.id, ownerToken: pr.owner_token!, attempt: pr.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for B5'});
     await expectCode('B5a materialization_publish+cutover_existing → subject invalid', () => {
       claimPublication(getDb(), {
         subject: {subjectType: 'materialization_publish', subjectId: matId, subjectMode: 'cutover_existing'},
@@ -492,7 +512,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
         stableRegistrySha256: stableSha,
       });
     }, PUBLICATION_CONFLICT);
-    failPublication(getDb(), {publicationId: activeRow.id, ownerToken: activeRow.owner_token!, attempt: activeRow.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for B8b'});
+    releasePublicationForTest(getDb(), {publicationId: activeRow.id, ownerToken: activeRow.owner_token!, attempt: activeRow.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for B8b'});
     const maxBeforeB8b = (getDb().prepare('SELECT COALESCE(MAX(generation),0) AS n FROM voice_registry_publications').get() as {n: number}).n;
     const after = claimPublication(getDb(), {
       subject: {subjectType: 'materialization_publish', subjectId: matId, subjectMode: 'publish_and_cutover'},
@@ -500,7 +520,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
     });
     ok(after.kind === 'claimed' && after.publication.generation === maxBeforeB8b + 1, `B8b A 终态后 B claim 成功（generation=${after.publication.generation}=max+1）`);
     if (after.kind !== 'claimed') throw new Error('B8b claim 未成功');
-    failPublication(getDb(), {publicationId: after.publication.id, ownerToken: after.publication.owner_token!, attempt: after.publication.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release'});
+    releasePublicationForTest(getDb(), {publicationId: after.publication.id, ownerToken: after.publication.owner_token!, attempt: after.publication.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release'});
 
     // B9: projection 状态不满足时 fail-closed（materialization 非 file_ready_unpublished）
     const {matId: matFailedId} = await newProjection('failed');
@@ -572,7 +592,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
       resolveReferencePath: (p) => path.join(VOICE_ROOT, p.replace(/^\/voices\//, '')),
     });
     // 需释放 C1 的 active 行（single-flight）后 C3 才能 claim
-    failPublication(getDb(), {publicationId: pub.id, ownerToken: pub.owner_token!, attempt: pub.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for C3'});
+    releasePublicationForTest(getDb(), {publicationId: pub.id, ownerToken: pub.owner_token!, attempt: pub.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for C3'});
     const c3b = claimPublication(getDb(), {
       subject: {subjectType: 'materialization_publish', subjectId: p3.matId, subjectMode: 'publish_and_cutover'},
       stableRegistrySha256: stableSha,
@@ -626,7 +646,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
     ok(JSON.stringify({publication: pub, legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT}) === optsBefore, 'C10 build options 未被修改');
 
     // 释放 c3b 的 active flight（C3 构建失败后 publication 保持 building——recoverable；供 D 段使用）
-    failPublication(getDb(), {publicationId: c3b.publication.id, ownerToken: c3b.publication.owner_token!, attempt: c3b.publication.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for D'});
+    releasePublicationForTest(getDb(), {publicationId: c3b.publication.id, ownerToken: c3b.publication.owner_token!, attempt: c3b.publication.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for D'});
   }
 
   // ══════════════ D. Durable file ══════════════
@@ -681,7 +701,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
     ok(sha256OfFile(filePath) === fileSha, 'D14 冲突时原文件未被覆盖');
 
     // 释放 D1 的 file_durable 行（frozen 单飞：file_durable 仍在 active set；供 D3 新 subject 使用）
-    failPublication(getDb(), {publicationId: outcome.publicationId, ownerToken: row.owner_token!, attempt: row.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for D3'});
+    releasePublicationForTest(getDb(), {publicationId: outcome.publicationId, ownerToken: row.owner_token!, attempt: row.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for D3'});
 
     // D3: partial write 故障（fsyncFile 注入失败）→ 无 final、无 temp 残留、DB 不前进
     const entryA = getDb().prepare("SELECT id FROM legacy_adapter_voice_entries WHERE voice_profile_key='a-voice'").get() as {id: string};
@@ -772,7 +792,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
     // D11: 文件未 durable 前 DB 不得声称成功（D3-D6 已断言 candidate_persisted；此处编排级验证）
     // 释放 D3 的 candidate_persisted 行（供 D12 新 subject）
     const d3Row = getPublicationRow(getDb(), pubT.id);
-    failPublication(getDb(), {publicationId: pubT.id, ownerToken: d3Row.owner_token!, attempt: d3Row.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for D12'});
+    releasePublicationForTest(getDb(), {publicationId: pubT.id, ownerToken: d3Row.owner_token!, attempt: d3Row.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release for D12'});
 
     // D12: file durable + DB finalize 失败 → 留下可恢复证据（candidate_persisted + candidate evidence + 文件存在）
     const entryForD12 = getDb().prepare("SELECT id FROM legacy_adapter_voice_entries WHERE voice_profile_key='b-voice'").get() as {id: string};
@@ -859,7 +879,7 @@ async function runChild(args: string[]): Promise<Record<string, unknown>> {
     ok(JSON.stringify(fs.readdirSync(candidateRegistryDir())) === JSON.stringify(filesBefore), 'R1-03 loser 未写 candidate 文件');
     ok(publicationRowCount() === pubBefore + 2, 'R1-03 loser 未新建 publication row（仅 R1-01/R1-02 winner 两行）');
     ok(!('ownerToken' in loserResult), 'R1-02 loser 结果不含 owner token');
-    failPublication(getDb(), {publicationId: winnerHandle.publicationId, ownerToken: winnerHandle.ownerToken, attempt: winnerHandle.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release after R1-02'});
+    releasePublicationForTest(getDb(), {publicationId: winnerHandle.publicationId, ownerToken: winnerHandle.ownerToken, attempt: winnerHandle.attempt, errorCode: 'TEST_FAIL', errorMessage: 'release after R1-02'});
 
     // R1-04/05: dir-fsync 失败 → existing-final 重跑重新建立 durability（组合流程）
     const r1p = await newProjection();

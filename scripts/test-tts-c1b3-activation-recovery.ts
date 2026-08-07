@@ -24,6 +24,12 @@
  *      后执行 fenced terminal；rollback_pending/unknown 不 terminal 不 legacy 不释放 single-flight；
  *      低层同步 helper 收为模块私有；pre-promotion helper 保持公开；restore/terminal 之间 takeover
  *      竞态（afterRestoreConfirmedHook）→ 旧 owner fence 失败、B 不变。
+ *   R4 exported-API closure（R4-01…R4-06）：
+ *      registry-publisher 公开 `failPublication` 已移除（编译期 @ts-expect-error + 运行时导出
+ *      清单审计）；不存在仅凭 db+publicationId+owner+attempt 即可把 file_durable/activation_pending
+ *      推进 terminal 的公开函数；legacy building/candidate_persisted 只能走
+ *      failPrePromotionPublicationAndRollbackLegacy（atomic legacy rollback）；file_durable →
+ *      pre-promotion helper 拒绝；唯一 post-promotion 入口 = safe orchestrator。
  *
  * 全部使用临时 SQLite + 临时目录 + mock HTTP adapter；零 production、零真实 IndexTTS2。
  */
@@ -44,7 +50,6 @@ import {
   buildRegistryCandidate,
   markCandidatePersisted,
   markFileDurable,
-  failPublication,
   publishRegistryCandidate,
   getPublicationRow,
   candidateRegistryDir,
@@ -80,6 +85,9 @@ import {
 import {RegistryRecoveryController} from '../src/lib/tts-c/registry-recovery-controller';
 import {RegistryContractError} from '../src/lib/tts-c/registry-contract-error';
 import {sha256Bytes} from '../src/lib/tts-c/registry-schema';
+// R4 API 审计：namespace import 用于运行时导出清单检查（不新增具名导入）。
+import * as registryPublisherApi from '../src/lib/tts-c/registry-publisher';
+import * as registryActivationApi from '../src/lib/tts-c/registry-activation';
 
 const execFileP = promisify(execFile);
 const TAG = 'test-tts-c1b3-activation';
@@ -171,8 +179,21 @@ function markMappedVerified(entryId: string, matId: string, mappingMode: 'publis
   if (res.changes !== 1) throw new Error(`markMappedVerified failed for ${entryId}`);
 }
 
+/** 测试清理专用：fenced 推进 failed（等价原 registry-publisher `failPublication` SQL 语义；
+ * R4 起该函数不再是公开 API，测试本地保留等价 SQL 用于释放 active-flight 行）。 */
 function failRow(row: PublicationRow, errorCode: string, errorMessage: string): void {
-  failPublication(getDb(), {publicationId: row.id, ownerToken: row.owner_token as string, attempt: row.attempt, errorCode, errorMessage});
+  const now = new Date().toISOString();
+  const res = getDb()
+    .prepare(
+      `UPDATE voice_registry_publications
+          SET status='failed', failed_at=?, error_code=?, error_message=?,
+              owner_token=NULL, lease_expires_at_epoch_ms=NULL, updated_at=?
+        WHERE id=? AND status IN ('building','candidate_persisted','file_durable')
+          AND owner_token=? AND attempt=?
+          AND (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)) <= lease_expires_at_epoch_ms`,
+    )
+    .run(now, errorCode, errorMessage, now, row.id, row.owner_token as string, row.attempt);
+  if (res.changes !== 1) throw new Error(`failRow fence 不命中: ${row.id}`);
 }
 
 function publicationCount(): number {
@@ -1706,31 +1727,6 @@ function recoveryDeps(adapter: MockAdapter) {
 
   // ══════════════ R3. TTS-C.1B.3.R3 API-safety closure ══════════════
   {
-    /** 局部构造：legacy_cutover_publish subject 到 file_durable + mock adapter（loaded=stable）。 */
-    async function prepareLegacyCutoverFileDurable(voiceKey: string): Promise<{entryId: string; pub: PublicationRow; adapter: MockAdapter; stableBytes: Buffer}> {
-      const p = await newProjection();
-      const wav = wavFile();
-      fs.writeFileSync(path.join(VOICE_ROOT, `${voiceKey}.wav`), wav);
-      const regPath = writeRegistry(path.join(DATA_DIR, 'regs'), `${voiceKey}-${crypto.randomUUID().slice(0, 6)}.json`, [
-        {voiceProfile: voiceKey, voiceRevision: '1', speakerName: voiceKey, referenceAssetPath: `${EMIT_ROOT}/${voiceKey}.wav`, referenceSha256: sha256Buf(wav)},
-      ]);
-      await importLegacyRegistry(getDb(), {registryFilePath: regPath, voiceRootDir: VOICE_ROOT, resolveReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))});
-      const entryId = (getDb().prepare('SELECT id FROM legacy_adapter_voice_entries WHERE voice_profile_key=?').get(voiceKey) as {id: string}).id;
-      markMappedVerified(entryId, p.matId, 'publish_and_cutover');
-      const adapter = new MockAdapter(ACTIVE_PATH);
-      await adapter.start();
-      const stableBytes = fs.readFileSync(ACTIVE_PATH);
-      adapter.loadedSha = sha256Bytes(stableBytes);
-      const out = await publishRegistryCandidate(getDb(), {
-        subject: {subjectType: 'legacy_cutover_publish', subjectId: entryId, subjectMode: 'publish_and_cutover'},
-        stableRegistrySha256: sha256Bytes(stableBytes),
-        build: {legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))},
-      });
-      if (out.kind !== 'completed') throw new Error(`prepareLegacyCutoverFileDurable failed: ${JSON.stringify(out)}`);
-      const pub = getPublicationRow(getDb(), out.publicationId);
-      return {entryId, pub, adapter, stableBytes};
-    }
-
     // ── R3-01: restore 明确失败（reload 500）→ rollback_pending，不 terminal、legacy 保持 mapping_pending ──
     {
       const p1 = await prepareLegacyCutoverFileDurable('r3-01');
@@ -1899,6 +1895,123 @@ function recoveryDeps(adapter: MockAdapter) {
     ok(true, 'R3-07 post-promotion terminal 无公开 DB-only 入口（源码审计 + tsc 编译确认）');
   }
 
+  // ══════════════ R4. TTS-C.1B.3.R4 exported-API closure ══════════════
+  {
+    // R4-01/02：编译期证明——failPublication 已从 registry-publisher 公开 API 移除。
+    // 若符号仍存在，tsc 报 unused @ts-expect-error（TS2578）使编译失败。
+    // @ts-expect-error R4: failPublication removed from public API
+    const removedFailPublication = registryPublisherApi.failPublication;
+    void removedFailPublication;
+
+    // R4-02/06：运行时导出清单审计——两个模块均不得公开 db-only post-promotion terminal helper
+    // （仅凭 db+publicationId+ownerToken+attempt 即可把 file_durable/activation_pending 推进 terminal）。
+    const bannedExports = [
+      'failPublication',
+      'failOrCancelPublicationAndRollbackLegacy',
+      'failPostPromotionPublicationAndRollbackLegacy',
+      'cancelPostPromotionPublicationAndRollbackLegacy',
+      'failPublicationAndRollbackLegacy',
+      'cancelPublicationAndRollbackLegacy',
+    ];
+    const pubExports = Object.keys(registryPublisherApi).sort();
+    const actExports = Object.keys(registryActivationApi).sort();
+    const violations = bannedExports.filter((b) => pubExports.includes(b) || actExports.includes(b));
+    ok(violations.length === 0, `R4-02/06 无公开 DB-only terminal helper（违规导出: ${JSON.stringify(violations)}）`);
+    ok(!('failPublication' in registryPublisherApi), 'R4-02 registry-publisher 不再导出 failPublication（运行时证明）');
+    console.log('[R4-06] registry-publisher exports:', pubExports.join(', '));
+    console.log('[R4-06] registry-activation exports:', actExports.join(', '));
+
+    // ── R4-01: file_durable 不能直接 fail（旧 DB-only API 不存在；唯一入口 = safe orchestrator）──
+    const p1 = await prepareLegacyCutoverFileDurable('r4-01');
+    await promoteCandidateToActive(getDb(), p1.pub.id, p1.pub.owner_token as string, p1.pub.attempt, PATHS);
+    ok((await classifyActiveDiskState(getDb(), p1.pub.id, PATHS)).state === 'candidate', 'R4-01 disk candidate 前置');
+    const lve1a = getDb().prepare('SELECT mapping_status, pending_publication_id FROM legacy_adapter_voice_entries WHERE id=?').get(p1.entryId) as Record<string, unknown>;
+    ok(lve1a.mapping_status === 'mapping_pending' && lve1a.pending_publication_id === p1.pub.id, 'R4-01 legacy mapping_pending 前置');
+    // 旧式宽泛 API 已不存在（编译期 @ts-expect-error + 运行时 in 检查已证）；
+    // 唯一正确入口仍工作：
+    const o1 = await failPostPromotionPublicationSafely(getDb(), {
+      publicationId: p1.pub.id,
+      ownerToken: p1.pub.owner_token as string,
+      attempt: p1.pub.attempt,
+      errorCode: 'TEST_FAIL',
+      errorMessage: 'R4-01',
+      paths: PATHS,
+      adapter: new AdapterClient({baseUrl: p1.adapter.baseUrl, timeoutMs: 500}),
+    });
+    ok(o1.kind === 'failed', `R4-01 safe orchestrator 完成安全 rollback（实际 ${o1.kind}）`);
+    ok(getPublicationRow(getDb(), p1.pub.id).status === 'failed', 'R4-01 publication failed（仅经 safe 路径）');
+    ok((await classifyActiveDiskState(getDb(), p1.pub.id, PATHS)).state === 'stable', 'R4-01 disk 恢复 stable');
+    const lve1b = getDb().prepare('SELECT mapping_status, pending_publication_id, candidate_source_selector FROM legacy_adapter_voice_entries WHERE id=?').get(p1.entryId) as Record<string, unknown>;
+    ok(lve1b.mapping_status === 'mapped_verified' && lve1b.pending_publication_id === null && lve1b.candidate_source_selector === null, 'R4-01 legacy rollback 完成（link/selector 清空）');
+    await p1.adapter.stop();
+
+    // ── R4-03: legacy building 不得绕过 rollback（正确调用 failPrePromotionPublicationAndRollbackLegacy）──
+    const rp3 = await newProjection();
+    const wav3 = wavFile();
+    fs.writeFileSync(path.join(VOICE_ROOT, 'r4-03.wav'), wav3);
+    const reg3 = writeRegistry(path.join(DATA_DIR, 'regs'), `r4-03-${crypto.randomUUID().slice(0, 6)}.json`, [
+      {voiceProfile: 'r4-03', voiceRevision: '1', speakerName: 'r4-03', referenceAssetPath: `${EMIT_ROOT}/r4-03.wav`, referenceSha256: sha256Buf(wav3)},
+    ]);
+    await importLegacyRegistry(getDb(), {registryFilePath: reg3, voiceRootDir: VOICE_ROOT, resolveReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))});
+    const entry3 = (getDb().prepare("SELECT id FROM legacy_adapter_voice_entries WHERE voice_profile_key='r4-03'").get() as {id: string}).id;
+    markMappedVerified(entry3, rp3.matId, 'publish_and_cutover');
+    const claim3 = claimPublication(getDb(), {
+      subject: {subjectType: 'legacy_cutover_publish', subjectId: entry3, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: 'a'.repeat(64),
+    });
+    if (claim3.kind !== 'claimed') throw new Error('R4-03 claim failed');
+    const pub3 = getPublicationRow(getDb(), claim3.publication.id);
+    ok(pub3.status === 'building', 'R4-03 building 前置');
+    failPrePromotionPublicationAndRollbackLegacy(getDb(), {publicationId: pub3.id, ownerToken: pub3.owner_token as string, attempt: pub3.attempt, errorCode: 'TEST_FAIL', errorMessage: 'R4-03'});
+    ok(getPublicationRow(getDb(), pub3.id).status === 'failed', 'R4-03 publication failed（经 pre-promotion legacy rollback）');
+    const lve3 = getDb().prepare('SELECT mapping_status, pending_publication_id, candidate_source_selector FROM legacy_adapter_voice_entries WHERE id=?').get(entry3) as Record<string, unknown>;
+    ok(lve3.mapping_status === 'mapped_verified' && lve3.pending_publication_id === null && lve3.candidate_source_selector === null, 'R4-03 legacy atomic rollback（link/selector 清空）');
+
+    // ── R4-04: legacy candidate_persisted 同场景（必须 atomic legacy rollback）──
+    const rp4 = await newProjection();
+    const wav4 = wavFile();
+    fs.writeFileSync(path.join(VOICE_ROOT, 'r4-04.wav'), wav4);
+    const reg4 = writeRegistry(path.join(DATA_DIR, 'regs'), `r4-04-${crypto.randomUUID().slice(0, 6)}.json`, [
+      {voiceProfile: 'r4-04', voiceRevision: '1', speakerName: 'r4-04', referenceAssetPath: `${EMIT_ROOT}/r4-04.wav`, referenceSha256: sha256Buf(wav4)},
+    ]);
+    await importLegacyRegistry(getDb(), {registryFilePath: reg4, voiceRootDir: VOICE_ROOT, resolveReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))});
+    const entry4 = (getDb().prepare("SELECT id FROM legacy_adapter_voice_entries WHERE voice_profile_key='r4-04'").get() as {id: string}).id;
+    markMappedVerified(entry4, rp4.matId, 'publish_and_cutover');
+    const claim4 = claimPublication(getDb(), {
+      subject: {subjectType: 'legacy_cutover_publish', subjectId: entry4, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: 'a'.repeat(64),
+    });
+    if (claim4.kind !== 'claimed') throw new Error('R4-04 claim failed');
+    const pub4 = getPublicationRow(getDb(), claim4.publication.id);
+    const built4 = await buildRegistryCandidate(getDb(), {publication: pub4, legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))});
+    markCandidatePersisted(getDb(), {publicationId: pub4.id, ownerToken: pub4.owner_token as string, attempt: pub4.attempt, candidateRegistrySha256: built4.registrySha256, candidateManifestJson: built4.manifestJson, candidateManifestSha256: built4.manifestSha256});
+    ok(getPublicationRow(getDb(), pub4.id).status === 'candidate_persisted', 'R4-04 candidate_persisted 前置');
+    failPrePromotionPublicationAndRollbackLegacy(getDb(), {publicationId: pub4.id, ownerToken: pub4.owner_token as string, attempt: pub4.attempt, errorCode: 'TEST_FAIL', errorMessage: 'R4-04'});
+    ok(getPublicationRow(getDb(), pub4.id).status === 'failed', 'R4-04 publication failed（经 pre-promotion legacy rollback）');
+    const lve4 = getDb().prepare('SELECT mapping_status, pending_publication_id FROM legacy_adapter_voice_entries WHERE id=?').get(entry4) as Record<string, unknown>;
+    ok(lve4.mapping_status === 'mapped_verified' && lve4.pending_publication_id === null, 'R4-04 legacy atomic rollback 完成');
+
+    // ── R4-05: non-legacy pre-promotion 行为（方案 A：无 non-legacy-only helper；
+    //          failPrePromotion 对 non-legacy 只做 terminal，对 legacy 做 atomic rollback）──
+    const np5 = await newProjection();
+    const claim5 = claimPublication(getDb(), {
+      subject: {subjectType: 'materialization_publish', subjectId: np5.matId, subjectMode: 'publish_and_cutover'},
+      stableRegistrySha256: 'a'.repeat(64),
+    });
+    if (claim5.kind !== 'claimed') throw new Error('R4-05 claim failed');
+    const pub5 = getPublicationRow(getDb(), claim5.publication.id);
+    failPrePromotionPublicationAndRollbackLegacy(getDb(), {publicationId: pub5.id, ownerToken: pub5.owner_token as string, attempt: pub5.attempt, errorCode: 'TEST_FAIL', errorMessage: 'R4-05'});
+    ok(getPublicationRow(getDb(), pub5.id).status === 'failed', 'R4-05 non-legacy building → failed（pre-promotion，不触碰 legacy）');
+    // file_durable → pre-promotion helper 拒绝（仅 building/candidate_persisted）
+    const {pub: p5b, adapter: a5b} = await prepareFileDurable();
+    await expectCode('R4-05 file_durable → pre-promotion helper 拒绝（PUBLICATION_NOT_OWNER）', () => {
+      failPrePromotionPublicationAndRollbackLegacy(getDb(), {publicationId: p5b.id, ownerToken: p5b.owner_token as string, attempt: p5b.attempt, errorCode: 'TEST_FAIL', errorMessage: 'R4-05'});
+    }, PUBLICATION_NOT_OWNER);
+    ok(getPublicationRow(getDb(), p5b.id).status === 'file_durable', 'R4-05 file_durable 保持（未直接 terminal）');
+    releaseAllActiveFlights();
+    await a5b.stop();
+  }
+
   // 清理
   closeDb();
   fs.rmSync(DATA_DIR, {recursive: true, force: true});
@@ -1919,4 +2032,29 @@ async function prepareActivationPending(): Promise<{pub: PublicationRow; adapter
   if (reload.kind !== 'ok') throw new Error(`prepareActivationPending reload failed: ${JSON.stringify(reload)}`);
   markActivationPending(getDb(), pub.id, pub.owner_token as string, pub.attempt);
   return {pub: getPublicationRow(getDb(), pub.id), adapter};
+}
+
+/** 局部构造（R3/R4 共用）：legacy_cutover_publish subject 到 file_durable + mock adapter（loaded=stable）。 */
+async function prepareLegacyCutoverFileDurable(voiceKey: string): Promise<{entryId: string; pub: PublicationRow; adapter: MockAdapter; stableBytes: Buffer}> {
+  const p = await newProjection();
+  const wav = wavFile();
+  fs.writeFileSync(path.join(VOICE_ROOT, `${voiceKey}.wav`), wav);
+  const regPath = writeRegistry(path.join(DATA_DIR, 'regs'), `${voiceKey}-${crypto.randomUUID().slice(0, 6)}.json`, [
+    {voiceProfile: voiceKey, voiceRevision: '1', speakerName: voiceKey, referenceAssetPath: `${EMIT_ROOT}/${voiceKey}.wav`, referenceSha256: sha256Buf(wav)},
+  ]);
+  await importLegacyRegistry(getDb(), {registryFilePath: regPath, voiceRootDir: VOICE_ROOT, resolveReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))});
+  const entryId = (getDb().prepare('SELECT id FROM legacy_adapter_voice_entries WHERE voice_profile_key=?').get(voiceKey) as {id: string}).id;
+  markMappedVerified(entryId, p.matId, 'publish_and_cutover');
+  const adapter = new MockAdapter(ACTIVE_PATH);
+  await adapter.start();
+  const stableBytes = fs.readFileSync(ACTIVE_PATH);
+  adapter.loadedSha = sha256Bytes(stableBytes);
+  const out = await publishRegistryCandidate(getDb(), {
+    subject: {subjectType: 'legacy_cutover_publish', subjectId: entryId, subjectMode: 'publish_and_cutover'},
+    stableRegistrySha256: sha256Bytes(stableBytes),
+    build: {legacyVoiceRootDir: VOICE_ROOT, materializationRootDir: MAT_ROOT, emitVoiceRootPath: EMIT_ROOT, resolveLegacyReferencePath: (rp: string) => path.join(VOICE_ROOT, rp.replace(/^\/voices\//, ''))},
+  });
+  if (out.kind !== 'completed') throw new Error(`prepareLegacyCutoverFileDurable failed: ${JSON.stringify(out)}`);
+  const pub = getPublicationRow(getDb(), out.publicationId);
+  return {entryId, pub, adapter, stableBytes};
 }
