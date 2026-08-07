@@ -71,7 +71,6 @@ import {
   candidateRegistryPath,
   candidateRegistryDir,
   durabilizeAndVerifyCandidate,
-  failPublication,
   publishRegistryCandidate,
   PUBLICATION_LEASE_MS,
   PUBLICATION_NOT_OWNER,

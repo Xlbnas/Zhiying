@@ -19,6 +19,10 @@
  * 明确不做：adapter reload（T3）、activation acknowledgment（T4）、atomic activation（T5）、
  * recovery/reconciler（1B.3）、production registry 写入、production 部署。
  * 不引入 capability/WeakMap authority；无新 hash 层；不新增表/trigger。
+ * R4（exported-API closure）：公开 `failPublication` 已移除——本模块不再提供任何 DB-only
+ * publication terminal helper；building/candidate_persisted 的 failed/cancelled 走
+ * registry-activation 的 fail/cancelPrePromotionPublicationAndRollbackLegacy，
+ * file_durable/activation_pending 走 fail/cancelPostPromotionPublicationSafely。
  */
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
@@ -921,38 +925,6 @@ export function markFileDurable(db: Db, publicationId: string, ownerToken: strin
   }
 }
 
-// ── fenced fail（frozen failed 终态；供失败路径与后续 reconciler 复用；非 recovery 闭环） ──
-
-export interface FailPublicationOptions {
-  publicationId: string;
-  ownerToken: string;
-  attempt: number;
-  errorCode: string;
-  errorMessage: string;
-}
-
-/**
- * fenced 推进 failed 终态（owner_token/lease 清空；failed_at + error_code 必填——frozen 形状）。
- * 仅 building/candidate_persisted/file_durable 可进 failed（trg_vrp_transition）；
- * fence 不命中 → PUBLICATION_NOT_OWNER。不是 recovery/reconciler（1B.3）。
- */
-export function failPublication(db: Db, options: FailPublicationOptions): void {
-  const now = nowIso();
-  const res = db
-    .prepare(
-      `UPDATE voice_registry_publications
-          SET status='failed', failed_at=?, error_code=?, error_message=?,
-              owner_token=NULL, lease_expires_at_epoch_ms=NULL, updated_at=?
-        WHERE id=? AND status IN ('building','candidate_persisted','file_durable')
-          AND owner_token=? AND attempt=?
-          AND (SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)) <= lease_expires_at_epoch_ms`,
-    )
-    .run(now, options.errorCode, options.errorMessage, now, options.publicationId, options.ownerToken, options.attempt);
-  if (res.changes !== 1) {
-    throw new RegistryContractError(PUBLICATION_NOT_OWNER, `publication ${options.publicationId} 无法推进 failed（fence 不命中）`);
-  }
-}
-
 // ── 编排入口（T1 → T1.5 → build → Tx A → file → Tx B；幂等可重跑） ──
 
 export interface PublicationOwnerHandleShape {
@@ -980,7 +952,7 @@ export interface PublishRegistryCandidateOptions {
 
 /**
  * 完整 T1+T2 编排（R1 P0-A 最小分流）：claim → 分流：
- *   - already_in_flight（loser）：不 renew / 不 build / 不写 DB / 不写文件 / 不 failPublication；
+ *   - already_in_flight（loser）：不 renew / 不 build / 不写 DB / 不写文件 / 不推进 terminal；
  *     file_durable → 只读 durable verification（P0-B acceptance）→ already_file_durable；
  *     building / candidate_persisted / activation_pending / indeterminate → 立即 already_in_flight
  *     （activation_pending/indeterminate 属 1B.3 范围外，不启动）。
