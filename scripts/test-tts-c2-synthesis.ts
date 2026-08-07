@@ -39,9 +39,11 @@ import {
   resolveClaimValidation,
   cancelSynthesisRequest,
   takeoverClaimValidation,
+  renewClaimValidation,
   getSynthesisClaim,
   VALIDATION_STALE_OWNER,
   SYNTHESIS_INVALID_STATE,
+  REQUEST_ID_CONFLICT,
 } from '../src/lib/tts-c/synthesis';
 import {
   claimSynthesisJob,
@@ -50,9 +52,11 @@ import {
   advanceAttemptPhase,
   finalizeSynthesisJobSuccess,
   failSynthesisJob,
+  prestartTerminalSynthesisJob,
   getTtsCJob,
   EXECUTION_NOT_OWNER,
   EXECUTION_INVALID_STATE,
+  REQUEST_STATE_INCONSISTENT,
 } from '../src/lib/tts-c/synthesis-execution';
 import {buildCompiledSynthesisPayload, computeSynthesisPayloadFingerprint} from '../src/lib/tts-c/synthesis-payload';
 import {providerCapabilitySnapshotV1Schema} from '../src/lib/tts-c/provider-capability';
@@ -72,6 +76,16 @@ const SNAP_V1 = providerCapabilitySnapshotV1Schema.parse({
 });
 
 let fx!: C1aFixture;
+const OUTPUT_ROOT = path.join('data', TAG, 'sentence-audio');
+
+/** 写输出 wav 文件并返回 {sha, size}（finalize exact reread 需要真实文件）。 */
+function writeOutputFile(rel: string): {sha: string; size: number; rel: string} {
+  const abs = path.join(OUTPUT_ROOT, rel);
+  fs.mkdirSync(path.dirname(abs), {recursive: true});
+  const wav = makeWav(1500, 500);
+  fs.writeFileSync(abs, wav);
+  return {sha: sha256Buf(wav), size: wav.length, rel};
+}
 
 async function expectCode(label: string, fn: () => unknown, code: string): Promise<void> {
   try {
@@ -85,6 +99,13 @@ async function expectCode(label: string, fn: () => unknown, code: string): Promi
 
 function sha256hex(s: string): string {
   return crypto.createHash('sha256').update(s, 'utf8').digest('hex');
+}
+
+/** source artifact canonical content hash（与 synthesis-execution 同款：artifacts 行 canonical JSON）。 */
+function artifactContentHash(db: ReturnType<typeof getDb>, artifactId: string, projectId: string, kind: string): string {
+  const row = db.prepare('SELECT id, project_id, kind, created_at FROM artifacts WHERE id=? AND project_id=? AND kind=?').get(artifactId, projectId, kind) as {id: string; project_id: string; kind: string; created_at: string};
+  if (!row) throw new Error('artifact missing');
+  return sha256hex(JSON.stringify({id: row.id, project_id: row.project_id, kind: row.kind, created_at: row.created_at}));
 }
 
 /** 构建 payload + fingerprint（1C.2）。 */
@@ -151,7 +172,7 @@ function buildSucceededChain(db: ReturnType<typeof getDb>, chain: ChainInput, ou
     projectId: chain.projectId,
     requests: [{requestId: `seed-${crypto.randomUUID()}`, unitId: chain.unitId, exactSourceFingerprint: chain.exactSourceFingerprint, synthesisPayloadFingerprint: chain.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex(chain.unitId + chain.payload.synthesisPayloadFingerprint)}],
   });
-  const claimId = out[0]!.claimId;
+  const claimId = out[0]!.claimId!;
   const claim = getSynthesisClaim(db, claimId);
   const res = resolveClaimValidation(db, {
     claimId,
@@ -163,22 +184,24 @@ function buildSucceededChain(db: ReturnType<typeof getDb>, chain: ChainInput, ou
   if (res.kind !== 'dispatched') throw new Error(`seed dispatch failed: ${res.kind}`);
   const jobId = res.jobId;
   const c = claimSynthesisJob(db, {jobId, workerOwnerToken: workerToken, providerRequestHash: chain.exactSourceFingerprint, providerRequestJson: chain.payload.canonicalPayloadJson, model: 'IndexTTS-2'});
+  const outFile = writeOutputFile('out.wav');
   advanceAttemptPhase(db, c.attemptId, 'provider_in_flight', {providerRequestId: 'seed-prov'});
   advanceAttemptPhase(db, c.attemptId, 'response_persisted', {responseHash: sha256hex('r'), recoveryTempRelativePath: 'tmp/o.wav'});
   advanceAttemptPhase(db, c.attemptId, 'file_validated');
-  advanceAttemptPhase(db, c.attemptId, 'file_durable', {finalRelativePath: 'sentence-audio/out.wav', audioSha256: output.audioSha256, outputSize: output.size, codec: 'pcm_s16le', sampleRate: 48000, channels: 1, ffprobeDurationMs: 1500});
+  advanceAttemptPhase(db, c.attemptId, 'file_durable', {finalRelativePath: outFile.rel, audioSha256: outFile.sha, outputSize: outFile.size, codec: 'pcm_s16le', sampleRate: 48000, channels: 1, ffprobeDurationMs: 1500});
   const fin = finalizeSynthesisJobSuccess(db, {
     jobId,
     workerOwnerToken: workerToken,
     attemptId: c.attemptId,
-    attemptEvidence: {finalRelativePath: 'sentence-audio/out.wav', audioSha256: output.audioSha256, outputSize: output.size, codec: 'pcm_s16le', sampleRate: 48000, channels: 1, ffprobeDurationMs: 1500, providerRequestId: 'seed-prov'},
+    outputRootDir: OUTPUT_ROOT,
+    attemptEvidence: {finalRelativePath: outFile.rel, audioSha256: outFile.sha, outputSize: outFile.size, codec: 'pcm_s16le', sampleRate: 48000, channels: 1, ffprobeDurationMs: 1500, providerRequestId: 'seed-prov'},
     artifact: {
       narrationPlanArtifactId: chain.narrationPlanArtifactId,
-      narrationPlanContentHash: sha256hex('np'),
+      narrationPlanContentHash: artifactContentHash(db, chain.narrationPlanArtifactId, chain.projectId, 'narration_plan_v2'),
       assignmentArtifactId: chain.assignmentArtifactId,
-      assignmentContentHash: sha256hex('asg'),
+      assignmentContentHash: artifactContentHash(db, chain.assignmentArtifactId, chain.projectId, 'project_voice_assignment'),
       performancePlanArtifactId: chain.performancePlanArtifactId,
-      performancePlanContentHash: sha256hex('pp'),
+      performancePlanContentHash: artifactContentHash(db, chain.performancePlanArtifactId, chain.projectId, 'narration_performance_plan'),
       voiceProfileId: chain.voiceProfileId,
       voiceProfileRevisionId: chain.voiceProfileRevisionId,
       providerVersion: 'v1.0',
@@ -289,7 +312,7 @@ async function newVoice() {
   const chainA = chainContext(fx.projectId, 'N001', makePayload('N001', 'hello'), voice, npArtifact, ppArtifact, fx.assignmentArtifactId);
 
   // ── R1/R2: request envelope + fan-in ──
-  let createdA: Array<{requestId: string; claimId: string}>;
+  let createdA: Array<{requestId: string; claimId: string | null}>;
   {
     const out = createSynthesisRequests(db, {
       projectId: fx.projectId,
@@ -299,14 +322,14 @@ async function newVoice() {
         {requestId: 'req-b1', unitId: 'N002', exactSourceFingerprint: 'x2', synthesisPayloadFingerprint: 'sha256:2', finalTtsInputFingerprint: sha256hex('N002')},
       ],
     });
-    createdA = out;
+    createdA = out as Array<{requestId: string; claimId: string}>;
     ok(out.length === 3 && out.every((r) => r.status === 'waiting'), 'R1 waiting 全部');
-    ok(out[0]!.claimId === out[1]!.claimId, 'R2 同 key fan-in → 同一 claim');
-    ok(out[0]!.claimId !== out[2]!.claimId, 'R2 不同 key → 不同 claim');
+    ok(out[0]!.claimId! === out[1]!.claimId!, 'R2 同 key fan-in → 同一 claim');
+    ok(out[0]!.claimId! !== out[2]!.claimId!, 'R2 不同 key → 不同 claim');
     const r = db.prepare("SELECT status, claim_id FROM tts_audio_requests WHERE request_id='req-a1'").get() as {status: string; claim_id: string | null};
     ok(r.status === 'waiting' && r.claim_id !== null, 'R1 initializing→waiting exact-link（claim_id 非 NULL）');
   }
-  const claimAId = createdA[0]!.claimId;
+  const claimAId = createdA[0]!.claimId!;
   const claimA = getSynthesisClaim(db, claimAId);
   ok(claimA.status === 'validating_reuse' && claimA.validation_attempt === 1 && claimA.candidate_artifact_id === null, 'R1 claim validating_reuse 初始态');
 
@@ -318,7 +341,7 @@ async function newVoice() {
       projectId: fx.projectId,
       requests: [{requestId: 'req-a3', unitId: 'N001', exactSourceFingerprint: chainA.exactSourceFingerprint, synthesisPayloadFingerprint: chainA.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N001' + chainA.payload.synthesisPayloadFingerprint)}],
     });
-    const claim = getSynthesisClaim(db, out[0]!.claimId);
+    const claim = getSynthesisClaim(db, out[0]!.claimId!);
     ok(claim.candidate_artifact_id !== null, 'R3 candidate 已找到');
     const res = resolveClaimValidation(db, {claimId: claim.id, validationOwnerToken: claim.validation_owner_token as string, validationAttempt: claim.validation_attempt, candidateUsable: true});
     ok(res.kind === 'reused', `R3 reuse（实际 ${res.kind}）`);
@@ -336,7 +359,7 @@ async function newVoice() {
       projectId: fx.projectId,
       requests: [{requestId: 'req-a4', unitId: 'N001', exactSourceFingerprint: chainA.exactSourceFingerprint, synthesisPayloadFingerprint: chainA.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N001' + chainA.payload.synthesisPayloadFingerprint)}],
     });
-    const claim4Id = out4[0]!.claimId;
+    const claim4Id = out4[0]!.claimId!!;
     ok(claim4Id !== claimAId, 'R4 新 claim（非已 succeeded 的 claimA）');
     const claim = getSynthesisClaim(db, claim4Id);
     const res = resolveClaimValidation(db, {
@@ -371,9 +394,10 @@ async function newVoice() {
       advanceAttemptPhase(db, claimRes.attemptId, 'succeeded' as never);
     }, EXECUTION_INVALID_STATE);
     advanceAttemptPhase(db, claimRes.attemptId, 'file_validated');
-    advanceAttemptPhase(db, claimRes.attemptId, 'file_durable', {finalRelativePath: 'sentence-audio/out.wav', audioSha256: 'b'.repeat(64), outputSize: 2000, codec: 'pcm_s16le', sampleRate: 48000, channels: 1, ffprobeDurationMs: 1500});
+    const outFileR4 = writeOutputFile('r4-out.wav');
+    advanceAttemptPhase(db, claimRes.attemptId, 'file_durable', {finalRelativePath: outFileR4.rel, audioSha256: outFileR4.sha, outputSize: outFileR4.size, codec: 'pcm_s16le', sampleRate: 48000, channels: 1, ffprobeDurationMs: 1500});
     const attemptRow = db.prepare('SELECT audio_sha256, final_relative_path FROM tts_generation_attempts WHERE id=?').get(claimRes.attemptId) as {audio_sha256: string; final_relative_path: string};
-    ok(attemptRow.audio_sha256 === 'b'.repeat(64), 'R11 file_durable evidence');
+    ok(attemptRow.audio_sha256 === outFileR4.sha, 'R11 file_durable evidence');
     await expectCode('R11 evidence write-once ABORT', () => {
       db.prepare('UPDATE tts_generation_attempts SET audio_sha256=? WHERE id=?').run('c'.repeat(64), claimRes.attemptId);
     }, 'SQLITE_CONSTRAINT_TRIGGER');
@@ -389,14 +413,15 @@ async function newVoice() {
       jobId,
       workerOwnerToken: 'worker-1',
       attemptId: claimRes.attemptId,
-      attemptEvidence: {finalRelativePath: 'sentence-audio/out.wav', audioSha256: 'b'.repeat(64), outputSize: 2000, codec: 'pcm_s16le', sampleRate: 48000, channels: 1, ffprobeDurationMs: 1500, providerRequestId: 'prov-1'},
+      outputRootDir: OUTPUT_ROOT,
+      attemptEvidence: {finalRelativePath: outFileR4.rel, audioSha256: outFileR4.sha, outputSize: outFileR4.size, codec: 'pcm_s16le', sampleRate: 48000, channels: 1, ffprobeDurationMs: 1500, providerRequestId: 'prov-1'},
       artifact: {
         narrationPlanArtifactId: chainA.narrationPlanArtifactId,
-        narrationPlanContentHash: sha256hex('np'),
+        narrationPlanContentHash: artifactContentHash(db, chainA.narrationPlanArtifactId, chainA.projectId, 'narration_plan_v2'),
         assignmentArtifactId: chainA.assignmentArtifactId,
-        assignmentContentHash: sha256hex('asg'),
+        assignmentContentHash: artifactContentHash(db, chainA.assignmentArtifactId, chainA.projectId, 'project_voice_assignment'),
         performancePlanArtifactId: chainA.performancePlanArtifactId,
-        performancePlanContentHash: sha256hex('pp'),
+        performancePlanContentHash: artifactContentHash(db, chainA.performancePlanArtifactId, chainA.projectId, 'narration_performance_plan'),
         voiceProfileId: chainA.voiceProfileId,
         voiceProfileRevisionId: chainA.voiceProfileRevisionId,
         providerVersion: 'v1.0',
@@ -436,7 +461,7 @@ async function newVoice() {
       projectId: fx.projectId,
       requests: [{requestId: 'req-c1', unitId: 'N010', exactSourceFingerprint: chainB.exactSourceFingerprint, synthesisPayloadFingerprint: chainB.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N010' + chainB.payload.synthesisPayloadFingerprint)}],
     });
-    const claim = getSynthesisClaim(db, out[0]!.claimId);
+    const claim = getSynthesisClaim(db, out[0]!.claimId!);
     // cancel race：validator resolve 前最后一个 subscriber 取消
     const cancelled = cancelSynthesisRequest(db, fx.projectId, 'req-c1');
     ok(cancelled.claimId === claim.id, 'R6 cancel detach 自己（claim 保留）');
@@ -455,7 +480,7 @@ async function newVoice() {
       projectId: fx.projectId,
       requests: [{requestId: 'req-d1', unitId: 'N011', exactSourceFingerprint: chainD.exactSourceFingerprint, synthesisPayloadFingerprint: chainD.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N011' + chainD.payload.synthesisPayloadFingerprint)}],
     });
-    const claim = getSynthesisClaim(db, out[0]!.claimId);
+    const claim = getSynthesisClaim(db, out[0]!.claimId!);
     const oldOwner = claim.validation_owner_token as string;
     // 手动过期 validation lease
     db.prepare('UPDATE tts_synthesis_claims SET validation_lease_expires_at_epoch_ms=1 WHERE id=?').run(claim.id);
@@ -481,7 +506,7 @@ async function newVoice() {
       projectId: fx.projectId,
       requests: [{requestId: 'req-e1', unitId: 'N012', exactSourceFingerprint: chainE.exactSourceFingerprint, synthesisPayloadFingerprint: chainE.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N012' + chainE.payload.synthesisPayloadFingerprint)}],
     });
-    const claim = getSynthesisClaim(db, out[0]!.claimId);
+    const claim = getSynthesisClaim(db, out[0]!.claimId!);
     const badCtx = {...dispatchJobContext(chainE), synthesisPayloadFingerprint: 'sha256:wrong'};
     await expectCode('R9 payload/fingerprint 不一致拒绝', () => {
       resolveClaimValidation(db, {claimId: claim.id, validationOwnerToken: claim.validation_owner_token as string, validationAttempt: claim.validation_attempt, candidateUsable: false, jobContext: badCtx});
@@ -510,7 +535,7 @@ async function newVoice() {
       projectId: fx.projectId,
       requests: [{requestId: 'req-f1', unitId: 'N013', exactSourceFingerprint: chainF.exactSourceFingerprint, synthesisPayloadFingerprint: chainF.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N013' + chainF.payload.synthesisPayloadFingerprint)}],
     });
-    const claim = getSynthesisClaim(db, out[0]!.claimId);
+    const claim = getSynthesisClaim(db, out[0]!.claimId!);
     const res = resolveClaimValidation(db, {claimId: claim.id, validationOwnerToken: claim.validation_owner_token as string, validationAttempt: claim.validation_attempt, candidateUsable: false, jobContext: dispatchJobContext(chainF)});
     if (res.kind !== 'dispatched') throw new Error('R16 dispatch failed');
     const jobId = res.jobId;
@@ -521,6 +546,210 @@ async function newVoice() {
     // 清理：fail 该 job（state_transition failed）
     failSynthesisJob(db, {jobId, workerOwnerToken: 'worker-f', errorCode: 'REQUEST_CANCELLED', errorMessage: 'cancel'});
     ok(getSynthesisClaim(db, claim.id).status === 'failed', 'R16 claim failed（终态）');
+  }
+
+  // ══════════════ R1. P1 blocker-specific ══════════════
+  {
+    // ── R1-A: atomic success request fan-out（多 subscriber 同一 claim → 全部 succeeded + 同一 artifact） ──
+    {
+      const chainA1 = chainContext(fx.projectId, 'N030', makePayload('N030', 'fanout'), voice, npArtifact, ppArtifact, fx.assignmentArtifactId);
+      const outA = createSynthesisRequests(db, {
+        projectId: fx.projectId,
+        requests: [
+          {requestId: 'r1a-req1', unitId: 'N030', exactSourceFingerprint: chainA1.exactSourceFingerprint, synthesisPayloadFingerprint: chainA1.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N030' + chainA1.payload.synthesisPayloadFingerprint)},
+          {requestId: 'r1a-req2', unitId: 'N030', exactSourceFingerprint: chainA1.exactSourceFingerprint, synthesisPayloadFingerprint: chainA1.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N030' + chainA1.payload.synthesisPayloadFingerprint)},
+        ],
+      });
+      ok(outA.length === 2 && outA[0]!.claimId === outA[1]!.claimId, 'R1-A 两个 request 同一 claim（fan-in）');
+      const claimA1 = getSynthesisClaim(db, outA[0]!.claimId!);
+      const resA = resolveClaimValidation(db, {claimId: claimA1.id, validationOwnerToken: claimA1.validation_owner_token as string, validationAttempt: claimA1.validation_attempt, candidateUsable: false, jobContext: dispatchJobContext(chainA1)});
+      if (resA.kind !== 'dispatched') throw new Error('R1-A dispatch failed');
+      const claimARes = claimSynthesisJob(db, {jobId: resA.jobId, workerOwnerToken: 'worker-r1a', providerRequestHash: chainA1.exactSourceFingerprint, providerRequestJson: chainA1.payload.canonicalPayloadJson, model: 'IndexTTS-2'});
+      const fileA = writeOutputFile('r1a-out.wav');
+      advanceAttemptPhase(db, claimARes.attemptId, 'provider_in_flight', {providerRequestId: 'p'});
+      advanceAttemptPhase(db, claimARes.attemptId, 'response_persisted', {responseHash: sha256hex('r'), recoveryTempRelativePath: 'tmp/o.wav'});
+      advanceAttemptPhase(db, claimARes.attemptId, 'file_validated');
+      advanceAttemptPhase(db, claimARes.attemptId, 'file_durable', {finalRelativePath: fileA.rel, audioSha256: fileA.sha, outputSize: fileA.size, codec: 'pcm_s16le', sampleRate: 48000, channels: 1, ffprobeDurationMs: 1500});
+      const finA = finalizeSynthesisJobSuccess(db, {
+        jobId: resA.jobId,
+        workerOwnerToken: 'worker-r1a',
+        attemptId: claimARes.attemptId,
+        outputRootDir: OUTPUT_ROOT,
+        attemptEvidence: {finalRelativePath: fileA.rel, audioSha256: fileA.sha, outputSize: fileA.size, codec: 'pcm_s16le', sampleRate: 48000, channels: 1, ffprobeDurationMs: 1500, providerRequestId: 'p'},
+        artifact: {
+          narrationPlanArtifactId: chainA1.narrationPlanArtifactId,
+          narrationPlanContentHash: artifactContentHash(db, chainA1.narrationPlanArtifactId, chainA1.projectId, 'narration_plan_v2'),
+          assignmentArtifactId: chainA1.assignmentArtifactId,
+          assignmentContentHash: artifactContentHash(db, chainA1.assignmentArtifactId, chainA1.projectId, 'project_voice_assignment'),
+          performancePlanArtifactId: chainA1.performancePlanArtifactId,
+          performancePlanContentHash: artifactContentHash(db, chainA1.performancePlanArtifactId, chainA1.projectId, 'narration_performance_plan'),
+          voiceProfileId: chainA1.voiceProfileId,
+          voiceProfileRevisionId: chainA1.voiceProfileRevisionId,
+          capabilityCompilerVersion: chainA1.payload.capabilityCompilerVersion,
+          capabilitySnapshotJson: chainA1.payload.capabilitySnapshotJson,
+          compiledPayloadJson: chainA1.payload.compiledPayloadJson,
+        },
+      });
+      const r1aReqs = db.prepare("SELECT request_id, status, result_artifact_id FROM tts_audio_requests WHERE claim_id=? ORDER BY request_id").all(outA[0]!.claimId!) as Array<{request_id: string; status: string; result_artifact_id: string | null}>;
+      ok(r1aReqs.length === 2 && r1aReqs.every((r) => r.status === 'succeeded' && r.result_artifact_id !== null), 'R1-A 同一 claim 全部 request succeeded + result（fan-out 原子完成）', r1aReqs);
+      const sameArtifact = new Set(r1aReqs.map((r) => r.result_artifact_id));
+      ok(sameArtifact.size === 1 && [...sameArtifact][0] === finA.artifactId, 'R1-A 全部指向同一 result artifact（== 本事务 artifact）');
+      const leftover = (db.prepare("SELECT COUNT(*) n FROM tts_audio_requests WHERE claim_id=? AND status IN ('waiting','running')").get(outA[0]!.claimId!) as {n: number}).n;
+      ok(leftover === 0, 'R1-A 无 claim succeeded 而 request 仍 active');
+      const dangling = (db.prepare("SELECT COUNT(*) n FROM tts_audio_requests r JOIN tts_synthesis_claims c ON c.id=r.claim_id WHERE c.status='succeeded' AND r.status IN ('waiting','running')").get() as {n: number}).n;
+      ok(dangling === 0, 'R1-A 全库无 claim succeeded 而 request 仍 active');
+    }
+
+    // ── R1-B: success rollback if exact reread fails（输出文件缺失 → 整事务回滚） ──
+    {
+      const chainB = chainContext(fx.projectId, 'N020', makePayload('N020', 'rollback'), voice, npArtifact, ppArtifact, fx.assignmentArtifactId);
+      const outB = createSynthesisRequests(db, {projectId: fx.projectId, requests: [{requestId: 'r1b-req', unitId: 'N020', exactSourceFingerprint: chainB.exactSourceFingerprint, synthesisPayloadFingerprint: chainB.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N020' + chainB.payload.synthesisPayloadFingerprint)}]});
+      const claimB = getSynthesisClaim(db, outB[0]!.claimId!);
+      const resB = resolveClaimValidation(db, {claimId: claimB.id, validationOwnerToken: claimB.validation_owner_token as string, validationAttempt: claimB.validation_attempt, candidateUsable: false, jobContext: dispatchJobContext(chainB)});
+      if (resB.kind !== 'dispatched') throw new Error('R1-B dispatch failed');
+      const claimB2 = claimSynthesisJob(db, {jobId: resB.jobId, workerOwnerToken: 'worker-b', providerRequestHash: 'h', providerRequestJson: chainB.payload.canonicalPayloadJson, model: 'IndexTTS-2'});
+      const fileB = writeOutputFile('r1b-out.wav');
+      advanceAttemptPhase(db, claimB2.attemptId, 'provider_in_flight', {providerRequestId: 'p'});
+      advanceAttemptPhase(db, claimB2.attemptId, 'response_persisted', {responseHash: sha256hex('r'), recoveryTempRelativePath: 'tmp/o.wav'});
+      advanceAttemptPhase(db, claimB2.attemptId, 'file_validated');
+      advanceAttemptPhase(db, claimB2.attemptId, 'file_durable', {finalRelativePath: fileB.rel, audioSha256: fileB.sha, outputSize: fileB.size, codec: 'pcm_s16le', sampleRate: 48000, channels: 1, ffprobeDurationMs: 1500});
+      // 删除输出文件 → exact reread 失败 → 整事务回滚
+      fs.rmSync(path.join(OUTPUT_ROOT, fileB.rel));
+      await expectCode('R1-B exact reread 失败 → REQUEST_STATE_INCONSISTENT', () => {
+        finalizeSynthesisJobSuccess(db, {
+          jobId: resB.jobId,
+          workerOwnerToken: 'worker-b',
+          attemptId: claimB2.attemptId,
+          outputRootDir: OUTPUT_ROOT,
+          attemptEvidence: {finalRelativePath: fileB.rel, audioSha256: fileB.sha, outputSize: fileB.size, codec: 'pcm_s16le', sampleRate: 48000, channels: 1, ffprobeDurationMs: 1500, providerRequestId: 'p'},
+          artifact: {
+            narrationPlanArtifactId: chainB.narrationPlanArtifactId,
+            narrationPlanContentHash: artifactContentHash(db, chainB.narrationPlanArtifactId, chainB.projectId, 'narration_plan_v2'),
+            assignmentArtifactId: chainB.assignmentArtifactId,
+            assignmentContentHash: artifactContentHash(db, chainB.assignmentArtifactId, chainB.projectId, 'project_voice_assignment'),
+            performancePlanArtifactId: chainB.performancePlanArtifactId,
+            performancePlanContentHash: artifactContentHash(db, chainB.performancePlanArtifactId, chainB.projectId, 'narration_performance_plan'),
+            voiceProfileId: chainB.voiceProfileId,
+            voiceProfileRevisionId: chainB.voiceProfileRevisionId,
+            capabilityCompilerVersion: chainB.payload.capabilityCompilerVersion,
+            capabilitySnapshotJson: chainB.payload.capabilitySnapshotJson,
+            compiledPayloadJson: chainB.payload.compiledPayloadJson,
+          },
+        });
+      }, REQUEST_STATE_INCONSISTENT);
+      ok(getTtsCJob(db, resB.jobId).status === 'running', 'R1-B rollback：job 保持 running');
+      ok(getSynthesisClaim(db, claimB.id).status === 'running', 'R1-B rollback：claim 保持 running');
+      ok((db.prepare('SELECT execution_phase FROM tts_generation_attempts WHERE id=?').get(claimB2.attemptId) as {execution_phase: string}).execution_phase === 'file_durable', 'R1-B rollback：attempt 保持 file_durable');
+      ok((db.prepare('SELECT COUNT(*) n FROM sentence_audio_artifacts WHERE job_id=?').get(resB.jobId) as {n: number}).n === 0, 'R1-B rollback：零 artifact');
+      ok((db.prepare("SELECT status FROM tts_audio_requests WHERE request_id='r1b-req'").get() as {status: string}).status === 'waiting', 'R1-B rollback：request 保持 waiting');
+      failSynthesisJob(db, {jobId: resB.jobId, workerOwnerToken: 'worker-b', errorCode: 'TEST', errorMessage: 'release R1-B'});
+    }
+
+    // ── R1-C: expired validator cannot usable-finalize（lease fence 不命中 → STALE 零副作用） ──
+    {
+      // 先造一个 succeeded candidate（N021）
+      const chainC = chainContext(fx.projectId, 'N021', makePayload('N021', 'fence'), voice, npArtifact, ppArtifact, fx.assignmentArtifactId);
+      buildSucceededChain(db, chainC, {audioSha256: 'a'.repeat(64), size: 1000});
+      const outC = createSynthesisRequests(db, {projectId: fx.projectId, requests: [{requestId: 'r1c-req', unitId: 'N021', exactSourceFingerprint: chainC.exactSourceFingerprint, synthesisPayloadFingerprint: chainC.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N021' + chainC.payload.synthesisPayloadFingerprint)}]});
+      const claimC = getSynthesisClaim(db, outC[0]!.claimId!);
+      ok(claimC.candidate_artifact_id !== null, 'R1-C candidate 存在');
+      db.prepare('UPDATE tts_synthesis_claims SET validation_lease_expires_at_epoch_ms=1 WHERE id=?').run(claimC.id);
+      await expectCode('R1-C lease 过期 usable-finalize → STALE_VALIDATION_OWNER', () => {
+        resolveClaimValidation(db, {claimId: claimC.id, validationOwnerToken: claimC.validation_owner_token as string, validationAttempt: claimC.validation_attempt, candidateUsable: true, candidateArtifactId: claimC.candidate_artifact_id, candidateMetadataHash: claimC.candidate_artifact_metadata_hash});
+      }, VALIDATION_STALE_OWNER);
+      ok(getSynthesisClaim(db, claimC.id).status === 'validating_reuse', 'R1-C 零副作用（仍 validating_reuse）');
+      ok((db.prepare("SELECT status FROM tts_audio_requests WHERE request_id='r1c-req'").get() as {status: string}).status === 'waiting', 'R1-C request 未推进');
+      cancelSynthesisRequest(db, fx.projectId, 'r1c-req');
+    }
+
+    // ── R1-D: candidate/hash mismatch cannot finalize ──
+    {
+      const chainD = chainContext(fx.projectId, 'N022', makePayload('N022', 'hash'), voice, npArtifact, ppArtifact, fx.assignmentArtifactId);
+      buildSucceededChain(db, chainD, {audioSha256: 'a'.repeat(64), size: 1000});
+      const outD = createSynthesisRequests(db, {projectId: fx.projectId, requests: [{requestId: 'r1d-req', unitId: 'N022', exactSourceFingerprint: chainD.exactSourceFingerprint, synthesisPayloadFingerprint: chainD.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N022' + chainD.payload.synthesisPayloadFingerprint)}]});
+      const claimD = getSynthesisClaim(db, outD[0]!.claimId!);
+      await expectCode('R1-D candidate/hash mismatch → STALE_VALIDATION_OWNER', () => {
+        resolveClaimValidation(db, {claimId: claimD.id, validationOwnerToken: claimD.validation_owner_token as string, validationAttempt: claimD.validation_attempt, candidateUsable: true, candidateArtifactId: claimD.candidate_artifact_id, candidateMetadataHash: 'deadbeef'});
+      }, VALIDATION_STALE_OWNER);
+      ok(getSynthesisClaim(db, claimD.id).status === 'validating_reuse', 'R1-D 零副作用');
+      cancelSynthesisRequest(db, fx.projectId, 'r1d-req');
+    }
+
+    // ── R1-E: validation renewal current owner only ──
+    {
+      const chainE = chainContext(fx.projectId, 'N023', makePayload('N023', 'renew'), voice, npArtifact, ppArtifact, fx.assignmentArtifactId);
+      const outE = createSynthesisRequests(db, {projectId: fx.projectId, requests: [{requestId: 'r1e-req', unitId: 'N023', exactSourceFingerprint: chainE.exactSourceFingerprint, synthesisPayloadFingerprint: chainE.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N023' + chainE.payload.synthesisPayloadFingerprint)}]});
+      const claimE = getSynthesisClaim(db, outE[0]!.claimId!);
+      const renewed = renewClaimValidation(db, {claimId: claimE.id, validationOwnerToken: claimE.validation_owner_token as string, validationAttempt: claimE.validation_attempt});
+      ok(renewed.newLease > (claimE.validation_lease_expires_at_epoch_ms ?? 0), 'R1-E renew 新 lease');
+      await expectCode('R1-E 旧 owner renew → STALE_VALIDATION_OWNER', () => {
+        renewClaimValidation(db, {claimId: claimE.id, validationOwnerToken: 'stale', validationAttempt: claimE.validation_attempt});
+      }, VALIDATION_STALE_OWNER);
+      ok(getSynthesisClaim(db, claimE.id).validation_owner_token === claimE.validation_owner_token, 'R1-E 零副作用');
+      cancelSynthesisRequest(db, fx.projectId, 'r1e-req');
+    }
+
+    // ── R1-F: takeover refreshes validation_started_at ──
+    {
+      const chainF = chainContext(fx.projectId, 'N024', makePayload('N024', 'take2'), voice, npArtifact, ppArtifact, fx.assignmentArtifactId);
+      const outF = createSynthesisRequests(db, {projectId: fx.projectId, requests: [{requestId: 'r1f-req', unitId: 'N024', exactSourceFingerprint: chainF.exactSourceFingerprint, synthesisPayloadFingerprint: chainF.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N024' + chainF.payload.synthesisPayloadFingerprint)}]});
+      const claimF = getSynthesisClaim(db, outF[0]!.claimId!);
+      const startedBefore = claimF.validation_started_at;
+      db.prepare('UPDATE tts_synthesis_claims SET validation_lease_expires_at_epoch_ms=1 WHERE id=?').run(claimF.id);
+      const taken = takeoverClaimValidation(db, {claimId: claimF.id, newValidationOwnerToken: 'v2'});
+      const afterF = getSynthesisClaim(db, claimF.id);
+      ok(taken.newValidationAttempt === 2, 'R1-F takeover attempt+1');
+      ok(afterF.validation_started_at !== startedBefore && afterF.validation_started_at !== null, 'R1-F validation_started_at 刷新为当前 attempt 开始时间');
+      // ── R1-G: takeover attempt 2 → dispatch → worker claim（attempt 传播） ──
+      const resG = resolveClaimValidation(db, {claimId: claimF.id, validationOwnerToken: 'v2', validationAttempt: 2, candidateUsable: false, jobContext: dispatchJobContext(chainF)});
+      if (resG.kind !== 'dispatched') throw new Error('R1-G dispatch failed');
+      const claimG = claimSynthesisJob(db, {jobId: resG.jobId, workerOwnerToken: 'worker-g', providerRequestHash: 'h', providerRequestJson: chainF.payload.canonicalPayloadJson, model: 'IndexTTS-2'});
+      const jobG = getTtsCJob(db, resG.jobId);
+      ok(jobG.attempt === 2, 'R1-G job.attempt = 2（validation attempt 传播）');
+      ok(getSynthesisClaim(db, claimF.id).validation_attempt === 2, 'R1-G claim.validation_attempt = 2');
+      ok((db.prepare('SELECT attempt_number FROM tts_generation_attempts WHERE id=?').get(claimG.attemptId) as {attempt_number: number}).attempt_number === 2, 'R1-G generation_attempt.attempt_number = 2');
+      const cmdG = db.prepare('SELECT worker_attempt FROM tts_job_execution_transitions WHERE claim_id=? AND command_kind=?').get(claimF.id, 'worker_claim') as {worker_attempt: number};
+      ok(cmdG.worker_attempt === 2, 'R1-G command.worker_attempt = 2');
+      failSynthesisJob(db, {jobId: resG.jobId, workerOwnerToken: 'worker-g', errorCode: 'TEST', errorMessage: 'release R1-G'});
+    }
+
+    // ── R1-H: takeover attempt 2 → dispatch → prestart terminal（job.attempt 保持 0） ──
+    {
+      const chainH = chainContext(fx.projectId, 'N025', makePayload('N025', 'pre'), voice, npArtifact, ppArtifact, fx.assignmentArtifactId);
+      const outH = createSynthesisRequests(db, {projectId: fx.projectId, requests: [{requestId: 'r1h-req', unitId: 'N025', exactSourceFingerprint: chainH.exactSourceFingerprint, synthesisPayloadFingerprint: chainH.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N025' + chainH.payload.synthesisPayloadFingerprint)}]});
+      const claimH = getSynthesisClaim(db, outH[0]!.claimId!);
+      db.prepare('UPDATE tts_synthesis_claims SET validation_lease_expires_at_epoch_ms=1 WHERE id=?').run(claimH.id);
+      takeoverClaimValidation(db, {claimId: claimH.id, newValidationOwnerToken: 'v2'});
+      const resH = resolveClaimValidation(db, {claimId: claimH.id, validationOwnerToken: 'v2', validationAttempt: 2, candidateUsable: false, jobContext: dispatchJobContext(chainH)});
+      if (resH.kind !== 'dispatched') throw new Error('R1-H dispatch failed');
+      prestartTerminalSynthesisJob(db, {jobId: resH.jobId, terminal: 'cancelled', reason: 'prestart'});
+      const cmdH = db.prepare('SELECT worker_attempt FROM tts_job_execution_transitions WHERE claim_id=? AND command_kind=?').get(claimH.id, 'prestart_terminal') as {worker_attempt: number};
+      ok(cmdH.worker_attempt === 2, 'R1-H prestart command.worker_attempt = 2（claim.validation_attempt）');
+      ok(getSynthesisClaim(db, claimH.id).validation_attempt === 2, 'R1-H claim.validation_attempt = 2');
+      const jobH = getTtsCJob(db, resH.jobId);
+      ok(jobH.attempt === 0, 'R1-H job.attempt = 0（prestart 无 Worker execution，frozen D5）');
+      ok(jobH.status === 'cancelled', 'R1-H job cancelled');
+      ok(getSynthesisClaim(db, claimH.id).status === 'cancelled', 'R1-H claim cancelled');
+    }
+
+    // ── R1-I/R1-J: requestId replay / conflict ──
+    {
+      const chainI = chainContext(fx.projectId, 'N026', makePayload('N026', 'replay'), voice, npArtifact, ppArtifact, fx.assignmentArtifactId);
+      const beforeReq = (db.prepare('SELECT COUNT(*) n FROM tts_audio_requests WHERE project_id=?').get(fx.projectId) as {n: number}).n;
+      const beforeClaim = (db.prepare('SELECT COUNT(*) n FROM tts_synthesis_claims WHERE project_id=?').get(fx.projectId) as {n: number}).n;
+      const outI1 = createSynthesisRequests(db, {projectId: fx.projectId, requests: [{requestId: 'req-replay', unitId: 'N026', exactSourceFingerprint: chainI.exactSourceFingerprint, synthesisPayloadFingerprint: chainI.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N026' + chainI.payload.synthesisPayloadFingerprint)}]});
+      const outI2 = createSynthesisRequests(db, {projectId: fx.projectId, requests: [{requestId: 'req-replay', unitId: 'N026', exactSourceFingerprint: chainI.exactSourceFingerprint, synthesisPayloadFingerprint: chainI.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N026' + chainI.payload.synthesisPayloadFingerprint)}]});
+      ok(outI2.length === 1 && outI2[0]!.replayed === true && outI2[0]!.claimId === outI1[0]!.claimId, 'R1-I 同 requestId + 同 identity → replay（同一 claim）');
+      ok((db.prepare('SELECT COUNT(*) n FROM tts_audio_requests WHERE project_id=?').get(fx.projectId) as {n: number}).n === beforeReq + 1, 'R1-I request 行数不变（+1 仅为本次新增）');
+      ok((db.prepare('SELECT COUNT(*) n FROM tts_synthesis_claims WHERE project_id=?').get(fx.projectId) as {n: number}).n === beforeClaim + 1, 'R1-I claim 数不变');
+      await expectCode('R1-J 同 requestId + 不同 fingerprint → REQUEST_ID_CONFLICT', () => {
+        createSynthesisRequests(db, {projectId: fx.projectId, requests: [{requestId: 'req-replay', unitId: 'N026', exactSourceFingerprint: chainI.exactSourceFingerprint, synthesisPayloadFingerprint: 'sha256:DIFFERENT', finalTtsInputFingerprint: sha256hex('N026')}]});
+      }, REQUEST_ID_CONFLICT);
+      await expectCode('R1-J 同 requestId + 不同 unit → REQUEST_ID_CONFLICT', () => {
+        createSynthesisRequests(db, {projectId: fx.projectId, requests: [{requestId: 'req-replay', unitId: 'N999', exactSourceFingerprint: chainI.exactSourceFingerprint, synthesisPayloadFingerprint: chainI.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: sha256hex('N999')}]});
+      }, REQUEST_ID_CONFLICT);
+      cancelSynthesisRequest(db, fx.projectId, 'req-replay');
+    }
   }
 
   closeDb();
