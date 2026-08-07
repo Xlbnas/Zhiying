@@ -59,6 +59,66 @@ export function computeSynthesisPayloadFingerprint(canonicalPayloadJson: string)
 }
 
 /**
+ * R2 — exact source fingerprint（frozen §8.2 3e）：exact source 身份的 canonical 绑定——
+ * project/unit + 三个 exact source artifact（ID + content hash）+ voice revision pair。
+ * 固定键序 canonical JSON → sha256:<hex>。纯函数（零 DB / IO / 时钟 / 随机）。
+ * 禁止 fallback current/latest/default（exact source 纪律：全链路显式 artifact ID）。
+ */
+export function computeExactSourceFingerprint(input: {
+  projectId: string;
+  unitId: string;
+  narrationPlanArtifactId: string;
+  narrationPlanContentHash: string;
+  assignmentArtifactId: string;
+  assignmentContentHash: string;
+  performancePlanArtifactId: string;
+  performancePlanContentHash: string;
+  voiceProfileId: string;
+  voiceProfileRevisionId: string;
+}): string {
+  return sha256Canonical({
+    projectId: input.projectId,
+    unitId: input.unitId,
+    narrationPlanArtifactId: input.narrationPlanArtifactId,
+    narrationPlanContentHash: input.narrationPlanContentHash,
+    assignmentArtifactId: input.assignmentArtifactId,
+    assignmentContentHash: input.assignmentContentHash,
+    performancePlanArtifactId: input.performancePlanArtifactId,
+    performancePlanContentHash: input.performancePlanContentHash,
+    voiceProfileId: input.voiceProfileId,
+    voiceProfileRevisionId: input.voiceProfileRevisionId,
+  });
+}
+
+/**
+ * R2 — final TTS input fingerprint（frozen §8.2 3e）：final compiled input 的 canonical 投影
+ * （unit + spoken text + voice revision pair + reference audio SHA + synthesis payload）。
+ * 固定键序 canonical JSON → sha256:<hex>。纯函数。
+ */
+export function computeFinalTtsInputFingerprint(input: {
+  unitId: string;
+  spokenText: string;
+  voiceProfileId: string;
+  voiceProfileRevisionId: string;
+  referenceAudioSha256: string;
+  synthesisPayloadFingerprint: string;
+}): string {
+  return sha256Canonical({
+    unitId: input.unitId,
+    spokenText: input.spokenText,
+    voiceProfileId: input.voiceProfileId,
+    voiceProfileRevisionId: input.voiceProfileRevisionId,
+    referenceAudioSha256: input.referenceAudioSha256,
+    synthesisPayloadFingerprint: input.synthesisPayloadFingerprint,
+  });
+}
+
+/** 固定键序 canonical JSON → sha256:<hex>（本模块 fingerprint 唯一序列化方式）。 */
+function sha256Canonical(obj: Record<string, unknown>): string {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(obj), 'utf8').digest('hex')}`;
+}
+
+/**
  * 构建 compiled synthesis payload（1C.2 handoff）：
  *   1. 编译 exact capability inputs + exact snapshot（1C.1 frozen 语义）；
  *   2. 组装 canonical payload（固定键序）并计算 synthesisPayloadFingerprint；

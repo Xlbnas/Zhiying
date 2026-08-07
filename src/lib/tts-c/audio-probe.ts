@@ -16,11 +16,17 @@ export interface AudioProbe {
   channels: number;
 }
 
-/** ffprobe 实测音频元数据（唯一时长真相）。 */
-export function probeAudio(filePath: string): AudioProbe {
-  const out = execFileSync('ffprobe', [
-    '-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', filePath,
-  ], {encoding: 'utf8'});
+/**
+ * ffprobe 实测音频元数据（唯一时长真相）。
+ * @param demuxer 可选强制容器（如 'wav'）：跳过探测歧义（正弦波数据可能被新版 ffmpeg
+ *   误判为 mpegts，score 100 > wav 99——契约已知容器时显式指定，避免探测竞态）；
+ *   缺省 = 自动探测（既有调用语义不变）。
+ */
+export function probeAudio(filePath: string, demuxer?: string): AudioProbe {
+  const args = ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format'];
+  if (demuxer) args.push('-f', demuxer);
+  args.push(filePath);
+  const out = execFileSync('ffprobe', args, {encoding: 'utf8'});
   const json = JSON.parse(out) as {
     format?: {duration?: string};
     streams?: Array<{codec_type?: string; codec_name?: string; sample_rate?: string; channels?: number}>;

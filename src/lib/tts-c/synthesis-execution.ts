@@ -25,10 +25,12 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type {Db} from '../db';
+import {getDataDir, type Db} from '../db';
 import {dbNowMs, nowIso} from './materialization';
 import {RegistryContractError} from './registry-contract-error';
-import {computeSynthesisPayloadFingerprint} from './synthesis-payload';
+import {computeSynthesisPayloadFingerprint, computeExactSourceFingerprint, computeFinalTtsInputFingerprint} from './synthesis-payload';
+import {probeAudio, type AudioProbe} from './audio-probe';
+import {ADAPTER_COMPATIBILITY_KEY, CANONICAL_FILENAME, VOICE_LIBRARY_ROOT} from '../voice-library/constants';
 
 export const EXECUTION_NOT_OWNER = 'EXECUTION_NOT_OWNER';
 export const EXECUTION_INVALID_STATE = 'EXECUTION_INVALID_STATE';
@@ -58,6 +60,7 @@ interface JobRow {
   exact_source_fingerprint: string | null;
   synthesis_payload_fingerprint: string | null;
   final_tts_input_fingerprint: string | null;
+  generation_variant_id: string | null;
   narration_plan_artifact_id: string | null;
   cancel_requested: number | null;
 }
@@ -366,9 +369,9 @@ export interface AttemptEvidence {
   ffprobeDurationMs?: number;
 }
 
-export function getGenerationAttempt(db: Db, attemptId: string): {execution_phase: string; job_id: string; attempt_number: number; audio_sha256: string | null; output_size: number | null; codec: string | null; sample_rate: number | null; channels: number | null; ffprobe_duration_ms: number | null; final_relative_path: string | null} {
-  const row = db.prepare('SELECT execution_phase, job_id, attempt_number, audio_sha256, output_size, codec, sample_rate, channels, ffprobe_duration_ms, final_relative_path FROM tts_generation_attempts WHERE id=?').get(attemptId) as
-    | {execution_phase: string; job_id: string; attempt_number: number; audio_sha256: string | null; output_size: number | null; codec: string | null; sample_rate: number | null; channels: number | null; ffprobe_duration_ms: number | null; final_relative_path: string | null}
+export function getGenerationAttempt(db: Db, attemptId: string): {execution_phase: string; job_id: string; attempt_number: number; provider_request_id: string | null; audio_sha256: string | null; output_size: number | null; codec: string | null; sample_rate: number | null; channels: number | null; ffprobe_duration_ms: number | null; final_relative_path: string | null} {
+  const row = db.prepare('SELECT execution_phase, job_id, attempt_number, provider_request_id, audio_sha256, output_size, codec, sample_rate, channels, ffprobe_duration_ms, final_relative_path FROM tts_generation_attempts WHERE id=?').get(attemptId) as
+    | {execution_phase: string; job_id: string; attempt_number: number; provider_request_id: string | null; audio_sha256: string | null; output_size: number | null; codec: string | null; sample_rate: number | null; channels: number | null; ffprobe_duration_ms: number | null; final_relative_path: string | null}
     | undefined;
   if (!row) throw new RegistryContractError(EXECUTION_NOT_FOUND, `attempt 不存在: ${attemptId}`);
   return row;
@@ -430,13 +433,58 @@ function readFileExactSync(absPath: string, expectedSha256: string): {sha: strin
   }
 }
 
-/** source artifact canonical content hash（artifacts 行 canonical JSON；按 exact IDs 重读重算）。 */
+/** source artifact canonical content hash（TTS-B 同款：content_json 的 sha256；按 exact IDs 重读，
+ * 禁止 hash 行元数据 id/created_at、禁止 fallback latest）。 */
 function sourceArtifactContentHashSync(db: Db, artifactId: string, projectId: string, kind: string): string {
   const row = db
-    .prepare('SELECT id, project_id, kind, created_at FROM artifacts WHERE id=? AND project_id=? AND kind=?')
-    .get(artifactId, projectId, kind) as {id: string; project_id: string; kind: string; created_at: string} | undefined;
-  if (!row) throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `source artifact 缺失: ${artifactId}（${kind}）`);
-  return sha256hex(JSON.stringify({id: row.id, project_id: row.project_id, kind: row.kind, created_at: row.created_at}));
+    .prepare('SELECT content_json FROM artifacts WHERE id=? AND project_id=? AND kind=?')
+    .get(artifactId, projectId, kind) as {content_json: string | null} | undefined;
+  if (!row || row.content_json === null || row.content_json === '') {
+    throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `source artifact content_json 缺失: ${artifactId}（${kind}）`);
+  }
+  return sha256hex(row.content_json);
+}
+
+/**
+ * R2 — Voice Revision exact 同步复核（frozen §8.2 3d 子集；与
+ * validateVoiceProfileRevisionExact 同一契约的最小同步实现——async validator 不能进入
+ * 同步成功事务）：exact pair / provider / adapter_compatibility_key / canonical SHA 格式 /
+ * canonical path 精确形状（voice-library/<pid>/<rid>/reference.wav）/ containment + parent
+ * 无 symlink。canonical 文件 SHA 由调用方 readFileExactSync 复核。
+ */
+function resolveVoiceRevisionExactSync(
+  db: Db,
+  options: {voiceProfileId: string; voiceProfileRevisionId: string; expectedProvider: string},
+): {canonicalAudioSha256: string; canonicalAudioPath: string} {
+  const row = db
+    .prepare(
+      `SELECT voice_profile_id, provider, adapter_compatibility_key, canonical_audio_sha256, canonical_audio_path
+         FROM voice_profile_revisions WHERE id=?`,
+    )
+    .get(options.voiceProfileRevisionId) as
+    | {voice_profile_id: string; provider: string; adapter_compatibility_key: string; canonical_audio_sha256: string; canonical_audio_path: string}
+    | undefined;
+  if (!row) throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `voice revision 缺失: ${options.voiceProfileRevisionId}`);
+  if (row.voice_profile_id !== options.voiceProfileId) {
+    throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'voice revision pair 不一致');
+  }
+  if (row.provider !== options.expectedProvider) {
+    throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `voice revision provider ${row.provider} != ${options.expectedProvider}`);
+  }
+  if (row.adapter_compatibility_key !== ADAPTER_COMPATIBILITY_KEY) {
+    throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `voice revision adapter key 非 frozen: ${row.adapter_compatibility_key}`);
+  }
+  if (!/^[0-9a-f]{64}$/.test(row.canonical_audio_sha256)) {
+    throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'canonical_audio_sha256 格式非法');
+  }
+  // exact path 形状（validateVoiceProfileRevisionExact 同款 lexical 检查，禁止拼接变体）
+  const expectedRel = path.posix.join(VOICE_LIBRARY_ROOT, options.voiceProfileId, options.voiceProfileRevisionId, CANONICAL_FILENAME);
+  if (row.canonical_audio_path !== expectedRel) {
+    throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `canonical_audio_path 非精确形状: ${row.canonical_audio_path}`);
+  }
+  // containment + 逐级 parent 无 symlink（复用本文件既有 resolveContainedSync；root = dataDir）
+  const canonicalAbs = resolveContainedSync(getDataDir(), row.canonical_audio_path);
+  return {canonicalAudioSha256: row.canonical_audio_sha256, canonicalAudioPath: canonicalAbs};
 }
 
 /** 推进 attempt phase（created→provider_in_flight→response_persisted→file_validated→file_durable）。 */
@@ -571,63 +619,113 @@ export function finalizeSynthesisJobSuccess(db: Db, options: FinalizeSuccessOpti
     }
 
     // 4) exact application-level rereads
-    // 4a) 输出文件：containment + parent 无 symlink + O_NOFOLLOW + regular + SHA + size
-    const outputAbs = resolveContainedSync(options.outputRootDir, options.attemptEvidence.finalRelativePath);
-    const fileRead = readFileExactSync(outputAbs, options.attemptEvidence.audioSha256);
-    if (fileRead.size !== options.attemptEvidence.outputSize) {
-      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `output size ${fileRead.size} != evidence ${options.attemptEvidence.outputSize}`);
+    // 4a) caller evidence vs persisted file_durable attempt row（persisted 是 byte/media
+    //     evidence 权威；caller 直传值必须与 persisted 逐项一致，否则 REQUEST_STATE_INCONSISTENT）
+    const ev = options.attemptEvidence;
+    if (
+      ev.finalRelativePath !== (attempt.final_relative_path ?? '') ||
+      ev.audioSha256 !== (attempt.audio_sha256 ?? '') ||
+      ev.outputSize !== (attempt.output_size ?? -1) ||
+      ev.codec !== (attempt.codec ?? '') ||
+      ev.sampleRate !== (attempt.sample_rate ?? -1) ||
+      ev.channels !== (attempt.channels ?? -1) ||
+      ev.ffprobeDurationMs !== (attempt.ffprobe_duration_ms ?? -1) ||
+      (ev.providerRequestId ?? null) !== attempt.provider_request_id
+    ) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'caller evidence 与 persisted file_durable attempt 不一致');
     }
-    // 4b) source artifact canonical hash（按 exact IDs 重读重算，不信任 caller 直传）
+    // 4b) 输出文件：containment + parent 无 symlink + O_NOFOLLOW + regular + SHA + size
+    const outputAbs = resolveContainedSync(options.outputRootDir, ev.finalRelativePath);
+    const fileRead = readFileExactSync(outputAbs, ev.audioSha256);
+    if (fileRead.size !== ev.outputSize) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `output size ${fileRead.size} != evidence ${ev.outputSize}`);
+    }
+    // 4c) media metadata probe（frozen §8.2 3a：codec/sample_rate/channels/duration == persisted attempt；
+    //     强制 wav 容器——sentence audio 契约；避免探测歧义）
+    let probe: AudioProbe;
+    try {
+      probe = probeAudio(outputAbs, 'wav');
+    } catch (err) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `output media probe 失败: ${(err as Error).message}`);
+    }
+    if (
+      probe.codec !== (attempt.codec ?? '') ||
+      probe.sampleRate !== (attempt.sample_rate ?? -1) ||
+      probe.channels !== (attempt.channels ?? -1) ||
+      probe.durationMs !== (attempt.ffprobe_duration_ms ?? -1)
+    ) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, `output media metadata 与 persisted attempt 不一致: ${JSON.stringify(probe)}`);
+    }
+    // 4d) source artifact canonical hash（按 exact IDs 重读 content_json，不信任 caller 直传）
     const npHash = sourceArtifactContentHashSync(db, options.artifact.narrationPlanArtifactId, job.project_id, 'narration_plan_v2');
     const asgHash = sourceArtifactContentHashSync(db, options.artifact.assignmentArtifactId, job.project_id, 'project_voice_assignment');
     const ppHash = sourceArtifactContentHashSync(db, options.artifact.performancePlanArtifactId, job.project_id, 'narration_performance_plan');
     if (npHash !== options.artifact.narrationPlanContentHash || asgHash !== options.artifact.assignmentContentHash || ppHash !== options.artifact.performancePlanContentHash) {
       throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'source artifact canonical hash 与待写 provenance 不一致');
     }
-    // 4c) voice revision exact（DB 侧 pair/provider + canonical_audio_sha256；canonical 文件 SHA 同步复核）
-    const rev = db.prepare('SELECT voice_profile_id, provider, canonical_audio_sha256, canonical_audio_path FROM voice_profile_revisions WHERE id=?').get(options.artifact.voiceProfileRevisionId) as
-      | {voice_profile_id: string; provider: string; canonical_audio_sha256: string; canonical_audio_path: string}
-      | undefined;
-    if (!rev || rev.voice_profile_id !== options.artifact.voiceProfileId || rev.provider !== job.provider) {
-      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'voice revision exact pair/provider 不一致');
-    }
-    const canonicalAbs = path.resolve(process.env.ZHIYING_DATA_DIR ?? 'data', rev.canonical_audio_path);
-    const canonicalRead = readFileExactSync(canonicalAbs, rev.canonical_audio_sha256);
+    // 4e) voice revision exact（pair/provider/adapter key/path 形状/containment + canonical 文件 SHA）
+    const rev = resolveVoiceRevisionExactSync(db, {
+      voiceProfileId: options.artifact.voiceProfileId,
+      voiceProfileRevisionId: options.artifact.voiceProfileRevisionId,
+      expectedProvider: job.provider,
+    });
+    const canonicalRead = readFileExactSync(rev.canonicalAudioPath, rev.canonicalAudioSha256);
     void canonicalRead;
-    // 4d) synthesis_payload_fingerprint 语义重算（payload_json canonical → fingerprint 与 persisted 一致）
+    // 4f) fingerprint 语义重算（frozen §8.2 3e：由冻结输入重算，与 persisted 逐项一致）
     if (!job.payload_json) throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'job payload_json 缺失');
-    const recomputedFp = computeSynthesisPayloadFingerprint(job.payload_json);
-    if (recomputedFp !== (job.synthesis_payload_fingerprint ?? '')) {
+    let payloadSpokenText: unknown;
+    try {
+      payloadSpokenText = (JSON.parse(job.payload_json) as {spokenText?: unknown}).spokenText;
+    } catch {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'job payload_json 不可解析');
+    }
+    if (typeof payloadSpokenText !== 'string') {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'payload spokenText 缺失');
+    }
+    const recomputedExact = computeExactSourceFingerprint({
+      projectId: job.project_id,
+      unitId: claim.unit_id,
+      narrationPlanArtifactId: options.artifact.narrationPlanArtifactId,
+      narrationPlanContentHash: npHash,
+      assignmentArtifactId: options.artifact.assignmentArtifactId,
+      assignmentContentHash: asgHash,
+      performancePlanArtifactId: options.artifact.performancePlanArtifactId,
+      performancePlanContentHash: ppHash,
+      voiceProfileId: options.artifact.voiceProfileId,
+      voiceProfileRevisionId: options.artifact.voiceProfileRevisionId,
+    });
+    if (recomputedExact !== (job.exact_source_fingerprint ?? '')) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'exact_source_fingerprint 语义重算与 persisted 不一致');
+    }
+    const recomputedPayloadFp = computeSynthesisPayloadFingerprint(job.payload_json);
+    if (recomputedPayloadFp !== (job.synthesis_payload_fingerprint ?? '')) {
       throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'synthesis_payload_fingerprint 重算与 persisted 不一致');
     }
+    const recomputedFinal = computeFinalTtsInputFingerprint({
+      unitId: claim.unit_id,
+      spokenText: payloadSpokenText,
+      voiceProfileId: options.artifact.voiceProfileId,
+      voiceProfileRevisionId: options.artifact.voiceProfileRevisionId,
+      referenceAudioSha256: rev.canonicalAudioSha256,
+      synthesisPayloadFingerprint: job.synthesis_payload_fingerprint ?? '',
+    });
+    if (recomputedFinal !== claim.final_tts_input_fingerprint || recomputedFinal !== (job.final_tts_input_fingerprint ?? '')) {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'final_tts_input_fingerprint 语义重算与 persisted 不一致');
+    }
+    // Phase 1 canonical generation variant identity = 'default'（无 variant 输入面；C.3 定义 variant 输入）
+    if (claim.generation_variant_id !== 'default' || (job.generation_variant_id ?? 'default') !== 'default') {
+      throw new RegistryContractError(REQUEST_STATE_INCONSISTENT, 'generation_variant 非 Phase-1 canonical（default）');
+    }
 
-    // 3) attempt file_durable → succeeded（changes=1；file_durable 后不补写 byte evidence）
+    // 3) attempt file_durable → succeeded（changes=1；frozen §8.2 step 2：同 UPDATE 不得再写任何
+    //    证据字段——byte evidence 在 file_durable 已冻结，terminal 只推进 execution_phase/finished_at）
     const attemptUpd = db
       .prepare(
         `UPDATE tts_generation_attempts
-            SET execution_phase='succeeded', finished_at=?,
-                provider_request_id=COALESCE(?, provider_request_id),
-                final_relative_path=COALESCE(?, final_relative_path),
-                audio_sha256=COALESCE(?, audio_sha256),
-                output_size=COALESCE(?, output_size),
-                codec=COALESCE(?, codec),
-                sample_rate=COALESCE(?, sample_rate),
-                channels=COALESCE(?, channels),
-                ffprobe_duration_ms=COALESCE(?, ffprobe_duration_ms)
+            SET execution_phase='succeeded', finished_at=?
           WHERE id=? AND execution_phase='file_durable'`,
       )
-      .run(
-        now,
-        options.attemptEvidence.providerRequestId ?? null,
-        options.attemptEvidence.finalRelativePath,
-        options.attemptEvidence.audioSha256,
-        options.attemptEvidence.outputSize,
-        options.attemptEvidence.codec,
-        options.attemptEvidence.sampleRate,
-        options.attemptEvidence.channels,
-        options.attemptEvidence.ffprobeDurationMs,
-        options.attemptId,
-      );
+      .run(now, options.attemptId);
     if (attemptUpd.changes !== 1) {
       throw new RegistryContractError(EXECUTION_INVALID_STATE, `attempt ${options.attemptId} file_durable→succeeded changes!=1`);
     }
@@ -660,7 +758,7 @@ export function finalizeSynthesisJobSuccess(db: Db, options: FinalizeSuccessOpti
       options.artifact.performancePlanContentHash,
       options.artifact.voiceProfileId,
       options.artifact.voiceProfileRevisionId,
-      rev.canonical_audio_sha256,
+      rev.canonicalAudioSha256,
       job.exact_source_fingerprint ?? '',
       job.synthesis_payload_fingerprint ?? '',
       claim.final_tts_input_fingerprint,
