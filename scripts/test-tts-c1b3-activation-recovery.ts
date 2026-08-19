@@ -1730,26 +1730,30 @@ function recoveryDeps(adapter: MockAdapter) {
     fs.rmSync(ACTIVE_PATH); // 只保留 nested 文件作为唯一 active registry
     const nestedPaths: ActiveRegistryPaths = {activeRegistryPath: nestedAbs, activeRegistryRoot: ACTIVE_DIR};
     ok((await classifyActiveDiskState(getDb(), p10.id, nestedPaths)).state === 'stable', 'R2-10 nested disk stable 前置');
-    // 记录 fsync 目标（/proc/self/fd 解析句柄对应目录）
-    const fsyncedDirs: string[] = [];
+    // 记录 fsync 目标（通过 held directory fd 的 dev/inode 识别目录）
+    const fsyncedDirs: Array<{dev: number; ino: number}> = [];
     const subAbs = path.resolve(path.join(ACTIVE_DIR, 'sub'));
+    const subStat = fs.statSync(subAbs);
+    const rootStat = fs.statSync(path.resolve(ACTIVE_DIR));
     const recordingPaths: ActiveRegistryPaths = {
       ...nestedPaths,
       fsyncDir: async (fh) => {
-        fsyncedDirs.push(fs.realpathSync(`/proc/self/fd/${fh.fd}`));
+        const st = await fh.stat();
+        fsyncedDirs.push({dev: st.dev, ino: st.ino});
       },
     };
     const o10 = await promoteCandidateToActive(getDb(), p10.id, p10.owner_token as string, p10.attempt, recordingPaths);
     ok(o10 === 'promoted', 'R2-10 nested promote 成功');
     ok(sha256OfFile(nestedAbs) === p10.candidate_registry_sha256, 'R2-10 nested active == candidate bytes');
-    ok(fsyncedDirs.some((d) => d === subAbs), `R2-10 fsync 目标含 exact parent root/sub（实际 ${JSON.stringify(fsyncedDirs)}）`);
-    ok(!fsyncedDirs.some((d) => d === path.resolve(ACTIVE_DIR)), 'R2-10 fsync 目标不含 root（未误 fsync root）');
+    ok(fsyncedDirs.some((d) => d.dev === subStat.dev && d.ino === subStat.ino), `R2-10 fsync 目标含 exact parent root/sub（实际 ${JSON.stringify(fsyncedDirs)}）`);
+    ok(!fsyncedDirs.some((d) => d.dev === rootStat.dev && d.ino === rootStat.ino), 'R2-10 fsync 目标不含 root（未误 fsync root）');
     // exact parent fsync 注入失败：restore 必须失败（rollback_pending），不继续 reload
     const reloadsBefore10 = a10.reloadCalls;
     const failingPaths: ActiveRegistryPaths = {
       ...nestedPaths,
       fsyncDir: async (fh) => {
-        if (fs.realpathSync(`/proc/self/fd/${fh.fd}`) === subAbs) {
+        const st = await fh.stat();
+        if (st.dev === subStat.dev && st.ino === subStat.ino) {
           throw new Error('injected exact parent fsync failure');
         }
       },
