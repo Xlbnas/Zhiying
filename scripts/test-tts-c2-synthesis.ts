@@ -752,7 +752,9 @@ async function newVoice(): Promise<{profileId: string; revisionId: string; canon
       const outE = createSynthesisRequests(db, {projectId: fx.projectId, requests: [{requestId: 'r1e-req', unitId: 'N023', exactSourceFingerprint: chainE.exactSourceFingerprint, synthesisPayloadFingerprint: chainE.payload.synthesisPayloadFingerprint, finalTtsInputFingerprint: chainE.finalTtsInputFingerprint}]});
       const claimE = getSynthesisClaim(db, outE[0]!.claimId!);
       const renewed = renewClaimValidation(db, {claimId: claimE.id, validationOwnerToken: claimE.validation_owner_token as string, validationAttempt: claimE.validation_attempt});
-      ok(renewed.newLease > (claimE.validation_lease_expires_at_epoch_ms ?? 0), 'R1-E renew 新 lease');
+      const leaseAfter = db.prepare(`SELECT validation_lease_expires_at_epoch_ms AS lease,
+        CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) AS db_now FROM tts_synthesis_claims WHERE id=?`).get(claimE.id) as {lease: number; db_now: number};
+      ok(leaseAfter.lease === renewed.newLease && leaseAfter.lease > leaseAfter.db_now, 'R1-E renew 新 lease > DB now');
       await expectCode('R1-E 旧 owner renew → STALE_VALIDATION_OWNER', () => {
         renewClaimValidation(db, {claimId: claimE.id, validationOwnerToken: 'stale', validationAttempt: claimE.validation_attempt});
       }, VALIDATION_STALE_OWNER);
