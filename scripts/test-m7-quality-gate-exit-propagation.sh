@@ -24,7 +24,7 @@ set -e
 if [ "$ec1" -eq 37 ]; then
   echo "PASS  m7-exit-propagation: pipefail 传播 exit 37（tee 未吞码）"
 else
-  echo "FAIL  m7-exit-propagation: pipefail 未传播 exit 37（got $ec1）"
+  echo "FAIL  m7-exit-propagation: pipefail 未传播 exit 37（got ${ec1}）"
   fails=$((fails + 1))
 fi
 
@@ -36,7 +36,7 @@ set -e
 if [ "$ec2" -eq 41 ]; then
   echo "PASS  m7-exit-propagation: canary gate 失败 exit 41 传播（QUALITY_GATE_RESULT=FAIL 不吞码）"
 else
-  echo "FAIL  m7-exit-propagation: canary 失败未传播 exit 41（got $ec2）"
+  echo "FAIL  m7-exit-propagation: canary 失败未传播 exit 41（got ${ec2}）"
   fails=$((fails + 1))
 fi
 
@@ -45,7 +45,7 @@ set +e
 bash -c '(exit 42) | tee /tmp/m7-nopipefail-test.log' >/dev/null 2>&1
 ec3=$?
 set -e
-echo "INFO  m7-exit-propagation: 无 pipefail 时管道退出码=$ec3（期望 0/吞码，对比项）"
+echo "INFO  m7-exit-propagation: 无 pipefail 时管道退出码=${ec3}（期望 0/吞码，对比项）"
 
 if [ "$fails" -gt 0 ]; then
   echo "FAIL  m7-quality-gate-exit-propagation: $fails 项失败"
