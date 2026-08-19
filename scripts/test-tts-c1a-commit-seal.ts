@@ -58,9 +58,10 @@ async function claimHandleFor(rev: RevCtx, requestId: string) {
 }
 
 /** 运行 executor + 攻击 hook；断言 job 不得 succeeded。 */
-async function expectSealReject(rev: RevCtx, requestId: string, attack: (finalAbs: string) => void): Promise<void> {
+async function expectSealReject(rev: RevCtx, requestId: string, attack: (finalAbs: string) => void): Promise<unknown> {
   const h = await claimHandleFor(rev, requestId);
   let attacked = false;
+  let caught: unknown = null;
   await runMaterializationJob(
     h,
     {log: () => undefined},
@@ -70,11 +71,14 @@ async function expectSealReject(rev: RevCtx, requestId: string, attack: (finalAb
         attacked = true;
       },
     },
-  ).catch(() => undefined);
+  ).catch((error) => {
+    caught = error;
+  });
   ok(attacked, `${requestId} hook 已执行`, attacked);
   const job = getMaterializationJob(h.jobId);
   ok(job?.status !== 'succeeded', `${requestId} 攻击后 job 不得 succeeded`, job?.status);
   ok(getProjection(fx.profileId, rev.revisionId) === undefined, `${requestId} projection=0`, undefined);
+  return caught;
 }
 
 (async () => {
@@ -99,10 +103,17 @@ async function expectSealReject(rev: RevCtx, requestId: string, attack: (finalAb
 
   // ── SEAL-03：仅 mtime/ctime 漂移（touch）──
   const rev3 = await freshRevision(2130);
-  await expectSealReject(rev3, 'seal-3', (finalAbs) => {
+  const seal3Error = await expectSealReject(rev3, 'seal-3', (finalAbs) => {
     const now = new Date(Date.now() + 5000);
     fs.utimesSync(finalAbs, now, now); // 只改时间戳（内容不变）
   });
+  ok(
+    seal3Error instanceof MaterializationError &&
+      seal3Error.code === 'REQUEST_STATE_INCONSISTENT' &&
+      seal3Error.message.includes('SEAL_MISMATCH'),
+    'SEAL-03b evidence 建立后 timestamp mutation → frozen SEAL_MISMATCH',
+    seal3Error,
+  );
 
   // ── SEAL-04：rename 替换为新 inode ──
   const rev4 = await freshRevision(2140);
@@ -199,6 +210,78 @@ async function expectSealReject(rev: RevCtx, requestId: string, attack: (finalAb
   );
   }
   await legitHeld6b.close();
+
+  // ── SEAL-07a：acquisition/durability 内 timestamp 更新纳入 post-acquisition snapshot ──
+  const rev7a = await freshRevision(2165);
+  const h7a = await claimHandleFor(rev7a, 'seal-7a');
+  const f7a = destinationAbsolutePath(`${fx.profileId}/${rev7a.revisionId}/reference.wav`);
+  fs.mkdirSync(path.dirname(f7a), {recursive: true});
+  fs.copyFileSync(canonicalOf(rev7a), f7a);
+  const initial7a = fs.statSync(f7a, {bigint: true});
+  let fsyncHookRan7a = false;
+  const held7a = await openHeldMaterializedFileEvidence(
+    {
+      relativePath: `${fx.profileId}/${rev7a.revisionId}/reference.wav`,
+      voiceProfileId: fx.profileId,
+      voiceProfileRevisionId: rev7a.revisionId,
+      expectedSha256: rev7a.sha,
+      expectedCodec: 'pcm_s16le',
+      expectedSampleRate: 48000,
+      expectedChannels: 1,
+      minDurationMs: 1,
+      adapterCompatibilityKey: 'indextts2-adapter-registry@1',
+    },
+    'durabilize',
+    {
+      fsyncFile: async (fh) => {
+        const fixed = new Date('2000-01-01T00:00:00.000Z');
+        await fh.utimes(fixed, fixed);
+        await fh.sync();
+        fsyncHookRan7a = true;
+      },
+    },
+  );
+  const postAcquisition7a = await held7a.fileFd.stat({bigint: true});
+  ok(fsyncHookRan7a, 'SEAL-07a acquisition fsync hook 已执行');
+  ok(
+    held7a.evidence.mtimeNs !== initial7a.mtimeNs &&
+      held7a.evidence.mtimeNs === postAcquisition7a.mtimeNs &&
+      held7a.evidence.ctimeNs === postAcquisition7a.ctimeNs,
+    'SEAL-07a evidence 使用 durability 完成后的 mtime/ctime snapshot',
+    {
+      initialMtimeNs: initial7a.mtimeNs.toString(),
+      evidenceMtimeNs: held7a.evidence.mtimeNs.toString(),
+      currentMtimeNs: postAcquisition7a.mtimeNs.toString(),
+      evidenceCtimeNs: held7a.evidence.ctimeNs.toString(),
+      currentCtimeNs: postAcquisition7a.ctimeNs.toString(),
+    },
+  );
+  const asgSnaps7a = [];
+  for (const r of listActiveRequestRows(h7a.jobId)) {
+    const asgRow = getProjectVoiceAssignment(r.project_id, r.assignment_artifact_id);
+    if (asgRow) asgSnaps7a.push({artifactId: r.assignment_artifact_id, contentHash: sha256Text(asgRow.artifact.content_json)});
+  }
+  let finalize7aError: unknown = null;
+  try {
+    workerFinalizeMaterialization({
+      handle: h7a,
+      held: held7a,
+      revisionEvidence: {
+        voiceProfileId: fx.profileId,
+        voiceProfileRevisionId: rev7a.revisionId,
+        canonicalAudioSha256: rev7a.sha,
+        adapterCompatibilityKey: 'indextts2-adapter-registry@1',
+        provider: 'indextts2',
+        fileSize: fs.statSync(canonicalOf(rev7a)).size,
+      },
+      asgSnapshots: asgSnaps7a,
+    });
+  } catch (error) {
+    finalize7aError = error;
+  }
+  ok(finalize7aError === null, 'SEAL-07a acquisition 内 timestamp 更新后 commit PASS', finalize7aError);
+  ok(getMaterializationJob(h7a.jobId)?.status === 'succeeded', 'SEAL-07a job succeeded');
+  await held7a.close();
 
   // ── SEAL-07：合法 held evidence → succeeded；commit 后再 verify usable ──
   const rev7 = await freshRevision(2170);

@@ -483,8 +483,8 @@ export async function openHeldMaterializedFileEvidence(
       if (code === 'ELOOP' || code === 'ENOTDIR') throw new MaterializedFileError('CONTAINMENT', `parent 非目录/symlink: ${code}`);
       throw new MaterializedFileError('IO_ERROR', `parent open 失败: ${code ?? String(err)}`);
     }
-    const st = await fh.stat({bigint: true});
-    if (!st.isFile()) throw new MaterializedFileError('NOT_REGULAR', 'final 非 regular file');
+    const initialStat = await fh.stat({bigint: true});
+    if (!initialStat.isFile()) throw new MaterializedFileError('NOT_REGULAR', 'final 非 regular file');
     const parentStat = await dirFh.stat({bigint: true});
     if (!parentStat.isDirectory()) throw new MaterializedFileError('CONTAINMENT', 'parent fd 非 directory');
     let pathStat;
@@ -494,7 +494,7 @@ export async function openHeldMaterializedFileEvidence(
       throw new MaterializedFileError('INODE_CHANGED', `final path 不可 stat: ${(err as NodeJS.ErrnoException)?.code ?? '?'}`);
     }
     if (pathStat.isSymbolicLink()) throw new MaterializedFileError('SYMLINK', 'final path 现在是 symlink');
-    if (pathStat.dev !== Number(st.dev) || pathStat.ino !== Number(st.ino)) {
+    if (pathStat.dev !== Number(initialStat.dev) || pathStat.ino !== Number(initialStat.ino)) {
       throw new MaterializedFileError('INODE_CHANGED', 'final path 与 opened fd 的 dev/inode 不一致（被替换）');
     }
     let parentPathStat;
@@ -528,8 +528,8 @@ export async function openHeldMaterializedFileEvidence(
     if (wav.durationMs < minDur) {
       throw new MaterializedFileError('WAV_CONTRACT', `durationMs=${wav.durationMs}`);
     }
-    if (expectation.expectedSize !== undefined && st.size !== BigInt(expectation.expectedSize)) {
-      throw new MaterializedFileError('SIZE_MISMATCH', `size=${st.size} expected=${expectation.expectedSize}`);
+    if (expectation.expectedSize !== undefined && initialStat.size !== BigInt(expectation.expectedSize)) {
+      throw new MaterializedFileError('SIZE_MISMATCH', `size=${initialStat.size} expected=${expectation.expectedSize}`);
     }
     let durabilityEstablished = false;
     if (mode === 'durabilize') {
@@ -549,21 +549,28 @@ export async function openHeldMaterializedFileEvidence(
         throw new MaterializedFileError('FSYNC_FAILED', `durability fsync 失败: ${(err as NodeJS.ErrnoException)?.code ?? String(err)}`);
       }
     }
+    const postAcquisitionStat = await fh.stat({bigint: true});
+    if (postAcquisitionStat.dev !== initialStat.dev || postAcquisitionStat.ino !== initialStat.ino) {
+      throw new MaterializedFileError('INODE_CHANGED', 'held fd dev/inode 在 acquisition 内漂移');
+    }
+    if (postAcquisitionStat.size !== initialStat.size) {
+      throw new MaterializedFileError('SIZE_MISMATCH', `held fd size 在 acquisition 内漂移（${initialStat.size} → ${postAcquisitionStat.size}）`);
+    }
     const evidence: MaterializedFileEvidence = {
       voiceProfileId: expectation.voiceProfileId,
       voiceProfileRevisionId: expectation.voiceProfileRevisionId,
       relativePath: expectation.relativePath,
       absolutePathInternal: finalAbs,
       sha256: sha,
-      size: Number(st.size),
+      size: Number(postAcquisitionStat.size),
       codec: wav.codec,
       sampleRate: wav.sampleRate,
       channels: wav.channels,
       durationMs: wav.durationMs,
-      device: st.dev,
-      inode: st.ino,
-      mtimeNs: st.mtimeNs,
-      ctimeNs: st.ctimeNs,
+      device: postAcquisitionStat.dev,
+      inode: postAcquisitionStat.ino,
+      mtimeNs: postAcquisitionStat.mtimeNs,
+      ctimeNs: postAcquisitionStat.ctimeNs,
       parentRealpath: realParent,
       parentDev: parentStat.dev,
       parentIno: parentStat.ino,
