@@ -1,0 +1,330 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {getDataDir, getDb} from '../lib/db';
+import {
+  enqueueFinalRender,
+  checkFinalRenderReadiness,
+} from '../lib/final-render/bridge';
+import {
+  FINAL_RENDER_ATTEMPT_ARTIFACT_KIND,
+  finalRenderAttemptSchema,
+} from '../lib/final-render/schema';
+import {enqueueNarrationAudioJobs, getCurrentNarrationAudioArtifact, getNarrationAudioOverview, tryFinalizeNarrationAudio} from '../lib/narration/audio';
+import {getCurrentNarrationPlan} from '../lib/narration/plan';
+import {getCurrentSubtitleTiming, checkSubtitleTimingReadiness, buildSubtitleTiming} from '../lib/subtitles/timing';
+import {getCurrentTimingReconciliation, checkTimingReconciliationReadiness, buildTimingReconciliation} from '../lib/reconciliation/timing';
+import {getStage, listStages} from '../lib/workflow/stages';
+import {getVersion} from '../lib/workflow/versions';
+import {getRenderArtifact, probeRenderOutput, resolveOutputAbs, sha256File} from '../lib/render/artifact';
+import {probeAudio} from '../lib/tts-c/audio-probe';
+import {getTtsJob, type TtsJobRow} from '../lib/tts-jobs';
+import type {RenderJobRow} from '../lib/jobs';
+
+type Identity = {id: string; version: number};
+type ParsedArgs = {command: string; values: Map<string, string>; flags: Set<string>};
+
+class CliError extends Error {
+  constructor(public readonly code: string, message: string) {
+    super(message);
+    this.name = 'CliError';
+  }
+}
+
+function parseIdentity(raw: string | undefined, label: string): Identity {
+  const match = raw?.match(/^([^@]+)@([1-9]\d*)$/);
+  if (!match) throw new CliError('MALFORMED_IDENTITY', `${label} 必须是 <id>@<version>`);
+  return {id: match[1]!, version: Number(match[2])};
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
+  const command = argv[0];
+  if (!command || !['inspect', 'tts', 'subtitles', 'reconcile', 'render'].includes(command)) {
+    throw new CliError('INVALID_COMMAND', '用法: zhiying <inspect|tts|subtitles|reconcile|render> ...');
+  }
+  const values = new Map<string, string>();
+  const flags = new Set<string>();
+  for (let i = 1; i < argv.length; i++) {
+    const token = argv[i]!;
+    if (!token.startsWith('--')) throw new CliError('INVALID_ARGUMENT', `不支持的位置参数: ${token}`);
+    if (token === '--wait' || token === '--media') {
+      flags.add(token.slice(2));
+      continue;
+    }
+    const key = token.slice(2);
+    const value = argv[++i];
+    if (!value || value.startsWith('--')) throw new CliError('MISSING_VALUE', `${token} 缺少值`);
+    values.set(key, value);
+  }
+  const allowedValues: Record<string, string[]> = {
+    inspect: ['project', 'artifact', 'job'],
+    tts: ['project', 'plan', 'timeout-seconds'],
+    subtitles: ['project', 'audio'],
+    reconcile: ['project', 'scenes', 'audio', 'subtitles'],
+    render: ['project', 'scenes', 'audio', 'subtitles', 'reconciliation', 'timeout-seconds'],
+  };
+  const allowedFlags: Record<string, string[]> = {
+    inspect: ['media'], tts: ['wait'], subtitles: [], reconcile: [], render: ['wait'],
+  };
+  for (const key of values.keys()) {
+    if (!allowedValues[command].includes(key)) throw new CliError('INVALID_ARGUMENT', `不支持 --${key}（command=${command}）`);
+  }
+  for (const key of flags) {
+    if (!allowedFlags[command].includes(key)) throw new CliError('INVALID_ARGUMENT', `不支持 --${key}（command=${command}）`);
+  }
+  return {command, values, flags};
+}
+
+function required(args: ParsedArgs, key: string): string {
+  const value = args.values.get(key);
+  if (!value) throw new CliError('MISSING_ARGUMENT', `缺少 --${key}`);
+  return value;
+}
+
+function timeoutMs(args: ParsedArgs): number {
+  const raw = args.values.get('timeout-seconds');
+  if (!raw) return 300_000;
+  const seconds = Number(raw);
+  if (!Number.isInteger(seconds) || seconds <= 0) {
+    throw new CliError('INVALID_ARGUMENT', '--timeout-seconds 必须是正整数');
+  }
+  return seconds * 1000;
+}
+
+function projectRow(projectId: string): Record<string, unknown> {
+  const row = getDb().prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as Record<string, unknown> | undefined;
+  if (!row) throw new CliError('PROJECT_NOT_FOUND', `项目不存在: ${projectId}`);
+  return row;
+}
+
+function artifactRow(projectId: string, identity: Identity): Record<string, unknown> {
+  const row = getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(identity.id) as Record<string, unknown> | undefined;
+  if (!row) throw new CliError('ARTIFACT_NOT_FOUND', `artifact 不存在: ${identity.id}`);
+  if (row.project_id !== projectId) throw new CliError('PROJECT_MISMATCH', `artifact 不属于 project: ${identity.id}`);
+  if (row.version !== identity.version) {
+    throw new CliError('VERSION_MISMATCH', `artifact version mismatch: expected ${identity.id}@${identity.version}, current @${row.version}`);
+  }
+  return row;
+}
+
+function parsedJson(value: unknown): unknown {
+  if (typeof value !== 'string') return null;
+  try { return JSON.parse(value); } catch { return null; }
+}
+
+async function mediaFacts(outputPath: string, kind: 'video' | 'audio', expectedSha?: string, expectedSize?: number): Promise<Record<string, unknown>> {
+  const absPath = path.isAbsolute(outputPath) ? outputPath : path.join(getDataDir(), outputPath);
+  if (!fs.existsSync(absPath) || !fs.statSync(absPath).isFile()) {
+    throw new CliError('MEDIA_MISSING', `media 文件不存在: ${outputPath}`);
+  }
+  const size = fs.statSync(absPath).size;
+  if (expectedSize !== undefined && size !== expectedSize) throw new CliError('MEDIA_MANIFEST_MISMATCH', 'media size 与 manifest 不一致');
+  const sha256 = await sha256File(absPath);
+  if (expectedSha && sha256 !== expectedSha) throw new CliError('MEDIA_MANIFEST_MISMATCH', 'media SHA256 与 manifest 不一致');
+  let probe: unknown = null;
+  try { probe = kind === 'video' ? await probeRenderOutput(absPath) : probeAudio(absPath, 'wav'); } catch (error) {
+    throw new CliError('MEDIA_PROBE_FAILED', error instanceof Error ? error.message : String(error));
+  }
+  return {path: outputPath, absolutePath: absPath, sha256, size, probe};
+}
+
+async function inspectJob(projectId: string, jobId: string, includeMedia: boolean): Promise<Record<string, unknown>> {
+  const db = getDb();
+  const render = db.prepare('SELECT * FROM render_jobs WHERE id = ?').get(jobId) as RenderJobRow | undefined;
+  if (render) {
+    if (render.project_id !== projectId) throw new CliError('PROJECT_MISMATCH', `job 不属于 project: ${jobId}`);
+    const manifest = render.status === 'succeeded' ? getRenderArtifact(render.id) : undefined;
+    let media: Record<string, unknown> | null = null;
+    if (render.status === 'succeeded') {
+      if (!manifest) throw new CliError('ARTIFACT_UNVALIDATED', 'exact render job 缺少 manifest');
+      if (manifest.output_path !== render.output_path) throw new CliError('ARTIFACT_PATH_MISMATCH', 'manifest 与 job output_path 不一致');
+      media = await mediaFacts(manifest.output_path, 'video', manifest.output_sha256, manifest.output_size);
+    } else if (includeMedia && render.output_path) {
+      media = await mediaFacts(render.output_path, 'video');
+    }
+    return {kind: 'render', row: render, manifest: manifest ?? null, media};
+  }
+  const tts = getTtsJob(jobId);
+  if (!tts) throw new CliError('JOB_NOT_FOUND', `job 不存在: ${jobId}`);
+  if (tts.project_id !== projectId) throw new CliError('PROJECT_MISMATCH', `job 不属于 project: ${jobId}`);
+  let media: Record<string, unknown> | null = null;
+  if (tts.status === 'succeeded') {
+    if (!tts.output_path || tts.audio_sha256 === null) throw new CliError('ARTIFACT_UNVALIDATED', 'exact TTS job 缺少 output/hash');
+    media = await mediaFacts(tts.output_path, 'audio', tts.audio_sha256);
+  } else if (includeMedia && tts.output_path) {
+    media = await mediaFacts(tts.output_path, 'audio');
+  }
+  return {kind: 'tts', row: tts, media};
+}
+
+function currentSources(projectId: string): Record<string, unknown> {
+  const scenesStage = getStage(projectId, 'scenes');
+  const scenes = scenesStage?.status === 'locked' && scenesStage.locked_version !== null
+    ? getVersion(projectId, 'scenes', scenesStage.locked_version)
+    : null;
+  const plan = getCurrentNarrationPlan(projectId);
+  const audio = getCurrentNarrationAudioArtifact(projectId);
+  const subtitle = getCurrentSubtitleTiming(projectId);
+  const reconciliation = getCurrentTimingReconciliation(projectId);
+  return {
+    scenes: scenes ? {id: scenes.id, version: scenes.version, stage: scenes.stage} : null,
+    narrationPlan: plan ? {id: plan.artifact.id, version: plan.artifact.version} : null,
+    audio: audio ? {id: audio.artifact.id, version: audio.artifact.version, manifest: audio.manifest} : null,
+    subtitles: subtitle ? {id: subtitle.artifact.id, version: subtitle.artifact.version, source: subtitle.timing.source} : null,
+    reconciliation: reconciliation ? {id: reconciliation.artifact.id, version: reconciliation.artifact.version, source: reconciliation.reconciliation.source} : null,
+  };
+}
+
+async function inspect(args: ParsedArgs): Promise<Record<string, unknown>> {
+  const projectId = required(args, 'project');
+  const project = projectRow(projectId);
+  const result: Record<string, unknown> = {
+    ok: true, command: 'inspect', project: {id: project.id, title: project.title, pipelineVersion: project.pipeline_version ?? null, row: project},
+    stages: listStages(projectId), currentSources: currentSources(projectId), readiness: {
+      subtitles: checkSubtitleTimingReadiness(projectId), reconciliation: checkTimingReconciliationReadiness(projectId), render: checkFinalRenderReadiness(projectId),
+    },
+  };
+  const artifactArg = args.values.get('artifact');
+  if (artifactArg) {
+    const row = artifactRow(projectId, parseIdentity(artifactArg, '--artifact'));
+    result.artifact = {...row, content: parsedJson(row.content_json)};
+  }
+  const jobId = args.values.get('job');
+  if (jobId) result.job = await inspectJob(projectId, jobId, args.flags.has('media'));
+  return result;
+}
+
+async function waitFor<T>(timeout: number, read: () => Promise<T | null>): Promise<T> {
+  const deadline = Date.now() + timeout;
+  while (Date.now() <= deadline) {
+    const result = await read();
+    if (result !== null) return result;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new CliError('TIMEOUT', `等待超过 ${Math.ceil(timeout / 1000)} 秒`);
+}
+
+function ttsJobs(projectId: string, plan: Identity): TtsJobRow[] {
+  return getDb().prepare('SELECT * FROM tts_jobs WHERE project_id = ? AND narration_plan_artifact_id = ? ORDER BY queued_at').all(projectId, plan.id) as TtsJobRow[];
+}
+
+function assertCurrentPlan(projectId: string, expected: Identity): void {
+  const current = getCurrentNarrationPlan(projectId);
+  if (
+    !current ||
+    current.artifact.id !== expected.id ||
+    current.artifact.version !== expected.version
+  ) {
+    throw new CliError(
+      'NARRATION_PLAN_SOURCE_MISMATCH',
+      `Narration Plan source mismatch: expected ${expected.id}@${expected.version}, ` +
+        `current ${current ? `${current.artifact.id}@${current.artifact.version}` : 'missing'}`,
+    );
+  }
+}
+
+async function tts(args: ParsedArgs): Promise<Record<string, unknown>> {
+  const projectId = required(args, 'project');
+  const plan = parseIdentity(required(args, 'plan'), '--plan');
+  projectRow(projectId);
+  artifactRow(projectId, plan);
+  const enqueued = enqueueNarrationAudioJobs(projectId, {expectedPlan: {artifactId: plan.id, version: plan.version}});
+  const read = async (): Promise<Record<string, unknown> | null> => {
+    assertCurrentPlan(projectId, plan);
+    const overview = getNarrationAudioOverview(projectId);
+    assertCurrentPlan(projectId, plan);
+    const jobs = ttsJobs(projectId, plan);
+    const failed = jobs.find((job) => job.status === 'failed' || job.status === 'cancelled');
+    if (failed) throw new CliError('TTS_TERMINAL_FAILURE', `TTS job ${failed.id} terminal status=${failed.status}: ${failed.error_message ?? ''}`);
+    if (!args.flags.has('wait')) return {status: 'queued', jobs, overview};
+    tryFinalizeNarrationAudio(projectId, {expectedPlan: {artifactId: plan.id, version: plan.version}});
+    const audio = getCurrentNarrationAudioArtifact(projectId);
+    if (audio) {
+      if (
+        audio.manifest.source.narrationPlanArtifactId !== plan.id ||
+        audio.manifest.source.narrationPlanArtifactVersion !== plan.version
+      ) {
+        throw new CliError('NARRATION_PLAN_SOURCE_MISMATCH', 'Narration Audio source 与 expected plan 不一致');
+      }
+      assertCurrentPlan(projectId, plan);
+      return {status: 'ready', jobs, overview: getNarrationAudioOverview(projectId), audio: {artifact: audio.artifact, manifest: audio.manifest}};
+    }
+    assertCurrentPlan(projectId, plan);
+    return null;
+  };
+  return {ok: true, command: 'tts', plan, enqueue: enqueued, result: await waitFor(args.flags.has('wait') ? timeoutMs(args) : 1, read)};
+}
+
+async function subtitles(args: ParsedArgs): Promise<Record<string, unknown>> {
+  const projectId = required(args, 'project');
+  const audio = parseIdentity(required(args, 'audio'), '--audio');
+  projectRow(projectId); artifactRow(projectId, audio);
+  const result = buildSubtitleTiming(projectId, {expectedAudio: {artifactId: audio.id, version: audio.version}});
+  return {ok: true, command: 'subtitles', source: audio, artifact: result.artifact, reused: result.reused, timing: result.timing, readiness: checkSubtitleTimingReadiness(projectId)};
+}
+
+async function reconcile(args: ParsedArgs): Promise<Record<string, unknown>> {
+  const projectId = required(args, 'project');
+  const scenes = parseIdentity(required(args, 'scenes'), '--scenes');
+  const audio = parseIdentity(required(args, 'audio'), '--audio');
+  const subtitle = parseIdentity(required(args, 'subtitles'), '--subtitles');
+  projectRow(projectId); artifactRow(projectId, audio); artifactRow(projectId, subtitle);
+  const result = buildTimingReconciliation(projectId, {
+    expectedScenes: {versionId: scenes.id, version: scenes.version}, expectedAudio: {artifactId: audio.id, version: audio.version}, expectedSubtitle: {artifactId: subtitle.id, version: subtitle.version},
+  });
+  return {ok: true, command: 'reconcile', sources: {scenes, audio, subtitles: subtitle}, artifact: result.artifact, reused: result.reused, reconciliation: result.reconciliation, readiness: checkTimingReconciliationReadiness(projectId)};
+}
+
+function latestAttempt(projectId: string, jobId: string): Record<string, unknown> {
+  const rows = getDb().prepare('SELECT * FROM artifacts WHERE project_id = ? AND kind = ? ORDER BY version DESC').all(projectId, FINAL_RENDER_ATTEMPT_ARTIFACT_KIND) as Array<Record<string, unknown>>;
+  for (const row of rows) {
+    const parsed = finalRenderAttemptSchema.safeParse(parsedJson(row.content_json));
+    if (parsed.success && parsed.data.jobId === jobId) return {id: row.id, version: row.version, content: parsed.data};
+  }
+  throw new CliError('ATTEMPT_NOT_FOUND', `exact render job 缺少 final_render_attempt: ${jobId}`);
+}
+
+async function render(args: ParsedArgs): Promise<Record<string, unknown>> {
+  const projectId = required(args, 'project');
+  const scenes = parseIdentity(required(args, 'scenes'), '--scenes');
+  const audio = parseIdentity(required(args, 'audio'), '--audio');
+  const subtitle = parseIdentity(required(args, 'subtitles'), '--subtitles');
+  const reconciliation = parseIdentity(required(args, 'reconciliation'), '--reconciliation');
+  projectRow(projectId); artifactRow(projectId, audio); artifactRow(projectId, subtitle); artifactRow(projectId, reconciliation);
+  const result = enqueueFinalRender(projectId, {
+    expectedScenes: {versionId: scenes.id, version: scenes.version}, expectedAudio: {artifactId: audio.id, version: audio.version}, expectedSubtitle: {artifactId: subtitle.id, version: subtitle.version}, expectedReconciliation: {artifactId: reconciliation.id, version: reconciliation.version},
+  });
+  const read = async (): Promise<Record<string, unknown> | null> => {
+    const job = getDb().prepare('SELECT * FROM render_jobs WHERE id = ?').get(result.job.id) as RenderJobRow | undefined;
+    if (!job) throw new CliError('JOB_NOT_FOUND', `render job 不存在: ${result.job.id}`);
+    if (job.status === 'failed' || job.status === 'cancelled') throw new CliError('RENDER_TERMINAL_FAILURE', `render job ${job.id} terminal status=${job.status}: ${job.error_message ?? ''}`);
+    if (!args.flags.has('wait')) return {job, attempt: latestAttempt(projectId, job.id)};
+    if (job.status !== 'succeeded') return null;
+    const manifest = getRenderArtifact(job.id);
+    if (!manifest || !job.output_path) throw new CliError('ARTIFACT_UNVALIDATED', 'exact render job 缺少 manifest/output');
+    if (manifest.output_path !== job.output_path) throw new CliError('ARTIFACT_PATH_MISMATCH', 'manifest 与 job output_path 不一致');
+    const media = await mediaFacts(manifest.output_path, 'video', manifest.output_sha256, manifest.output_size);
+    return {job, attempt: latestAttempt(projectId, job.id), manifest, media};
+  };
+  return {ok: true, command: 'render', sources: {scenes, audio, subtitles: subtitle, reconciliation}, sourceArtifact: result.sourceArtifact, sourceReused: result.sourceReused, result: await waitFor(args.flags.has('wait') ? timeoutMs(args) : 1, read)};
+}
+
+async function main(): Promise<void> {
+  let command = 'unknown';
+  try {
+    const args = parseArgs(process.argv.slice(2)); command = args.command;
+    const result = args.command === 'inspect' ? await inspect(args)
+      : args.command === 'tts' ? await tts(args)
+      : args.command === 'subtitles' ? await subtitles(args)
+      : args.command === 'reconcile' ? await reconcile(args)
+      : await render(args);
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+  } catch (error) {
+    const code = error instanceof CliError ? error.code : (error as {code?: string})?.code ?? 'ERROR';
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`${message}\n`);
+    process.stdout.write(`${JSON.stringify({ok: false, command, error: {code, message}})}\n`);
+    process.exitCode = 1;
+  }
+}
+
+void main();

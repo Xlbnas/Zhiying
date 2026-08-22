@@ -29,6 +29,7 @@ export type SubtitleTimingErrorCode =
   | 'NARRATION_PLAN_NOT_CURRENT'
   | 'NARRATION_PLAN_INVALID'
   | 'NARRATION_AUDIO_NOT_READY'
+  | 'AUDIO_SOURCE_MISMATCH'
   | 'NARRATION_AUDIO_INVALID'
   | 'SUBTITLE_TIMING_INVALID'
   | 'AUDIO_TIMELINE_MISMATCH';
@@ -176,7 +177,10 @@ export function checkSubtitleTimingReadiness(projectId: string): SubtitleTimingR
  * project exists → 非 legacy → current audio manifest（含 plan current 防线）→
  * 幂等复用检查 → deterministic compile → INSERT artifact → commit。
  */
-export function buildSubtitleTiming(projectId: string): {
+export function buildSubtitleTiming(
+  projectId: string,
+  options?: {expectedAudio?: {artifactId: string; version: number}},
+): {
   timing: SubtitleTiming;
   artifact: {id: string; version: number};
   reused: boolean;
@@ -209,6 +213,17 @@ export function buildSubtitleTiming(projectId: string): {
       throw new SubtitleTimingError(
         'NARRATION_AUDIO_NOT_READY',
         'Narration Audio Manifest 不是 current（missing / stale / master 缺失）——请先生成音频',
+      );
+    }
+    if (
+      options?.expectedAudio &&
+      (audio.artifact.id !== options.expectedAudio.artifactId ||
+        audio.artifact.version !== options.expectedAudio.version)
+    ) {
+      throw new SubtitleTimingError(
+        'AUDIO_SOURCE_MISMATCH',
+        `Narration Audio source mismatch: expected ${options.expectedAudio.artifactId}@${options.expectedAudio.version}, ` +
+          `current ${audio.artifact.id}@${audio.artifact.version}`,
       );
     }
     const currentPlan = getCurrentNarrationPlan(projectId);

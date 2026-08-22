@@ -8,6 +8,8 @@
     "build": "next build",
     "start": "next start",
     "worker": "tsx src/worker/index.ts",
+    "zhiying": "tsx src/cli/zhiying.ts",
+    "test:cli": "tsx scripts/test-cli-v1.ts",
     "typecheck": "tsc --noEmit",
     "verify:roundtrip": "node scripts/verify-roundtrip.mjs",
     "import:sample": "node scripts/import-sample.mjs"

@@ -116,6 +116,7 @@ export type NarrationAudioErrorCode =
   | 'PROJECT_NOT_FOUND'
   | 'LEGACY_PROJECT'
   | 'NARRATION_PLAN_NOT_CURRENT'
+  | 'NARRATION_PLAN_SOURCE_MISMATCH'
   | 'NARRATION_PLAN_CONTAMINATED'
   | 'PROVIDER_SNAPSHOT_MISMATCH'
   | 'MASTER_PATH_CONFLICT';
@@ -146,7 +147,10 @@ export interface EnqueueAudioResult {
  */
 export function enqueueNarrationAudioJobs(
   projectId: string,
-  options?: {voiceProfile?: {id: string; revision: string}},
+  options?: {
+    voiceProfile?: {id: string; revision: string};
+    expectedPlan?: {artifactId: string; version: number};
+  },
 ): EnqueueAudioResult {
   const db = getDb();
   const voice = options?.voiceProfile ?? DEFAULT_VOICE_PROFILE;
@@ -169,6 +173,17 @@ export function enqueueNarrationAudioJobs(
       );
     }
     const {plan, artifact} = current;
+    if (
+      options?.expectedPlan &&
+      (artifact.id !== options.expectedPlan.artifactId ||
+        artifact.version !== options.expectedPlan.version)
+    ) {
+      throw new NarrationAudioError(
+        'NARRATION_PLAN_SOURCE_MISMATCH',
+        `Narration Plan source mismatch: expected ${options.expectedPlan.artifactId}@${options.expectedPlan.version}, ` +
+          `current ${artifact.id}@${artifact.version}`,
+      );
+    }
 
     // Gate B（M7.2.1 P0 hotfix）：任何 TTS job 创建前重跑统一 leakage validator。
     // 旧污染 plan（如 script-v2@2.0 DSL 被 M6 compiler 误编产生的 artifact）：
@@ -508,6 +523,7 @@ function wrapPcmAsWav(pcm: Buffer): Buffer {
 export interface FinalizeNarrationAudioDeps {
   renameImpl?: (oldPath: string, newPath: string) => void;
   insertArtifactImpl?: (contentJson: string) => void;
+  expectedPlan?: {artifactId: string; version: number};
 }
 
 /**
@@ -545,8 +561,26 @@ export function tryFinalizeNarrationAudio(
       );
     });
   const current = getCurrentNarrationPlan(projectId);
-  if (!current) return null;
+  if (!current) {
+    if (deps.expectedPlan) {
+      throw new NarrationAudioError(
+        'NARRATION_PLAN_SOURCE_MISMATCH',
+        `Narration Plan source mismatch: expected ${deps.expectedPlan.artifactId}@${deps.expectedPlan.version}, current missing`,
+      );
+    }
+    return null;
+  }
   const {plan, artifact} = current;
+  if (
+    deps.expectedPlan &&
+    (artifact.id !== deps.expectedPlan.artifactId || artifact.version !== deps.expectedPlan.version)
+  ) {
+    throw new NarrationAudioError(
+      'NARRATION_PLAN_SOURCE_MISMATCH',
+      `Narration Plan source mismatch: expected ${deps.expectedPlan.artifactId}@${deps.expectedPlan.version}, ` +
+        `current ${artifact.id}@${artifact.version}`,
+    );
+  }
   const provider = getTtsProvider();
   const voice = DEFAULT_VOICE_PROFILE;
 
@@ -714,7 +748,23 @@ export function tryFinalizeNarrationAudio(
       | {outcome: 'stale'};
     const tx = db.transaction((): TxOutcome => {
       const still = getCurrentNarrationPlan(projectId);
-      if (!still || still.artifact.id !== artifact.id) return {outcome: 'stale'};
+      if (
+        deps.expectedPlan &&
+        (!still ||
+          still.artifact.id !== deps.expectedPlan.artifactId ||
+          still.artifact.version !== deps.expectedPlan.version)
+      ) {
+        throw new NarrationAudioError(
+          'NARRATION_PLAN_SOURCE_MISMATCH',
+          `Narration Plan source mismatch: expected ${deps.expectedPlan.artifactId}@${deps.expectedPlan.version}, ` +
+            `current ${still ? `${still.artifact.id}@${still.artifact.version}` : 'missing'}`,
+        );
+      }
+      if (
+        !still ||
+        still.artifact.id !== artifact.id ||
+        still.artifact.version !== artifact.version
+      ) return {outcome: 'stale'};
       const won = readCurrentManifest(projectId);
       if (won) return {outcome: 'reuse', manifest: won};
       // §八：final 路径已存在时的 orphan/冲突裁决

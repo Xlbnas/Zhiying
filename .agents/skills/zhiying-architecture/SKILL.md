@@ -8,15 +8,23 @@ disableModelInvocation: false
 
 # 知影架构约束
 
-开发前首先读取项目中的：
+## 当前有效架构依据
 
-视频生成器_架构设计文档.md（位于本项目的上一级目录）
+`视频生成器_架构设计文档.md` v0.2.1 因文件不可取得、且不在当前仓库或 Git history 中，已不再作为当前架构 Source of Truth。
 
-该文件是当前架构 Source of Truth。
+迁移期间按以下优先级判断：
+
+1. 当前实际源码与 tests；
+2. 当前 Feiniu production 现场事实；
+3. `docs/skill_migration/04_CONTRACT_FREEZE.md`；
+4. `docs/skill_migration/03_ARCHITECTURE_REVIEW.md`；
+5. 其他与上述事实一致的当前项目文档。
+
+历史文档对该文件的引用只保留为历史记录，不得据此重建已不可验证的架构结论。若发生冲突，以当前源码与已验证生产事实为准。
 
 不得因为"更现代""更企业级"而自行替换已经确定的架构。
 
-当前基线（v0.2.1 冻结）：
+以下既有基线仅在与当前源码、production facts 和迁移 contract 一致时适用：
 
 - Next.js App Router（package.json 精确锁定版本 + 提交 lockfile，禁用 latest）
 - SQLite + better-sqlite3
@@ -74,12 +82,4 @@ FullCutScenes.json
 
 ## 实现前
 
-遇到架构问题：
-
-先确认现有架构文档是否已有结论。
-
-已有结论：
-遵守。
-
-不存在结论：
-提出最小变更方案，不自行扩大系统复杂度。
+遇到架构问题，先检查当前源码、tests、已验证 production facts，以及本仓库的迁移 contract/review 文档。已有事实遵守；不存在结论时提出最小变更方案，不自行扩大系统复杂度。

@@ -65,6 +65,7 @@ export type FinalRenderErrorCode =
   | 'TIMING_RECONCILIATION_NOT_READY'
   | 'VISUAL_READINESS_FAILED'
   | 'FINAL_VISUAL_INCOMPLETE'
+  | 'SOURCE_MISMATCH'
   | 'RENDER_ALREADY_ACTIVE'
   | 'FINAL_RENDER_SOURCE_INVALID';
 
@@ -470,7 +471,12 @@ export interface EnqueueFinalRenderResult {
  * sourceKey 幂等（reuse/INSERT，永不 UPDATE）→ active guard →
  * render_job + final_render_attempt → COMMIT。
  */
-export function enqueueFinalRender(projectId: string): EnqueueFinalRenderResult {
+export function enqueueFinalRender(projectId: string, options?: {
+  expectedScenes?: {versionId: string; version: number};
+  expectedAudio?: {artifactId: string; version: number};
+  expectedSubtitle?: {artifactId: string; version: number};
+  expectedReconciliation?: {artifactId: string; version: number};
+}): EnqueueFinalRenderResult {
   const db = getDb();
   const tx = db.transaction((): EnqueueFinalRenderResult => {
     const project = db
@@ -484,6 +490,26 @@ export function enqueueFinalRender(projectId: string): EnqueueFinalRenderResult 
     }
     const src = readFinalSources(projectId);
     if (src instanceof FinalRenderError) throw src;
+    const expected = options;
+    if (
+      (expected?.expectedScenes &&
+        (src.scenes.versionId !== expected.expectedScenes.versionId ||
+          src.scenes.version !== expected.expectedScenes.version)) ||
+      (expected?.expectedAudio &&
+        (src.audio.artifact.id !== expected.expectedAudio.artifactId ||
+          src.audio.artifact.version !== expected.expectedAudio.version)) ||
+      (expected?.expectedSubtitle &&
+        (src.subtitle.artifact.id !== expected.expectedSubtitle.artifactId ||
+          src.subtitle.artifact.version !== expected.expectedSubtitle.version)) ||
+      (expected?.expectedReconciliation &&
+        (src.reconciliation.artifact.id !== expected.expectedReconciliation.artifactId ||
+          src.reconciliation.artifact.version !== expected.expectedReconciliation.version))
+    ) {
+      throw new FinalRenderError(
+        'SOURCE_MISMATCH',
+        'Final Render expected source 与当前 authoritative source 不一致',
+      );
+    }
 
     // M6：Final Render 硬门禁 — 视觉素材未就绪禁止入队（M6.3.8：requirement 粒度）
     const visual = evaluateVisualReadiness(projectId, src.scenes.data.scenes, {scenesVersionId: src.scenes.versionId});

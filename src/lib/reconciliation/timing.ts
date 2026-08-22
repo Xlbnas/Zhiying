@@ -42,6 +42,7 @@ export type TimingReconciliationErrorCode =
   | 'NARRATION_PLAN_NOT_CURRENT'
   | 'NARRATION_AUDIO_NOT_READY'
   | 'SUBTITLE_TIMING_NOT_READY'
+  | 'SOURCE_MISMATCH'
   | 'RECONCILIATION_INVALID'
   | 'RECONCILIATION_IMPOSSIBLE';
 
@@ -326,7 +327,14 @@ export function checkTimingReconciliationReadiness(
  * 构建 / 复用 current Timing Reconciliation（单 BEGIN IMMEDIATE 原子）：
  * 事务内重读三 source → 幂等复用 → deterministic compile → INSERT。
  */
-export function buildTimingReconciliation(projectId: string): {
+export function buildTimingReconciliation(
+  projectId: string,
+  options?: {
+    expectedScenes?: {versionId: string; version: number};
+    expectedAudio?: {artifactId: string; version: number};
+    expectedSubtitle?: {artifactId: string; version: number};
+  },
+): {
   reconciliation: TimingReconciliation;
   artifact: {id: string; version: number};
   reused: boolean;
@@ -379,6 +387,23 @@ export function buildTimingReconciliation(projectId: string): {
       );
     }
     const src: CurrentSources = {scenes, audio, subtitle};
+    const expected = options;
+    if (
+      (expected?.expectedScenes &&
+        (scenes.versionId !== expected.expectedScenes.versionId ||
+          scenes.version !== expected.expectedScenes.version)) ||
+      (expected?.expectedAudio &&
+        (audio.artifact.id !== expected.expectedAudio.artifactId ||
+          audio.artifact.version !== expected.expectedAudio.version)) ||
+      (expected?.expectedSubtitle &&
+        (subtitle.artifact.id !== expected.expectedSubtitle.artifactId ||
+          subtitle.artifact.version !== expected.expectedSubtitle.version))
+    ) {
+      throw new TimingReconciliationError(
+        'SOURCE_MISMATCH',
+        'Timing Reconciliation expected source 与当前 authoritative source 不一致',
+      );
+    }
 
     // 幂等：全 source snapshot + compilerVersion 匹配 → reuse
     for (const row of listReconciliationArtifacts(projectId)) {

@@ -1,7 +1,7 @@
 # 知影 M1 开发契约（CONTRACT）
 
 > 本文件是 M1 并行开发的**唯一接口基准**。所有实现必须与本契约一致。
-> 架构总纲见上级目录《视频生成器_架构设计文档.md》(v0.2.1)。冲突时以架构文档为准。
+> 上级目录《视频生成器_架构设计文档.md》(v0.2.1) 因文件不可取得、且不在当前仓库或 Git history 中，自 2026-08-22 起废止其作为当前架构 Source of Truth 的地位。迁移期间以当前源码/tests、已验证 Feiniu production facts、`docs/skill_migration/04_CONTRACT_FREEZE.md` 与 `docs/skill_migration/03_ARCHITECTURE_REVIEW.md` 为准；历史引用仅作记录。
 > M1 红线：**不接 LLM / DeepSeek / TTS / Sources**，只做渲染闭环。
 
 ## 1. 目录布局（各 agent 只动自己的范围）
