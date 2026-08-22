@@ -10,6 +10,8 @@ import {
   enqueueTtsJobTx,
   getActiveTtsJob,
   getLatestSucceededTtsJob,
+  parseTtsJobPayload,
+  payloadSpokenText,
   ttsJobResultSchema,
   type TtsJobResult,
   type TtsJobRow,
@@ -19,6 +21,7 @@ import type {NarrationPlan, NarrationUnit} from './schema';
 import {detectPlanContamination, type PlanContamination} from './contamination';
 import {describeLeakage, findDirectiveLeakage} from './leakage';
 import {isSpeakableText} from './speech-text';
+import {probeAudio, sha256FileBytes} from '../tts-c/audio-probe';
 
 /**
  * Narration Audio 管线（M3-B §三十–三十二/四十四–五十四）。
@@ -478,6 +481,130 @@ export function getCurrentNarrationAudioArtifact(projectId: string): {
     artifact: {id: row.artifact.id, version: row.artifact.version},
     manifest: row.manifest,
   };
+}
+
+/**
+ * Read-only compatibility path for an already finalized M6 narration audio.
+ * This deliberately validates the immutable artifact before any enqueue gate;
+ * callers must fall back to enqueueNarrationAudioJobs when it returns null.
+ */
+export async function getExactReusableNarrationAudioArtifact(
+  projectId: string,
+  expectedPlan: {artifactId: string; version: number},
+): Promise<{
+  artifact: {id: string; version: number};
+  manifest: NarrationAudioManifest;
+} | null> {
+  const current = getCurrentNarrationPlan(projectId);
+  if (
+    !current ||
+    current.artifact.id !== expectedPlan.artifactId ||
+    current.artifact.version !== expectedPlan.version
+  ) return null;
+
+  const audio = getCurrentNarrationAudioArtifact(projectId);
+  if (
+    !audio ||
+    audio.manifest.schemaVersion !== NARRATION_AUDIO_SCHEMA_VERSION ||
+    audio.manifest.source.narrationPlanArtifactId !== expectedPlan.artifactId ||
+    audio.manifest.source.narrationPlanArtifactVersion !== expectedPlan.version
+  ) return null;
+
+  const dataDir = path.resolve(getDataDir());
+  const masterPath = path.resolve(dataDir, audio.manifest.master.filePath);
+  if (!masterPath.startsWith(dataDir + path.sep)) return null;
+
+  let masterStat: fs.Stats;
+  try {
+    masterStat = fs.statSync(masterPath);
+    if (!masterStat.isFile() || masterStat.size <= 44) return null;
+    const header = Buffer.alloc(44);
+    const fd = fs.openSync(masterPath, 'r');
+    try {
+      const bytesRead = fs.readSync(fd, header, 0, header.length, 0);
+      if (
+        bytesRead !== header.length ||
+        header.toString('ascii', 0, 4) !== 'RIFF' ||
+        header.toString('ascii', 8, 12) !== 'WAVE' ||
+        header.toString('ascii', 36, 40) !== 'data' ||
+        header.readUInt32LE(40) !== masterStat.size - 44
+      ) return null;
+    } finally {
+      fs.closeSync(fd);
+    }
+    if (await sha256FileBytes(masterPath) !== audio.manifest.master.sha256) return null;
+    const probe = probeAudio(masterPath, 'wav');
+    if (
+      probe.durationMs !== audio.manifest.master.durationMs ||
+      probe.sampleRate !== audio.manifest.master.sampleRate ||
+      probe.channels !== audio.manifest.master.channels
+    ) return null;
+  } catch {
+    return null;
+  }
+
+  if (audio.manifest.units.length !== current.plan.units.length) return null;
+  const manifestUnits = new Map(audio.manifest.units.map((unit) => [unit.unitId, unit]));
+  const provider = audio.manifest.provider;
+  for (const unit of current.plan.units) {
+    const manifestUnit = manifestUnits.get(unit.id);
+    if (!manifestUnit || manifestUnit.kind !== unit.kind) return null;
+    if (unit.kind !== 'speech') continue;
+    if (!unit.text || !isSpeakableText(unit.text) || manifestUnit.kind !== 'speech') return null;
+    if (manifestUnit.text !== unit.text) return null;
+
+    const job = getDb().prepare('SELECT * FROM tts_jobs WHERE id = ?').get(manifestUnit.ttsJobId) as TtsJobRow | undefined;
+    if (
+      !job ||
+      job.project_id !== projectId ||
+      job.narration_plan_artifact_id !== expectedPlan.artifactId ||
+      job.narration_plan_version !== expectedPlan.version ||
+      job.unit_id !== unit.id ||
+      job.provider !== provider.name ||
+      job.voice_profile_id !== provider.voiceProfile.id ||
+      job.voice_profile_revision !== provider.voiceProfile.revision ||
+      job.status !== 'succeeded' ||
+      job.output_path !== manifestUnit.filePath ||
+      job.duration_ms !== manifestUnit.durationMs ||
+      job.audio_sha256 !== manifestUnit.sha256 ||
+      !job.result_json
+    ) return null;
+    const payload = parseTtsJobPayload(job.payload_json);
+    if (
+      !payload ||
+      payload.narrationPlanArtifactId !== expectedPlan.artifactId ||
+      payload.narrationPlanArtifactVersion !== expectedPlan.version ||
+      payload.unitId !== unit.id ||
+      payloadSpokenText(payload) !== unit.text
+    ) return null;
+    let resultJson: unknown;
+    try {
+      resultJson = JSON.parse(job.result_json);
+    } catch {
+      return null;
+    }
+    const result = ttsJobResultSchema.safeParse(resultJson);
+    if (
+      !result.success ||
+      result.data.provider !== provider.name ||
+      result.data.model !== provider.model ||
+      result.data.providerVersion !== provider.providerVersion ||
+      result.data.providerCommit !== provider.providerCommit ||
+      result.data.settings.voiceProfileId !== provider.voiceProfile.id ||
+      result.data.settings.voiceProfileRevision !== provider.voiceProfile.revision ||
+      result.data.settings.useRandom !== false ||
+      result.data.audio.sampleRate !== manifestUnit.sampleRate ||
+      result.data.audio.channels !== manifestUnit.channels
+    ) return null;
+  }
+
+  const stillCurrent = getCurrentNarrationPlan(projectId);
+  if (
+    !stillCurrent ||
+    stillCurrent.artifact.id !== expectedPlan.artifactId ||
+    stillCurrent.artifact.version !== expectedPlan.version
+  ) return null;
+  return audio;
 }
 
 // ---------- Master 构建（ffmpeg 统一 48k/mono/s16） ----------

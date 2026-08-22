@@ -9,7 +9,7 @@ import {
   FINAL_RENDER_ATTEMPT_ARTIFACT_KIND,
   finalRenderAttemptSchema,
 } from '../lib/final-render/schema';
-import {enqueueNarrationAudioJobs, getCurrentNarrationAudioArtifact, getNarrationAudioOverview, tryFinalizeNarrationAudio} from '../lib/narration/audio';
+import {enqueueNarrationAudioJobs, getCurrentNarrationAudioArtifact, getExactReusableNarrationAudioArtifact, getNarrationAudioOverview, tryFinalizeNarrationAudio} from '../lib/narration/audio';
 import {getCurrentNarrationPlan} from '../lib/narration/plan';
 import {getCurrentSubtitleTiming, checkSubtitleTimingReadiness, buildSubtitleTiming} from '../lib/subtitles/timing';
 import {getCurrentTimingReconciliation, checkTimingReconciliationReadiness, buildTimingReconciliation} from '../lib/reconciliation/timing';
@@ -227,6 +227,34 @@ async function tts(args: ParsedArgs): Promise<Record<string, unknown>> {
   const plan = parseIdentity(required(args, 'plan'), '--plan');
   projectRow(projectId);
   artifactRow(projectId, plan);
+  assertCurrentPlan(projectId, plan);
+  const reusableAudio = await getExactReusableNarrationAudioArtifact(projectId, {
+    artifactId: plan.id,
+    version: plan.version,
+  });
+  if (reusableAudio) {
+    assertCurrentPlan(projectId, plan);
+    const jobs = ttsJobs(projectId, plan);
+    return {
+      ok: true,
+      command: 'tts',
+      plan,
+      enqueue: {
+        enqueued: 0,
+        reused: jobs.length,
+        active: 0,
+        planArtifactId: plan.id,
+        planArtifactVersion: plan.version,
+      },
+      result: {
+        status: 'ready',
+        jobs,
+        overview: getNarrationAudioOverview(projectId),
+        audio: {artifact: reusableAudio.artifact, manifest: reusableAudio.manifest},
+        reusedExistingAudio: true,
+      },
+    };
+  }
   const enqueued = enqueueNarrationAudioJobs(projectId, {expectedPlan: {artifactId: plan.id, version: plan.version}});
   const read = async (): Promise<Record<string, unknown> | null> => {
     assertCurrentPlan(projectId, plan);
