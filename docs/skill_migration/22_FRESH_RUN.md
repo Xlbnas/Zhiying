@@ -511,6 +511,8 @@ UNRESOLVED_NARRATION_UNITS: `0`
 
 VISUAL_READINESS: `PASS (3/3 required assets, 0 missing)`
 
+EXACT_FINAL_PROPS_GATE: `PASS (0 issues, 0 placeholder scenes/tokens)`
+
 The post-write snapshot remained `tts_jobs=50`, `llm_jobs=0`, and
 `render_jobs=0` for this Fresh project. This continuation created one
 reconciliation artifact and no TTS, LLM, or render job.
