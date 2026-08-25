@@ -50,6 +50,8 @@ export const ttsJobPayloadSchema = z.object({
   compilerVersion: z.string().min(1),
   unitId: z.string().regex(/^N\d{3}$/),
   unitText: z.string().min(1),
+  /** Optional legacy-registry reference snapshot; absent on historical jobs. */
+  referenceAudioSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 });
 
 export type TtsJobPayload = z.infer<typeof ttsJobPayloadSchema>;
@@ -68,6 +70,7 @@ export const ttsJobPayloadV11Schema = z.object({
   spokenText: z.string().min(1),
   delivery: z.enum(['normal', 'slow', 'fast', 'soft', 'firm', 'emphasis']),
   ttsInputFingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  referenceAudioSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 });
 
 export type TtsJobPayloadV11 = z.infer<typeof ttsJobPayloadV11Schema>;
@@ -107,6 +110,8 @@ export const ttsJobResultSchema = z.object({
     voiceProfileId: z.string().min(1),
     voiceProfileRevision: z.string().min(1),
     useRandom: z.boolean(),
+    /** Optional reference snapshot; absent on historical result_json. */
+    referenceSha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
   }),
   audio: z.object({
     codec: z.string().min(1),

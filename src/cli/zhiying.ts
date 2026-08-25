@@ -18,6 +18,7 @@ import {getVersion} from '../lib/workflow/versions';
 import {getRenderArtifact, probeRenderOutput, resolveOutputAbs, sha256File} from '../lib/render/artifact';
 import {probeAudio} from '../lib/tts-c/audio-probe';
 import {getTtsJob, type TtsJobRow} from '../lib/tts-jobs';
+import {resolveRequestedVoice} from '../lib/tts/voice-registry';
 import type {RenderJobRow} from '../lib/jobs';
 
 type Identity = {id: string; version: number};
@@ -57,7 +58,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   }
   const allowedValues: Record<string, string[]> = {
     inspect: ['project', 'artifact', 'job'],
-    tts: ['project', 'plan', 'timeout-seconds'],
+    tts: ['project', 'plan', 'timeout-seconds', 'voice'],
     subtitles: ['project', 'audio'],
     reconcile: ['project', 'scenes', 'audio', 'subtitles'],
     render: ['project', 'scenes', 'audio', 'subtitles', 'reconciliation', 'timeout-seconds'],
@@ -225,13 +226,21 @@ function assertCurrentPlan(projectId: string, expected: Identity): void {
 async function tts(args: ParsedArgs): Promise<Record<string, unknown>> {
   const projectId = required(args, 'project');
   const plan = parseIdentity(required(args, 'plan'), '--plan');
+  const requestedVoice = args.values.get('voice');
+  const resolvedVoice = resolveRequestedVoice(requestedVoice);
+  const voiceOptions = requestedVoice === undefined
+    ? undefined
+    : {
+        voiceProfile: {id: resolvedVoice.id, revision: resolvedVoice.revision},
+        referenceSha256: resolvedVoice.referenceSha256!,
+      };
   projectRow(projectId);
   artifactRow(projectId, plan);
   assertCurrentPlan(projectId, plan);
   const reusableAudio = await getExactReusableNarrationAudioArtifact(projectId, {
     artifactId: plan.id,
     version: plan.version,
-  });
+  }, voiceOptions);
   if (reusableAudio) {
     assertCurrentPlan(projectId, plan);
     const jobs = ttsJobs(projectId, plan);
@@ -249,23 +258,29 @@ async function tts(args: ParsedArgs): Promise<Record<string, unknown>> {
       result: {
         status: 'ready',
         jobs,
-        overview: getNarrationAudioOverview(projectId),
+        overview: getNarrationAudioOverview(projectId, voiceOptions),
         audio: {artifact: reusableAudio.artifact, manifest: reusableAudio.manifest},
         reusedExistingAudio: true,
       },
     };
   }
-  const enqueued = enqueueNarrationAudioJobs(projectId, {expectedPlan: {artifactId: plan.id, version: plan.version}});
+  const enqueued = enqueueNarrationAudioJobs(projectId, {
+    expectedPlan: {artifactId: plan.id, version: plan.version},
+    ...voiceOptions,
+  });
   const read = async (): Promise<Record<string, unknown> | null> => {
     assertCurrentPlan(projectId, plan);
-    const overview = getNarrationAudioOverview(projectId);
+    const overview = getNarrationAudioOverview(projectId, voiceOptions);
     assertCurrentPlan(projectId, plan);
     const jobs = ttsJobs(projectId, plan);
     const failed = jobs.find((job) => job.status === 'failed' || job.status === 'cancelled');
     if (failed) throw new CliError('TTS_TERMINAL_FAILURE', `TTS job ${failed.id} terminal status=${failed.status}: ${failed.error_message ?? ''}`);
     if (!args.flags.has('wait')) return {status: 'queued', jobs, overview};
-    tryFinalizeNarrationAudio(projectId, {expectedPlan: {artifactId: plan.id, version: plan.version}});
-    const audio = getCurrentNarrationAudioArtifact(projectId);
+    tryFinalizeNarrationAudio(projectId, {
+      expectedPlan: {artifactId: plan.id, version: plan.version},
+      ...voiceOptions,
+    });
+    const audio = getCurrentNarrationAudioArtifact(projectId, voiceOptions);
     if (audio) {
       if (
         audio.manifest.source.narrationPlanArtifactId !== plan.id ||
@@ -274,7 +289,7 @@ async function tts(args: ParsedArgs): Promise<Record<string, unknown>> {
         throw new CliError('NARRATION_PLAN_SOURCE_MISMATCH', 'Narration Audio source 与 expected plan 不一致');
       }
       assertCurrentPlan(projectId, plan);
-      return {status: 'ready', jobs, overview: getNarrationAudioOverview(projectId), audio: {artifact: audio.artifact, manifest: audio.manifest}};
+      return {status: 'ready', jobs, overview: getNarrationAudioOverview(projectId, voiceOptions), audio: {artifact: audio.artifact, manifest: audio.manifest}};
     }
     assertCurrentPlan(projectId, plan);
     return null;

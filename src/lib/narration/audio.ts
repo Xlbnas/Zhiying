@@ -92,6 +92,8 @@ export const narrationAudioManifestSchema = z.object({
     providerVersion: z.string().nullable(),
     providerCommit: z.string().nullable(),
     voiceProfile: z.object({id: z.string(), revision: z.string()}),
+    // Optional for backward compatibility with historical default@1 manifests.
+    referenceSha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
     useRandom: z.literal(false),
   }),
   units: z.array(
@@ -152,6 +154,7 @@ export function enqueueNarrationAudioJobs(
   projectId: string,
   options?: {
     voiceProfile?: {id: string; revision: string};
+    referenceSha256?: string;
     expectedPlan?: {artifactId: string; version: number};
   },
 ): EnqueueAudioResult {
@@ -239,6 +242,7 @@ export function enqueueNarrationAudioJobs(
         compilerVersion: plan.compilerVersion,
         unitId: unit.id,
         unitText: unit.text,
+        ...(options?.referenceSha256 ? {referenceAudioSha256: options.referenceSha256} : {}),
       });
       enqueued++;
     }
@@ -348,9 +352,12 @@ function collectUnitProgress(
 }
 
 /** Narration Audio 区 overview（纯读）。 */
-export function getNarrationAudioOverview(projectId: string): NarrationAudioOverview {
+export function getNarrationAudioOverview(
+  projectId: string,
+  options?: {voiceProfile?: {id: string; revision: string}; referenceSha256?: string | null},
+): NarrationAudioOverview {
   const provider = getTtsProvider();
-  const voice = DEFAULT_VOICE_PROFILE;
+  const voice = options?.voiceProfile ?? DEFAULT_VOICE_PROFILE;
   const current = getCurrentNarrationPlan(projectId);
   if (!current) {
     return {
@@ -376,7 +383,7 @@ export function getNarrationAudioOverview(projectId: string): NarrationAudioOver
   const anyFailed = speechUnits.some((u) => u.jobStatus === 'failed');
   const anyActive = speechUnits.some((u) => u.jobStatus === 'queued' || u.jobStatus === 'running');
 
-  const manifest = readCurrentManifest(projectId);
+  const manifest = readCurrentManifest(projectId, voice, options?.referenceSha256);
   let status: NarrationAudioStatus;
   if (contamination) {
     status = 'blocked_contaminated';
@@ -429,6 +436,8 @@ interface ArtifactRow {
  */
 function readCurrentManifestRow(
   projectId: string,
+  voice: {id: string; revision: string} = DEFAULT_VOICE_PROFILE,
+  referenceSha256?: string | null,
 ): {artifact: ArtifactRow; manifest: NarrationAudioManifest} | null {
   const current = getCurrentNarrationPlan(projectId);
   if (!current) return null;
@@ -446,8 +455,9 @@ function readCurrentManifestRow(
         parsed.success &&
         parsed.data.source.narrationPlanArtifactId === current.artifact.id &&
         parsed.data.provider.name === provider.name &&
-        parsed.data.provider.voiceProfile.id === DEFAULT_VOICE_PROFILE.id &&
-        parsed.data.provider.voiceProfile.revision === DEFAULT_VOICE_PROFILE.revision
+        parsed.data.provider.voiceProfile.id === voice.id &&
+        parsed.data.provider.voiceProfile.revision === voice.revision &&
+        (referenceSha256 === undefined || parsed.data.provider.referenceSha256 === referenceSha256)
       ) {
         // §三不变量：current manifest 的 master.filePath 必须对应完整正式文件
         const abs = path.resolve(dataDir, parsed.data.master.filePath);
@@ -462,8 +472,12 @@ function readCurrentManifestRow(
   return null;
 }
 
-function readCurrentManifest(projectId: string): NarrationAudioManifest | null {
-  return readCurrentManifestRow(projectId)?.manifest ?? null;
+function readCurrentManifest(
+  projectId: string,
+  voice: {id: string; revision: string} = DEFAULT_VOICE_PROFILE,
+  referenceSha256?: string | null,
+): NarrationAudioManifest | null {
+  return readCurrentManifestRow(projectId, voice, referenceSha256)?.manifest ?? null;
 }
 
 /**
@@ -471,11 +485,14 @@ function readCurrentManifest(projectId: string): NarrationAudioManifest | null {
  * 与 readCurrentManifest 走完全相同的防线（plan current / source gate /
  * provider/voice gate / master 路径安全 / master 文件存在），不改变 M3-B contract。
  */
-export function getCurrentNarrationAudioArtifact(projectId: string): {
+export function getCurrentNarrationAudioArtifact(
+  projectId: string,
+  options?: {voiceProfile?: {id: string; revision: string}; referenceSha256?: string | null},
+): {
   artifact: {id: string; version: number};
   manifest: NarrationAudioManifest;
 } | null {
-  const row = readCurrentManifestRow(projectId);
+  const row = readCurrentManifestRow(projectId, options?.voiceProfile, options?.referenceSha256);
   if (!row) return null;
   return {
     artifact: {id: row.artifact.id, version: row.artifact.version},
@@ -491,6 +508,7 @@ export function getCurrentNarrationAudioArtifact(projectId: string): {
 export async function getExactReusableNarrationAudioArtifact(
   projectId: string,
   expectedPlan: {artifactId: string; version: number},
+  options?: {voiceProfile?: {id: string; revision: string}; referenceSha256?: string | null},
 ): Promise<{
   artifact: {id: string; version: number};
   manifest: NarrationAudioManifest;
@@ -502,7 +520,11 @@ export async function getExactReusableNarrationAudioArtifact(
     current.artifact.version !== expectedPlan.version
   ) return null;
 
-  const audio = getCurrentNarrationAudioArtifact(projectId);
+  const voice = options?.voiceProfile ?? DEFAULT_VOICE_PROFILE;
+  const audio = getCurrentNarrationAudioArtifact(projectId, {
+    voiceProfile: voice,
+    referenceSha256: options?.referenceSha256,
+  });
   if (
     !audio ||
     audio.manifest.schemaVersion !== NARRATION_AUDIO_SCHEMA_VERSION ||
@@ -592,6 +614,8 @@ export async function getExactReusableNarrationAudioArtifact(
       result.data.providerCommit !== provider.providerCommit ||
       result.data.settings.voiceProfileId !== provider.voiceProfile.id ||
       result.data.settings.voiceProfileRevision !== provider.voiceProfile.revision ||
+      (options?.referenceSha256 !== undefined && result.data.settings.referenceSha256 !== options.referenceSha256) ||
+      (options?.referenceSha256 !== undefined && parseTtsJobPayload(job.payload_json)?.referenceAudioSha256 !== options.referenceSha256) ||
       result.data.settings.useRandom !== false ||
       result.data.audio.sampleRate !== manifestUnit.sampleRate ||
       result.data.audio.channels !== manifestUnit.channels
@@ -651,6 +675,8 @@ export interface FinalizeNarrationAudioDeps {
   renameImpl?: (oldPath: string, newPath: string) => void;
   insertArtifactImpl?: (contentJson: string) => void;
   expectedPlan?: {artifactId: string; version: number};
+  voiceProfile?: {id: string; revision: string};
+  referenceSha256?: string | null;
 }
 
 /**
@@ -709,9 +735,9 @@ export function tryFinalizeNarrationAudio(
     );
   }
   const provider = getTtsProvider();
-  const voice = DEFAULT_VOICE_PROFILE;
+  const voice = deps.voiceProfile ?? DEFAULT_VOICE_PROFILE;
 
-  const existing = readCurrentManifest(projectId);
+  const existing = readCurrentManifest(projectId, voice, deps.referenceSha256);
   if (existing) return existing;
 
   // 收集全部 speech 输出（必须全部 succeeded 且 result_json 合法——§十四唯一 metadata 来源）
@@ -734,6 +760,13 @@ export function tryFinalizeNarrationAudio(
     if (!parsed.success) {
       return null;
     }
+    if (
+      deps.referenceSha256 &&
+      (parsed.data.settings.referenceSha256 !== deps.referenceSha256 ||
+        parseTtsJobPayload(job.payload_json)?.referenceAudioSha256 !== deps.referenceSha256)
+    ) {
+      return null;
+    }
     outputs.push({unit, job, result: parsed.data});
   }
   if (outputs.length === 0) return null;
@@ -748,6 +781,7 @@ export function tryFinalizeNarrationAudio(
       o.result.providerCommit !== first.providerCommit ||
       o.result.settings.voiceProfileId !== first.settings.voiceProfileId ||
       o.result.settings.voiceProfileRevision !== first.settings.voiceProfileRevision ||
+      o.result.settings.referenceSha256 !== first.settings.referenceSha256 ||
       o.result.settings.useRandom !== first.settings.useRandom,
   );
   if (mixed) {
@@ -820,6 +854,7 @@ export function tryFinalizeNarrationAudio(
           id: first.settings.voiceProfileId,
           revision: first.settings.voiceProfileRevision,
         },
+        referenceSha256: first.settings.referenceSha256,
         useRandom: false,
       },
       units: plan.units.map((unit) => {
@@ -892,7 +927,7 @@ export function tryFinalizeNarrationAudio(
         still.artifact.id !== artifact.id ||
         still.artifact.version !== artifact.version
       ) return {outcome: 'stale'};
-      const won = readCurrentManifest(projectId);
+      const won = readCurrentManifest(projectId, voice, deps.referenceSha256);
       if (won) return {outcome: 'reuse', manifest: won};
       // §八：final 路径已存在时的 orphan/冲突裁决
       if (fs.existsSync(absMaster)) {

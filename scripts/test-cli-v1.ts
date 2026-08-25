@@ -158,8 +158,8 @@ async function main(): Promise<void> {
     ok(wrongVersion.status !== 0 && jsonOf(wrongVersion).error.code === 'VERSION_MISMATCH', 'inspect wrong version fails closed');
     const missingProject = run(['inspect']);
     ok(missingProject.status !== 0 && jsonOf(missingProject).error.code === 'MISSING_ARGUMENT', 'inspect missing project is rejected');
-    const unsupportedVoice = run(['tts', '--project', 'cli-project', '--plan', 'cli-artifact@2', '--voice', 'custom']);
-    ok(unsupportedVoice.status !== 0 && jsonOf(unsupportedVoice).error.code === 'INVALID_ARGUMENT', 'TTS voice override is rejected');
+    const invalidVoice = run(['tts', '--project', 'cli-project', '--plan', 'cli-artifact@2', '--voice', 'custom']);
+    ok(invalidVoice.status !== 0 && jsonOf(invalidVoice).error.code === 'VOICE_NOT_READY', 'invalid TTS voice fails closed');
     const mismatch = run(['inspect', '--project', 'other-project', '--artifact', 'cli-artifact@2']);
     ok(mismatch.status !== 0 && jsonOf(mismatch).error.code === 'PROJECT_NOT_FOUND', 'inspect mismatched project fails closed');
 
