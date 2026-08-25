@@ -12,7 +12,7 @@ import {
 import {enqueueNarrationAudioJobs, getCurrentNarrationAudioArtifact, getExactNarrationAudioArtifact, getExactReusableNarrationAudioArtifact, getNarrationAudioOverview, tryFinalizeNarrationAudio} from '../lib/narration/audio';
 import {getCurrentNarrationPlan} from '../lib/narration/plan';
 import {getCurrentSubtitleTiming, getExactSubtitleTiming, checkSubtitleTimingReadiness, buildSubtitleTiming} from '../lib/subtitles/timing';
-import {getCurrentTimingReconciliation, getExactReconciliationScenes, checkTimingReconciliationReadiness, buildTimingReconciliation} from '../lib/reconciliation/timing';
+import {getCurrentTimingReconciliation, getExactTimingReconciliation, getExactReconciliationScenes, checkTimingReconciliationReadiness, buildTimingReconciliation} from '../lib/reconciliation/timing';
 import {getStage, listStages} from '../lib/workflow/stages';
 import {getVersion} from '../lib/workflow/versions';
 import {getRenderArtifact, probeRenderOutput, resolveOutputAbs, sha256File} from '../lib/render/artifact';
@@ -381,8 +381,39 @@ async function render(args: ParsedArgs): Promise<Record<string, unknown>> {
   const subtitle = parseIdentity(required(args, 'subtitles'), '--subtitles');
   const reconciliation = parseIdentity(required(args, 'reconciliation'), '--reconciliation');
   projectRow(projectId); artifactRow(projectId, audio); artifactRow(projectId, subtitle); artifactRow(projectId, reconciliation);
+  const exactScenes = getExactReconciliationScenes(projectId, {
+    versionId: scenes.id,
+    version: scenes.version,
+  });
+  if (!exactScenes) throw new CliError('SOURCE_MISMATCH', `exact scenes 无效或不匹配: ${scenes.id}@${scenes.version}`);
+  const exactAudio = await getExactNarrationAudioArtifact(projectId, {
+    artifactId: audio.id,
+    version: audio.version,
+  });
+  if (!exactAudio) throw new CliError('SOURCE_MISMATCH', `exact narration audio 无效或不匹配: ${audio.id}@${audio.version}`);
+  const exactSubtitle = getExactSubtitleTiming(projectId, {
+    artifactId: subtitle.id,
+    version: subtitle.version,
+  }, exactAudio);
+  if (!exactSubtitle) throw new CliError('SOURCE_MISMATCH', `exact subtitles 无效或 source audio 不匹配: ${subtitle.id}@${subtitle.version}`);
+  const exactReconciliation = getExactTimingReconciliation(projectId, {
+    artifactId: reconciliation.id,
+    version: reconciliation.version,
+  }, {scenes: exactScenes, audio: exactAudio, subtitle: exactSubtitle});
+  if (!exactReconciliation) {
+    throw new CliError(
+      'SOURCE_MISMATCH',
+      `exact reconciliation 无效或 source chain 不匹配: ${reconciliation.id}@${reconciliation.version}`,
+    );
+  }
   const result = enqueueFinalRender(projectId, {
     expectedScenes: {versionId: scenes.id, version: scenes.version}, expectedAudio: {artifactId: audio.id, version: audio.version}, expectedSubtitle: {artifactId: subtitle.id, version: subtitle.version}, expectedReconciliation: {artifactId: reconciliation.id, version: reconciliation.version},
+    exactSources: {
+      scenes: exactScenes,
+      audio: exactAudio,
+      subtitle: exactSubtitle,
+      reconciliation: exactReconciliation,
+    },
   });
   const read = async (): Promise<Record<string, unknown> | null> => {
     const job = getDb().prepare('SELECT * FROM render_jobs WHERE id = ?').get(result.job.id) as RenderJobRow | undefined;

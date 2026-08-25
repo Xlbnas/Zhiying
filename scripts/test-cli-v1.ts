@@ -500,7 +500,11 @@ async function main(): Promise<void> {
         {status: result.status, stdout: result.stdout, stderr: result.stderr},
       );
     };
-    const replaceIdentity = (args: string[], flag: '--scenes' | '--audio' | '--subtitles', identity: string): string[] => {
+    const replaceIdentity = (
+      args: string[],
+      flag: '--scenes' | '--audio' | '--subtitles' | '--reconciliation',
+      identity: string,
+    ): string[] => {
       const copy = [...args];
       copy[copy.indexOf(flag) + 1] = identity;
       return copy;
@@ -552,6 +556,106 @@ async function main(): Promise<void> {
     assertReconcileFailsClosed(
       replaceIdentity(exactCustomReconcileArgs, '--audio', `${audio.artifact.id}@${audio.artifact.version}`),
       'reconcile subtitle dependency mismatch fails closed without selecting current audio',
+    );
+
+    const exactCustomRenderArgs = [
+      'render', '--project', projectId, '--scenes', `${scenesV1Id}@1`,
+      '--audio', `${customAudio.artifact.id}@${customAudio.artifact.version}`,
+      '--subtitles', `${customSubtitle.id}@${customSubtitle.version}`,
+      '--reconciliation', `${exactCustomReconcileJson.artifact.id}@${exactCustomReconcileJson.artifact.version}`,
+    ];
+    const exactCustomRender = run(exactCustomRenderArgs);
+    const exactCustomRenderJson = jsonOf(exactCustomRender);
+    const exactCustomSource = exactCustomRender.status === 0
+      ? JSON.parse((db.prepare('SELECT content_json FROM artifacts WHERE id = ?')
+          .get(exactCustomRenderJson.sourceArtifact.id) as {content_json: string}).content_json)
+      : null;
+    ok(
+      exactCustomRender.status === 0 &&
+        exactCustomSource.source.scenesVersionId === scenesV1Id &&
+        exactCustomSource.source.narrationAudioArtifactId === customAudio.artifact.id &&
+        exactCustomSource.source.subtitleTimingArtifactId === customSubtitle.id &&
+        exactCustomSource.source.timingReconciliationArtifactId === exactCustomReconcileJson.artifact.id,
+      'render exact non-current scenes and xlbnas chain bypasses all implicit current resolvers',
+      {status: exactCustomRender.status, stdout: exactCustomRender.stdout, stderr: exactCustomRender.stderr},
+    );
+    if (exactCustomRender.status === 0) {
+      db.prepare("UPDATE render_jobs SET status = 'cancelled', finished_at = ? WHERE id = ?")
+        .run(new Date().toISOString(), exactCustomRenderJson.result.job.id);
+    }
+
+    const assertRenderFailsClosed = (args: string[], label: string): void => {
+      const before = counts(db, projectId);
+      const result = run(args);
+      ok(
+        result.status !== 0 && JSON.stringify(counts(db, projectId)) === JSON.stringify(before),
+        label,
+        {status: result.status, stdout: result.stdout, stderr: result.stderr},
+      );
+    };
+    assertRenderFailsClosed(
+      replaceIdentity(exactCustomRenderArgs, '--scenes', 'missing-scenes@1'),
+      'render wrong scenes id fails closed',
+    );
+    assertRenderFailsClosed(
+      replaceIdentity(exactCustomRenderArgs, '--scenes', `${scenesV1Id}@2`),
+      'render wrong scenes version fails closed',
+    );
+    assertRenderFailsClosed(
+      replaceIdentity(exactCustomRenderArgs, '--audio', 'missing-audio@1'),
+      'render wrong audio id fails closed',
+    );
+    assertRenderFailsClosed(
+      replaceIdentity(exactCustomRenderArgs, '--audio', `${customAudio.artifact.id}@${customAudio.artifact.version + 1}`),
+      'render wrong audio version fails closed',
+    );
+    assertRenderFailsClosed(
+      replaceIdentity(exactCustomRenderArgs, '--subtitles', 'missing-subtitles@1'),
+      'render wrong subtitle id fails closed',
+    );
+    assertRenderFailsClosed(
+      replaceIdentity(exactCustomRenderArgs, '--subtitles', `${customSubtitle.id}@${customSubtitle.version + 1}`),
+      'render wrong subtitle version fails closed',
+    );
+    assertRenderFailsClosed(
+      replaceIdentity(exactCustomRenderArgs, '--reconciliation', 'missing-reconciliation@1'),
+      'render wrong reconciliation id fails closed',
+    );
+    assertRenderFailsClosed(
+      replaceIdentity(
+        exactCustomRenderArgs,
+        '--reconciliation',
+        `${exactCustomReconcileJson.artifact.id}@${exactCustomReconcileJson.artifact.version + 1}`,
+      ),
+      'render wrong reconciliation version fails closed',
+    );
+    assertRenderFailsClosed(
+      replaceIdentity(exactCustomRenderArgs, '--scenes', `${crossProjectScenesId}@1`),
+      'render cross-project scenes fails closed',
+    );
+    assertRenderFailsClosed(
+      replaceIdentity(exactCustomRenderArgs, '--audio', 'cli-artifact@2'),
+      'render cross-project audio fails closed',
+    );
+    assertRenderFailsClosed(
+      replaceIdentity(exactCustomRenderArgs, '--subtitles', 'cli-artifact@2'),
+      'render cross-project subtitles fails closed',
+    );
+    assertRenderFailsClosed(
+      replaceIdentity(exactCustomRenderArgs, '--reconciliation', 'cli-artifact@2'),
+      'render cross-project reconciliation fails closed',
+    );
+    assertRenderFailsClosed(
+      replaceIdentity(exactCustomRenderArgs, '--audio', `${audio.artifact.id}@${audio.artifact.version}`),
+      'render subtitle audio mismatch fails closed without selecting current subtitles',
+    );
+    assertRenderFailsClosed(
+      replaceIdentity(
+        exactCustomRenderArgs,
+        '--reconciliation',
+        `${recBlockedJson.artifact.id}@${recBlockedJson.artifact.version}`,
+      ),
+      'render reconciliation source mismatch fails closed without selecting current reconciliation',
     );
 
     const beforeAssetBlock = counts(db, projectId);

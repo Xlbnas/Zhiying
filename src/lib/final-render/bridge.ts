@@ -4,13 +4,16 @@ import path from 'node:path';
 import {isDeepStrictEqual} from 'node:util';
 import {getDb} from '../db';
 import {enqueueRenderJob, type RenderJobRow} from '../jobs';
-import {getCurrentNarrationAudioArtifact, type NarrationAudioManifest} from '../narration/audio';
+import {getCurrentNarrationAudioArtifact, type NarrationAudioArtifact} from '../narration/audio';
 import {getCurrentNarrationPlan} from '../narration/plan';
 import {scenesAiOutputSchema, type ScenesAiOutput} from '../prompts/scenes';
 import {isLegacyM1Project} from '../projects';
 import {applyTimingReconciliation} from '../reconciliation/adapter';
-import type {TimingReconciliation} from '../reconciliation/schema';
-import {getCurrentTimingReconciliation} from '../reconciliation/timing';
+import {
+  getCurrentTimingReconciliation,
+  type ReconciliationScenesSource,
+  type TimingReconciliationArtifact,
+} from '../reconciliation/timing';
 import {summarizeRenderProgress} from '../render/progress-detail';
 import {getRenderArtifact} from '../render/artifact';
 import {auditFinalVisuals, validateFinalVisualProps, type FinalVisualAudit} from '../render/visual-gate';
@@ -21,8 +24,7 @@ import {
   type ZhiyingFullCutProps,
 } from '../scene-schema';
 import {toRendererSubtitleCues} from '../subtitles/renderer';
-import type {SubtitleTiming} from '../subtitles/schema';
-import {getCurrentSubtitleTiming} from '../subtitles/timing';
+import {getCurrentSubtitleTiming, type SubtitleTimingArtifact} from '../subtitles/timing';
 import {validateScenesSemantics} from '../workflow/scenes-semantic-validation';
 import {getStage} from '../workflow/stages';
 import {getVersion} from '../workflow/versions';
@@ -45,7 +47,7 @@ import {
 /**
  * Final Render Bridge（M3-E）。
  *
- * 链：四 source 全 current（单 BEGIN IMMEDIATE authoritative fence）→
+ * 链：legacy caller 使用四 source current；explicit CLI 可传入已验证的 exact sources →
  * M3-D applyTimingReconciliation + M3-C toRendererSubtitleCues →
  * deterministic props → final_render_source（immutable，sourceKey 幂等 reuse，
  * 永不 UPDATE）→ render_job（复用 kind='fullcut'）+ final_render_attempt
@@ -118,14 +120,44 @@ function readCurrentScenes(projectId: string): CurrentScenes {
 
 // ---------- 四 source 汇总 ----------
 
-interface FinalSources {
-  scenes: Extract<CurrentScenes, {kind: 'ready'}>;
-  audio: {artifact: {id: string; version: number}; manifest: NarrationAudioManifest};
-  subtitle: {artifact: {id: string; version: number}; timing: SubtitleTiming};
-  reconciliation: {artifact: {id: string; version: number}; reconciliation: TimingReconciliation};
+export interface FinalRenderSources {
+  scenes: ReconciliationScenesSource;
+  audio: NarrationAudioArtifact;
+  subtitle: SubtitleTimingArtifact;
+  reconciliation: TimingReconciliationArtifact;
 }
 
-function readFinalSources(projectId: string): FinalSources | FinalRenderError {
+function validateFinalSources(src: FinalRenderSources): FinalRenderError | null {
+  const {scenes, audio, subtitle, reconciliation} = src;
+  const rec = reconciliation.reconciliation.source;
+  if (rec.scenesVersionId !== scenes.versionId || rec.scenesVersion !== scenes.version) {
+    return new FinalRenderError(
+      'FINAL_RENDER_SOURCE_INVALID',
+      'reconciliation 与 Scenes 不同代，禁止组合',
+    );
+  }
+  if (
+    rec.narrationAudioArtifactId !== audio.artifact.id ||
+    rec.narrationAudioArtifactVersion !== audio.artifact.version
+  ) {
+    return new FinalRenderError(
+      'FINAL_RENDER_SOURCE_INVALID',
+      'reconciliation 与 Narration Audio 不同代，禁止组合',
+    );
+  }
+  if (
+    rec.subtitleTimingArtifactId !== subtitle.artifact.id ||
+    rec.subtitleTimingArtifactVersion !== subtitle.artifact.version
+  ) {
+    return new FinalRenderError(
+      'FINAL_RENDER_SOURCE_INVALID',
+      'reconciliation 与 Subtitle Timing 不同代，禁止组合',
+    );
+  }
+  return null;
+}
+
+function readFinalSources(projectId: string): FinalRenderSources | FinalRenderError {
   const scenes = readCurrentScenes(projectId);
   if (scenes.kind === 'not_current') {
     return new FinalRenderError('SCENES_NOT_CURRENT', 'Scenes 未锁定或已 stale');
@@ -153,36 +185,8 @@ function readFinalSources(projectId: string): FinalSources | FinalRenderError {
       'Timing Reconciliation 不是 current',
     );
   }
-  const src: FinalSources = {scenes, audio, subtitle, reconciliation};
-
-  // Whole-generation invariant（§12，defense-in-depth）：
-  // reconciliation 声称的 source refs 必须逐项等于当前三者——禁止跨代组合。
-  const rec = reconciliation.reconciliation.source;
-  if (rec.scenesVersionId !== scenes.versionId || rec.scenesVersion !== scenes.version) {
-    return new FinalRenderError(
-      'FINAL_RENDER_SOURCE_INVALID',
-      'reconciliation 与当前 locked Scenes 不同代，禁止组合',
-    );
-  }
-  if (
-    rec.narrationAudioArtifactId !== audio.artifact.id ||
-    rec.narrationAudioArtifactVersion !== audio.artifact.version
-  ) {
-    return new FinalRenderError(
-      'FINAL_RENDER_SOURCE_INVALID',
-      'reconciliation 与当前 Narration Audio 不同代，禁止组合',
-    );
-  }
-  if (
-    rec.subtitleTimingArtifactId !== subtitle.artifact.id ||
-    rec.subtitleTimingArtifactVersion !== subtitle.artifact.version
-  ) {
-    return new FinalRenderError(
-      'FINAL_RENDER_SOURCE_INVALID',
-      'reconciliation 与当前 Subtitle Timing 不同代，禁止组合',
-    );
-  }
-  return src;
+  const src: FinalRenderSources = {scenes, audio, subtitle, reconciliation};
+  return validateFinalSources(src) ?? src;
 }
 
 // ---------- deterministic props ----------
@@ -195,7 +199,7 @@ export function buildFinalRenderProps(input: {
   projectId: string;
   title: string;
   templateVersion: string;
-  src: FinalSources;
+  src: FinalRenderSources;
 }): ZhiyingFullCutProps {
   const {src} = input;
   const rec = src.reconciliation.reconciliation;
@@ -467,7 +471,7 @@ export interface EnqueueFinalRenderResult {
 
 /**
  * 原子 enqueue Final Render（单 BEGIN IMMEDIATE）：
- * 事务内重读四 source → whole-generation 断言 → deterministic props →
+ * exact source objects 或 legacy current sources → whole-generation 断言 → deterministic props →
  * sourceKey 幂等（reuse/INSERT，永不 UPDATE）→ active guard →
  * render_job + final_render_attempt → COMMIT。
  */
@@ -476,6 +480,7 @@ export function enqueueFinalRender(projectId: string, options?: {
   expectedAudio?: {artifactId: string; version: number};
   expectedSubtitle?: {artifactId: string; version: number};
   expectedReconciliation?: {artifactId: string; version: number};
+  exactSources?: FinalRenderSources;
 }): EnqueueFinalRenderResult {
   const db = getDb();
   const tx = db.transaction((): EnqueueFinalRenderResult => {
@@ -488,8 +493,10 @@ export function enqueueFinalRender(projectId: string, options?: {
     if (isLegacyM1Project(projectId)) {
       throw new FinalRenderError('LEGACY_PROJECT', 'Legacy M1 项目走原渲染链');
     }
-    const src = readFinalSources(projectId);
+    const src = options?.exactSources ?? readFinalSources(projectId);
     if (src instanceof FinalRenderError) throw src;
+    const sourceError = validateFinalSources(src);
+    if (sourceError) throw sourceError;
     const expected = options;
     if (
       (expected?.expectedScenes &&

@@ -153,6 +153,11 @@ interface ReconciliationArtifactRow {
   content_json: string;
 }
 
+export type TimingReconciliationArtifact = {
+  reconciliation: TimingReconciliation;
+  artifact: {id: string; version: number};
+};
+
 function listReconciliationArtifacts(projectId: string): ReconciliationArtifactRow[] {
   return getDb()
     .prepare(
@@ -272,6 +277,28 @@ function matchesSourceSnapshot(rec: TimingReconciliation, src: ReconciliationSou
     matchesSceneSnapshot(rec, src.scenes.data) &&
     matchesDeterministicOutput(rec, src)
   );
+}
+
+/** Exact identity path: validates the supplied artifact against the supplied exact source chain. */
+export function getExactTimingReconciliation(
+  projectId: string,
+  expectedReconciliation: {artifactId: string; version: number},
+  exactSources: ReconciliationSources,
+): TimingReconciliationArtifact | null {
+  const row = getDb().prepare(
+    `SELECT id, project_id, kind, version, content_json FROM artifacts WHERE id = ?`,
+  ).get(expectedReconciliation.artifactId) as
+    | (ReconciliationArtifactRow & {project_id: string; kind: string})
+    | undefined;
+  if (
+    !row ||
+    row.project_id !== projectId ||
+    row.kind !== TIMING_RECONCILIATION_ARTIFACT_KIND ||
+    row.version !== expectedReconciliation.version
+  ) return null;
+  const reconciliation = parseReconciliation(row);
+  if (!reconciliation || !matchesSourceSnapshot(reconciliation, exactSources)) return null;
+  return {reconciliation, artifact: {id: row.id, version: row.version}};
 }
 
 /** 读取 current Timing Reconciliation（任一 source 不 current 时恒 null）。 */
