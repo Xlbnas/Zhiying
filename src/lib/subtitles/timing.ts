@@ -50,6 +50,11 @@ interface SubtitleArtifactRow {
   content_json: string;
 }
 
+export type SubtitleTimingArtifact = {
+  timing: SubtitleTiming;
+  artifact: {id: string; version: number};
+};
+
 function listSubtitleArtifacts(projectId: string): SubtitleArtifactRow[] {
   return getDb()
     .prepare(
@@ -120,6 +125,28 @@ export function getCurrentSubtitleTiming(projectId: string): {
     }
   }
   return null;
+}
+
+/** Exact identity path: validates the supplied artifact against the supplied exact audio. */
+export function getExactSubtitleTiming(
+  projectId: string,
+  expectedSubtitle: {artifactId: string; version: number},
+  exactAudio: NarrationAudioArtifact,
+): SubtitleTimingArtifact | null {
+  const row = getDb().prepare(
+    `SELECT id, project_id, kind, version, content_json FROM artifacts WHERE id = ?`,
+  ).get(expectedSubtitle.artifactId) as
+    | (SubtitleArtifactRow & {project_id: string; kind: string})
+    | undefined;
+  if (
+    !row ||
+    row.project_id !== projectId ||
+    row.kind !== SUBTITLE_TIMING_ARTIFACT_KIND ||
+    row.version !== expectedSubtitle.version
+  ) return null;
+  const timing = parseTiming(row);
+  if (!timing || !matchesCurrentSource(timing, exactAudio)) return null;
+  return {timing, artifact: {id: row.id, version: row.version}};
 }
 
 export type SubtitleTimingStatus = 'ready' | 'stale' | 'missing' | 'not_ready';

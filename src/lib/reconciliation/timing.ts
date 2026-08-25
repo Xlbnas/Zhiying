@@ -1,11 +1,14 @@
 import crypto from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {getDb} from '../db';
-import {getCurrentNarrationAudioArtifact} from '../narration/audio';
+import {getCurrentNarrationAudioArtifact, type NarrationAudioArtifact} from '../narration/audio';
 import {getCurrentNarrationPlan} from '../narration/plan';
 import {scenesAiOutputSchema, type ScenesAiOutput} from '../prompts/scenes';
 import {isLegacyM1Project} from '../projects';
-import {getCurrentSubtitleTiming} from '../subtitles/timing';
+import {
+  getCurrentSubtitleTiming,
+  type SubtitleTimingArtifact,
+} from '../subtitles/timing';
 import {validateScenesSemantics} from '../workflow/scenes-semantic-validation';
 import {getStage} from '../workflow/stages';
 import {getVersion} from '../workflow/versions';
@@ -24,12 +27,11 @@ import {
 /**
  * Timing Reconciliation artifact 层（M3-D）。
  *
- * - source 三件套全部 current 才允许 build：locked Scenes（JSON.parse →
- *   scenesAiOutputSchema → validateScenesSemantics，不 blind trust frozen stage）、
- *   current Narration Audio、current Subtitle Timing
+ * - legacy build 仍要求三件套 current；explicit CLI build 可传入已完成同等校验的
+ *   exact Scenes / Narration Audio / Subtitle Timing，且不重新解析 current
  * - 幂等：全 provenance + compilerVersion 匹配 → reuse
  * - stale：任一 source 前进 / compiler 升级 → 旧 artifact 保留历史，不再 current
- * - 单 BEGIN IMMEDIATE：事务内重读三 source + 幂等检查 + compile + INSERT
+ * - 单 BEGIN IMMEDIATE：source fence + 幂等检查 + compile + INSERT
  * - corrupted artifact：JSON.parse → safeParse，坏数据 skip，不 crash 不 current
  * - 无 DB migration / 无第 11 stage / 无 job queue；绝不修改 source project_versions
  */
@@ -94,14 +96,46 @@ function readCurrentScenes(projectId: string): CurrentScenes {
   return {kind: 'ready', versionId: row.id, version: row.version, data: structural.data};
 }
 
-interface CurrentSources {
+export type ReconciliationScenesSource = Extract<CurrentScenes, {kind: 'ready'}>;
+
+export interface ReconciliationSources {
   scenes: Extract<CurrentScenes, {kind: 'ready'}>;
-  audio: NonNullable<ReturnType<typeof getCurrentNarrationAudioArtifact>>;
-  subtitle: NonNullable<ReturnType<typeof getCurrentSubtitleTiming>>;
+  audio: NarrationAudioArtifact;
+  subtitle: SubtitleTimingArtifact;
+}
+
+/** Exact scenes identity path: validates immutable row ownership, type, structure and semantics. */
+export function getExactReconciliationScenes(
+  projectId: string,
+  expectedScenes: {versionId: string; version: number},
+): ReconciliationScenesSource | null {
+  const row = getDb().prepare(
+    `SELECT id, project_id, stage, version, content
+     FROM project_versions WHERE id = ?`,
+  ).get(expectedScenes.versionId) as
+    | {id: string; project_id: string; stage: string; version: number; content: string}
+    | undefined;
+  if (
+    !row ||
+    row.project_id !== projectId ||
+    row.stage !== 'scenes' ||
+    row.version !== expectedScenes.version
+  ) return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(row.content);
+  } catch {
+    return null;
+  }
+  const structural = scenesAiOutputSchema.safeParse(raw);
+  if (!structural.success) return null;
+  const semantic = validateScenesSemantics(structural.data);
+  if (!semantic.ok) return null;
+  return {kind: 'ready', versionId: row.id, version: row.version, data: structural.data};
 }
 
 /** 三 source 全部 current 才返回（纯读；invalid scenes 视为不可用）。 */
-function readCurrentSources(projectId: string): CurrentSources | null {
+function readCurrentSources(projectId: string): ReconciliationSources | null {
   const scenes = readCurrentScenes(projectId);
   if (scenes.kind !== 'ready') return null;
   const audio = getCurrentNarrationAudioArtifact(projectId);
@@ -173,8 +207,8 @@ function matchesSceneSnapshot(rec: TimingReconciliation, scenes: ScenesAiOutput)
   );
 }
 
-/** 由 current sources 构造与正式 build 完全相同的 compiler refs（唯一构造点，防双实现漂移）。 */
-function sourceRefsOf(src: CurrentSources): ReconciliationSourceRefs {
+/** 由已验证 sources 构造与正式 build 完全相同的 compiler refs（唯一构造点，防双实现漂移）。 */
+function sourceRefsOf(src: ReconciliationSources): ReconciliationSourceRefs {
   const manifestSrc = src.audio.manifest.source;
   return {
     scenesVersionId: src.scenes.versionId,
@@ -202,7 +236,7 @@ function sourceRefsOf(src: CurrentSources): ReconciliationSourceRefs {
  * compiler-owned derived output 的 schema-valid semantic tamper 都无法蒙混。
  * 用 current sources 重编译抛契约错误 → 该 artifact 绝不 current/reuse（返回 false，不 crash）。
  */
-function matchesDeterministicOutput(rec: TimingReconciliation, src: CurrentSources): boolean {
+function matchesDeterministicOutput(rec: TimingReconciliation, src: ReconciliationSources): boolean {
   let expected: TimingReconciliation;
   try {
     expected = compileTimingReconciliation({
@@ -218,7 +252,7 @@ function matchesDeterministicOutput(rec: TimingReconciliation, src: CurrentSourc
 }
 
 /** current 判定：cheap gates（provenance + compilerVersion + scene snapshot）→ deterministic recompile equality。 */
-function matchesCurrentSource(rec: TimingReconciliation, src: CurrentSources): boolean {
+function matchesSourceSnapshot(rec: TimingReconciliation, src: ReconciliationSources): boolean {
   const manifestSrc = src.audio.manifest.source;
   return (
     rec.source.scenesVersionId === src.scenes.versionId &&
@@ -249,7 +283,7 @@ export function getCurrentTimingReconciliation(projectId: string): {
   if (!src) return null;
   for (const row of listReconciliationArtifacts(projectId)) {
     const rec = parseReconciliation(row);
-    if (rec && matchesCurrentSource(rec, src)) {
+    if (rec && matchesSourceSnapshot(rec, src)) {
       return {reconciliation: rec, artifact: {id: row.id, version: row.version}};
     }
   }
@@ -324,8 +358,8 @@ export function checkTimingReconciliationReadiness(
 }
 
 /**
- * 构建 / 复用 current Timing Reconciliation（单 BEGIN IMMEDIATE 原子）：
- * 事务内重读三 source → 幂等复用 → deterministic compile → INSERT。
+ * 构建 / 复用 Timing Reconciliation（单 BEGIN IMMEDIATE 原子）：
+ * explicit source objects 或 legacy current sources → 幂等复用 → deterministic compile → INSERT。
  */
 export function buildTimingReconciliation(
   projectId: string,
@@ -333,6 +367,7 @@ export function buildTimingReconciliation(
     expectedScenes?: {versionId: string; version: number};
     expectedAudio?: {artifactId: string; version: number};
     expectedSubtitle?: {artifactId: string; version: number};
+    exactSources?: ReconciliationSources;
   },
 ): {
   reconciliation: TimingReconciliation;
@@ -355,38 +390,44 @@ export function buildTimingReconciliation(
       throw new TimingReconciliationError('LEGACY_PROJECT', 'Legacy M1 项目无 workflow Scenes/Narration 链');
     }
 
-    // 事务内重读三 source（authoritative fence）
-    const scenes = readCurrentScenes(projectId);
-    if (scenes.kind === 'not_current') {
-      throw new TimingReconciliationError(
-        'SCENES_NOT_CURRENT',
-        'Scenes 未锁定或已 stale——请先完成并锁定 scenes 阶段',
-      );
-    }
-    if (scenes.kind === 'invalid') {
-      throw new TimingReconciliationError('SCENES_INVALID', scenes.message);
-    }
-    const audio = getCurrentNarrationAudioArtifact(projectId);
-    if (!audio) {
-      if (!getCurrentNarrationPlan(projectId)) {
+    let src: ReconciliationSources;
+    if (options?.exactSources) {
+      src = options.exactSources;
+    } else {
+      // Legacy callers retain the transaction-local current-source fence.
+      const scenes = readCurrentScenes(projectId);
+      if (scenes.kind === 'not_current') {
         throw new TimingReconciliationError(
-          'NARRATION_PLAN_NOT_CURRENT',
-          'Narration Plan 不是当前版本（missing 或 stale）——请先 Build Narration Plan',
+          'SCENES_NOT_CURRENT',
+          'Scenes 未锁定或已 stale——请先完成并锁定 scenes 阶段',
         );
       }
-      throw new TimingReconciliationError(
-        'NARRATION_AUDIO_NOT_READY',
-        'Narration Audio Manifest 不是 current——请先生成音频',
-      );
+      if (scenes.kind === 'invalid') {
+        throw new TimingReconciliationError('SCENES_INVALID', scenes.message);
+      }
+      const audio = getCurrentNarrationAudioArtifact(projectId);
+      if (!audio) {
+        if (!getCurrentNarrationPlan(projectId)) {
+          throw new TimingReconciliationError(
+            'NARRATION_PLAN_NOT_CURRENT',
+            'Narration Plan 不是当前版本（missing 或 stale）——请先 Build Narration Plan',
+          );
+        }
+        throw new TimingReconciliationError(
+          'NARRATION_AUDIO_NOT_READY',
+          'Narration Audio Manifest 不是 current——请先生成音频',
+        );
+      }
+      const subtitle = getCurrentSubtitleTiming(projectId);
+      if (!subtitle) {
+        throw new TimingReconciliationError(
+          'SUBTITLE_TIMING_NOT_READY',
+          'Subtitle Timing 不是 current——请先 Build Subtitle Timing',
+        );
+      }
+      src = {scenes, audio, subtitle};
     }
-    const subtitle = getCurrentSubtitleTiming(projectId);
-    if (!subtitle) {
-      throw new TimingReconciliationError(
-        'SUBTITLE_TIMING_NOT_READY',
-        'Subtitle Timing 不是 current——请先 Build Subtitle Timing',
-      );
-    }
-    const src: CurrentSources = {scenes, audio, subtitle};
+    const {scenes, audio, subtitle} = src;
     const expected = options;
     if (
       (expected?.expectedScenes &&
@@ -408,7 +449,7 @@ export function buildTimingReconciliation(
     // 幂等：全 source snapshot + compilerVersion 匹配 → reuse
     for (const row of listReconciliationArtifacts(projectId)) {
       const rec = parseReconciliation(row);
-      if (rec && matchesCurrentSource(rec, src)) {
+      if (rec && matchesSourceSnapshot(rec, src)) {
         return {reconciliation: rec, artifact: {id: row.id, version: row.version}, reused: true};
       }
     }

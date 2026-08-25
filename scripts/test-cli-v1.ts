@@ -268,6 +268,7 @@ async function main(): Promise<void> {
       '--audio', `${customAudio.artifact.id}@${customAudio.artifact.version}`,
     ]);
     const customSubtitlesJson = jsonOf(customSubtitles);
+    const customSubtitle = customSubtitlesJson.artifact as {id: string; version: number};
     ok(
       customSubtitles.status === 0 &&
         customSubtitlesJson.timing.source.narrationAudioArtifactId === customAudio.artifact.id &&
@@ -306,6 +307,9 @@ async function main(): Promise<void> {
       category: 'Minimal', visualType: 'Minimal', template: null, sourceTemplate: null,
       assetIds: [], assetRequirements: [], licenseStatus: 'not-applicable',
     });
+    const crossProjectScenesId = insertLockedVersion(
+      db, 'cli-project', 'scenes', 1, JSON.stringify(scenesReady), 'json',
+    );
     const scenesV1Id = insertLockedVersion(db, projectId, 'scenes', 1, JSON.stringify(scenesReady), 'json');
     const reconcileArgs = [
       'reconcile', '--project', projectId, '--scenes', `${scenesV1Id}@1`,
@@ -468,6 +472,88 @@ async function main(): Promise<void> {
     ]);
     const recBlockedJson = jsonOf(recBlocked);
     ok(recBlocked.status === 0, 'reconcile remains independent of asset acquisition');
+
+    const exactCustomReconcileArgs = [
+      'reconcile', '--project', projectId, '--scenes', `${scenesV1Id}@1`,
+      '--audio', `${customAudio.artifact.id}@${customAudio.artifact.version}`,
+      '--subtitles', `${customSubtitle.id}@${customSubtitle.version}`,
+    ];
+    const exactCustomReconcile = run(exactCustomReconcileArgs);
+    const exactCustomReconcileJson = jsonOf(exactCustomReconcile);
+    ok(
+      exactCustomReconcile.status === 0 &&
+        exactCustomReconcileJson.reconciliation.source.scenesVersionId === scenesV1Id &&
+        exactCustomReconcileJson.reconciliation.source.narrationAudioArtifactId === customAudio.artifact.id &&
+        exactCustomReconcileJson.reconciliation.source.subtitleTimingArtifactId === customSubtitle.id &&
+        exactCustomReconcileJson.reconciliation.source.masterSha256 === customAudio.manifest.master.sha256 &&
+        exactCustomReconcileJson.reconciliation.source.masterDurationMs === customAudio.manifest.master.durationMs,
+      'reconcile exact non-current scenes and xlbnas chain bypasses all implicit current resolvers',
+      {status: exactCustomReconcile.status, stdout: exactCustomReconcile.stdout, stderr: exactCustomReconcile.stderr},
+    );
+
+    const assertReconcileFailsClosed = (args: string[], label: string): void => {
+      const before = counts(db, projectId).reconciliation;
+      const result = run(args);
+      ok(
+        result.status !== 0 && counts(db, projectId).reconciliation === before,
+        label,
+        {status: result.status, stdout: result.stdout, stderr: result.stderr},
+      );
+    };
+    const replaceIdentity = (args: string[], flag: '--scenes' | '--audio' | '--subtitles', identity: string): string[] => {
+      const copy = [...args];
+      copy[copy.indexOf(flag) + 1] = identity;
+      return copy;
+    };
+    assertReconcileFailsClosed(
+      replaceIdentity(exactCustomReconcileArgs, '--scenes', 'missing-scenes@1'),
+      'reconcile wrong scenes id fails closed',
+    );
+    assertReconcileFailsClosed(
+      replaceIdentity(exactCustomReconcileArgs, '--scenes', `${scenesV1Id}@2`),
+      'reconcile wrong scenes version fails closed',
+    );
+    assertReconcileFailsClosed(
+      replaceIdentity(exactCustomReconcileArgs, '--audio', 'missing-audio@1'),
+      'reconcile wrong audio id fails closed',
+    );
+    assertReconcileFailsClosed(
+      replaceIdentity(exactCustomReconcileArgs, '--audio', `${customAudio.artifact.id}@${customAudio.artifact.version + 1}`),
+      'reconcile wrong audio version fails closed',
+    );
+    assertReconcileFailsClosed(
+      replaceIdentity(exactCustomReconcileArgs, '--subtitles', 'missing-subtitles@1'),
+      'reconcile wrong subtitle id fails closed',
+    );
+    assertReconcileFailsClosed(
+      replaceIdentity(exactCustomReconcileArgs, '--subtitles', `${customSubtitle.id}@${customSubtitle.version + 1}`),
+      'reconcile wrong subtitle version fails closed',
+    );
+    assertReconcileFailsClosed(
+      replaceIdentity(exactCustomReconcileArgs, '--scenes', `${crossProjectScenesId}@1`),
+      'reconcile cross-project scenes fails closed',
+    );
+    assertReconcileFailsClosed(
+      replaceIdentity(exactCustomReconcileArgs, '--audio', 'cli-artifact@2'),
+      'reconcile cross-project audio fails closed',
+    );
+    assertReconcileFailsClosed(
+      replaceIdentity(exactCustomReconcileArgs, '--subtitles', 'cli-artifact@2'),
+      'reconcile cross-project subtitles fails closed',
+    );
+    assertReconcileFailsClosed(
+      replaceIdentity(exactCustomReconcileArgs, '--audio', `${planB.id}@${planB.version}`),
+      'reconcile wrong audio artifact type fails closed',
+    );
+    assertReconcileFailsClosed(
+      replaceIdentity(exactCustomReconcileArgs, '--subtitles', `${planB.id}@${planB.version}`),
+      'reconcile wrong subtitle artifact type fails closed',
+    );
+    assertReconcileFailsClosed(
+      replaceIdentity(exactCustomReconcileArgs, '--audio', `${audio.artifact.id}@${audio.artifact.version}`),
+      'reconcile subtitle dependency mismatch fails closed without selecting current audio',
+    );
+
     const beforeAssetBlock = counts(db, projectId);
     const assetBlocked = run([
       'render', '--project', projectId, '--scenes', `${scenesV2Id}@2`,

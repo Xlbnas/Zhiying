@@ -11,8 +11,8 @@ import {
 } from '../lib/final-render/schema';
 import {enqueueNarrationAudioJobs, getCurrentNarrationAudioArtifact, getExactNarrationAudioArtifact, getExactReusableNarrationAudioArtifact, getNarrationAudioOverview, tryFinalizeNarrationAudio} from '../lib/narration/audio';
 import {getCurrentNarrationPlan} from '../lib/narration/plan';
-import {getCurrentSubtitleTiming, checkSubtitleTimingReadiness, buildSubtitleTiming} from '../lib/subtitles/timing';
-import {getCurrentTimingReconciliation, checkTimingReconciliationReadiness, buildTimingReconciliation} from '../lib/reconciliation/timing';
+import {getCurrentSubtitleTiming, getExactSubtitleTiming, checkSubtitleTimingReadiness, buildSubtitleTiming} from '../lib/subtitles/timing';
+import {getCurrentTimingReconciliation, getExactReconciliationScenes, checkTimingReconciliationReadiness, buildTimingReconciliation} from '../lib/reconciliation/timing';
 import {getStage, listStages} from '../lib/workflow/stages';
 import {getVersion} from '../lib/workflow/versions';
 import {getRenderArtifact, probeRenderOutput, resolveOutputAbs, sha256File} from '../lib/render/artifact';
@@ -319,10 +319,50 @@ async function reconcile(args: ParsedArgs): Promise<Record<string, unknown>> {
   const audio = parseIdentity(required(args, 'audio'), '--audio');
   const subtitle = parseIdentity(required(args, 'subtitles'), '--subtitles');
   projectRow(projectId); artifactRow(projectId, audio); artifactRow(projectId, subtitle);
+  const exactScenes = getExactReconciliationScenes(projectId, {
+    versionId: scenes.id,
+    version: scenes.version,
+  });
+  if (!exactScenes) throw new CliError('SOURCE_MISMATCH', `exact scenes 无效或不匹配: ${scenes.id}@${scenes.version}`);
+  const exactAudio = await getExactNarrationAudioArtifact(projectId, {
+    artifactId: audio.id,
+    version: audio.version,
+  });
+  if (!exactAudio) throw new CliError('SOURCE_MISMATCH', `exact narration audio 无效或不匹配: ${audio.id}@${audio.version}`);
+  const exactSubtitle = getExactSubtitleTiming(projectId, {
+    artifactId: subtitle.id,
+    version: subtitle.version,
+  }, exactAudio);
+  if (!exactSubtitle) throw new CliError('SOURCE_MISMATCH', `exact subtitles 无效或 source audio 不匹配: ${subtitle.id}@${subtitle.version}`);
   const result = buildTimingReconciliation(projectId, {
     expectedScenes: {versionId: scenes.id, version: scenes.version}, expectedAudio: {artifactId: audio.id, version: audio.version}, expectedSubtitle: {artifactId: subtitle.id, version: subtitle.version},
+    exactSources: {scenes: exactScenes, audio: exactAudio, subtitle: exactSubtitle},
   });
-  return {ok: true, command: 'reconcile', sources: {scenes, audio, subtitles: subtitle}, artifact: result.artifact, reused: result.reused, reconciliation: result.reconciliation, readiness: checkTimingReconciliationReadiness(projectId)};
+  const rec = result.reconciliation;
+  return {
+    ok: true,
+    command: 'reconcile',
+    sources: {scenes, audio, subtitles: subtitle},
+    artifact: result.artifact,
+    reused: result.reused,
+    reconciliation: rec,
+    readiness: {
+      status: 'ready',
+      compilerVersion: rec.compilerVersion,
+      sources: {
+        scenesVersion: scenes.version,
+        audioArtifactVersion: audio.version,
+        subtitleArtifactVersion: subtitle.version,
+      },
+      artifactVersion: result.artifact.version,
+      sceneCount: rec.scenes.length,
+      masterDurationMs: rec.source.masterDurationMs,
+      sourceVisual: rec.sourceVisual,
+      target: rec.target,
+      unresolvedCount: rec.unresolvedNarrationUnitIds.length,
+      reconciliation: rec,
+    },
+  };
 }
 
 function latestAttempt(projectId: string, jobId: string): Record<string, unknown> {
