@@ -130,7 +130,7 @@ async function main(): Promise<void> {
     const {initProjectStages} = await import('../src/lib/workflow/stages');
     const {createProjectWithWorkflow} = await import('../src/lib/projects');
     const {buildNarrationPlan} = await import('../src/lib/narration/plan');
-    const {getCurrentNarrationAudioArtifact, tryFinalizeNarrationAudio} = await import('../src/lib/narration/audio');
+    const {enqueueNarrationAudioJobs, getCurrentNarrationAudioArtifact, tryFinalizeNarrationAudio} = await import('../src/lib/narration/audio');
     const {getCurrentSubtitleTiming} = await import('../src/lib/subtitles/timing');
     const {getCurrentTimingReconciliation} = await import('../src/lib/reconciliation/timing');
     const {MOCK_FIXTURES} = await import('../src/lib/prompts/fixtures');
@@ -240,10 +240,66 @@ async function main(): Promise<void> {
     ok(
       subtitles.status === 0 && subtitlesJson.timing.source.narrationAudioArtifactId === audio.artifact.id,
       'subtitles accepts exact audio and preserves source refs',
+      {status: subtitles.status, stdout: subtitles.stdout, stderr: subtitles.stderr},
     );
     const subtitle = getCurrentSubtitleTiming(projectId)!;
     const wrongAudio = run(['subtitles', '--project', projectId, '--audio', `${planB.id}@${planB.version}`]);
     ok(wrongAudio.status !== 0 && jsonOf(wrongAudio).error.code === 'AUDIO_SOURCE_MISMATCH', 'subtitles rejects mismatched audio');
+
+    const customVoice = {id: 'xlbnas', revision: '1'};
+    enqueueNarrationAudioJobs(projectId, {voiceProfile: customVoice});
+    for (;;) {
+      const claimed = claimNextAnyJob('w-cli-v1-custom-voice');
+      if (!claimed) break;
+      if (claimed.type !== 'tts') throw new Error(`unexpected job type: ${claimed.type}`);
+      try {
+        await runTtsJob(claimed.job, CTX);
+      } finally {
+        releaseResourceLeaseForJob('production_gpu', 'tts', claimed.job.id);
+      }
+    }
+    if (!tryFinalizeNarrationAudio(projectId, {
+      expectedPlan: {artifactId: planB.id, version: planB.version},
+      voiceProfile: customVoice,
+    })) throw new Error('custom voice audio finalize failed');
+    const customAudio = getCurrentNarrationAudioArtifact(projectId, {voiceProfile: customVoice})!;
+    const customSubtitles = run([
+      'subtitles', '--project', projectId,
+      '--audio', `${customAudio.artifact.id}@${customAudio.artifact.version}`,
+    ]);
+    const customSubtitlesJson = jsonOf(customSubtitles);
+    ok(
+      customSubtitles.status === 0 &&
+        customSubtitlesJson.timing.source.narrationAudioArtifactId === customAudio.artifact.id &&
+        customSubtitlesJson.timing.source.masterSha256 === customAudio.manifest.master.sha256 &&
+        customSubtitlesJson.timing.source.masterDurationMs === customAudio.manifest.master.durationMs,
+      'subtitles exact xlbnas@1 audio bypasses implicit default resolution and preserves media facts',
+      {status: customSubtitles.status, stdout: customSubtitles.stdout, stderr: customSubtitles.stderr},
+    );
+    const wrongCustomVersion = run([
+      'subtitles', '--project', projectId,
+      '--audio', `${customAudio.artifact.id}@${customAudio.artifact.version + 1}`,
+    ]);
+    ok(
+      wrongCustomVersion.status !== 0 && jsonOf(wrongCustomVersion).error.code === 'VERSION_MISMATCH',
+      'subtitles exact audio wrong version fails closed',
+    );
+    const missingCustomAudio = run([
+      'subtitles', '--project', projectId,
+      '--audio', `missing-audio@1`,
+    ]);
+    ok(
+      missingCustomAudio.status !== 0 && jsonOf(missingCustomAudio).error.code === 'ARTIFACT_NOT_FOUND',
+      'subtitles exact audio wrong id fails closed',
+    );
+    const crossProjectAudio = run([
+      'subtitles', '--project', 'cli-project',
+      '--audio', `${customAudio.artifact.id}@${customAudio.artifact.version}`,
+    ]);
+    ok(
+      crossProjectAudio.status !== 0 && jsonOf(crossProjectAudio).error.code === 'PROJECT_MISMATCH',
+      'subtitles exact audio from another project fails closed',
+    );
 
     const scenesReady = JSON.parse(MOCK_FIXTURES.scenes) as {scenes: Array<Record<string, unknown>>};
     Object.assign(scenesReady.scenes[0]!, {

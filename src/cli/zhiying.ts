@@ -9,7 +9,7 @@ import {
   FINAL_RENDER_ATTEMPT_ARTIFACT_KIND,
   finalRenderAttemptSchema,
 } from '../lib/final-render/schema';
-import {enqueueNarrationAudioJobs, getCurrentNarrationAudioArtifact, getExactReusableNarrationAudioArtifact, getNarrationAudioOverview, tryFinalizeNarrationAudio} from '../lib/narration/audio';
+import {enqueueNarrationAudioJobs, getCurrentNarrationAudioArtifact, getExactNarrationAudioArtifact, getExactReusableNarrationAudioArtifact, getNarrationAudioOverview, tryFinalizeNarrationAudio} from '../lib/narration/audio';
 import {getCurrentNarrationPlan} from '../lib/narration/plan';
 import {getCurrentSubtitleTiming, checkSubtitleTimingReadiness, buildSubtitleTiming} from '../lib/subtitles/timing';
 import {getCurrentTimingReconciliation, checkTimingReconciliationReadiness, buildTimingReconciliation} from '../lib/reconciliation/timing';
@@ -301,7 +301,15 @@ async function subtitles(args: ParsedArgs): Promise<Record<string, unknown>> {
   const projectId = required(args, 'project');
   const audio = parseIdentity(required(args, 'audio'), '--audio');
   projectRow(projectId); artifactRow(projectId, audio);
-  const result = buildSubtitleTiming(projectId, {expectedAudio: {artifactId: audio.id, version: audio.version}});
+  const exactAudio = await getExactNarrationAudioArtifact(projectId, {
+    artifactId: audio.id,
+    version: audio.version,
+  });
+  if (!exactAudio) throw new CliError('AUDIO_SOURCE_MISMATCH', `exact narration audio 无效或不匹配: ${audio.id}@${audio.version}`);
+  const result = buildSubtitleTiming(projectId, {
+    expectedAudio: {artifactId: audio.id, version: audio.version},
+    exactAudio,
+  });
   return {ok: true, command: 'subtitles', source: audio, artifact: result.artifact, reused: result.reused, timing: result.timing, readiness: checkSubtitleTimingReadiness(projectId)};
 }
 

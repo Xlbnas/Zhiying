@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import {getDb} from '../db';
-import {getCurrentNarrationAudioArtifact} from '../narration/audio';
+import {getCurrentNarrationAudioArtifact, type NarrationAudioArtifact} from '../narration/audio';
 import {getCurrentNarrationPlan} from '../narration/plan';
 import {isLegacyM1Project} from '../projects';
 import {compileSubtitleTiming, SubtitleCompileError} from './compiler';
@@ -179,7 +179,10 @@ export function checkSubtitleTimingReadiness(projectId: string): SubtitleTimingR
  */
 export function buildSubtitleTiming(
   projectId: string,
-  options?: {expectedAudio?: {artifactId: string; version: number}},
+  options?: {
+    expectedAudio?: {artifactId: string; version: number};
+    exactAudio?: NarrationAudioArtifact;
+  },
 ): {
   timing: SubtitleTiming;
   artifact: {id: string; version: number};
@@ -202,7 +205,7 @@ export function buildSubtitleTiming(
     }
 
     // Build Source Gate（§二十四）：只允许 current Narration Audio Manifest
-    const audio = getCurrentNarrationAudioArtifact(projectId);
+    const audio = options?.exactAudio ?? getCurrentNarrationAudioArtifact(projectId);
     if (!audio) {
       if (!getCurrentNarrationPlan(projectId)) {
         throw new SubtitleTimingError(

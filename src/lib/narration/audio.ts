@@ -500,36 +500,31 @@ export function getCurrentNarrationAudioArtifact(
   };
 }
 
-/**
- * Read-only compatibility path for an already finalized M6 narration audio.
- * This deliberately validates the immutable artifact before any enqueue gate;
- * callers must fall back to enqueueNarrationAudioJobs when it returns null.
- */
-export async function getExactReusableNarrationAudioArtifact(
-  projectId: string,
-  expectedPlan: {artifactId: string; version: number},
-  options?: {voiceProfile?: {id: string; revision: string}; referenceSha256?: string | null},
-): Promise<{
+export type NarrationAudioArtifact = {
   artifact: {id: string; version: number};
   manifest: NarrationAudioManifest;
-} | null> {
+};
+
+async function validateExactNarrationAudioArtifact(
+  projectId: string,
+  expectedPlan: {artifactId: string; version: number},
+  audio: NarrationAudioArtifact,
+  options?: {voiceProfile?: {id: string; revision: string}; referenceSha256?: string | null},
+): Promise<NarrationAudioArtifact | null> {
   const current = getCurrentNarrationPlan(projectId);
   if (
     !current ||
     current.artifact.id !== expectedPlan.artifactId ||
-    current.artifact.version !== expectedPlan.version
-  ) return null;
-
-  const voice = options?.voiceProfile ?? DEFAULT_VOICE_PROFILE;
-  const audio = getCurrentNarrationAudioArtifact(projectId, {
-    voiceProfile: voice,
-    referenceSha256: options?.referenceSha256,
-  });
-  if (
-    !audio ||
+    current.artifact.version !== expectedPlan.version ||
     audio.manifest.schemaVersion !== NARRATION_AUDIO_SCHEMA_VERSION ||
     audio.manifest.source.narrationPlanArtifactId !== expectedPlan.artifactId ||
-    audio.manifest.source.narrationPlanArtifactVersion !== expectedPlan.version
+    audio.manifest.source.narrationPlanArtifactVersion !== expectedPlan.version ||
+    audio.manifest.provider.name !== getTtsProvider().name ||
+    (options?.voiceProfile !== undefined &&
+      (audio.manifest.provider.voiceProfile.id !== options.voiceProfile.id ||
+        audio.manifest.provider.voiceProfile.revision !== options.voiceProfile.revision)) ||
+    (options?.referenceSha256 !== undefined &&
+      audio.manifest.provider.referenceSha256 !== options.referenceSha256)
   ) return null;
 
   const dataDir = path.resolve(getDataDir());
@@ -615,7 +610,7 @@ export async function getExactReusableNarrationAudioArtifact(
       result.data.settings.voiceProfileId !== provider.voiceProfile.id ||
       result.data.settings.voiceProfileRevision !== provider.voiceProfile.revision ||
       (options?.referenceSha256 !== undefined && result.data.settings.referenceSha256 !== options.referenceSha256) ||
-      (options?.referenceSha256 !== undefined && parseTtsJobPayload(job.payload_json)?.referenceAudioSha256 !== options.referenceSha256) ||
+      (options?.referenceSha256 !== undefined && payload.referenceAudioSha256 !== options.referenceSha256) ||
       result.data.settings.useRandom !== false ||
       result.data.audio.sampleRate !== manifestUnit.sampleRate ||
       result.data.audio.channels !== manifestUnit.channels
@@ -629,6 +624,72 @@ export async function getExactReusableNarrationAudioArtifact(
     stillCurrent.artifact.version !== expectedPlan.version
   ) return null;
   return audio;
+}
+
+/** Exact identity path: never resolves latest/current/default audio. */
+export async function getExactNarrationAudioArtifact(
+  projectId: string,
+  expectedAudio: {artifactId: string; version: number},
+): Promise<NarrationAudioArtifact | null> {
+  const row = getDb().prepare(
+    `SELECT id, project_id, kind, version, content_json FROM artifacts WHERE id = ?`,
+  ).get(expectedAudio.artifactId) as (ArtifactRow & {project_id: string; kind: string}) | undefined;
+  if (
+    !row ||
+    row.project_id !== projectId ||
+    row.kind !== NARRATION_AUDIO_ARTIFACT_KIND ||
+    row.version !== expectedAudio.version
+  ) return null;
+
+  let manifest: NarrationAudioManifest;
+  try {
+    const parsed = narrationAudioManifestSchema.safeParse(JSON.parse(row.content_json));
+    if (!parsed.success) return null;
+    manifest = parsed.data;
+  } catch {
+    return null;
+  }
+  return validateExactNarrationAudioArtifact(
+    projectId,
+    {
+      artifactId: manifest.source.narrationPlanArtifactId,
+      version: manifest.source.narrationPlanArtifactVersion,
+    },
+    {artifact: {id: row.id, version: row.version}, manifest},
+    {
+      voiceProfile: manifest.provider.voiceProfile,
+      referenceSha256: manifest.provider.referenceSha256 ?? undefined,
+    },
+  );
+}
+
+/**
+ * Read-only compatibility path for an already finalized M6 narration audio.
+ * This deliberately validates the immutable artifact before any enqueue gate;
+ * callers must fall back to enqueueNarrationAudioJobs when it returns null.
+ */
+export async function getExactReusableNarrationAudioArtifact(
+  projectId: string,
+  expectedPlan: {artifactId: string; version: number},
+  options?: {voiceProfile?: {id: string; revision: string}; referenceSha256?: string | null},
+): Promise<{
+  artifact: {id: string; version: number};
+  manifest: NarrationAudioManifest;
+} | null> {
+  const current = getCurrentNarrationPlan(projectId);
+  if (
+    !current ||
+    current.artifact.id !== expectedPlan.artifactId ||
+    current.artifact.version !== expectedPlan.version
+  ) return null;
+
+  const voice = options?.voiceProfile ?? DEFAULT_VOICE_PROFILE;
+  const audio = getCurrentNarrationAudioArtifact(projectId, {
+    voiceProfile: voice,
+    referenceSha256: options?.referenceSha256,
+  });
+  if (!audio) return null;
+  return validateExactNarrationAudioArtifact(projectId, expectedPlan, audio, options);
 }
 
 // ---------- Master 构建（ffmpeg 统一 48k/mono/s16） ----------
