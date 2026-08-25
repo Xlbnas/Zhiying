@@ -240,7 +240,12 @@ export async function runTtsJob(
         model: result.model,
         providerVersion: result.providerVersion ?? null,
         providerCommit: result.providerCommit ?? null,
-        settings: result.settings,
+        // Preserve the enqueue-time registry reference snapshot without changing
+        // the Provider API. Historical jobs persist this as null.
+        settings: {
+          ...result.settings,
+          referenceSha256: payload.referenceAudioSha256 ?? null,
+        },
         audio: {
           codec: probeResult.codec,
           sampleRate: probeResult.sampleRate,

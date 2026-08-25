@@ -845,6 +845,15 @@ async function main(): Promise<void> {
     setScriptV2(pid, SCRIPT_V2);
     buildNarrationPlan(pid);
     enqueueNarrationAudioJobs(pid);
+    const referenceSha256 = 'a'.repeat(64);
+    const queued = db.prepare(
+      "SELECT id, payload_json FROM tts_jobs WHERE project_id = ? AND status = 'queued'",
+    ).all(pid) as Array<{id: string; payload_json: string}>;
+    for (const row of queued) {
+      const payload = JSON.parse(row.payload_json) as Record<string, unknown>;
+      payload.referenceAudioSha256 = referenceSha256;
+      db.prepare('UPDATE tts_jobs SET payload_json = ? WHERE id = ?').run(JSON.stringify(payload), row.id);
+    }
     const fake = (): TtsProvider => fakeProvider({commit: 'commit-test-1', model: 'Model-X'});
     const claimed = claimTts()!;
     await runTtsJobWithRunner(claimed, CTX, {providers: {mock: fake()}});
@@ -854,8 +863,9 @@ async function main(): Promise<void> {
     ok(
       r.provider === 'mock' && r.model === 'Model-X' && r.providerCommit === 'commit-test-1' &&
         r.providerVersion === null && r.settings.voiceProfileId === 'default' &&
-        r.settings.voiceProfileRevision === '1' && r.settings.useRandom === false,
-      '[H52] result_json 记录真实 model/providerCommit/providerVersion/voice（非推断）',
+        r.settings.voiceProfileRevision === '1' && r.settings.useRandom === false &&
+        r.settings.referenceSha256 === referenceSha256,
+      '[H52] result_json 记录真实 provider/voice 与 enqueue-time reference SHA（非推断）',
       r,
     );
     const abs = path.join(getDataDir(), job.output_path!);
