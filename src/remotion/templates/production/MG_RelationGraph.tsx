@@ -35,13 +35,13 @@ export const MG_RelationGraph = ({title, nodes, edges, caption}: RelationGraphPr
   const nodeMap = new Map(positioned.map((n) => [n.id, n]));
 
   return (
-    <AbsoluteFill style={{backgroundColor: colors.background, overflow: 'hidden'}}>
+    <AbsoluteFill style={{background: 'radial-gradient(circle at 50% 48%, #f8fbfb 0%, #dbe5e7 72%)', overflow: 'hidden'}}>
       {/* 标题 */}
       <div style={{
         position: 'absolute', left: 120, top: 80,
         opacity: interpolate(frame, [0, 15], [0, 1], {extrapolateRight: 'clamp'}),
       }}>
-        <Typography variant="SectionTitle" color={colors.accent} style={{fontSize: 36, letterSpacing: 2}}>
+        <Typography variant="SectionTitle" color="#2f6e7b" style={{fontSize: 34, letterSpacing: 2}}>
           {title}
         </Typography>
         <div style={{width: 60, height: 3, background: colors.accent, marginTop: 12}} />
@@ -57,10 +57,10 @@ export const MG_RelationGraph = ({title, nodes, edges, caption}: RelationGraphPr
           return (
             <g key={`${edge.from}-${edge.to}`} opacity={opacity}>
               <line x1={from.x} y1={from.y} x2={to.x} y2={to.y}
-                stroke={colors.accent} strokeWidth={lineWidth.normal} />
+                stroke="#4c8995" strokeWidth={lineWidth.normal + 1} strokeDasharray="10 8" />
               {edge.label ? (
                 <text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 10}
-                  fill={colors.secondary} fontSize={16} textAnchor="middle">
+                  fill="#3f5c62" fontSize={17} textAnchor="middle">
                   {edge.label}
                 </text>
               ) : null}
@@ -75,16 +75,17 @@ export const MG_RelationGraph = ({title, nodes, edges, caption}: RelationGraphPr
         return (
           <div key={node.id} style={{
             position: 'absolute',
-            left: node.x - 90, top: node.y - 40,
-            width: 180, minHeight: 80,
-            borderRadius: 14,
-            border: `1.5px solid ${colors.accentSoft}`,
-            background: `${colors.accent}14`,
+            left: node.x - 78, top: node.y - 78,
+            width: 156, minHeight: 156,
+            borderRadius: '50%',
+            border: '2px solid #4c8995',
+            background: i === positioned.length - 1 ? '#2f6e7b' : 'rgba(255,255,255,.9)',
+            boxShadow: '0 12px 36px rgba(42,78,85,.12)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             padding: '12px 16px',
             opacity,
           }}>
-            <Typography variant="BodyLabel" color={colors.primary} style={{fontSize: 20, fontWeight: 600, textAlign: 'center'}}>
+            <Typography variant="BodyLabel" color={i === positioned.length - 1 ? '#f5f9fa' : '#173139'} style={{fontSize: 20, fontWeight: 650, textAlign: 'center'}}>
               {node.label}
             </Typography>
           </div>
@@ -97,7 +98,7 @@ export const MG_RelationGraph = ({title, nodes, edges, caption}: RelationGraphPr
           position: 'absolute', left: 120, bottom: 80,
           opacity: interpolate(frame, [50, 65], [0, 1], {extrapolateRight: 'clamp'}),
         }}>
-          <Typography variant="BodyLabel" color={colors.secondary} style={{fontSize: 18}}>
+          <Typography variant="BodyLabel" color="#3f5c62" style={{fontSize: 20}}>
             {caption}
           </Typography>
         </div>

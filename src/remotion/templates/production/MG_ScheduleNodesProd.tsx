@@ -21,19 +21,21 @@ export const MG_ScheduleNodesProd = ({title, items, caption}: ScheduleNodesProdP
   const itemGap = 100;
 
   return (
-    <AbsoluteFill style={{backgroundColor: colors.background, overflow: 'hidden'}}>
+    <AbsoluteFill style={{background: '#f2eee6', overflow: 'hidden'}}>
       {/* 标题 */}
       <div style={{
         position: 'absolute', left: 120, top: 80,
         opacity: interpolate(frame, [0, 15], [0, 1], {extrapolateRight: 'clamp'}),
       }}>
-        <Typography variant="SectionTitle" color={colors.accent} style={{fontSize: 36, letterSpacing: 2}}>
+        <Typography variant="SectionTitle" color="#7d3e39" style={{fontSize: 36, letterSpacing: 2}}>
           {title}
         </Typography>
         <div style={{width: 60, height: 3, background: colors.accent, marginTop: 12}} />
       </div>
 
-      {/* 步骤列表 */}
+      <div style={{position: 'absolute', left: 243, top: startY + 26, width: 3,
+        height: Math.max(0, (items.length - 1) * itemGap), background: '#bdaea0'}} />
+      {/* 证据阶梯 / 步骤列表 */}
       {items.map((item, i) => {
         const y = startY + i * itemGap;
         const opacity = interpolate(frame, [8 + i * 6, 22 + i * 6], [0, 1], {extrapolateRight: 'clamp'});
@@ -48,20 +50,20 @@ export const MG_ScheduleNodesProd = ({title, items, caption}: ScheduleNodesProdP
             {/* 序号圆圈 */}
             <div style={{
               width: 48, height: 48, borderRadius: '50%',
-              border: `1.5px solid ${item.done ? colors.accent : colors.muted}`,
-              background: item.done ? `${colors.accent}18` : 'transparent',
+              border: `2px solid ${item.done ? '#7d3e39' : '#81786e'}`,
+              background: item.done ? '#7d3e39' : '#f2eee6',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
               {item.done ? (
-                <span style={{color: colors.accent, fontSize: 20, fontWeight: 700, opacity: checkOpacity}}>✓</span>
+                <span style={{color: '#fff8ef', fontSize: 20, fontWeight: 700, opacity: checkOpacity}}>✓</span>
               ) : (
-                <Typography variant="SmallLabel" color={colors.secondary} style={{fontSize: 18}}>
+                <Typography variant="SmallLabel" color="#5a5148" style={{fontSize: 18}}>
                   {i + 1}
                 </Typography>
               )}
             </div>
             {/* 标签 */}
-            <Typography variant="BodyLabel" color={colors.primary} style={{fontSize: 24, fontWeight: 600}}>
+            <Typography variant="BodyLabel" color="#2e2924" style={{fontSize: 27, fontWeight: 650}}>
               {item.label}
             </Typography>
           </div>
@@ -74,7 +76,7 @@ export const MG_ScheduleNodesProd = ({title, items, caption}: ScheduleNodesProdP
           position: 'absolute', left: 120, bottom: 80,
           opacity: interpolate(frame, [50, 65], [0, 1], {extrapolateRight: 'clamp'}),
         }}>
-          <Typography variant="BodyLabel" color={colors.secondary} style={{fontSize: 18}}>
+          <Typography variant="BodyLabel" color="#5a5148" style={{fontSize: 20}}>
             {caption}
           </Typography>
         </div>

@@ -19,13 +19,13 @@ export const MG_Timeline = ({title, events, caption}: TimelineProps) => {
   const startX = 200, endX = 1720, lineY = 580;
 
   return (
-    <AbsoluteFill style={{backgroundColor: colors.background, overflow: 'hidden'}}>
+    <AbsoluteFill style={{background: 'linear-gradient(180deg, #eee5d7 0%, #f7f3eb 100%)', overflow: 'hidden'}}>
       {/* 标题 */}
       <div style={{
         position: 'absolute', left: 120, top: 80,
         opacity: interpolate(frame, [0, 15], [0, 1], {extrapolateRight: 'clamp'}),
       }}>
-        <Typography variant="SectionTitle" color={colors.accent} style={{fontSize: 36, letterSpacing: 2}}>
+        <Typography variant="SectionTitle" color="#7d3e39" style={{fontSize: 36, letterSpacing: 2}}>
           {title}
         </Typography>
         <div style={{width: 60, height: 3, background: colors.accent, marginTop: 12}} />
@@ -34,7 +34,7 @@ export const MG_Timeline = ({title, events, caption}: TimelineProps) => {
       {/* 时间线 */}
       <svg width="1920" height="1080" style={{position: 'absolute', inset: 0}}>
         <line x1={startX} y1={lineY} x2={endX} y2={lineY}
-          stroke={colors.muted} strokeWidth={lineWidth.normal} />
+          stroke="#9d8775" strokeWidth={lineWidth.normal + 1} />
       </svg>
 
       {/* 事件节点 */}
@@ -49,21 +49,21 @@ export const MG_Timeline = ({title, events, caption}: TimelineProps) => {
             <div style={{
               position: 'absolute', left: 92, top: 122,
               width: 16, height: 16, borderRadius: '50%',
-              background: isLast ? colors.accent : colors.primary,
-              border: `2px solid ${colors.accentSoft}`,
+              background: isLast ? '#7d3e39' : '#f7f3eb',
+              border: '3px solid #7d3e39',
             }} />
             {/* 时间标签 */}
             {event.time ? (
-              <Typography variant="SmallLabel" color={colors.secondary} style={{textAlign: 'center', fontSize: 14, marginBottom: 8}}>
+              <Typography variant="SmallLabel" color="#7d3e39" style={{textAlign: 'center', fontSize: 16, marginBottom: 8, fontWeight: 700}}>
                 {event.time}
               </Typography>
             ) : null}
             {/* 事件标签（在线上方） */}
-            <Typography variant="BodyLabel" color={colors.primary} style={{
+            <Typography variant="BodyLabel" color="#2e2924" style={{
               textAlign: 'center', fontSize: 18, fontWeight: 600,
               padding: '8px 12px', borderRadius: 8,
-              background: `${colors.accent}0D`,
-              border: `1px solid ${colors.accentSoft}`,
+              background: 'rgba(255,255,255,.72)',
+              border: '1px solid #c8b8aa',
             }}>
               {event.label}
             </Typography>
@@ -77,7 +77,7 @@ export const MG_Timeline = ({title, events, caption}: TimelineProps) => {
           position: 'absolute', left: 120, bottom: 80,
           opacity: interpolate(frame, [50, 65], [0, 1], {extrapolateRight: 'clamp'}),
         }}>
-          <Typography variant="BodyLabel" color={colors.secondary} style={{fontSize: 18}}>
+          <Typography variant="BodyLabel" color="#5a5148" style={{fontSize: 20}}>
             {caption}
           </Typography>
         </div>

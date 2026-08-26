@@ -1,0 +1,86 @@
+{
+  "data": {
+    "schemaVersion": "1.0",
+    "templateVersion": "freud-mg-v1.0",
+    "project": {
+      "title": "Editorial Polish V2 family preview",
+      "projectId": "3778ffb0-c430-4499-9f7f-2590f45cb8cb",
+      "composition": "ZhiyingFullCut",
+      "fps": 30,
+      "width": 1920,
+      "height": 1080,
+      "durationSec": 30,
+      "durationInFrames": 900,
+      "showPilotIntro": false
+    },
+    "chapterTiming": [
+      {"chapter": 1, "title": "一个尴尬的瞬间", "start": 0, "end": 10},
+      {"chapter": 2, "title": "弗洛伊德为什么迷人", "start": 10, "end": 15},
+      {"chapter": 3, "title": "大脑本来就有噪声", "start": 5, "end": 20},
+      {"chapter": 4, "title": "保留问题，放下万能钥匙", "start": 25, "end": 30}
+    ],
+    "scenes": [
+      {
+        "id": "S003", "chapter": 1, "chapterTitle": "一个尴尬的瞬间",
+        "start": 0, "end": 5, "duration": 5, "startFrame": 0, "durationInFrames": 150,
+        "category": "Editorial Graphic", "visualType": "UI", "template": null, "sourceTemplate": null,
+        "assetRequirements": [], "narrationSummary": "从一个错误，到隐藏欲望：中间需要多少证据？",
+        "description": "Editorial typography", "notes": "", "assetIds": [], "licenseStatus": "not-applicable",
+        "subtitlePosition": "bottom", "transitionIn": "cut", "transitionOut": "cut"
+      },
+      {
+        "id": "S012", "chapter": 3, "chapterTitle": "大脑本来就有噪声",
+        "start": 5, "end": 10, "duration": 5, "startFrame": 150, "durationInFrames": 150,
+        "category": "MG", "visualType": "MG", "template": "MG_LayeredDiagram", "sourceTemplate": "MG_LayeredDiagram",
+        "templateProps": {"title": "说话是一层层激活", "layers": [{"label": "词义"}, {"label": "词语"}, {"label": "语音"}], "caption": "多个候选同时竞争"},
+        "assetRequirements": [], "narrationSummary": "语言单位逐层激活", "description": "Activation bands", "notes": "",
+        "assetIds": [], "licenseStatus": "not-applicable", "subtitlePosition": "bottom", "transitionIn": "cut", "transitionOut": "cut"
+      },
+      {
+        "id": "S005", "chapter": 2, "chapterTitle": "弗洛伊德为什么迷人",
+        "start": 10, "end": 15, "duration": 5, "startFrame": 300, "durationInFrames": 150,
+        "category": "Archive", "visualType": "Archive", "template": null, "sourceTemplate": null,
+        "assetRequirements": [{"requirementId": "S005-R01", "kind": "image", "subject": "早期德文版标题页", "query": "Freud title page", "usage": "primary", "policy": "public_domain", "authenticity": "authentic_required"}],
+        "narrationSummary": "弗洛伊德把日常小失误放进同一个研究计划", "description": "Annotated archive", "notes": "",
+        "assetIds": ["0b48e30c-d5d8-4d39-8438-42400e799263"], "licenseStatus": "verified", "subtitlePosition": "bottom", "transitionIn": "cut", "transitionOut": "cut"
+      },
+      {
+        "id": "S018", "chapter": 3, "chapterTitle": "大脑本来就有噪声",
+        "start": 15, "end": 20, "duration": 5, "startFrame": 450, "durationInFrames": 150,
+        "category": "MG", "visualType": "MG", "template": "MG_ConceptCompare", "sourceTemplate": "MG_ConceptCompare",
+        "templateProps": {"title": "证据支持到哪里？", "left": "语境可能影响候选竞争", "right": "被压抑欲望已经现形", "note": "前者不自动推出后者"},
+        "assetRequirements": [], "narrationSummary": "心理状态参与竞争，不等于抓到被压抑欲望", "description": "Debate split", "notes": "",
+        "assetIds": [], "licenseStatus": "not-applicable", "subtitlePosition": "bottom", "transitionIn": "cut", "transitionOut": "cut"
+      },
+      {
+        "id": "S020", "chapter": 4, "chapterTitle": "保留问题，放下万能钥匙",
+        "start": 20, "end": 25, "duration": 5, "startFrame": 600, "durationInFrames": 150,
+        "category": "MG", "visualType": "MG", "template": "MG_ScheduleNodes", "sourceTemplate": "MG_ScheduleNodes",
+        "templateProps": {"title": "一个解释怎样接受检验", "items": [{"label": "能否提前预测？"}, {"label": "是否比较普通原因？"}, {"label": "是否排除替代解释？"}], "caption": "故事讲得通，只是起点"},
+        "assetRequirements": [], "narrationSummary": "预测、基线、替代解释", "description": "Evidence ladder", "notes": "",
+        "assetIds": [], "licenseStatus": "not-applicable", "subtitlePosition": "bottom", "transitionIn": "cut", "transitionOut": "cut"
+      },
+      {
+        "id": "S024", "chapter": 4, "chapterTitle": "保留问题，放下万能钥匙",
+        "start": 25, "end": 30, "duration": 5, "startFrame": 750, "durationInFrames": 150,
+        "category": "Minimal", "visualType": "Minimal", "template": null, "sourceTemplate": null,
+        "assetRequirements": [], "narrationSummary": "可以追问，但别急着宣布破案", "description": "Minimal breath", "notes": "",
+        "assetIds": [], "licenseStatus": "not-applicable", "subtitlePosition": "bottom", "transitionIn": "cut", "transitionOut": "cut"
+      }
+    ],
+    "assetMap": {
+      "S005": [{
+        "assetId": "0b48e30c-d5d8-4d39-8438-42400e799263",
+        "publicPath": "assets/3778ffb0-c430-4499-9f7f-2590f45cb8cb/6ce6f1fb-d52b-4a8f-8892-7651857b5a86.jpg",
+        "mediaType": "image", "width": 591, "height": 914,
+        "description": "Title page of Freud, Zur Psychopathologie, 1904",
+        "attribution": "Sigmund Freud, Wikimedia Commons",
+        "sourceUrl": "https://commons.wikimedia.org/wiki/File:Zur_psychopathologie_1904_freud.jpg"
+      }]
+    }
+  },
+  "subtitles": [],
+  "audio": {"narration": null, "bgm": null, "sfx": null},
+  "showSubtitles": false,
+  "renderMode": "preview"
+}

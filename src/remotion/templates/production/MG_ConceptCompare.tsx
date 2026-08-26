@@ -23,14 +23,14 @@ export const MG_ConceptCompare = ({title, left, right, note}: ConceptCompareProp
   const vsOpacity = interpolate(frame, [8, 20], [0, 1], {extrapolateRight: 'clamp'});
 
   return (
-    <AbsoluteFill style={{backgroundColor: colors.background, overflow: 'hidden'}}>
+    <AbsoluteFill style={{background: 'linear-gradient(90deg, #eee5d8 0 49.8%, #dfe8eb 50.2% 100%)', overflow: 'hidden'}}>
       {/* 标题 */}
       {title ? (
         <div style={{
           position: 'absolute', left: 120, top: 80,
           opacity: interpolate(frame, [0, 15], [0, 1], {extrapolateRight: 'clamp'}),
         }}>
-          <Typography variant="SectionTitle" color={colors.accent} style={{fontSize: 36, letterSpacing: 2}}>
+          <Typography variant="SectionTitle" color="#743b37" style={{fontSize: 32, letterSpacing: 2}}>
             {title}
           </Typography>
           <div style={{width: 60, height: 3, background: colors.accent, marginTop: 12}} />
@@ -40,15 +40,14 @@ export const MG_ConceptCompare = ({title, left, right, note}: ConceptCompareProp
       {/* 左侧 */}
       <div style={{
         position: 'absolute', left: 180, top: 280,
-        width: 580, minHeight: 200,
-        borderRadius: 16,
-        border: `1.5px solid ${colors.accentSoft}`,
-        background: `${colors.accent}0D`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '40px 30px',
+        width: 580, minHeight: 260,
+        borderTop: '5px solid #8f3f3a',
+        background: 'rgba(255,252,247,.56)',
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+        padding: '58px 42px',
         opacity: leftOpacity,
       }}>
-        <Typography variant="Title" color={colors.primary} style={{fontSize: 44, fontWeight: 650, textAlign: 'center'}}>
+        <Typography variant="Title" color="#2b211c" style={{fontSize: 44, fontWeight: 680, textAlign: 'left'}}>
           {left}
         </Typography>
       </div>
@@ -60,23 +59,22 @@ export const MG_ConceptCompare = ({title, left, right, note}: ConceptCompareProp
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         opacity: vsOpacity,
       }}>
-        <Typography variant="SectionTitle" color={colors.accent} style={{fontSize: 48, fontWeight: 700, letterSpacing: 6}}>
-          VS
+        <Typography variant="SectionTitle" color="#465c64" style={{fontSize: 48, fontWeight: 700, letterSpacing: 6}}>
+          ≠
         </Typography>
       </div>
 
       {/* 右侧 */}
       <div style={{
         position: 'absolute', left: 1040, top: 280,
-        width: 580, minHeight: 200,
-        borderRadius: 16,
-        border: `1.5px solid ${colors.accentSoft}`,
-        background: `${colors.accent}0D`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '40px 30px',
+        width: 580, minHeight: 260,
+        borderTop: '5px solid #397789',
+        background: 'rgba(247,251,252,.7)',
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+        padding: '58px 42px',
         opacity: rightOpacity,
       }}>
-        <Typography variant="Title" color={colors.primary} style={{fontSize: 44, fontWeight: 650, textAlign: 'center'}}>
+        <Typography variant="Title" color="#15272d" style={{fontSize: 44, fontWeight: 680, textAlign: 'left'}}>
           {right}
         </Typography>
       </div>
@@ -88,7 +86,7 @@ export const MG_ConceptCompare = ({title, left, right, note}: ConceptCompareProp
           opacity: interpolate(frame, [30, 45], [0, 1], {extrapolateRight: 'clamp'}),
         }}>
           <div style={{width: 40, height: 2, background: colors.muted, marginBottom: 12}} />
-          <Typography variant="BodyLabel" color={colors.secondary} style={{fontSize: 18}}>
+          <Typography variant="BodyLabel" color="#34484f" style={{fontSize: 21}}>
             {note}
           </Typography>
         </div>

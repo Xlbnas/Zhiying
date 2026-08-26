@@ -30,6 +30,7 @@ const bundleDir = path.join(dataDir, 'bundle-cache', 'freud-mg-v1.0');
 const outDir = path.join(dataDir, 'still-test');
 const projectId = process.argv[2];
 const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+const inputPropsPath = process.env.INPUT_PROPS;
 
 if (!projectId) {
   console.error('usage: node scripts/render-frames.mjs <projectId> [frames 逗号分隔]');
@@ -44,11 +45,14 @@ fs.mkdirSync(outDir, { recursive: true });
 // 会让 esbuild 输出无导入的 React.createElement，渲染时抛 "React is not defined"。
 const marker = path.join(bundleDir, 'index.html');
 let serveUrl;
-if (fs.existsSync(marker)) {
+if (fs.existsSync(marker) && process.env.FORCE_BUNDLE !== '1') {
   console.log('[still] bundle cache hit');
   serveUrl = bundleDir;
 } else {
   console.log('[still] bundling…');
+  if (process.env.FORCE_BUNDLE === '1') {
+    fs.rmSync(bundleDir, {recursive: true, force: true});
+  }
   serveUrl = await bundle({
     entryPoint: path.join(root, 'src', 'remotion', 'index.ts'),
     outDir: bundleDir,
@@ -89,10 +93,15 @@ console.log('[still] bundle ready:', serveUrl);
 // 渲染静态服务端口：每次运行随机（渲染失败后端口未必释放，固定端口重跑必撞）
 const RENDER_PORT = 4000 + Math.floor(Math.random() * 10000);
 
-// 2. input props from API
-const res = await fetch(`${baseUrl}/api/projects/${projectId}/scenes`);
-if (!res.ok) throw new Error(`scenes API HTTP ${res.status}`);
-const inputProps = await res.json();
+// 2. input props from an exact local preview fixture or the existing API.
+// INPUT_PROPS is preview-only and preserves the historical API behaviour by default.
+const inputProps = inputPropsPath
+  ? JSON.parse(fs.readFileSync(path.resolve(root, inputPropsPath), 'utf8'))
+  : await (async () => {
+      const res = await fetch(`${baseUrl}/api/projects/${projectId}/scenes`);
+      if (!res.ok) throw new Error(`scenes API HTTP ${res.status}`);
+      return res.json();
+    })();
 console.log(
   `[still] props: scenes=${inputProps.data.scenes.length} subtitles=${inputProps.subtitles.length} narration=${inputProps.audio.narration}`,
 );

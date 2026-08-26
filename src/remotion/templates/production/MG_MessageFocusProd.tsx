@@ -21,20 +21,20 @@ export const MG_MessageFocusProd = ({message, context}: MessageFocusProdProps) =
 
   return (
     <AbsoluteFill style={{
-      backgroundColor: colors.background,
+      background: 'linear-gradient(120deg, #101617 0%, #1b2729 72%, #30201f 100%)',
       display: 'flex',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       justifyContent: 'center',
       flexDirection: 'column',
     }}>
       {/* 核心信息 */}
       <div style={{
-        maxWidth: 1300, textAlign: 'center',
+        maxWidth: 1320, textAlign: 'left', marginLeft: 150,
         opacity: messageOpacity,
         transform: `translateY(${10 * (1 - messageOpacity)}px)`,
       }}>
         <Typography variant="Title" color={colors.primary} style={{
-          fontSize: 56, fontWeight: 700, lineHeight: 1.3,
+          fontSize: 62, fontWeight: 680, lineHeight: 1.32,
         }}>
           {message}
         </Typography>
@@ -43,10 +43,11 @@ export const MG_MessageFocusProd = ({message, context}: MessageFocusProdProps) =
       {/* 上下文 */}
       {context ? (
         <div style={{
-          maxWidth: 1000, textAlign: 'center', marginTop: 50,
+          maxWidth: 980, textAlign: 'left', marginTop: 50, marginLeft: 150,
           opacity: contextOpacity,
         }}>
-          <div style={{width: 40, height: 2, background: colors.accent, margin: '0 auto 24px'}} />
+          <div style={{width: 240, height: 3, background: colors.accent, marginBottom: 24,
+            transform: `scaleX(${contextOpacity})`, transformOrigin: 'left'}} />
           <Typography variant="BodyLabel" color={colors.secondary} style={{fontSize: 22, lineHeight: 1.5}}>
             {context}
           </Typography>

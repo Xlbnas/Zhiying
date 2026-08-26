@@ -21,13 +21,13 @@ export const MG_LayeredDiagram = ({title, layers, caption}: LayeredDiagramProps)
   const layerHeight = 720 / (layerCount + 1);
 
   return (
-    <AbsoluteFill style={{backgroundColor: colors.background, overflow: 'hidden'}}>
+    <AbsoluteFill style={{background: 'linear-gradient(135deg, #edf2f3 0%, #d9e4e7 100%)', overflow: 'hidden'}}>
       {/* 标题 */}
       <div style={{
         position: 'absolute', left: 120, top: 80,
         opacity: interpolate(frame, [0, 15], [0, 1], {extrapolateRight: 'clamp'}),
       }}>
-        <Typography variant="SectionTitle" color={colors.accent} style={{fontSize: 36, letterSpacing: 2}}>
+        <Typography variant="SectionTitle" color="#2d6978" style={{fontSize: 36, letterSpacing: 2}}>
           {title}
         </Typography>
         <div style={{width: 60, height: 3, background: colors.accent, marginTop: 12}} />
@@ -50,22 +50,23 @@ export const MG_LayeredDiagram = ({title, layers, caption}: LayeredDiagramProps)
             height: layerHeight - 30,
             opacity,
           }}>
-            {/* 层级背景 */}
+            {/* 机制层级：亮底 activation band，与历史/暗色卡片区分 */}
             <div style={{
               width: '100%', height: '100%',
-              borderRadius: 16,
-              border: `1.5px solid ${colors.accentSoft}`,
-              background: `linear-gradient(180deg, ${colors.accent}12, ${colors.accent}04)`,
+              borderRadius: 4,
+              borderLeft: `${8 + index * 3}px solid ${index === layerCount - 1 ? '#2d6978' : '#78a8b3'}`,
+              background: `rgba(255,255,255,${0.9 - index * 0.12})`,
+              boxShadow: '0 12px 30px rgba(30,60,66,.08)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               flexDirection: 'column',
             }}>
-              <Typography variant="BodyLabel" color={colors.primary} style={{
-                fontSize: 24, fontWeight: 600, opacity: labelOpacity,
+              <Typography variant="BodyLabel" color="#162c32" style={{
+                fontSize: 28, fontWeight: 650, opacity: labelOpacity,
               }}>
                 {layer.label}
               </Typography>
               {layer.note ? (
-                <Typography variant="SmallLabel" color={colors.secondary} style={{
+                <Typography variant="SmallLabel" color="#526c72" style={{
                   fontSize: 16, marginTop: 6, opacity: labelOpacity,
                 }}>
                   {layer.note}
@@ -82,7 +83,7 @@ export const MG_LayeredDiagram = ({title, layers, caption}: LayeredDiagramProps)
           position: 'absolute', left: 120, bottom: 80,
           opacity: interpolate(frame, [45, 60], [0, 1], {extrapolateRight: 'clamp'}),
         }}>
-          <Typography variant="BodyLabel" color={colors.secondary} style={{fontSize: 18}}>
+          <Typography variant="BodyLabel" color="#405b62" style={{fontSize: 20}}>
             {caption}
           </Typography>
         </div>
