@@ -250,6 +250,7 @@ function main(): void {
     projectId: projectA,
     narrationPlanV2ArtifactId: build1.artifact.id,
     provider: SNAPSHOT,
+    referenceAudioHash: 'a'.repeat(64),
   });
   ok(enq1.enqueued === 2 && enq1.reused === 0, '[DB15] 首次入队：2 个 speech unit → 2 jobs', enq1);
   const jobs = getDb()
@@ -267,14 +268,16 @@ function main(): void {
       p0.schemaVersion === 'tts-payload@1.1' &&
       p0.spokenText === planUnits[0]!.spokenText &&
       p0.delivery === planUnits[0]!.delivery &&
+      p0.referenceAudioSha256 === 'a'.repeat(64) &&
       p0.ttsInputFingerprint ===
-        fingerprintForUnit(planUnits[0]!, SNAPSHOT, DEFAULT_VOICE_PROFILE, 'none'),
-    '[DB17] payload spokenText/delivery/fingerprint 与 plan 精确一致',
+        fingerprintForUnit(planUnits[0]!, SNAPSHOT, DEFAULT_VOICE_PROFILE, 'a'.repeat(64)),
+    '[DB17] payload spokenText/delivery/reference/fingerprint 与 plan 精确一致',
   );
   const enq2 = enqueueNarrationAudioJobsV2({
     projectId: projectA,
     narrationPlanV2ArtifactId: build1.artifact.id,
     provider: SNAPSHOT,
+    referenceAudioHash: 'a'.repeat(64),
   });
   ok(enq2.enqueued === 0 && enq2.active === 2, '[DB18] 重复入队 → active 去重（零新 job）', enq2);
 

@@ -362,6 +362,7 @@ export function enqueueNarrationAudioJobsV2(input: {
         unitId: unit.id,
         spokenText: unit.spokenText,
         delivery: unit.delivery,
+        ...(input.referenceAudioHash ? {referenceAudioSha256: input.referenceAudioHash} : {}),
         ttsInputFingerprint:
           decision?.ttsInputFingerprint ??
           fingerprintForUnit(unit, input.provider, voice, input.referenceAudioHash ?? 'none'),
