@@ -32,7 +32,13 @@ import {
   SubtitleTimingV2Error,
 } from '../src/lib/subtitles/timing-v2';
 import {NARRATION_AUDIO_V2_ARTIFACT_KIND} from '../src/lib/narration/audio-v2-manifest';
-import {buildVisualSourceV2, getExactVisualSourceV2Artifact} from '../src/lib/visual-source-v2';
+import {
+  buildVisualSourceV2,
+  getExactVisualSourceV2Artifact,
+  V2_VISUAL_R2_CHOREOGRAPHY,
+  V2_VISUAL_R2_RENDERER_VERSION,
+  VisualSourceV2Error,
+} from '../src/lib/visual-source-v2';
 import {buildTimingReconciliationV2, getExactTimingReconciliationV2} from '../src/lib/reconciliation/timing-v2';
 import {enqueueFinalRenderV2} from '../src/lib/final-render/bridge-v2';
 import {stageRuntimeNarrationAudio} from '../src/worker/runtime-audio';
@@ -391,6 +397,39 @@ async function main(): Promise<void> {
   ok(visual2.reused && visual2.artifact.id === visual1.artifact.id, '[V4] exact visual source idempotency');
   ok((await getExactVisualSourceV2Artifact(fixture.projectId, {artifactId: visual1.artifact.id, version: visual1.artifact.version}))?.artifact.id === visual1.artifact.id, '[V5] exact visual source read validates all V2 parents');
   ok(await getExactVisualSourceV2Artifact(fixture.projectId, {artifactId: visual1.artifact.id, version: visual1.artifact.version + 1}) === null, '[V6] wrong visual version fails closed');
+  const visualR2 = await buildVisualSourceV2({
+    projectId: fixture.projectId,
+    designScenes: {id: designRow.id, version: designRow.version},
+    narrationPlanV2: {id: fixture.artifact.id, version: fixture.artifact.version},
+    narrationAudioV2: first.artifact,
+    subtitleTimingV2: subtitle1.artifact,
+    choreography: V2_VISUAL_R2_CHOREOGRAPHY,
+  });
+  ok(!visualR2.reused && visualR2.artifact.id !== visual1.artifact.id && visualR2.visual.choreography?.beatCount === 44, '[V7] exact choreography creates a distinct visual source');
+  ok(visualR2.visual.data.scenes.every((scene) => (scene.templateProps?.v2VisualR2 as {version?: unknown} | undefined)?.version === V2_VISUAL_R2_RENDERER_VERSION), '[V8] exact choreography marker propagates to all scenes');
+  ok((await getExactVisualSourceV2Artifact(fixture.projectId, {artifactId: visualR2.artifact.id, version: visualR2.artifact.version}))?.artifact.id === visualR2.artifact.id, '[V9] exact R2 visual source recomputes and validates choreography');
+  const visualR2Again = await buildVisualSourceV2({
+    projectId: fixture.projectId,
+    designScenes: {id: designRow.id, version: designRow.version},
+    narrationPlanV2: {id: fixture.artifact.id, version: fixture.artifact.version},
+    narrationAudioV2: first.artifact,
+    subtitleTimingV2: subtitle1.artifact,
+    choreography: V2_VISUAL_R2_CHOREOGRAPHY,
+  });
+  ok(visualR2Again.reused && visualR2Again.artifact.id === visualR2.artifact.id, '[V10] exact choreography visual source is idempotent');
+  try {
+    await buildVisualSourceV2({
+      projectId: fixture.projectId,
+      designScenes: {id: designRow.id, version: designRow.version},
+      narrationPlanV2: {id: fixture.artifact.id, version: fixture.artifact.version},
+      narrationAudioV2: first.artifact,
+      subtitleTimingV2: subtitle1.artifact,
+      choreography: {id: 'v2-visual-r2', version: 2},
+    });
+    ok(false, '[V11] unsupported choreography version fails closed');
+  } catch (error) {
+    ok(error instanceof VisualSourceV2Error && error.code === 'CHOREOGRAPHY_INVALID', '[V11] unsupported choreography version fails closed');
+  }
 
   const rec1 = buildTimingReconciliationV2(fixture.projectId, {visual: visual1, audio: first, subtitle: subtitle1});
   ok(rec1.reconciliation.source.scenesVersionId === visual1.artifact.id && rec1.reconciliation.source.narrationAudioArtifactId === first.artifact.id && rec1.reconciliation.source.subtitleTimingArtifactId === subtitle1.artifact.id, '[R1] reconciliation persists exact V2 identities');
@@ -411,6 +450,9 @@ async function main(): Promise<void> {
   const cliVisual = runCli(['visuals', '--project', fixture.projectId, '--design', `${designRow.id}@${designRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`]);
   const cliVisualJson = JSON.parse(cliVisual.stdout) as {artifact?: {id?: string}; reused?: boolean};
   ok(cliVisual.status === 0 && cliVisualJson.artifact?.id === visual1.artifact.id && cliVisualJson.reused === true, '[C5] visuals CLI routes exact identities and reuses artifact');
+  const cliVisualR2 = runCli(['visuals', '--project', fixture.projectId, '--design', `${designRow.id}@${designRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--choreography', 'v2-visual-r2@1']);
+  const cliVisualR2Json = JSON.parse(cliVisualR2.stdout) as {artifact?: {id?: string}; reused?: boolean; sources?: {choreography?: {id?: string; version?: number}}};
+  ok(cliVisualR2.status === 0 && cliVisualR2Json.artifact?.id === visualR2.artifact.id && cliVisualR2Json.reused === true && cliVisualR2Json.sources?.choreography?.version === 1, '[C5-R2] visuals CLI routes explicit exact choreography');
   const cliReconcile = runCli(['reconcile', '--project', fixture.projectId, '--scenes', `${visual1.artifact.id}@${visual1.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`]);
   const cliRecJson = JSON.parse(cliReconcile.stdout) as {mode?: string; artifact?: {id?: string}};
   ok(cliReconcile.status === 0 && cliRecJson.mode === 'v2-exact' && cliRecJson.artifact?.id === rec1.artifact.id, '[C6] reconcile CLI routes exact V2 chain');

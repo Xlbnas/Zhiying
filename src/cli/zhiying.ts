@@ -73,7 +73,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     inspect: ['project', 'artifact', 'job'],
     tts: ['project', 'plan', 'timeout-seconds', 'voice'],
     subtitles: ['project', 'audio'],
-    visuals: ['project', 'design', 'plan', 'audio', 'subtitles'],
+    visuals: ['project', 'design', 'plan', 'audio', 'subtitles', 'choreography'],
     reconcile: ['project', 'scenes', 'audio', 'subtitles'],
     render: ['project', 'scenes', 'audio', 'subtitles', 'reconciliation', 'timeout-seconds'],
   };
@@ -408,6 +408,8 @@ async function visuals(args: ParsedArgs): Promise<Record<string, unknown>> {
   const plan = parseIdentity(required(args, 'plan'), '--plan');
   const audio = parseIdentity(required(args, 'audio'), '--audio');
   const subtitles = parseIdentity(required(args, 'subtitles'), '--subtitles');
+  const choreographyRaw = args.values.get('choreography');
+  const choreography = choreographyRaw ? parseIdentity(choreographyRaw, '--choreography') : undefined;
   projectRow(projectId);
   const result = await buildVisualSourceV2({
     projectId,
@@ -415,11 +417,12 @@ async function visuals(args: ParsedArgs): Promise<Record<string, unknown>> {
     narrationPlanV2: plan,
     narrationAudioV2: audio,
     subtitleTimingV2: subtitles,
+    choreography,
   });
   return {
     ok: true,
     command: 'visuals',
-    sources: {design, plan, audio, subtitles},
+    sources: {design, plan, audio, subtitles, ...(choreography ? {choreography} : {})},
     artifact: result.artifact,
     reused: result.reused,
     visual: result.visual,

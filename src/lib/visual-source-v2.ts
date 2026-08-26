@@ -19,10 +19,13 @@ import {
   type SubtitleTimingV2Artifact,
 } from './subtitles/timing-v2';
 import {validateScenesSemantics} from './workflow/scenes-semantic-validation';
+import v2VisualR2Choreography from '../data/v2-visual-r2-choreography-plan.json';
 
 export const VISUAL_SOURCE_V2_ARTIFACT_KIND = 'visual_source_v2';
 export const VISUAL_SOURCE_V2_SCHEMA_VERSION = 'visual-source@2.0';
 export const VISUAL_SOURCE_V2_COMPILER_VERSION = '1.0';
+export const V2_VISUAL_R2_CHOREOGRAPHY = {id: 'v2-visual-r2', version: 1} as const;
+export const V2_VISUAL_R2_RENDERER_VERSION = 'v2-visual-r2@1';
 const FPS = 30;
 
 const identitySchema = z.object({id: z.string().min(1), version: z.number().int().positive()});
@@ -40,6 +43,11 @@ export const visualSourceV2Schema = z.object({
     masterDurationMs: z.number().int().positive(),
   }),
   timingBasis: z.literal('narration_audio_v2_unit_timeline'),
+  choreography: z.object({
+    id: z.literal(V2_VISUAL_R2_CHOREOGRAPHY.id),
+    version: z.literal(V2_VISUAL_R2_CHOREOGRAPHY.version),
+    beatCount: z.number().int().positive(),
+  }).optional(),
   unitMappings: z.array(z.object({
     sceneId: z.string().regex(/^S\d{3}$/),
     unitId: z.string().regex(/^N\d{3}$/),
@@ -131,6 +139,57 @@ function visualFamily(category: string, template: string | null): string {
   if (template === 'MG_ConceptCompare') return 'Comparison / Debate';
   if (template === 'MG_Timeline' || template === 'MG_ScheduleNodes') return 'Timeline / Evidence Map';
   return 'Cognitive Mechanism Diagram';
+}
+
+function visualFamiliesFor(data: ScenesAiOutput, choreography?: VisualSourceV2['choreography']): string[] {
+  if (choreography) {
+    return [
+      'Persistent Cognitive System',
+      'Annotated Archival Evidence',
+      'Causal Mechanism Motion',
+      'Activation / Threshold Process',
+      'Evidence Evaluation',
+      'Investigation / Final Synthesis',
+    ];
+  }
+  return [...new Set(data.scenes.map((scene) => visualFamily(scene.category, scene.template)))];
+}
+
+function applyExactChoreography(
+  data: ScenesAiOutput,
+  identity?: {id: string; version: number},
+): Pick<VisualSourceV2, 'data' | 'choreography'> {
+  if (!identity) return {data};
+  if (identity.id !== V2_VISUAL_R2_CHOREOGRAPHY.id || identity.version !== V2_VISUAL_R2_CHOREOGRAPHY.version) {
+    throw new VisualSourceV2Error('CHOREOGRAPHY_INVALID', `不支持 exact choreography: ${identity.id}@${identity.version}`);
+  }
+  const beatsByScene = new Map<string, string[]>();
+  for (const beat of v2VisualR2Choreography.beats) {
+    const ids = beatsByScene.get(beat.sceneId) ?? [];
+    ids.push(beat.beatId);
+    beatsByScene.set(beat.sceneId, ids);
+  }
+  const scenes = data.scenes.map((scene) => {
+    const beatIds = beatsByScene.get(scene.id);
+    if (!beatIds?.length) {
+      throw new VisualSourceV2Error('CHOREOGRAPHY_INVALID', `${scene.id} 没有 exact choreography beats`);
+    }
+    return {
+      ...scene,
+      templateProps: {
+        ...(scene.templateProps ?? {}),
+        v2VisualR2: {version: V2_VISUAL_R2_RENDERER_VERSION, beatIds},
+      },
+    };
+  });
+  return {
+    data: scenesAiOutputSchema.parse({...data, scenes}),
+    choreography: {
+      id: V2_VISUAL_R2_CHOREOGRAPHY.id,
+      version: V2_VISUAL_R2_CHOREOGRAPHY.version,
+      beatCount: v2VisualR2Choreography.beats.length,
+    },
+  };
 }
 
 function retimeDesign(input: {
@@ -297,9 +356,13 @@ export async function buildVisualSourceV2(input: {
   narrationPlanV2: {id: string; version: number};
   narrationAudioV2: {id: string; version: number};
   subtitleTimingV2: {id: string; version: number};
+  choreography?: {id: string; version: number};
 }): Promise<VisualSourceV2Artifact & {reused: boolean}> {
   const exact = await readExactSources(input);
-  const {data, unitMappings} = retimeDesign(exact);
+  const retimed = retimeDesign(exact);
+  const choreographed = applyExactChoreography(retimed.data, input.choreography);
+  const data = choreographed.data;
+  const unitMappings = retimed.unitMappings;
   const assets = exactAssets(input.projectId, data);
   const expected = visualSourceV2Schema.parse({
     schemaVersion: VISUAL_SOURCE_V2_SCHEMA_VERSION,
@@ -314,10 +377,11 @@ export async function buildVisualSourceV2(input: {
       masterDurationMs: exact.audio.manifest.master.durationMs,
     },
     timingBasis: 'narration_audio_v2_unit_timeline',
+    ...(choreographed.choreography ? {choreography: choreographed.choreography} : {}),
     unitMappings,
     data,
     ...assets,
-    visualFamilies: [...new Set(data.scenes.map((scene) => visualFamily(scene.category, scene.template)))],
+    visualFamilies: visualFamiliesFor(data, choreographed.choreography),
   });
   const db = getDb();
   const rows = db.prepare(
@@ -361,14 +425,18 @@ export async function getExactVisualSourceV2Artifact(
       subtitleTimingV2: visual.source.subtitleTimingV2,
     });
     const retimed = retimeDesign(exact);
+    const choreographed = applyExactChoreography(retimed.data, visual.choreography
+      ? {id: visual.choreography.id, version: visual.choreography.version}
+      : undefined);
     if (
       visual.compilerVersion !== VISUAL_SOURCE_V2_COMPILER_VERSION ||
       visual.source.scriptV2.id !== exact.scriptV2.id ||
       visual.source.scriptV2.version !== exact.scriptV2.version ||
       visual.source.masterSha256 !== exact.audio.manifest.master.sha256 ||
       visual.source.masterDurationMs !== exact.audio.manifest.master.durationMs ||
-      !isDeepStrictEqual(visual.data, retimed.data) ||
-      !isDeepStrictEqual(visual.unitMappings, retimed.unitMappings)
+      !isDeepStrictEqual(visual.data, choreographed.data) ||
+      !isDeepStrictEqual(visual.unitMappings, retimed.unitMappings) ||
+      !isDeepStrictEqual(visual.visualFamilies, visualFamiliesFor(choreographed.data, choreographed.choreography))
     ) return null;
     for (const assets of Object.values(visual.assetMap)) {
       for (const asset of assets) {
