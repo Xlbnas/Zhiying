@@ -3,7 +3,24 @@
 
 Run date: 2026-08-25 (Asia/Shanghai)
 
-## Verdict
+## Final outcome
+
+VERDICT: `PASS`
+
+TECHNICAL_FRESH_RUN: `PASS`
+
+VISUAL_FRESH_RUN: `PASS`
+
+CORE_SKILL_MIGRATION: `PASS`
+
+FINAL_MP4: `outputs/fresh-3778ffb0-c430-4499-9f7f-2590f45cb8cb/76cbf96c-c8af-42d2-9080-bbf7ea35d9ec.mp4`
+
+The first production pass stopped at several exact-source migration gaps. The
+same Fresh project subsequently resumed through the minimal fixes documented
+below, produced one exact-source final render, and passed independent visual
+review without rerendering.
+
+## Historical initial verdict
 
 VERDICT: `PARTIAL`
 
@@ -549,3 +566,125 @@ Guards for this continuation:
 - `RENDER_JOBS=0`
 - `SCHEMA_CHANGE=NO`
 - `REMOTION_VERSION=4.0.492`
+
+---
+
+## Final continuation — exact render and independent visual review (2026-08-26)
+
+The same Fresh project continued from the render boundary. No upstream
+artifact was regenerated.
+
+### Exact-source render repair
+
+RENDER_AUDIT: `SAFE_MINIMAL_EXACT_SOURCE_FIX`
+
+ROOT_CAUSE: the CLI accepted four exact identities, but the render bridge
+discarded those verified objects and called `readFinalSources()`, which selected
+the legacy current scenes, audio, subtitles, and reconciliation. The CLI also
+lacked an exact scenes validation before enqueue.
+
+The minimal repair validates all four exact artifacts at the CLI boundary and
+passes the same verified objects into `enqueueFinalRender()`. The bridge checks
+their whole-generation dependency chain before writing the immutable render
+job. Legacy callers retain the old current-source branch. The render Worker was
+audited and already consumes the frozen final-render source, attempt, props,
+and historical audio identity; it performs no second current/latest/default
+lookup. The Worker, Web service, schema, and default voice were unchanged.
+
+COMMIT: `8e46959fd72e05df38c2e0454c970f8953729aae`
+
+RUNNER_IMAGE: `zhiying-cli-runner:8e46959`
+
+RUNNER_IMAGE_ID: `sha256:6d5750f53b97ac7da7a0adb6150ed1fa1a73550602c81ef71c85182ab71be240`
+
+SILENT_CURRENT_RESOLUTION:
+
+- scenes: `0`
+- audio: `0`
+- subtitles: `0`
+- reconciliation: `0`
+
+Verification:
+
+- CLI V1: `68 PASS, 0 FAIL`
+- Artifact/exact-job: `32 PASS, 0 FAIL`
+- typecheck: `PASS`
+- production build: `PASS`
+- scoped `git diff --check`: `PASS`
+- M3-E reached its existing high-level audio fixture failure before Final
+  Render assertions because the historical TTS helper does not release the
+  `production_gpu` lease. The unrelated fixture was not changed.
+
+### Fresh render
+
+Exactly one production render job was enqueued. The CLI waiter's SSH session
+disconnected during rendering, but the durable job continued; no duplicate or
+retry was submitted.
+
+- Job: `76cbf96c-c8af-42d2-9080-bbf7ea35d9ec` (`succeeded`, attempt 1)
+- Final render attempt: `9dd3b244-32ec-46d0-8c22-575838261d31@1`
+- Final render source: `e7c5be60-c92c-48b0-afb6-c5c989a1c54f@1`
+- Scenes: `71d22000-e038-4c54-83ad-616ed51b9e7e@2`
+- Audio: `bd6600e8-1f6b-4a61-9ad1-3227e764ec2c@1`
+- Subtitles: `1db0fb06-1176-4fd5-aee1-f7e55671dbec@1`
+- Reconciliation: `4cd2ad1a-eebb-4191-b197-7e91d5da3da0@1`
+- MP4: `outputs/fresh-3778ffb0-c430-4499-9f7f-2590f45cb8cb/76cbf96c-c8af-42d2-9080-bbf7ea35d9ec.mp4`
+- SHA-256: `2c5ae13c20393201a29c65531d2d691e32403adf65747ba9c6a02ba11bc884ea`
+- Size: `72,971,676 bytes`
+- Duration: `241.216s`
+- Resolution: `1920x1080`
+- Frame rate / frames: `30fps / 7235`
+- Codecs: `H.264 + AAC stereo 48kHz`
+- Encoder: `h264_nvenc`
+- Placeholder / unresolved: `0 / 0`
+
+The persisted final-render source, attempt, job result, and physical MP4 agree
+on the exact source chain and media manifest. The output passed exact-job media
+inspection and full-file SHA verification.
+
+### Independent visual review
+
+VISUAL_REVIEW_MODEL: `GPT-5.6 Luna`
+
+VISUAL_REVIEW: `PASS`
+
+- P0: `0`
+- P1: `0`
+- P2: `0`
+- Rerender recommended: `NO`
+
+The independent read-only reviewer inspected the complete MP4, the 21-frame
+review set and contact sheet, additional approximately two-second samples, and
+key transitions. It found no black/empty frames, flashes, placeholders, wrong
+assets, unsafe crops, unreadable or displaced subtitles, anomalous repetition,
+transition failure, or tail truncation. The slight top-edge crop of the Freud
+document around 36 seconds preserves the identifying content and does not
+affect comprehension.
+
+Review package: `docs/skill_migration/22_FRESH_VISUAL_REVIEW/`
+
+### Final verdict
+
+VERDICT: `PASS`
+
+TECHNICAL_FRESH_RUN: `PASS`
+
+VISUAL_FRESH_RUN: `PASS`
+
+CORE_SKILL_MIGRATION: `PASS`
+
+Guards:
+
+- `OLD_RUN_STAGE_CALLS=0`
+- `DEEPSEEK_STAGE_EXECUTOR_CALLS=0`
+- `WORKFLOW_UI_ACTIONS=0`
+- `NEW_TTS_JOBS=0`
+- `TTS_RETRIES=0`
+- `PLATFORM_LLM_JOBS=0`
+- `SCHEMA_CHANGE=NO`
+- `DEFAULT_VOICE_CHANGE=NO`
+- `RENDER_JOBS=1`
+- `RENDER_RETRIES=0`
+- `REMOTION_VERSION=4.0.492`
+
+NEXT_STEP: `USER_REVIEW_FINAL_MP4`
