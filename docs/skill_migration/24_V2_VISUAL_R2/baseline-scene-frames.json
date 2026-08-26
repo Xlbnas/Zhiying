@@ -1,0 +1,33 @@
+{
+  "projectId": "3778ffb0-c430-4499-9f7f-2590f45cb8cb",
+  "visualSource": "b95a3264-46df-41b1-b0db-31aaf4c790ae@1",
+  "reconciliation": "b40849c0-a42a-4b21-b082-2cd86e6cd070@2",
+  "fps": 30,
+  "scenes": [
+    {"sceneId":"S001","startFrame":0,"endFrame":157},
+    {"sceneId":"S002","startFrame":157,"endFrame":307},
+    {"sceneId":"S003","startFrame":307,"endFrame":425},
+    {"sceneId":"S004","startFrame":425,"endFrame":920},
+    {"sceneId":"S005","startFrame":920,"endFrame":1317},
+    {"sceneId":"S006","startFrame":1317,"endFrame":1604},
+    {"sceneId":"S007","startFrame":1604,"endFrame":1853},
+    {"sceneId":"S008","startFrame":1853,"endFrame":2113},
+    {"sceneId":"S009","startFrame":2113,"endFrame":2492},
+    {"sceneId":"S010","startFrame":2492,"endFrame":2821},
+    {"sceneId":"S011","startFrame":2821,"endFrame":3032},
+    {"sceneId":"S012","startFrame":3032,"endFrame":3333},
+    {"sceneId":"S013","startFrame":3333,"endFrame":3573},
+    {"sceneId":"S014","startFrame":3573,"endFrame":3832},
+    {"sceneId":"S015","startFrame":3832,"endFrame":4302},
+    {"sceneId":"S016","startFrame":4302,"endFrame":4648},
+    {"sceneId":"S017","startFrame":4648,"endFrame":4908},
+    {"sceneId":"S018","startFrame":4908,"endFrame":5188},
+    {"sceneId":"S019","startFrame":5188,"endFrame":5514},
+    {"sceneId":"S020","startFrame":5514,"endFrame":5725},
+    {"sceneId":"S021","startFrame":5725,"endFrame":6106},
+    {"sceneId":"S022","startFrame":6106,"endFrame":6489},
+    {"sceneId":"S023","startFrame":6489,"endFrame":6754},
+    {"sceneId":"S024","startFrame":6754,"endFrame":6985},
+    {"sceneId":"S025","startFrame":6985,"endFrame":7307}
+  ]
+}

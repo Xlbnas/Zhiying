@@ -1,0 +1,32 @@
+{
+  "scenes": [
+    {
+      "sceneId": "S001",
+      "startFrame": 0,
+      "endFrame": 157,
+      "sourceStartFrame": 0,
+      "sourceEndFrame": 157
+    },
+    {
+      "sceneId": "S002",
+      "startFrame": 157,
+      "endFrame": 307,
+      "sourceStartFrame": 157,
+      "sourceEndFrame": 307
+    },
+    {
+      "sceneId": "S003",
+      "startFrame": 307,
+      "endFrame": 425,
+      "sourceStartFrame": 307,
+      "sourceEndFrame": 425
+    },
+    {
+      "sceneId": "S004",
+      "startFrame": 425,
+      "endFrame": 920,
+      "sourceStartFrame": 425,
+      "sourceEndFrame": 920
+    }
+  ]
+}

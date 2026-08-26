@@ -1,0 +1,39 @@
+{
+  "scenes": [
+    {
+      "sceneId": "S015",
+      "startFrame": 0,
+      "endFrame": 470,
+      "sourceStartFrame": 3832,
+      "sourceEndFrame": 4302
+    },
+    {
+      "sceneId": "S016",
+      "startFrame": 470,
+      "endFrame": 816,
+      "sourceStartFrame": 4302,
+      "sourceEndFrame": 4648
+    },
+    {
+      "sceneId": "S017",
+      "startFrame": 816,
+      "endFrame": 1076,
+      "sourceStartFrame": 4648,
+      "sourceEndFrame": 4908
+    },
+    {
+      "sceneId": "S018",
+      "startFrame": 1076,
+      "endFrame": 1356,
+      "sourceStartFrame": 4908,
+      "sourceEndFrame": 5188
+    },
+    {
+      "sceneId": "S019",
+      "startFrame": 1356,
+      "endFrame": 1682,
+      "sourceStartFrame": 5188,
+      "sourceEndFrame": 5514
+    }
+  ]
+}

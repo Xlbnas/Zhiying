@@ -1,0 +1,18 @@
+{
+  "scenes": [
+    {
+      "sceneId": "S024",
+      "startFrame": 0,
+      "endFrame": 231,
+      "sourceStartFrame": 6754,
+      "sourceEndFrame": 6985
+    },
+    {
+      "sceneId": "S025",
+      "startFrame": 231,
+      "endFrame": 553,
+      "sourceStartFrame": 6985,
+      "sourceEndFrame": 7307
+    }
+  ]
+}

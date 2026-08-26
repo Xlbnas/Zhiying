@@ -1,0 +1,2279 @@
+{
+  "schemaVersion": "v2-visual-r2-prototype-evidence@1.0",
+  "prototypes": [
+    {
+      "id": "A",
+      "name": "hook",
+      "startFrame": 0,
+      "endFrame": 920,
+      "sceneIds": [
+        "S001",
+        "S002",
+        "S003",
+        "S004"
+      ],
+      "frameCount": 920,
+      "sceneFile": "A-hook-scenes.json",
+      "scenes": [
+        {
+          "sceneId": "S001",
+          "startFrame": 0,
+          "endFrame": 157,
+          "sourceStartFrame": 0,
+          "sourceEndFrame": 157
+        },
+        {
+          "sceneId": "S002",
+          "startFrame": 157,
+          "endFrame": 307,
+          "sourceStartFrame": 157,
+          "sourceEndFrame": 307
+        },
+        {
+          "sceneId": "S003",
+          "startFrame": 307,
+          "endFrame": 425,
+          "sourceStartFrame": 307,
+          "sourceEndFrame": 425
+        },
+        {
+          "sceneId": "S004",
+          "startFrame": 425,
+          "endFrame": 920,
+          "sourceStartFrame": 425,
+          "sourceEndFrame": 920
+        }
+      ],
+      "beats": [
+        {
+          "beatId": "B001",
+          "sceneId": "S001",
+          "unitId": "N001",
+          "startFrame": 0,
+          "endFrame": 157,
+          "subtitleCueIds": [
+            1
+          ],
+          "statement": "想象一下——聚会上，你把现任叫成了前任的名字。",
+          "narrativePurpose": "用一次具体口误建立持续视觉系统",
+          "inputState": "目标词“现任”位于可说出的句子路径上",
+          "actors": [
+            "intended_word",
+            "competing_word",
+            "spoken_word"
+          ],
+          "dominantVerb": "侵入",
+          "visibleAction": "竞争词“前任”从侧路加速并在出口前越过目标词",
+          "visibleResult": "错误词被说出，句子路径出现可追踪断点",
+          "viewerFocus": "竞争词越线的瞬间",
+          "persistentActors": [
+            "intended_word",
+            "competing_word",
+            "spoken_word",
+            "error_token"
+          ],
+          "handoff": "错误词凝结为后续解释共同引用的 error_token",
+          "candidateShotLibraryEntries": [
+            "wide-process-pill-builder",
+            "wide-relationship-focus"
+          ],
+          "localStartFrame": 0,
+          "localEndFrame": 157
+        },
+        {
+          "beatId": "B002",
+          "sceneId": "S002",
+          "unitId": "N002",
+          "startFrame": 157,
+          "endFrame": 210,
+          "subtitleCueIds": [
+            2
+          ],
+          "statement": "全场安静两秒。",
+          "narrativePurpose": "表现错误发生后的真实停顿",
+          "inputState": "error_token 悬在句子出口，周围交流仍在进行",
+          "actors": [
+            "error_token",
+            "attention_focus"
+          ],
+          "dominantVerb": "冻结",
+          "visibleAction": "声场节点瞬间静止，attention_focus 收缩到错误词",
+          "visibleResult": "错误从流畅语言变成所有人都看见的异常事件",
+          "viewerFocus": "静止的人际节点与高亮错误词",
+          "persistentActors": [
+            "error_token",
+            "attention_focus"
+          ],
+          "handoff": "异常事件保持在画面中央，等待第一种解释接入",
+          "candidateShotLibraryEntries": [
+            "wide-spotlight-reveal"
+          ],
+          "localStartFrame": 157,
+          "localEndFrame": 210
+        },
+        {
+          "beatId": "B003",
+          "sceneId": "S002",
+          "unitId": "N002",
+          "startFrame": 210,
+          "endFrame": 307,
+          "subtitleCueIds": [
+            3
+          ],
+          "statement": "有人赶紧打圆场：只是嘴瓢。",
+          "narrativePurpose": "引入普通失误解释",
+          "inputState": "异常 error_token 尚未被解释",
+          "actors": [
+            "error_token",
+            "evidence_card"
+          ],
+          "dominantVerb": "归因",
+          "visibleAction": "“只是嘴瓢”卡片从观察侧接入但保持低置信度",
+          "visibleResult": "一个朴素解释形成，不等于结案",
+          "viewerFocus": "error_token 与第一张解释卡之间的弱连接",
+          "persistentActors": [
+            "error_token",
+            "evidence_card",
+            "confidence_indicator"
+          ],
+          "handoff": "保留解释槽位，让相反解释在同一空间进入",
+          "candidateShotLibraryEntries": [
+            "wide-evidence-bridge"
+          ],
+          "localStartFrame": 210,
+          "localEndFrame": 307
+        },
+        {
+          "beatId": "B004",
+          "sceneId": "S003",
+          "unitId": "N003",
+          "startFrame": 307,
+          "endFrame": 425,
+          "subtitleCueIds": [
+            4
+          ],
+          "statement": "也有人会心一笑：潜意识终于招了。",
+          "narrativePurpose": "引入隐藏欲望解释并制造冲突",
+          "inputState": "普通失误解释已连接 error_token",
+          "actors": [
+            "error_token",
+            "freud_interpretation",
+            "evidence_card"
+          ],
+          "dominantVerb": "叠加",
+          "visibleAction": "“潜意识招了”卡片从另一侧抢占视觉权重",
+          "visibleResult": "同一错误产生两个竞争解释",
+          "viewerFocus": "两条解释路径对同一 error_token 的争夺",
+          "persistentActors": [
+            "error_token",
+            "freud_interpretation",
+            "confidence_indicator"
+          ],
+          "handoff": "把两条解释之间的距离展开为证据缺口",
+          "candidateShotLibraryEntries": [
+            "split-comparison",
+            "wide-causal-tag-map"
+          ],
+          "localStartFrame": 307,
+          "localEndFrame": 425
+        },
+        {
+          "beatId": "B005",
+          "sceneId": "S004",
+          "unitId": "N004",
+          "startFrame": 425,
+          "endFrame": 617,
+          "subtitleCueIds": [
+            5
+          ],
+          "statement": "可问题是，从一个错误，跳到一个隐藏欲望，中间到底需要多少证据？",
+          "narrativePurpose": "把从错误跳到欲望的推断距离显形",
+          "inputState": "error_token 与隐藏欲望结论之间只有一条未经检验的长线",
+          "actors": [
+            "error_token",
+            "freud_interpretation",
+            "evidence_card"
+          ],
+          "dominantVerb": "展开",
+          "visibleAction": "镜头沿长线后退，暴露多个空缺证据槽",
+          "visibleResult": "观众看到结论并非紧邻观察，而是隔着证据链",
+          "viewerFocus": "错误与结论之间的空槽",
+          "persistentActors": [
+            "error_token",
+            "freud_interpretation",
+            "evidence_card"
+          ],
+          "handoff": "第一空槽变成三类主张的分流器",
+          "candidateShotLibraryEntries": [
+            "wide-evidence-bridge",
+            "wide-ruler-chapter-progress"
+          ],
+          "localStartFrame": 425,
+          "localEndFrame": 617
+        },
+        {
+          "beatId": "B006",
+          "sceneId": "S004",
+          "unitId": "N004",
+          "startFrame": 617,
+          "endFrame": 920,
+          "subtitleCueIds": [
+            6
+          ],
+          "statement": "“失误有原因”，“原因没有被你意识到”，还有“原因一定是被压抑的愿望”，其实是三种完全不同的主张。",
+          "narrativePurpose": "区分三种逻辑强度不同的主张",
+          "inputState": "一个模糊的“失误有原因”标签尚未拆分",
+          "actors": [
+            "error_token",
+            "evidence_card",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "分层",
+          "visibleAction": "单一卡片依次分裂为“有原因 / 未意识到 / 被压抑愿望”三层，并拉开证明距离",
+          "visibleResult": "三种主张不再被视觉上当成同一句话",
+          "viewerFocus": "三层之间递增的证据门槛",
+          "persistentActors": [
+            "error_token",
+            "evidence_card",
+            "confidence_indicator"
+          ],
+          "handoff": "最强主张的卡片翻面成为历史章节入口",
+          "candidateShotLibraryEntries": [
+            "wide-evidence-stack",
+            "wide-process-pill-builder"
+          ],
+          "localStartFrame": 617,
+          "localEndFrame": 920
+        }
+      ],
+      "cues": [
+        {
+          "id": 1,
+          "segmentId": "N001:S01",
+          "text": "想象一下——聚会上，你把现任叫成了前任的名字。",
+          "startMs": 0,
+          "endMs": 5224,
+          "sourceStartFrame": 0,
+          "sourceEndFrame": 157,
+          "localStartFrame": 0,
+          "localEndFrame": 157
+        },
+        {
+          "id": 2,
+          "segmentId": "N002:S01",
+          "text": "全场安静两秒。",
+          "startMs": 5224,
+          "endMs": 6971,
+          "sourceStartFrame": 157,
+          "sourceEndFrame": 210,
+          "localStartFrame": 157,
+          "localEndFrame": 210
+        },
+        {
+          "id": 3,
+          "segmentId": "N002:S02",
+          "text": "有人赶紧打圆场：只是嘴瓢。",
+          "startMs": 6971,
+          "endMs": 10216,
+          "sourceStartFrame": 210,
+          "sourceEndFrame": 307,
+          "localStartFrame": 210,
+          "localEndFrame": 307
+        },
+        {
+          "id": 4,
+          "segmentId": "N003:S01",
+          "text": "也有人会心一笑：潜意识终于招了。",
+          "startMs": 10216,
+          "endMs": 14163,
+          "sourceStartFrame": 307,
+          "sourceEndFrame": 425,
+          "localStartFrame": 307,
+          "localEndFrame": 425
+        },
+        {
+          "id": 5,
+          "segmentId": "N004:S01",
+          "text": "可问题是，从一个错误，跳到一个隐藏欲望，中间到底需要多少证据？",
+          "startMs": 14163,
+          "endMs": 20552,
+          "sourceStartFrame": 425,
+          "sourceEndFrame": 617,
+          "localStartFrame": 425,
+          "localEndFrame": 617
+        },
+        {
+          "id": 6,
+          "segmentId": "N004:S02",
+          "text": "“失误有原因”，“原因没有被你意识到”，还有“原因一定是被压抑的愿望”，其实是三种完全不同的主张。",
+          "startMs": 20552,
+          "endMs": 30652,
+          "sourceStartFrame": 617,
+          "sourceEndFrame": 920,
+          "localStartFrame": 617,
+          "localEndFrame": 920
+        }
+      ]
+    },
+    {
+      "id": "B",
+      "name": "mechanism",
+      "startFrame": 2821,
+      "endFrame": 3832,
+      "sceneIds": [
+        "S011",
+        "S012",
+        "S013",
+        "S014"
+      ],
+      "frameCount": 1011,
+      "sceneFile": "B-mechanism-scenes.json",
+      "scenes": [
+        {
+          "sceneId": "S011",
+          "startFrame": 0,
+          "endFrame": 211,
+          "sourceStartFrame": 2821,
+          "sourceEndFrame": 3032
+        },
+        {
+          "sceneId": "S012",
+          "startFrame": 211,
+          "endFrame": 512,
+          "sourceStartFrame": 3032,
+          "sourceEndFrame": 3333
+        },
+        {
+          "sceneId": "S013",
+          "startFrame": 512,
+          "endFrame": 752,
+          "sourceStartFrame": 3333,
+          "sourceEndFrame": 3573
+        },
+        {
+          "sceneId": "S014",
+          "startFrame": 752,
+          "endFrame": 1011,
+          "sourceStartFrame": 3573,
+          "sourceEndFrame": 3832
+        }
+      ],
+      "beats": [
+        {
+          "beatId": "B018",
+          "sceneId": "S011",
+          "unitId": "N011",
+          "startFrame": 2821,
+          "endFrame": 3032,
+          "subtitleCueIds": [
+            18
+          ],
+          "statement": "但一百多年后的认知心理学，已经有了很多不需要隐藏欲望的解释。",
+          "narrativePurpose": "把历史解释交给现代机制比较",
+          "inputState": "历史假设卡仍在观察窗内",
+          "actors": [
+            "freud_interpretation",
+            "modern_mechanism",
+            "error_token"
+          ],
+          "dominantVerb": "重构",
+          "visibleAction": "相机拉远，历史卡缩到一侧，多个现代机制入口在同一 error_token 周围展开",
+          "visibleResult": "错误保留不变，解释空间扩大",
+          "viewerFocus": "同一错误对应的多机制入口",
+          "persistentActors": [
+            "error_token",
+            "freud_interpretation",
+            "modern_mechanism"
+          ],
+          "handoff": "镜头推进语言机制入口",
+          "candidateShotLibraryEntries": [
+            "wide-exploded-workflow-board",
+            "wide-chapter-transition"
+          ],
+          "localStartFrame": 0,
+          "localEndFrame": 211
+        },
+        {
+          "beatId": "B019",
+          "sceneId": "S012",
+          "unitId": "N012",
+          "startFrame": 3032,
+          "endFrame": 3176,
+          "subtitleCueIds": [
+            19
+          ],
+          "statement": "说话不是先在脑子里写好完整句子，再按下播放。",
+          "narrativePurpose": "否定预写完整句子的直觉模型",
+          "inputState": "一个完整句子条带已被预先装入播放按钮",
+          "actors": [
+            "spoken_word",
+            "modern_mechanism"
+          ],
+          "dominantVerb": "拆解",
+          "visibleAction": "播放模型被分解成语义、词项、语音三个动态层",
+          "visibleResult": "说话被改写为逐层生成，而非成品播放",
+          "viewerFocus": "从完整句子到三个生成层的形态变化",
+          "persistentActors": [
+            "spoken_word",
+            "modern_mechanism"
+          ],
+          "handoff": "三个层产生多个候选词项",
+          "candidateShotLibraryEntries": [
+            "wide-process-pill-builder",
+            "kinetic-statement"
+          ],
+          "localStartFrame": 211,
+          "localEndFrame": 355
+        },
+        {
+          "beatId": "B020",
+          "sceneId": "S012",
+          "unitId": "N012",
+          "startFrame": 3176,
+          "endFrame": 3332,
+          "subtitleCueIds": [
+            20
+          ],
+          "statement": "词义、词语和语音会一层层激活，多个候选同时竞争。",
+          "narrativePurpose": "展示词义词语语音的激活竞争",
+          "inputState": "三个生成层已连接到候选池",
+          "actors": [
+            "intended_word",
+            "competing_word",
+            "modern_mechanism",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "竞速",
+          "visibleAction": "多候选激活条同时上升，目标词与竞争词交替领先",
+          "visibleResult": "竞争是可见的动态过程，错误词可能短暂越过目标",
+          "viewerFocus": "两条激活曲线的交叉点",
+          "persistentActors": [
+            "intended_word",
+            "competing_word",
+            "modern_mechanism",
+            "confidence_indicator"
+          ],
+          "handoff": "领先候选冲向监控闸门",
+          "candidateShotLibraryEntries": [
+            "wide-relationship-focus",
+            "wide-process-pill-builder"
+          ],
+          "localStartFrame": 355,
+          "localEndFrame": 511
+        },
+        {
+          "beatId": "B021",
+          "sceneId": "S013",
+          "unitId": "N013",
+          "startFrame": 3332,
+          "endFrame": 3452,
+          "subtitleCueIds": [
+            21
+          ],
+          "statement": "大多数时候，监控系统能拦住错误。",
+          "narrativePurpose": "展示监控系统通常拦住错误",
+          "inputState": "竞争词暂时领先并接近输出闸门",
+          "actors": [
+            "competing_word",
+            "attention_focus",
+            "spoken_word"
+          ],
+          "dominantVerb": "拦截",
+          "visibleAction": "监控闸门识别不匹配，把错误候选退回并放行目标词",
+          "visibleResult": "正常说话被表现为一次成功校验",
+          "viewerFocus": "监控闸门的拒绝/放行状态",
+          "persistentActors": [
+            "competing_word",
+            "attention_focus",
+            "spoken_word"
+          ],
+          "handoff": "保持同一闸门，降低一次反应余量",
+          "candidateShotLibraryEntries": [
+            "wide-tutorial-spotlight",
+            "wide-process-pill-builder"
+          ],
+          "localStartFrame": 511,
+          "localEndFrame": 631
+        },
+        {
+          "beatId": "B022",
+          "sceneId": "S013",
+          "unitId": "N013",
+          "startFrame": 3452,
+          "endFrame": 3572,
+          "subtitleCueIds": [
+            22
+          ],
+          "statement": "偶尔错误候选抢先一步，嘴就瓢了。",
+          "narrativePurpose": "展示偶发错误候选抢先",
+          "inputState": "同一监控闸门反应窗口缩短",
+          "actors": [
+            "competing_word",
+            "attention_focus",
+            "spoken_word",
+            "error_token"
+          ],
+          "dominantVerb": "抢先",
+          "visibleAction": "错误候选在闸门关闭前越线并占据 spoken_word 槽",
+          "visibleResult": "嘴瓢成为竞速与监控时序的可见结果",
+          "viewerFocus": "错误候选越过闸门的一帧",
+          "persistentActors": [
+            "competing_word",
+            "attention_focus",
+            "spoken_word",
+            "error_token",
+            "memory_trace"
+          ],
+          "handoff": "错误词退出，留下一个无法取回的目标槽",
+          "candidateShotLibraryEntries": [
+            "wide-relationship-focus"
+          ],
+          "localStartFrame": 631,
+          "localEndFrame": 751
+        },
+        {
+          "beatId": "B023",
+          "sceneId": "S014",
+          "unitId": "N014",
+          "startFrame": 3572,
+          "endFrame": 3656,
+          "subtitleCueIds": [
+            23
+          ],
+          "statement": "想不起人名，也不一定神秘。",
+          "narrativePurpose": "区分忘名与神秘动机",
+          "inputState": "姓名目标槽为空，但 memory_trace 仍在背景存在",
+          "actors": [
+            "memory_trace",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "保留",
+          "visibleAction": "记忆痕迹保持亮起，输出槽显示“暂不可达”而非“已消失”",
+          "visibleResult": "忘名被界定为可访问性问题",
+          "viewerFocus": "仍存在的痕迹与空输出槽",
+          "persistentActors": [
+            "memory_trace",
+            "confidence_indicator"
+          ],
+          "handoff": "痕迹进入 retrieval funnel",
+          "candidateShotLibraryEntries": [
+            "kinetic-statement",
+            "wide-spotlight-reveal"
+          ],
+          "localStartFrame": 751,
+          "localEndFrame": 835
+        },
+        {
+          "beatId": "B024",
+          "sceneId": "S014",
+          "unitId": "N014",
+          "startFrame": 3656,
+          "endFrame": 3831,
+          "subtitleCueIds": [
+            24
+          ],
+          "statement": "舌尖现象说明，信息可能还在记忆里，只是这一刻取不出来。",
+          "narrativePurpose": "表现舌尖状态的取回失败",
+          "inputState": "memory_trace 位于取回漏斗上方",
+          "actors": [
+            "memory_trace",
+            "attention_focus",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "取回",
+          "visibleAction": "痕迹沿漏斗下降但停在阈值线下，输出槽保持空白",
+          "visibleResult": "信息在记忆中但此刻没有达到取回阈值",
+          "viewerFocus": "阈值线与停住的痕迹",
+          "persistentActors": [
+            "memory_trace",
+            "attention_focus",
+            "confidence_indicator"
+          ],
+          "handoff": "阈值线延长为未来意图时间线",
+          "candidateShotLibraryEntries": [
+            "wide-process-pill-builder",
+            "wide-ruler-chapter-progress"
+          ],
+          "localStartFrame": 835,
+          "localEndFrame": 1010
+        }
+      ],
+      "cues": [
+        {
+          "id": 18,
+          "segmentId": "N011:S01",
+          "text": "但一百多年后的认知心理学，已经有了很多不需要隐藏欲望的解释。",
+          "startMs": 94019,
+          "endMs": 101043,
+          "sourceStartFrame": 2821,
+          "sourceEndFrame": 3032,
+          "localStartFrame": 0,
+          "localEndFrame": 211
+        },
+        {
+          "id": 19,
+          "segmentId": "N012:S01",
+          "text": "说话不是先在脑子里写好完整句子，再按下播放。",
+          "startMs": 101043,
+          "endMs": 105835,
+          "sourceStartFrame": 3032,
+          "sourceEndFrame": 3176,
+          "localStartFrame": 211,
+          "localEndFrame": 355
+        },
+        {
+          "id": 20,
+          "segmentId": "N012:S02",
+          "text": "词义、词语和语音会一层层激活，多个候选同时竞争。",
+          "startMs": 105835,
+          "endMs": 111062,
+          "sourceStartFrame": 3176,
+          "sourceEndFrame": 3332,
+          "localStartFrame": 355,
+          "localEndFrame": 511
+        },
+        {
+          "id": 21,
+          "segmentId": "N013:S01",
+          "text": "大多数时候，监控系统能拦住错误。",
+          "startMs": 111062,
+          "endMs": 115056,
+          "sourceStartFrame": 3332,
+          "sourceEndFrame": 3452,
+          "localStartFrame": 511,
+          "localEndFrame": 631
+        },
+        {
+          "id": 22,
+          "segmentId": "N013:S02",
+          "text": "偶尔错误候选抢先一步，嘴就瓢了。",
+          "startMs": 115056,
+          "endMs": 119050,
+          "sourceStartFrame": 3452,
+          "sourceEndFrame": 3572,
+          "localStartFrame": 631,
+          "localEndFrame": 751
+        },
+        {
+          "id": 23,
+          "segmentId": "N014:S01",
+          "text": "想不起人名，也不一定神秘。",
+          "startMs": 119050,
+          "endMs": 121857,
+          "sourceStartFrame": 3572,
+          "sourceEndFrame": 3656,
+          "localStartFrame": 751,
+          "localEndFrame": 835
+        },
+        {
+          "id": 24,
+          "segmentId": "N014:S02",
+          "text": "舌尖现象说明，信息可能还在记忆里，只是这一刻取不出来。",
+          "startMs": 121857,
+          "endMs": 127688,
+          "sourceStartFrame": 3656,
+          "sourceEndFrame": 3831,
+          "localStartFrame": 835,
+          "localEndFrame": 1010
+        }
+      ]
+    },
+    {
+      "id": "C",
+      "name": "evaluation-conclusion",
+      "startFrame": 5514,
+      "endFrame": 6754,
+      "sceneIds": [
+        "S020",
+        "S021",
+        "S022",
+        "S023"
+      ],
+      "frameCount": 1240,
+      "sceneFile": "C-evaluation-conclusion-scenes.json",
+      "scenes": [
+        {
+          "sceneId": "S020",
+          "startFrame": 0,
+          "endFrame": 211,
+          "sourceStartFrame": 5514,
+          "sourceEndFrame": 5725
+        },
+        {
+          "sceneId": "S021",
+          "startFrame": 211,
+          "endFrame": 592,
+          "sourceStartFrame": 5725,
+          "sourceEndFrame": 6106
+        },
+        {
+          "sceneId": "S022",
+          "startFrame": 592,
+          "endFrame": 975,
+          "sourceStartFrame": 6106,
+          "sourceEndFrame": 6489
+        },
+        {
+          "sceneId": "S023",
+          "startFrame": 975,
+          "endFrame": 1240,
+          "sourceStartFrame": 6489,
+          "sourceEndFrame": 6754
+        }
+      ],
+      "beats": [
+        {
+          "beatId": "B034",
+          "sceneId": "S020",
+          "unitId": "N020",
+          "startFrame": 5514,
+          "endFrame": 5637,
+          "subtitleCueIds": [
+            34
+          ],
+          "statement": "可科学解释不能只问，故事讲得通不通。",
+          "narrativePurpose": "把故事通顺与科学解释分开",
+          "inputState": "联想链在“故事通顺”指示器上得分很高",
+          "actors": [
+            "evidence_card",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "检验",
+          "visibleAction": "检查台将“通顺”与“可检验”分成两个独立仪表，后者保持空缺",
+          "visibleResult": "叙事一致性不再等同证据",
+          "viewerFocus": "两个不等价的仪表",
+          "persistentActors": [
+            "evidence_card",
+            "confidence_indicator"
+          ],
+          "handoff": "空缺仪表展开为提前预测槽",
+          "candidateShotLibraryEntries": [
+            "split-comparison",
+            "wide-process-pill-builder"
+          ],
+          "localStartFrame": 0,
+          "localEndFrame": 123
+        },
+        {
+          "beatId": "B035",
+          "sceneId": "S020",
+          "unitId": "N020",
+          "startFrame": 5637,
+          "endFrame": 5725,
+          "subtitleCueIds": [
+            35
+          ],
+          "statement": "还要问：它能不能提前预测？",
+          "narrativePurpose": "加入事前预测门槛",
+          "inputState": "解释卡尚未给出结果前预测",
+          "actors": [
+            "evidence_card",
+            "confidence_indicator",
+            "action_path"
+          ],
+          "dominantVerb": "预测",
+          "visibleAction": "解释卡必须先写入可失败预测，再允许时间线推进到结果",
+          "visibleResult": "可证伪性成为可见门槛",
+          "viewerFocus": "结果出现前已冻结的预测卡",
+          "persistentActors": [
+            "evidence_card",
+            "confidence_indicator",
+            "action_path"
+          ],
+          "handoff": "预测卡进入普通原因对照区",
+          "candidateShotLibraryEntries": [
+            "wide-evidence-bridge",
+            "story-timeline"
+          ],
+          "localStartFrame": 123,
+          "localEndFrame": 211
+        },
+        {
+          "beatId": "B036",
+          "sceneId": "S021",
+          "unitId": "N021",
+          "startFrame": 5725,
+          "endFrame": 5912,
+          "subtitleCueIds": [
+            36
+          ],
+          "statement": "有没有和词频、语音相似、疲劳、注意下降这些普通原因比较？",
+          "narrativePurpose": "把普通替代机制纳入比较",
+          "inputState": "预测卡只有隐藏动机单一路径",
+          "actors": [
+            "evidence_card",
+            "modern_mechanism",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "比较",
+          "visibleAction": "词频、语音相似、疲劳、注意下降四张机制卡接入同一观察",
+          "visibleResult": "解释必须与普通原因竞争",
+          "viewerFocus": "同一结果下的多解释对照",
+          "persistentActors": [
+            "evidence_card",
+            "modern_mechanism",
+            "confidence_indicator"
+          ],
+          "handoff": "所有路径共同等待结果揭示",
+          "candidateShotLibraryEntries": [
+            "reference-card-stack",
+            "wide-evidence-stack"
+          ],
+          "localStartFrame": 211,
+          "localEndFrame": 398
+        },
+        {
+          "beatId": "B037",
+          "sceneId": "S021",
+          "unitId": "N021",
+          "startFrame": 5912,
+          "endFrame": 6106,
+          "subtitleCueIds": [
+            37
+          ],
+          "statement": "如果结果正好相反，这套解释会不会也能换一条联想，继续成立？",
+          "narrativePurpose": "展示结果相反时事后解释仍可改写",
+          "inputState": "结果翻面并与原预测相反",
+          "actors": [
+            "evidence_card",
+            "freud_interpretation",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "改写",
+          "visibleAction": "联想链自动重排为新故事，而预测卡显示失败",
+          "visibleResult": "能无限换故事的解释无法被结果淘汰",
+          "viewerFocus": "失败预测与仍成立的改写故事对照",
+          "persistentActors": [
+            "evidence_card",
+            "freud_interpretation",
+            "confidence_indicator"
+          ],
+          "handoff": "失效路径被压低，进入平衡结论",
+          "candidateShotLibraryEntries": [
+            "split-comparison",
+            "story-timeline"
+          ],
+          "localStartFrame": 398,
+          "localEndFrame": 592
+        },
+        {
+          "beatId": "B038",
+          "sceneId": "S022",
+          "unitId": "N022",
+          "startFrame": 6106,
+          "endFrame": 6332,
+          "subtitleCueIds": [
+            38
+          ],
+          "statement": "所以，更稳妥的结论，不是“弗洛伊德全错”，也不是“每次嘴瓢都是真心话”。",
+          "narrativePurpose": "拒绝两个过度结论",
+          "inputState": "“全错”与“每次都是真心话”占据天平两端",
+          "actors": [
+            "freud_interpretation",
+            "modern_mechanism",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "平衡",
+          "visibleAction": "两端都退到低置信度，中间出现“保留问题、限制结论”路径",
+          "visibleResult": "稳妥结论不是在两个口号中二选一",
+          "viewerFocus": "中间的校准区域",
+          "persistentActors": [
+            "freud_interpretation",
+            "modern_mechanism",
+            "confidence_indicator"
+          ],
+          "handoff": "中间路径接回最初的 error_token",
+          "candidateShotLibraryEntries": [
+            "split-comparison",
+            "wide-causal-tag-map"
+          ],
+          "localStartFrame": 592,
+          "localEndFrame": 818
+        },
+        {
+          "beatId": "B039",
+          "sceneId": "S022",
+          "unitId": "N022",
+          "startFrame": 6332,
+          "endFrame": 6489,
+          "subtitleCueIds": [
+            39
+          ],
+          "statement": "他的贡献，是逼我们承认：行为并不总对意识完全透明。",
+          "narrativePurpose": "保留行为不完全透明的贡献",
+          "inputState": "最初 error_token 与意识解释之间仍有空白",
+          "actors": [
+            "error_token",
+            "freud_interpretation",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "承认",
+          "visibleAction": "空白被标记为“并不总对意识透明”，但不自动填入欲望答案",
+          "visibleResult": "问题的价值被保留，答案的确定性被限制",
+          "viewerFocus": "被保留的未知区",
+          "persistentActors": [
+            "error_token",
+            "freud_interpretation",
+            "confidence_indicator"
+          ],
+          "handoff": "未知区分解成可实验机制",
+          "candidateShotLibraryEntries": [
+            "wide-knowledge-world",
+            "wide-evidence-bridge"
+          ],
+          "localStartFrame": 818,
+          "localEndFrame": 975
+        },
+        {
+          "beatId": "B040",
+          "sceneId": "S023",
+          "unitId": "N023",
+          "startFrame": 6489,
+          "endFrame": 6754,
+          "subtitleCueIds": [
+            40
+          ],
+          "statement": "现代心理学保留了这个问题，却把答案拆成了可以实验的语言、记忆、注意和控制机制。",
+          "narrativePurpose": "把现代答案拆成可实验机制",
+          "inputState": "一个总括的“隐藏原因”盒子仍覆盖未知区",
+          "actors": [
+            "modern_mechanism",
+            "evidence_card",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "拆分",
+          "visibleAction": "盒子分解为语言、记忆、注意、控制四个可检验模块，并各自接入证据端口",
+          "visibleResult": "现代心理学把大问题转成多个可失败的机制问题",
+          "viewerFocus": "四个模块及其证据端口",
+          "persistentActors": [
+            "modern_mechanism",
+            "evidence_card",
+            "confidence_indicator"
+          ],
+          "handoff": "四个模块汇入一个实际追问界面",
+          "candidateShotLibraryEntries": [
+            "wide-exploded-workflow-board",
+            "wide-process-pill-builder"
+          ],
+          "localStartFrame": 975,
+          "localEndFrame": 1240
+        }
+      ],
+      "cues": [
+        {
+          "id": 34,
+          "segmentId": "N020:S01",
+          "text": "可科学解释不能只问，故事讲得通不通。",
+          "startMs": 183778,
+          "endMs": 187870,
+          "sourceStartFrame": 5514,
+          "sourceEndFrame": 5637,
+          "localStartFrame": 0,
+          "localEndFrame": 123
+        },
+        {
+          "id": 35,
+          "segmentId": "N020:S02",
+          "text": "还要问：它能不能提前预测？",
+          "startMs": 187870,
+          "endMs": 190825,
+          "sourceStartFrame": 5637,
+          "sourceEndFrame": 5725,
+          "localStartFrame": 123,
+          "localEndFrame": 211
+        },
+        {
+          "id": 36,
+          "segmentId": "N021:S01",
+          "text": "有没有和词频、语音相似、疲劳、注意下降这些普通原因比较？",
+          "startMs": 190825,
+          "endMs": 197059,
+          "sourceStartFrame": 5725,
+          "sourceEndFrame": 5912,
+          "localStartFrame": 211,
+          "localEndFrame": 398
+        },
+        {
+          "id": 37,
+          "segmentId": "N021:S02",
+          "text": "如果结果正好相反，这套解释会不会也能换一条联想，继续成立？",
+          "startMs": 197059,
+          "endMs": 203515,
+          "sourceStartFrame": 5912,
+          "sourceEndFrame": 6106,
+          "localStartFrame": 398,
+          "localEndFrame": 592
+        },
+        {
+          "id": 38,
+          "segmentId": "N022:S01",
+          "text": "所以，更稳妥的结论，不是“弗洛伊德全错”，也不是“每次嘴瓢都是真心话”。",
+          "startMs": 203515,
+          "endMs": 211052,
+          "sourceStartFrame": 6106,
+          "sourceEndFrame": 6332,
+          "localStartFrame": 592,
+          "localEndFrame": 818
+        },
+        {
+          "id": 39,
+          "segmentId": "N022:S02",
+          "text": "他的贡献，是逼我们承认：行为并不总对意识完全透明。",
+          "startMs": 211052,
+          "endMs": 216286,
+          "sourceStartFrame": 6332,
+          "sourceEndFrame": 6489,
+          "localStartFrame": 818,
+          "localEndFrame": 975
+        },
+        {
+          "id": 40,
+          "segmentId": "N023:S01",
+          "text": "现代心理学保留了这个问题，却把答案拆成了可以实验的语言、记忆、注意和控制机制。",
+          "startMs": 216286,
+          "endMs": 225121,
+          "sourceStartFrame": 6489,
+          "sourceEndFrame": 6754,
+          "localStartFrame": 975,
+          "localEndFrame": 1240
+        }
+      ]
+    },
+    {
+      "id": "D",
+      "name": "history",
+      "startFrame": 920,
+      "endFrame": 2821,
+      "sceneIds": [
+        "S005",
+        "S006",
+        "S007",
+        "S008",
+        "S009",
+        "S010"
+      ],
+      "frameCount": 1901,
+      "sceneFile": "D-history-scenes.json",
+      "scenes": [
+        {
+          "sceneId": "S005",
+          "startFrame": 0,
+          "endFrame": 397,
+          "sourceStartFrame": 920,
+          "sourceEndFrame": 1317
+        },
+        {
+          "sceneId": "S006",
+          "startFrame": 397,
+          "endFrame": 684,
+          "sourceStartFrame": 1317,
+          "sourceEndFrame": 1604
+        },
+        {
+          "sceneId": "S007",
+          "startFrame": 684,
+          "endFrame": 933,
+          "sourceStartFrame": 1604,
+          "sourceEndFrame": 1853
+        },
+        {
+          "sceneId": "S008",
+          "startFrame": 933,
+          "endFrame": 1193,
+          "sourceStartFrame": 1853,
+          "sourceEndFrame": 2113
+        },
+        {
+          "sceneId": "S009",
+          "startFrame": 1193,
+          "endFrame": 1572,
+          "sourceStartFrame": 2113,
+          "sourceEndFrame": 2492
+        },
+        {
+          "sceneId": "S010",
+          "startFrame": 1572,
+          "endFrame": 1901,
+          "sourceStartFrame": 2492,
+          "sourceEndFrame": 2821
+        }
+      ],
+      "beats": [
+        {
+          "beatId": "B007",
+          "sceneId": "S005",
+          "unitId": "N005",
+          "startFrame": 920,
+          "endFrame": 1317,
+          "subtitleCueIds": [
+            7
+          ],
+          "statement": "弗洛伊德在《日常生活心理病理学》里，把忘记名字、口误、误读误写、忘记办事，还有拿错、弄丢东西，放进了同一个研究计划。",
+          "narrativePurpose": "把弗洛伊德著作作为历史研究入口",
+          "inputState": "最强主张卡片需要历史来源",
+          "actors": [
+            "freud_interpretation",
+            "evidence_card"
+          ],
+          "dominantVerb": "定位",
+          "visibleAction": "书页进入中心，支持范围内的研究对象标签逐项锚定到文献周围",
+          "visibleResult": "多类日常失误被归入同一研究计划",
+          "viewerFocus": "书页与六类错误对象的证据连线",
+          "persistentActors": [
+            "freud_interpretation",
+            "evidence_card"
+          ],
+          "handoff": "研究计划收束为一条“干扰”假设路径",
+          "candidateShotLibraryEntries": [
+            "wide-source-document",
+            "reference-card-stack"
+          ],
+          "localStartFrame": 0,
+          "localEndFrame": 397
+        },
+        {
+          "beatId": "B008",
+          "sceneId": "S006",
+          "unitId": "N006",
+          "startFrame": 1317,
+          "endFrame": 1427,
+          "subtitleCueIds": [
+            8
+          ],
+          "statement": "他的核心想法，不是错误本身会说真话。",
+          "narrativePurpose": "先排除“错误会自动说真话”的误读",
+          "inputState": "历史解释路径旁出现“错误本身说真话”假命题",
+          "actors": [
+            "error_token",
+            "freud_interpretation",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "否定",
+          "visibleAction": "假命题被明确划掉，error_token 保持中性",
+          "visibleResult": "历史框架的主张范围被校正",
+          "viewerFocus": "被划掉的错误等于真话路径",
+          "persistentActors": [
+            "error_token",
+            "freud_interpretation"
+          ],
+          "handoff": "中性 error_token 回到原动作路径，等待干扰源进入",
+          "candidateShotLibraryEntries": [
+            "kinetic-statement",
+            "wide-causal-tag-map"
+          ],
+          "localStartFrame": 397,
+          "localEndFrame": 507
+        },
+        {
+          "beatId": "B009",
+          "sceneId": "S006",
+          "unitId": "N006",
+          "startFrame": 1427,
+          "endFrame": 1604,
+          "subtitleCueIds": [
+            9
+          ],
+          "statement": "而是你原本要做、要说的事，可能被另一股没有承认的念头干扰。",
+          "narrativePurpose": "表现未承认念头对计划的干扰",
+          "inputState": "原本的说话/行动路径稳定前进",
+          "actors": [
+            "action_path",
+            "competing_word",
+            "freud_interpretation"
+          ],
+          "dominantVerb": "干扰",
+          "visibleAction": "第二股路径从侧面施力，使主路径在分叉点偏移",
+          "visibleResult": "错误被呈现为计划与竞争念头的相互作用",
+          "viewerFocus": "两条路径接触后产生的偏移",
+          "persistentActors": [
+            "action_path",
+            "competing_word",
+            "freud_interpretation"
+          ],
+          "handoff": "偏移路径分裂为口误与忘事两个实例",
+          "candidateShotLibraryEntries": [
+            "wide-relationship-focus",
+            "wide-causal-tag-map"
+          ],
+          "localStartFrame": 507,
+          "localEndFrame": 684
+        },
+        {
+          "beatId": "B010",
+          "sceneId": "S007",
+          "unitId": "N007",
+          "startFrame": 1604,
+          "endFrame": 1704,
+          "subtitleCueIds": [
+            10
+          ],
+          "statement": "口误，是两种表达挤到了一起。",
+          "narrativePurpose": "把口误画成表达竞争",
+          "inputState": "同一出口前有两条语言表达路径",
+          "actors": [
+            "intended_word",
+            "competing_word",
+            "spoken_word"
+          ],
+          "dominantVerb": "挤压",
+          "visibleAction": "两条表达在狭窄出口同时到达并发生位置交换",
+          "visibleResult": "竞争词短暂占据 spoken_word 槽位",
+          "viewerFocus": "出口处的交换",
+          "persistentActors": [
+            "intended_word",
+            "competing_word",
+            "spoken_word",
+            "error_token",
+            "action_path"
+          ],
+          "handoff": "语言路径留在左侧，右侧展开行动意图路径",
+          "candidateShotLibraryEntries": [
+            "wide-process-pill-builder"
+          ],
+          "localStartFrame": 684,
+          "localEndFrame": 784
+        },
+        {
+          "beatId": "B011",
+          "sceneId": "S007",
+          "unitId": "N007",
+          "startFrame": 1704,
+          "endFrame": 1854,
+          "subtitleCueIds": [
+            11
+          ],
+          "statement": "忘记办事，也可能是心里有一部分根本不想做。",
+          "narrativePurpose": "把忘事画成行动意图变弱",
+          "inputState": "待办意图已挂在未来行动路径上",
+          "actors": [
+            "action_path",
+            "memory_trace",
+            "freud_interpretation"
+          ],
+          "dominantVerb": "抑制",
+          "visibleAction": "一股未承认的反向权重拉低待办节点，路径未被触发",
+          "visibleResult": "遗漏被表现为意图节点没有达到行动阈值",
+          "viewerFocus": "未触发的待办节点",
+          "persistentActors": [
+            "action_path",
+            "memory_trace",
+            "freud_interpretation"
+          ],
+          "handoff": "未触发节点变成接下来忘名案例的 missing target",
+          "candidateShotLibraryEntries": [
+            "wide-relationship-focus"
+          ],
+          "localStartFrame": 784,
+          "localEndFrame": 934
+        },
+        {
+          "beatId": "B012",
+          "sceneId": "S008",
+          "unitId": "N008",
+          "startFrame": 1854,
+          "endFrame": 1934,
+          "subtitleCueIds": [
+            12
+          ],
+          "statement": "最著名的是西尼奥雷利案例。",
+          "narrativePurpose": "建立西尼奥雷利忘名案例的缺失目标",
+          "inputState": "人物/名字目标槽为空，历史来源进入",
+          "actors": [
+            "memory_trace",
+            "evidence_card",
+            "freud_interpretation"
+          ],
+          "dominantVerb": "定位",
+          "visibleAction": "真实 archive 画面局部聚焦，目标姓名槽与案例标签贴近来源",
+          "visibleResult": "案例主体与问题范围可见，不靠字幕认人",
+          "viewerFocus": "来源局部与空姓名槽",
+          "persistentActors": [
+            "memory_trace",
+            "evidence_card",
+            "freud_interpretation"
+          ],
+          "handoff": "空槽保留，两个替代词从记忆区升起",
+          "candidateShotLibraryEntries": [
+            "wide-source-document",
+            "wide-spotlight-reveal"
+          ],
+          "localStartFrame": 934,
+          "localEndFrame": 1014
+        },
+        {
+          "beatId": "B013",
+          "sceneId": "S008",
+          "unitId": "N008",
+          "startFrame": 1934,
+          "endFrame": 2114,
+          "subtitleCueIds": [
+            13
+          ],
+          "statement": "弗洛伊德忘了那位画家的名字，却不断冒出另外两个相近的名字。",
+          "narrativePurpose": "表现相近替代名字不断冒出",
+          "inputState": "目标姓名仍未被取回",
+          "actors": [
+            "memory_trace",
+            "competing_word"
+          ],
+          "dominantVerb": "替代",
+          "visibleAction": "两个匿名化的“相近名字 A/B”从记忆网络进入空槽又被弹开",
+          "visibleResult": "观众看到替代候选出现而目标仍缺失",
+          "viewerFocus": "空目标槽与反复靠近的候选",
+          "persistentActors": [
+            "memory_trace",
+            "competing_word"
+          ],
+          "handoff": "替代词拖出可追踪的联想线",
+          "candidateShotLibraryEntries": [
+            "wide-knowledge-world",
+            "wide-relationship-focus"
+          ],
+          "localStartFrame": 1014,
+          "localEndFrame": 1194
+        },
+        {
+          "beatId": "B014",
+          "sceneId": "S009",
+          "unitId": "N009",
+          "startFrame": 2114,
+          "endFrame": 2352,
+          "subtitleCueIds": [
+            14
+          ],
+          "statement": "他把这些替代词，连回此前关于死亡和痛苦的谈话，认为忘名受到了被避开的联想影响。",
+          "narrativePurpose": "重建弗洛伊德的联想推断",
+          "inputState": "替代词已携带未解释的联想线",
+          "actors": [
+            "competing_word",
+            "evidence_card",
+            "freud_interpretation"
+          ],
+          "dominantVerb": "连回",
+          "visibleAction": "联想线依次连接此前的死亡/痛苦谈话节点，再指向被避开的联想假设",
+          "visibleResult": "历史解释如何从替代词到压抑假设被完整显形",
+          "viewerFocus": "从替代词经过谈话节点到假设的路径",
+          "persistentActors": [
+            "competing_word",
+            "evidence_card",
+            "freud_interpretation"
+          ],
+          "handoff": "在推断末端预留一张限制卡",
+          "candidateShotLibraryEntries": [
+            "wide-evidence-bridge",
+            "story-timeline"
+          ],
+          "localStartFrame": 1194,
+          "localEndFrame": 1432
+        },
+        {
+          "beatId": "B015",
+          "sceneId": "S009",
+          "unitId": "N009",
+          "startFrame": 2352,
+          "endFrame": 2492,
+          "subtitleCueIds": [
+            15
+          ],
+          "statement": "公平地说，他也承认，并不是所有忘名都来自压抑。",
+          "narrativePurpose": "加入弗洛伊德自己的范围限制",
+          "inputState": "联想推断已到达压抑假设",
+          "actors": [
+            "freud_interpretation",
+            "confidence_indicator",
+            "evidence_card"
+          ],
+          "dominantVerb": "限定",
+          "visibleAction": "“并非所有忘名都来自压抑”卡片压低结论置信度并缩窄适用范围",
+          "visibleResult": "历史观点从绝对命题变为有限假设",
+          "viewerFocus": "置信度与范围边界",
+          "persistentActors": [
+            "freud_interpretation",
+            "confidence_indicator",
+            "evidence_card"
+          ],
+          "handoff": "有限假设进入日常生活视野",
+          "candidateShotLibraryEntries": [
+            "reference-card-stack",
+            "wide-causal-tag-map"
+          ],
+          "localStartFrame": 1432,
+          "localEndFrame": 1572
+        },
+        {
+          "beatId": "B016",
+          "sceneId": "S010",
+          "unitId": "N010",
+          "startFrame": 2492,
+          "endFrame": 2700,
+          "subtitleCueIds": [
+            16
+          ],
+          "statement": "这个解释真正迷人的地方，是它把无意识从梦和诊室，带进了普通人的日常生活。",
+          "narrativePurpose": "表现历史解释把无意识带入日常",
+          "inputState": "梦/诊室两个远端区域与日常场景分离",
+          "actors": [
+            "freud_interpretation",
+            "error_token",
+            "evidence_card"
+          ],
+          "dominantVerb": "迁移",
+          "visibleAction": "解释卡沿时间/空间路径从梦和诊室移入日常生活画面",
+          "visibleResult": "无意识解释的历史吸引力来自适用场景扩展",
+          "viewerFocus": "跨场景移动的解释卡",
+          "persistentActors": [
+            "freud_interpretation",
+            "error_token",
+            "evidence_card"
+          ],
+          "handoff": "卡片落到一个普通小错误上",
+          "candidateShotLibraryEntries": [
+            "story-timeline",
+            "wide-evidence-bridge"
+          ],
+          "localStartFrame": 1572,
+          "localEndFrame": 1780
+        },
+        {
+          "beatId": "B017",
+          "sceneId": "S010",
+          "unitId": "N010",
+          "startFrame": 2700,
+          "endFrame": 2821,
+          "subtitleCueIds": [
+            17
+          ],
+          "statement": "一个小错误，也可能成为观察心理冲突的窗口。",
+          "narrativePurpose": "把小错误变成观察窗口而非结论",
+          "inputState": "普通 error_token 位于日常场景",
+          "actors": [
+            "error_token",
+            "freud_interpretation",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "放大",
+          "visibleAction": "镜头从小错误局部放大到一个“冲突假设”观察窗，同时保留问号",
+          "visibleResult": "错误成为可调查线索，但没有自动证明冲突",
+          "viewerFocus": "带问号的观察窗",
+          "persistentActors": [
+            "error_token",
+            "freud_interpretation",
+            "confidence_indicator"
+          ],
+          "handoff": "观察窗翻面，露出现代机制层",
+          "candidateShotLibraryEntries": [
+            "wide-spotlight-reveal",
+            "wide-chapter-transition"
+          ],
+          "localStartFrame": 1780,
+          "localEndFrame": 1901
+        }
+      ],
+      "cues": [
+        {
+          "id": 7,
+          "segmentId": "N005:S01",
+          "text": "弗洛伊德在《日常生活心理病理学》里，把忘记名字、口误、误读误写、忘记办事，还有拿错、弄丢东西，放进了同一个研究计划。",
+          "startMs": 30652,
+          "endMs": 43887,
+          "sourceStartFrame": 920,
+          "sourceEndFrame": 1317,
+          "localStartFrame": 0,
+          "localEndFrame": 397
+        },
+        {
+          "id": 8,
+          "segmentId": "N006:S01",
+          "text": "他的核心想法，不是错误本身会说真话。",
+          "startMs": 43887,
+          "endMs": 47546,
+          "sourceStartFrame": 1317,
+          "sourceEndFrame": 1427,
+          "localStartFrame": 397,
+          "localEndFrame": 507
+        },
+        {
+          "id": 9,
+          "segmentId": "N006:S02",
+          "text": "而是你原本要做、要说的事，可能被另一股没有承认的念头干扰。",
+          "startMs": 47546,
+          "endMs": 53442,
+          "sourceStartFrame": 1427,
+          "sourceEndFrame": 1604,
+          "localStartFrame": 507,
+          "localEndFrame": 684
+        },
+        {
+          "id": 10,
+          "segmentId": "N007:S01",
+          "text": "口误，是两种表达挤到了一起。",
+          "startMs": 53442,
+          "endMs": 56776,
+          "sourceStartFrame": 1604,
+          "sourceEndFrame": 1704,
+          "localStartFrame": 684,
+          "localEndFrame": 784
+        },
+        {
+          "id": 11,
+          "segmentId": "N007:S02",
+          "text": "忘记办事，也可能是心里有一部分根本不想做。",
+          "startMs": 56776,
+          "endMs": 61778,
+          "sourceStartFrame": 1704,
+          "sourceEndFrame": 1854,
+          "localStartFrame": 784,
+          "localEndFrame": 934
+        },
+        {
+          "id": 12,
+          "segmentId": "N008:S01",
+          "text": "最著名的是西尼奥雷利案例。",
+          "startMs": 61778,
+          "endMs": 64459,
+          "sourceStartFrame": 1854,
+          "sourceEndFrame": 1934,
+          "localStartFrame": 934,
+          "localEndFrame": 1014
+        },
+        {
+          "id": 13,
+          "segmentId": "N008:S02",
+          "text": "弗洛伊德忘了那位画家的名字，却不断冒出另外两个相近的名字。",
+          "startMs": 64459,
+          "endMs": 70439,
+          "sourceStartFrame": 1934,
+          "sourceEndFrame": 2114,
+          "localStartFrame": 1014,
+          "localEndFrame": 1194
+        },
+        {
+          "id": 14,
+          "segmentId": "N009:S01",
+          "text": "他把这些替代词，连回此前关于死亡和痛苦的谈话，认为忘名受到了被避开的联想影响。",
+          "startMs": 70439,
+          "endMs": 78377,
+          "sourceStartFrame": 2114,
+          "sourceEndFrame": 2352,
+          "localStartFrame": 1194,
+          "localEndFrame": 1432
+        },
+        {
+          "id": 15,
+          "segmentId": "N009:S02",
+          "text": "公平地说，他也承认，并不是所有忘名都来自压抑。",
+          "startMs": 78377,
+          "endMs": 83059,
+          "sourceStartFrame": 2352,
+          "sourceEndFrame": 2492,
+          "localStartFrame": 1432,
+          "localEndFrame": 1572
+        },
+        {
+          "id": 16,
+          "segmentId": "N010:S01",
+          "text": "这个解释真正迷人的地方，是它把无意识从梦和诊室，带进了普通人的日常生活。",
+          "startMs": 83059,
+          "endMs": 89981,
+          "sourceStartFrame": 2492,
+          "sourceEndFrame": 2700,
+          "localStartFrame": 1572,
+          "localEndFrame": 1780
+        },
+        {
+          "id": 17,
+          "segmentId": "N010:S02",
+          "text": "一个小错误，也可能成为观察心理冲突的窗口。",
+          "startMs": 89981,
+          "endMs": 94019,
+          "sourceStartFrame": 2700,
+          "sourceEndFrame": 2821,
+          "localStartFrame": 1780,
+          "localEndFrame": 1901
+        }
+      ]
+    },
+    {
+      "id": "E",
+      "name": "applied-mechanisms",
+      "startFrame": 3832,
+      "endFrame": 5514,
+      "sceneIds": [
+        "S015",
+        "S016",
+        "S017",
+        "S018",
+        "S019"
+      ],
+      "frameCount": 1682,
+      "sceneFile": "E-applied-mechanisms-scenes.json",
+      "scenes": [
+        {
+          "sceneId": "S015",
+          "startFrame": 0,
+          "endFrame": 470,
+          "sourceStartFrame": 3832,
+          "sourceEndFrame": 4302
+        },
+        {
+          "sceneId": "S016",
+          "startFrame": 470,
+          "endFrame": 816,
+          "sourceStartFrame": 4302,
+          "sourceEndFrame": 4648
+        },
+        {
+          "sceneId": "S017",
+          "startFrame": 816,
+          "endFrame": 1076,
+          "sourceStartFrame": 4648,
+          "sourceEndFrame": 4908
+        },
+        {
+          "sceneId": "S018",
+          "startFrame": 1076,
+          "endFrame": 1356,
+          "sourceStartFrame": 4908,
+          "sourceEndFrame": 5188
+        },
+        {
+          "sceneId": "S019",
+          "startFrame": 1356,
+          "endFrame": 1682,
+          "sourceStartFrame": 5188,
+          "sourceEndFrame": 5514
+        }
+      ],
+      "beats": [
+        {
+          "beatId": "B025",
+          "sceneId": "S015",
+          "unitId": "N015",
+          "startFrame": 3831,
+          "endFrame": 4023,
+          "subtitleCueIds": [
+            25
+          ],
+          "statement": "忘记买牛奶、回消息或者带钥匙，属于未来意图记忆的问题。",
+          "narrativePurpose": "把未来意图放进时间轴",
+          "inputState": "买牛奶/回消息/带钥匙三个待办状态已登记",
+          "actors": [
+            "memory_trace",
+            "action_path",
+            "attention_focus"
+          ],
+          "dominantVerb": "排程",
+          "visibleAction": "待办胶囊沿时间线移动，等待环境 cue 激活",
+          "visibleResult": "未来意图记忆的任务不是保存事实，而是在正确时刻触发",
+          "viewerFocus": "待办与未来 cue 的距离",
+          "persistentActors": [
+            "memory_trace",
+            "action_path",
+            "attention_focus"
+          ],
+          "handoff": "当前任务从上方占用注意资源",
+          "candidateShotLibraryEntries": [
+            "story-timeline",
+            "wide-process-pill-builder"
+          ],
+          "localStartFrame": 0,
+          "localEndFrame": 191
+        },
+        {
+          "beatId": "B026",
+          "sceneId": "S015",
+          "unitId": "N015",
+          "startFrame": 4023,
+          "endFrame": 4301,
+          "subtitleCueIds": [
+            26
+          ],
+          "statement": "一项汇总四十篇研究的系统综述发现，手头的事越费脑，人越容易漏掉稍后要做的任务。",
+          "narrativePurpose": "展示认知负荷使稍后任务漏触发",
+          "inputState": "待办到达 cue 附近，attention_focus 已被当前任务占用",
+          "actors": [
+            "memory_trace",
+            "attention_focus",
+            "action_path",
+            "evidence_card"
+          ],
+          "dominantVerb": "占用",
+          "visibleAction": "当前任务扩张并遮住 cue，待办胶囊从触发窗口旁滑过；“40篇研究综述”作为证据卡接入",
+          "visibleResult": "高负荷与漏掉未来任务之间的支持性观察可见",
+          "viewerFocus": "被遮住的 cue 与未触发待办",
+          "persistentActors": [
+            "memory_trace",
+            "attention_focus",
+            "action_path",
+            "evidence_card"
+          ],
+          "handoff": "漏触发路径变成自动化行动分叉",
+          "candidateShotLibraryEntries": [
+            "wide-evidence-bridge",
+            "wide-exploded-workflow-board"
+          ],
+          "localStartFrame": 191,
+          "localEndFrame": 469
+        },
+        {
+          "beatId": "B027",
+          "sceneId": "S016",
+          "unitId": "N016",
+          "startFrame": 4301,
+          "endFrame": 4529,
+          "subtitleCueIds": [
+            27
+          ],
+          "statement": "拿错杯子，或者走上每天熟悉、但今天不该走的路，也可以是行动脚本启动得太快。",
+          "narrativePurpose": "展示熟练行动脚本走入旧路径",
+          "inputState": "当前目标与熟悉路径在分叉点并存",
+          "actors": [
+            "action_path",
+            "attention_focus",
+            "modern_mechanism"
+          ],
+          "dominantVerb": "分叉",
+          "visibleAction": "熟悉路径凭更高自动激活先亮起，动作对象走向旧杯子/旧路线",
+          "visibleResult": "行动失误由自动化路径抢先解释",
+          "viewerFocus": "分叉点与领先的熟悉路径",
+          "persistentActors": [
+            "action_path",
+            "attention_focus",
+            "modern_mechanism"
+          ],
+          "handoff": "保留分叉点，让当前目标尝试接管",
+          "candidateShotLibraryEntries": [
+            "wide-process-pill-builder",
+            "wide-relationship-focus"
+          ],
+          "localStartFrame": 469,
+          "localEndFrame": 697
+        },
+        {
+          "beatId": "B028",
+          "sceneId": "S016",
+          "unitId": "N016",
+          "startFrame": 4529,
+          "endFrame": 4647,
+          "subtitleCueIds": [
+            28
+          ],
+          "statement": "熟练程序先跑了，当前目标没来得及接管。",
+          "narrativePurpose": "展示当前目标接管过晚",
+          "inputState": "熟练路径已经越过分叉点",
+          "actors": [
+            "action_path",
+            "attention_focus",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "接管",
+          "visibleAction": "当前目标信号随后增强，但只能在错误路径后亮起纠正标记",
+          "visibleResult": "结果来自时序失配，不需要隐藏欲望",
+          "viewerFocus": "晚到的目标信号与已发生的动作",
+          "persistentActors": [
+            "action_path",
+            "attention_focus",
+            "confidence_indicator"
+          ],
+          "handoff": "把“动机”作为可调权重接入同一机制图",
+          "candidateShotLibraryEntries": [
+            "wide-causal-tag-map",
+            "wide-process-pill-builder"
+          ],
+          "localStartFrame": 697,
+          "localEndFrame": 815
+        },
+        {
+          "beatId": "B029",
+          "sceneId": "S017",
+          "unitId": "N017",
+          "startFrame": 4647,
+          "endFrame": 4734,
+          "subtitleCueIds": [
+            29
+          ],
+          "statement": "当然，这不等于动机永远无关。",
+          "narrativePurpose": "保留动机可能相关的边界",
+          "inputState": "现代机制图已经解释基础竞争",
+          "actors": [
+            "freud_interpretation",
+            "modern_mechanism",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "校准",
+          "visibleAction": "动机卡不再占据结论，而是作为一个可调输入插入候选竞争",
+          "visibleResult": "动机从万能解释降为可能影响竞争的因素",
+          "viewerFocus": "输入权重而非最终结论",
+          "persistentActors": [
+            "freud_interpretation",
+            "modern_mechanism",
+            "confidence_indicator"
+          ],
+          "handoff": "当前语境滑块连接候选激活条",
+          "candidateShotLibraryEntries": [
+            "wide-causal-tag-map",
+            "wide-relationship-focus"
+          ],
+          "localStartFrame": 815,
+          "localEndFrame": 902
+        },
+        {
+          "beatId": "B030",
+          "sceneId": "S017",
+          "unitId": "N017",
+          "startFrame": 4734,
+          "endFrame": 4907,
+          "subtitleCueIds": [
+            30
+          ],
+          "statement": "实验确实提示，眼下的语境，可能影响哪一类口误更容易出现。",
+          "narrativePurpose": "表现语境改变哪类口误更易出现",
+          "inputState": "两个候选激活条基线相近",
+          "actors": [
+            "competing_word",
+            "attention_focus",
+            "modern_mechanism"
+          ],
+          "dominantVerb": "偏置",
+          "visibleAction": "语境滑块移动，某类候选的激活概率随之上升但不锁定结果",
+          "visibleResult": "实验提示的是概率偏置，不是欲望证据",
+          "viewerFocus": "概率条的相对变化",
+          "persistentActors": [
+            "competing_word",
+            "attention_focus",
+            "modern_mechanism",
+            "confidence_indicator"
+          ],
+          "handoff": "概率结果进入复现检查",
+          "candidateShotLibraryEntries": [
+            "wide-relationship-focus",
+            "wide-evidence-bridge"
+          ],
+          "localStartFrame": 902,
+          "localEndFrame": 1075
+        },
+        {
+          "beatId": "B031",
+          "sceneId": "S018",
+          "unitId": "N018",
+          "startFrame": 4907,
+          "endFrame": 5023,
+          "subtitleCueIds": [
+            31
+          ],
+          "statement": "但相关的无意识启动结果，并没有稳定复现。",
+          "narrativePurpose": "把未稳定复现作为证据状态变化",
+          "inputState": "一张无意识启动结果卡显示初始支持",
+          "actors": [
+            "evidence_card",
+            "confidence_indicator",
+            "modern_mechanism"
+          ],
+          "dominantVerb": "复核",
+          "visibleAction": "多次复现卡依次接入，支持条波动并下降到“不稳定”",
+          "visibleResult": "证据置信度被复现结果实际改变",
+          "viewerFocus": "支持条从高到不稳定",
+          "persistentActors": [
+            "evidence_card",
+            "confidence_indicator",
+            "modern_mechanism"
+          ],
+          "handoff": "不稳定结果与强欲望结论并排",
+          "candidateShotLibraryEntries": [
+            "wide-evidence-stack",
+            "reference-card-stack"
+          ],
+          "localStartFrame": 1075,
+          "localEndFrame": 1191
+        },
+        {
+          "beatId": "B032",
+          "sceneId": "S018",
+          "unitId": "N018",
+          "startFrame": 5023,
+          "endFrame": 5187,
+          "subtitleCueIds": [
+            32
+          ],
+          "statement": "心理状态可能参与竞争，不等于被压抑的欲望已经被抓了现行。",
+          "narrativePurpose": "区分参与竞争与抓获压抑欲望",
+          "inputState": "心理状态影响竞争的有限路径已存在",
+          "actors": [
+            "modern_mechanism",
+            "freud_interpretation",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "分界",
+          "visibleAction": "有限路径停在“可能参与”，强结论路径因缺失证据桥而无法到达",
+          "visibleResult": "相关参与不等于压抑欲望被证实",
+          "viewerFocus": "两条路径之间的断桥",
+          "persistentActors": [
+            "modern_mechanism",
+            "freud_interpretation",
+            "confidence_indicator",
+            "evidence_card"
+          ],
+          "handoff": "断桥转化为事后故事生成器",
+          "candidateShotLibraryEntries": [
+            "split-comparison",
+            "wide-evidence-bridge"
+          ],
+          "localStartFrame": 1191,
+          "localEndFrame": 1355
+        },
+        {
+          "beatId": "B033",
+          "sceneId": "S019",
+          "unitId": "N019",
+          "startFrame": 5187,
+          "endFrame": 5514,
+          "subtitleCueIds": [
+            33
+          ],
+          "statement": "弗洛伊德式解释最迷人，也最危险的地方是：错误一发生，我们总能从一个人的经历里，找到一条看起来很吻合的联想链。",
+          "narrativePurpose": "表现事后联想链为何迷人且危险",
+          "inputState": "error_token 已发生，个人经历卡库位于其后",
+          "actors": [
+            "error_token",
+            "evidence_card",
+            "freud_interpretation"
+          ],
+          "dominantVerb": "回填",
+          "visibleAction": "故事生成器在结果之后从经历卡库自动挑选吻合节点并串成链",
+          "visibleResult": "任何已发生结果都能被回填成看似连贯的故事",
+          "viewerFocus": "结果之后迅速长出的联想链",
+          "persistentActors": [
+            "error_token",
+            "evidence_card",
+            "freud_interpretation"
+          ],
+          "handoff": "联想链被送入科学解释检查台",
+          "candidateShotLibraryEntries": [
+            "story-timeline",
+            "wide-knowledge-world"
+          ],
+          "localStartFrame": 1355,
+          "localEndFrame": 1682
+        }
+      ],
+      "cues": [
+        {
+          "id": 25,
+          "segmentId": "N015:S01",
+          "text": "忘记买牛奶、回消息或者带钥匙，属于未来意图记忆的问题。",
+          "startMs": 127688,
+          "endMs": 134092,
+          "sourceStartFrame": 3831,
+          "sourceEndFrame": 4023,
+          "localStartFrame": 0,
+          "localEndFrame": 191
+        },
+        {
+          "id": 26,
+          "segmentId": "N015:S02",
+          "text": "一项汇总四十篇研究的系统综述发现，手头的事越费脑，人越容易漏掉稍后要做的任务。",
+          "startMs": 134092,
+          "endMs": 143341,
+          "sourceStartFrame": 4023,
+          "sourceEndFrame": 4301,
+          "localStartFrame": 191,
+          "localEndFrame": 469
+        },
+        {
+          "id": 27,
+          "segmentId": "N016:S01",
+          "text": "拿错杯子，或者走上每天熟悉、但今天不该走的路，也可以是行动脚本启动得太快。",
+          "startMs": 143341,
+          "endMs": 150966,
+          "sourceStartFrame": 4301,
+          "sourceEndFrame": 4529,
+          "localStartFrame": 469,
+          "localEndFrame": 697
+        },
+        {
+          "id": 28,
+          "segmentId": "N016:S02",
+          "text": "熟练程序先跑了，当前目标没来得及接管。",
+          "startMs": 150966,
+          "endMs": 154881,
+          "sourceStartFrame": 4529,
+          "sourceEndFrame": 4647,
+          "localStartFrame": 697,
+          "localEndFrame": 815
+        },
+        {
+          "id": 29,
+          "segmentId": "N017:S01",
+          "text": "当然，这不等于动机永远无关。",
+          "startMs": 154881,
+          "endMs": 157768,
+          "sourceStartFrame": 4647,
+          "sourceEndFrame": 4734,
+          "localStartFrame": 815,
+          "localEndFrame": 902
+        },
+        {
+          "id": 30,
+          "segmentId": "N017:S02",
+          "text": "实验确实提示，眼下的语境，可能影响哪一类口误更容易出现。",
+          "startMs": 157768,
+          "endMs": 163542,
+          "sourceStartFrame": 4734,
+          "sourceEndFrame": 4907,
+          "localStartFrame": 902,
+          "localEndFrame": 1075
+        },
+        {
+          "id": 31,
+          "segmentId": "N018:S01",
+          "text": "但相关的无意识启动结果，并没有稳定复现。",
+          "startMs": 163542,
+          "endMs": 167431,
+          "sourceStartFrame": 4907,
+          "sourceEndFrame": 5023,
+          "localStartFrame": 1075,
+          "localEndFrame": 1191
+        },
+        {
+          "id": 32,
+          "segmentId": "N018:S02",
+          "text": "心理状态可能参与竞争，不等于被压抑的欲望已经被抓了现行。",
+          "startMs": 167431,
+          "endMs": 172876,
+          "sourceStartFrame": 5023,
+          "sourceEndFrame": 5187,
+          "localStartFrame": 1191,
+          "localEndFrame": 1355
+        },
+        {
+          "id": 33,
+          "segmentId": "N019:S01",
+          "text": "弗洛伊德式解释最迷人，也最危险的地方是：错误一发生，我们总能从一个人的经历里，找到一条看起来很吻合的联想链。",
+          "startMs": 172876,
+          "endMs": 183778,
+          "sourceStartFrame": 5187,
+          "sourceEndFrame": 5514,
+          "localStartFrame": 1355,
+          "localEndFrame": 1682
+        }
+      ]
+    },
+    {
+      "id": "F",
+      "name": "final-close",
+      "startFrame": 6754,
+      "endFrame": 7307,
+      "sceneIds": [
+        "S024",
+        "S025"
+      ],
+      "frameCount": 553,
+      "sceneFile": "F-final-close-scenes.json",
+      "scenes": [
+        {
+          "sceneId": "S024",
+          "startFrame": 0,
+          "endFrame": 231,
+          "sourceStartFrame": 6754,
+          "sourceEndFrame": 6985
+        },
+        {
+          "sceneId": "S025",
+          "startFrame": 231,
+          "endFrame": 553,
+          "sourceStartFrame": 6985,
+          "sourceEndFrame": 7307
+        }
+      ],
+      "beats": [
+        {
+          "beatId": "B041",
+          "sceneId": "S024",
+          "unitId": "N024",
+          "startFrame": 6754,
+          "endFrame": 6927,
+          "subtitleCueIds": [
+            41
+          ],
+          "statement": "下一次叫错名字，你当然可以多问一句：我刚才为什么会错？",
+          "narrativePurpose": "把观众的追问接入证据流程",
+          "inputState": "一次新的 error_token 出现在四机制入口前",
+          "actors": [
+            "error_token",
+            "modern_mechanism",
+            "attention_focus"
+          ],
+          "dominantVerb": "追问",
+          "visibleAction": "attention_focus 沿错误路径回溯，依次点亮可问的机制入口",
+          "visibleResult": "“为什么会错”成为调查起点而非答案",
+          "viewerFocus": "被逐项点亮的可检验入口",
+          "persistentActors": [
+            "error_token",
+            "modern_mechanism",
+            "attention_focus"
+          ],
+          "handoff": "追问路径到达结论闸门前",
+          "candidateShotLibraryEntries": [
+            "wide-tutorial-spotlight",
+            "wide-causal-tag-map"
+          ],
+          "localStartFrame": 0,
+          "localEndFrame": 173
+        },
+        {
+          "beatId": "B042",
+          "sceneId": "S024",
+          "unitId": "N024",
+          "startFrame": 6927,
+          "endFrame": 6985,
+          "subtitleCueIds": [
+            42
+          ],
+          "statement": "但别急着宣布破案。",
+          "narrativePurpose": "阻止证据不足时宣布破案",
+          "inputState": "结论闸门前仍有未填 evidence_card 槽位",
+          "actors": [
+            "evidence_card",
+            "confidence_indicator",
+            "attention_focus"
+          ],
+          "dominantVerb": "暂停",
+          "visibleAction": "红色“证据不足”闸门阻止 verdict 卡落下，置信度保持开放",
+          "visibleResult": "观众看到停止判断的具体原因",
+          "viewerFocus": "空证据槽与被阻止的 verdict",
+          "persistentActors": [
+            "evidence_card",
+            "confidence_indicator",
+            "attention_focus"
+          ],
+          "handoff": "闸门转成最终的线索/噪声分叉",
+          "candidateShotLibraryEntries": [
+            "kinetic-statement",
+            "wide-evidence-bridge"
+          ],
+          "localStartFrame": 173,
+          "localEndFrame": 231
+        },
+        {
+          "beatId": "B043",
+          "sceneId": "S025",
+          "unitId": "N025",
+          "startFrame": 6985,
+          "endFrame": 7140,
+          "subtitleCueIds": [
+            43
+          ],
+          "statement": "一次失误，可以是线索，也可以只是一个忙碌大脑的噪声。",
+          "narrativePurpose": "区分线索与忙碌大脑噪声",
+          "inputState": "error_token 位于两条同等可行路径前",
+          "actors": [
+            "error_token",
+            "modern_mechanism",
+            "evidence_card"
+          ],
+          "dominantVerb": "分流",
+          "visibleAction": "一条路径进入可追踪线索链，另一条进入普通认知噪声机制",
+          "visibleResult": "单次失误既可能有意义，也可能是普通系统噪声",
+          "viewerFocus": "两条仍待证据选择的路径",
+          "persistentActors": [
+            "error_token",
+            "modern_mechanism",
+            "evidence_card",
+            "confidence_indicator"
+          ],
+          "handoff": "两条路径重新汇到证据链总图",
+          "candidateShotLibraryEntries": [
+            "split-comparison",
+            "wide-causal-tag-map"
+          ],
+          "localStartFrame": 231,
+          "localEndFrame": 386
+        },
+        {
+          "beatId": "B044",
+          "sceneId": "S025",
+          "unitId": "N025",
+          "startFrame": 7140,
+          "endFrame": 7307,
+          "subtitleCueIds": [
+            44
+          ],
+          "statement": "要从错误走到隐藏动机——中间还缺一整条可以检验的证据链。",
+          "narrativePurpose": "以同一视觉系统收束证据链",
+          "inputState": "错误、隐藏动机和所有证据槽已在同一总图中",
+          "actors": [
+            "error_token",
+            "freud_interpretation",
+            "modern_mechanism",
+            "evidence_card",
+            "confidence_indicator"
+          ],
+          "dominantVerb": "收束",
+          "visibleAction": "相机拉远展示从错误到动机的完整路径；未满足的证据槽保持可见，最终结论卡停在链末",
+          "visibleResult": "最终定格说明缺的不是一个漂亮故事，而是一整条可检验证据链",
+          "viewerFocus": "完整链路与仍为空的关键证据槽",
+          "persistentActors": [
+            "error_token",
+            "freud_interpretation",
+            "modern_mechanism",
+            "evidence_card",
+            "confidence_indicator"
+          ],
+          "handoff": "保持完整证据链作为最终尾帧",
+          "candidateShotLibraryEntries": [
+            "wide-evidence-bridge",
+            "wide-ruler-chapter-progress"
+          ],
+          "localStartFrame": 386,
+          "localEndFrame": 553
+        }
+      ],
+      "cues": [
+        {
+          "id": 41,
+          "segmentId": "N024:S01",
+          "text": "下一次叫错名字，你当然可以多问一句：我刚才为什么会错？",
+          "startMs": 225121,
+          "endMs": 230894,
+          "sourceStartFrame": 6754,
+          "sourceEndFrame": 6927,
+          "localStartFrame": 0,
+          "localEndFrame": 173
+        },
+        {
+          "id": 42,
+          "segmentId": "N024:S02",
+          "text": "但别急着宣布破案。",
+          "startMs": 230894,
+          "endMs": 232818,
+          "sourceStartFrame": 6927,
+          "sourceEndFrame": 6985,
+          "localStartFrame": 173,
+          "localEndFrame": 231
+        },
+        {
+          "id": 43,
+          "segmentId": "N025:S01",
+          "text": "一次失误，可以是线索，也可以只是一个忙碌大脑的噪声。",
+          "startMs": 232818,
+          "endMs": 237989,
+          "sourceStartFrame": 6985,
+          "sourceEndFrame": 7140,
+          "localStartFrame": 231,
+          "localEndFrame": 386
+        },
+        {
+          "id": 44,
+          "segmentId": "N025:S02",
+          "text": "要从错误走到隐藏动机——中间还缺一整条可以检验的证据链。",
+          "startMs": 237989,
+          "endMs": 243557,
+          "sourceStartFrame": 7140,
+          "sourceEndFrame": 7307,
+          "localStartFrame": 386,
+          "localEndFrame": 553
+        }
+      ]
+    }
+  ]
+}

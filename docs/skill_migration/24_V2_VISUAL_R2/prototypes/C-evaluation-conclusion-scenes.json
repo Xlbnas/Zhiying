@@ -1,0 +1,32 @@
+{
+  "scenes": [
+    {
+      "sceneId": "S020",
+      "startFrame": 0,
+      "endFrame": 211,
+      "sourceStartFrame": 5514,
+      "sourceEndFrame": 5725
+    },
+    {
+      "sceneId": "S021",
+      "startFrame": 211,
+      "endFrame": 592,
+      "sourceStartFrame": 5725,
+      "sourceEndFrame": 6106
+    },
+    {
+      "sceneId": "S022",
+      "startFrame": 592,
+      "endFrame": 975,
+      "sourceStartFrame": 6106,
+      "sourceEndFrame": 6489
+    },
+    {
+      "sceneId": "S023",
+      "startFrame": 975,
+      "endFrame": 1240,
+      "sourceStartFrame": 6489,
+      "sourceEndFrame": 6754
+    }
+  ]
+}
