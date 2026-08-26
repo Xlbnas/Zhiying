@@ -10,8 +10,16 @@ import {
   finalRenderAttemptSchema,
 } from '../lib/final-render/schema';
 import {enqueueNarrationAudioJobs, getCurrentNarrationAudioArtifact, getExactNarrationAudioArtifact, getExactReusableNarrationAudioArtifact, getNarrationAudioOverview, tryFinalizeNarrationAudio} from '../lib/narration/audio';
+import {
+  getExactNarrationAudioV2Artifact,
+  tryFinalizeNarrationAudioV2,
+  type TtsProviderSnapshot,
+} from '../lib/narration/audio-v2';
+import {NARRATION_PLAN_V2_ARTIFACT_KIND} from '../lib/narration/schema-v2';
+import {NARRATION_AUDIO_V2_ARTIFACT_KIND} from '../lib/narration/audio-v2-manifest';
 import {getCurrentNarrationPlan} from '../lib/narration/plan';
 import {getCurrentSubtitleTiming, getExactSubtitleTiming, checkSubtitleTimingReadiness, buildSubtitleTiming} from '../lib/subtitles/timing';
+import {buildSubtitleTimingV2} from '../lib/subtitles/timing-v2';
 import {getCurrentTimingReconciliation, getExactTimingReconciliation, getExactReconciliationScenes, checkTimingReconciliationReadiness, buildTimingReconciliation} from '../lib/reconciliation/timing';
 import {getStage, listStages} from '../lib/workflow/stages';
 import {getVersion} from '../lib/workflow/versions';
@@ -19,6 +27,7 @@ import {getRenderArtifact, probeRenderOutput, resolveOutputAbs, sha256File} from
 import {probeAudio} from '../lib/tts-c/audio-probe';
 import {getTtsJob, type TtsJobRow} from '../lib/tts-jobs';
 import {resolveRequestedVoice} from '../lib/tts/voice-registry';
+import {getTtsProvider} from '../lib/tts';
 import type {RenderJobRow} from '../lib/jobs';
 
 type Identity = {id: string; version: number};
@@ -47,7 +56,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   for (let i = 1; i < argv.length; i++) {
     const token = argv[i]!;
     if (!token.startsWith('--')) throw new CliError('INVALID_ARGUMENT', `不支持的位置参数: ${token}`);
-    if (token === '--wait' || token === '--media') {
+    if (token === '--wait' || token === '--media' || token === '--finalize-only') {
       flags.add(token.slice(2));
       continue;
     }
@@ -64,7 +73,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     render: ['project', 'scenes', 'audio', 'subtitles', 'reconciliation', 'timeout-seconds'],
   };
   const allowedFlags: Record<string, string[]> = {
-    inspect: ['media'], tts: ['wait'], subtitles: [], reconcile: [], render: ['wait'],
+    inspect: ['media'], tts: ['wait', 'finalize-only'], subtitles: [], reconcile: [], render: ['wait'],
   };
   for (const key of values.keys()) {
     if (!allowedValues[command].includes(key)) throw new CliError('INVALID_ARGUMENT', `不支持 --${key}（command=${command}）`);
@@ -235,7 +244,60 @@ async function tts(args: ParsedArgs): Promise<Record<string, unknown>> {
         referenceSha256: resolvedVoice.referenceSha256!,
       };
   projectRow(projectId);
-  artifactRow(projectId, plan);
+  const exactPlanRow = artifactRow(projectId, plan);
+  if (exactPlanRow.kind === NARRATION_PLAN_V2_ARTIFACT_KIND) {
+    if (!args.flags.has('finalize-only')) {
+      throw new CliError('FINALIZE_ONLY_REQUIRED', 'exact narration_plan_v2 只能通过 --finalize-only 消费；本路径绝不 enqueue');
+    }
+    if (args.flags.has('wait')) {
+      throw new CliError('INVALID_ARGUMENT', '--finalize-only 不接受 --wait');
+    }
+    if (requestedVoice === undefined) {
+      throw new CliError('MISSING_ARGUMENT', 'exact narration_plan_v2 --finalize-only 必须显式提供 --voice <id>@<revision>');
+    }
+    const provider = getTtsProvider();
+    if (!provider.health) throw new CliError('PROVIDER_SNAPSHOT_UNAVAILABLE', 'TTS provider 不提供 health snapshot');
+    const health = await provider.health();
+    if (!health.ready || !health.model || health.provider !== provider.name) {
+      throw new CliError('PROVIDER_SNAPSHOT_UNAVAILABLE', `TTS provider health snapshot 非 ready/不完整: ${JSON.stringify(health)}`);
+    }
+    const snapshot: TtsProviderSnapshot = {
+      name: provider.name,
+      model: health.model,
+      providerVersion: null,
+      providerCommit: health.repoCommit ?? null,
+    };
+    const result = await tryFinalizeNarrationAudioV2({
+      projectId,
+      narrationPlanV2ArtifactId: plan.id,
+      narrationPlanV2ArtifactVersion: plan.version,
+      provider: snapshot,
+      voiceProfile: {id: resolvedVoice.id, revision: resolvedVoice.revision},
+      referenceSha256: resolvedVoice.referenceSha256,
+    });
+    return {
+      ok: true,
+      command: 'tts',
+      mode: 'finalize-only',
+      plan,
+      schemaVersion: result.manifest.schemaVersion,
+      enqueue: {enqueued: 0, active: result.active},
+      resolvedSources: result.resolvedSources,
+      reusePlan: {
+        reuse: result.decisions.filter((decision) => decision.decision === 'reuse').length,
+        rebuild: result.decisions.filter((decision) => decision.decision === 'rebuild').length,
+        decisions: result.decisions,
+      },
+      result: {
+        status: 'ready',
+        audio: {artifact: result.artifact, manifest: result.manifest},
+        reusedExistingAudio: result.reused,
+      },
+    };
+  }
+  if (args.flags.has('finalize-only')) {
+    throw new CliError('INVALID_ARGUMENT', '--finalize-only 仅支持 exact narration_plan_v2；V1 tts 行为保持不变');
+  }
   assertCurrentPlan(projectId, plan);
   const reusableAudio = await getExactReusableNarrationAudioArtifact(projectId, {
     artifactId: plan.id,
@@ -300,7 +362,29 @@ async function tts(args: ParsedArgs): Promise<Record<string, unknown>> {
 async function subtitles(args: ParsedArgs): Promise<Record<string, unknown>> {
   const projectId = required(args, 'project');
   const audio = parseIdentity(required(args, 'audio'), '--audio');
-  projectRow(projectId); artifactRow(projectId, audio);
+  projectRow(projectId);
+  const exactAudioRow = artifactRow(projectId, audio);
+  if (exactAudioRow.kind === NARRATION_AUDIO_V2_ARTIFACT_KIND) {
+    const exactAudioV2 = await getExactNarrationAudioV2Artifact(projectId, {
+      artifactId: audio.id,
+      version: audio.version,
+    });
+    if (!exactAudioV2) throw new CliError('AUDIO_SOURCE_MISMATCH', `exact narration audio v2 无效或不匹配: ${audio.id}@${audio.version}`);
+    const result = await buildSubtitleTimingV2({
+      projectId,
+      narrationAudioV2ArtifactId: audio.id,
+      narrationAudioV2ArtifactVersion: audio.version,
+    });
+    return {
+      ok: true,
+      command: 'subtitles',
+      schemaVersion: result.timing.schemaVersion,
+      source: audio,
+      artifact: result.artifact,
+      reused: result.reused,
+      timing: result.timing,
+    };
+  }
   const exactAudio = await getExactNarrationAudioArtifact(projectId, {
     artifactId: audio.id,
     version: audio.version,

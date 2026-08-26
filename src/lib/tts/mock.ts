@@ -101,7 +101,12 @@ export class MockTtsProvider implements TtsProvider {
     };
   }
 
-  health(): Promise<{ready: boolean; provider: string; model: string}> {
-    return Promise.resolve({ready: true, provider: 'mock', model: 'mock-tone-v1'});
+  health(): Promise<{ready: boolean; provider: string; model: string; repoCommit: string}> {
+    return Promise.resolve({
+      ready: true,
+      provider: 'mock',
+      model: 'mock-tone-v1',
+      repoCommit: 'mock-deterministic',
+    });
   }
 }

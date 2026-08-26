@@ -694,7 +694,7 @@ export async function getExactReusableNarrationAudioArtifact(
 
 // ---------- Master 构建（ffmpeg 统一 48k/mono/s16） ----------
 
-function normalizeUnitToPcm(wavPath: string): Buffer {
+export function normalizeUnitToPcm(wavPath: string): Buffer {
   const out = execFileSync('ffmpeg', [
     '-v', 'error', '-y', '-i', wavPath,
     '-f', 's16le', '-acodec', 'pcm_s16le',
@@ -703,12 +703,12 @@ function normalizeUnitToPcm(wavPath: string): Buffer {
   return out;
 }
 
-function silencePcm(durationMs: number): Buffer {
+export function silencePcm(durationMs: number): Buffer {
   const samples = Math.round((durationMs / 1000) * MASTER_SAMPLE_RATE) * MASTER_CHANNELS;
   return Buffer.alloc(samples * 2, 0);
 }
 
-function wrapPcmAsWav(pcm: Buffer): Buffer {
+export function wrapPcmAsWav(pcm: Buffer): Buffer {
   const header = Buffer.alloc(44);
   header.write('RIFF', 0);
   header.writeUInt32LE(36 + pcm.length, 4);
