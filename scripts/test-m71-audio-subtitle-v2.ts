@@ -424,7 +424,7 @@ async function main(): Promise<void> {
       narrationPlanV2: {id: fixture.artifact.id, version: fixture.artifact.version},
       narrationAudioV2: first.artifact,
       subtitleTimingV2: subtitle1.artifact,
-      choreography: {id: 'v2-visual-r2', version: 2},
+      choreography: {id: 'v2-visual-r2', version: 3},
     });
     ok(false, '[V11] unsupported choreography version fails closed');
   } catch (error) {
@@ -450,9 +450,9 @@ async function main(): Promise<void> {
   const cliVisual = runCli(['visuals', '--project', fixture.projectId, '--design', `${designRow.id}@${designRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`]);
   const cliVisualJson = JSON.parse(cliVisual.stdout) as {artifact?: {id?: string}; reused?: boolean};
   ok(cliVisual.status === 0 && cliVisualJson.artifact?.id === visual1.artifact.id && cliVisualJson.reused === true, '[C5] visuals CLI routes exact identities and reuses artifact');
-  const cliVisualR2 = runCli(['visuals', '--project', fixture.projectId, '--design', `${designRow.id}@${designRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--choreography', 'v2-visual-r2@1']);
+  const cliVisualR2 = runCli(['visuals', '--project', fixture.projectId, '--design', `${designRow.id}@${designRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--choreography', 'v2-visual-r2@2']);
   const cliVisualR2Json = JSON.parse(cliVisualR2.stdout) as {artifact?: {id?: string}; reused?: boolean; sources?: {choreography?: {id?: string; version?: number}}};
-  ok(cliVisualR2.status === 0 && cliVisualR2Json.artifact?.id === visualR2.artifact.id && cliVisualR2Json.reused === true && cliVisualR2Json.sources?.choreography?.version === 1, '[C5-R2] visuals CLI routes explicit exact choreography');
+  ok(cliVisualR2.status === 0 && cliVisualR2Json.artifact?.id === visualR2.artifact.id && cliVisualR2Json.reused === true && cliVisualR2Json.sources?.choreography?.version === 2, '[C5-R2] visuals CLI routes explicit exact choreography');
   const cliReconcile = runCli(['reconcile', '--project', fixture.projectId, '--scenes', `${visual1.artifact.id}@${visual1.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`]);
   const cliRecJson = JSON.parse(cliReconcile.stdout) as {mode?: string; artifact?: {id?: string}};
   ok(cliReconcile.status === 0 && cliRecJson.mode === 'v2-exact' && cliRecJson.artifact?.id === rec1.artifact.id, '[C6] reconcile CLI routes exact V2 chain');

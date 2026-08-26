@@ -4,7 +4,7 @@ import type {ResolvedAsset, Scene as SchemaScene} from '@/lib/scene-schema';
 import choreography from '@/data/v2-visual-r2-choreography-plan.json';
 import {fontFamily} from '../../design/tokens';
 
-export const V2_VISUAL_R2_VERSION = 'v2-visual-r2@1';
+export const V2_VISUAL_R2_VERSION = 'v2-visual-r2@2';
 
 const palette = {
   paper: '#f3f0e8',

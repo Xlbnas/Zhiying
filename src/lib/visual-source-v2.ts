@@ -24,8 +24,8 @@ import v2VisualR2Choreography from '../data/v2-visual-r2-choreography-plan.json'
 export const VISUAL_SOURCE_V2_ARTIFACT_KIND = 'visual_source_v2';
 export const VISUAL_SOURCE_V2_SCHEMA_VERSION = 'visual-source@2.0';
 export const VISUAL_SOURCE_V2_COMPILER_VERSION = '1.0';
-export const V2_VISUAL_R2_CHOREOGRAPHY = {id: 'v2-visual-r2', version: 1} as const;
-export const V2_VISUAL_R2_RENDERER_VERSION = 'v2-visual-r2@1';
+export const V2_VISUAL_R2_CHOREOGRAPHY = {id: 'v2-visual-r2', version: 2} as const;
+export const V2_VISUAL_R2_RENDERER_VERSION = 'v2-visual-r2@2';
 const FPS = 30;
 
 const identitySchema = z.object({id: z.string().min(1), version: z.number().int().positive()});

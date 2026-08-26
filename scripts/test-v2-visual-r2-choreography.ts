@@ -10,7 +10,7 @@ const shotIds = new Set(shotLibrary.map((shot) => shot.id));
 const actorIds = new Set(Object.keys(choreography.persistentObjectRegistry));
 const beats = choreography.beats;
 
-assert.equal(choreography.schemaVersion, 'v2-visual-r2-choreography@1.0');
+assert.equal(choreography.schemaVersion, 'v2-visual-r2-choreography@2.0');
 assert.equal(choreography.fps, 30);
 assert.equal(beats.length, 44);
 assert.equal(beats[0]?.startFrame, 0);

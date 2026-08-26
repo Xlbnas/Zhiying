@@ -50,7 +50,7 @@ const scenes = sourceScenes.map((scene) => {
   const startFrame = timing.effectiveStartFrame;
   const durationInFrames = timing.effectiveDurationFrames;
   const marker = markedSceneIds.has(scene.id)
-    ? {v2VisualR2: {version: 'v2-visual-r2@1'}}
+    ? {v2VisualR2: {version: 'v2-visual-r2@2'}}
     : {};
   return {
     ...scene,
