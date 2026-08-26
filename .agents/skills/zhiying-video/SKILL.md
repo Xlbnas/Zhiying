@@ -95,4 +95,7 @@ Before accepting a final result:
 3. Apply the relevant content and audiovisual checks from the review reference.
 4. If review fails, locate the earliest faulty source and correct only the necessary portion.
 
+- Different template filenames do not by themselves prove visual diversity; review rendered visual families, information density, and template repetition in actual frames.
+- Audio review includes prosody variation, not only file validity and voice identity.
+
 Do not perform production deployment or other external publication unless the user explicitly requests and authorizes it.
