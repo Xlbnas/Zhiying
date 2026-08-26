@@ -13,7 +13,13 @@ const outputDir = path.resolve(root, 'outputs/v2-visual-r2/prototypes');
 const bundleDir = path.resolve(root, 'outputs/v2-visual-r2/bundle-preview');
 const inputProps = JSON.parse(fs.readFileSync(propsPath, 'utf8'));
 
-const configuredPrototypes = process.argv.includes('--remaining') ? [
+const semanticCleanup = process.argv.includes('--semantic-cleanup');
+const configuredPrototypes = semanticCleanup ? [
+  {name: 'semantic-A-S001-S003', frameRange: [0, 424]},
+  {name: 'semantic-B-S011-S013', frameRange: [2821, 3571]},
+  {name: 'semantic-C1-S019-S021', frameRange: [5187, 6105]},
+  {name: 'semantic-C2-S024', frameRange: [6754, 6984]},
+] : process.argv.includes('--remaining') ? [
   {name: 'D-history', frameRange: [920, 2820]},
   {name: 'E-applied-mechanisms', frameRange: [3832, 5513]},
   {name: 'F-final-close', frameRange: [6754, 7306]},

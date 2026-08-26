@@ -76,9 +76,9 @@
         "spoken_word"
       ],
       "dominantVerb": "侵入",
-      "visibleAction": "竞争词“前任”从侧路加速并在出口前越过目标词",
-      "visibleResult": "错误词被说出，句子路径出现可追踪断点",
-      "viewerFocus": "竞争词越线的瞬间",
+      "visibleAction": "目标词与竞争词沿两条标注通道进入同一 OUTPUT，竞争词先到达",
+      "visibleResult": "OUTPUT 明确显示错误词“前任”",
+      "viewerFocus": "竞争词先于目标词到达同一输出槽",
       "persistentActors": [
         "intended_word",
         "competing_word",
@@ -108,9 +108,9 @@
         "attention_focus"
       ],
       "dominantVerb": "冻结",
-      "visibleAction": "声场节点瞬间静止，attention_focus 收缩到错误词",
+      "visibleAction": "画面冻结在居中的 ERROR TOKEN，不引入无标签节点",
       "visibleResult": "错误从流畅语言变成所有人都看见的异常事件",
-      "viewerFocus": "静止的人际节点与高亮错误词",
+      "viewerFocus": "冻结且高亮的错误词",
       "persistentActors": [
         "error_token",
         "attention_focus"
@@ -137,9 +137,9 @@
         "evidence_card"
       ],
       "dominantVerb": "归因",
-      "visibleAction": "“只是嘴瓢”卡片从观察侧接入但保持低置信度",
-      "visibleResult": "一个朴素解释形成，不等于结案",
-      "viewerFocus": "error_token 与第一张解释卡之间的弱连接",
+      "visibleAction": "ERROR TOKEN 向“普通口误”和“潜意识解释”两个有标签分支展开",
+      "visibleResult": "两个解释候选同时可见，但尚未裁决",
+      "viewerFocus": "同一错误分出的两个明确解释分支",
       "persistentActors": [
         "error_token",
         "evidence_card",
@@ -168,9 +168,9 @@
         "evidence_card"
       ],
       "dominantVerb": "叠加",
-      "visibleAction": "“潜意识招了”卡片从另一侧抢占视觉权重",
-      "visibleResult": "同一错误产生两个竞争解释",
-      "viewerFocus": "两条解释路径对同一 error_token 的争夺",
+      "visibleAction": "ERROR、MISSING EVIDENCE、HIDDEN MOTIVE 三个端点依次显现",
+      "visibleResult": "隐藏动机推断被明确停在缺失证据节点",
+      "viewerFocus": "ERROR 与 HIDDEN MOTIVE 之间可见的证据缺口",
       "persistentActors": [
         "error_token",
         "freud_interpretation",
@@ -357,9 +357,9 @@
         "spoken_word"
       ],
       "dominantVerb": "挤压",
-      "visibleAction": "两条表达在狭窄出口同时到达并发生位置交换",
-      "visibleResult": "竞争词短暂占据 spoken_word 槽位",
-      "viewerFocus": "出口处的交换",
+      "visibleAction": "两条标注表达沿同一语言输出通道靠近固定出口，竞争词先到达",
+      "visibleResult": "固定出口明确显示“说出口：前任”",
+      "viewerFocus": "竞争词先抵达固定出口",
       "persistentActors": [
         "intended_word",
         "competing_word",
@@ -390,7 +390,7 @@
         "freud_interpretation"
       ],
       "dominantVerb": "抑制",
-      "visibleAction": "一股未承认的反向权重拉低待办节点，路径未被触发",
+      "visibleAction": "待办节点与固定 cue 位于未来意图通道，节点停在行动阈值前",
       "visibleResult": "遗漏被表现为意图节点没有达到行动阈值",
       "viewerFocus": "未触发的待办节点",
       "persistentActors": [
@@ -611,9 +611,9 @@
         "error_token"
       ],
       "dominantVerb": "重构",
-      "visibleAction": "相机拉远，历史卡缩到一侧，多个现代机制入口在同一 error_token 周围展开",
+      "visibleAction": "旧隐藏动机框架降权，同一个 ERROR 交给固定的 2×2 现代机制面板",
       "visibleResult": "错误保留不变，解释空间扩大",
-      "viewerFocus": "同一错误对应的多机制入口",
+      "viewerFocus": "同一个 ERROR 从旧解释转交机制分析",
       "persistentActors": [
         "error_token",
         "freud_interpretation",
@@ -1095,9 +1095,9 @@
         "freud_interpretation"
       ],
       "dominantVerb": "回填",
-      "visibleAction": "故事生成器在结果之后从经历卡库自动挑选吻合节点并串成链",
-      "visibleResult": "任何已发生结果都能被回填成看似连贯的故事",
-      "viewerFocus": "结果之后迅速长出的联想链",
+      "visibleAction": "固定时间线依次显示事前无预测、结果发生、事后故事一次接入",
+      "visibleResult": "故事只在结果之后出现，事前没有可失败预测",
+      "viewerFocus": "AFTER 卡只在 OUTCOME 之后出现",
       "persistentActors": [
         "error_token",
         "evidence_card",
@@ -1189,7 +1189,7 @@
         "confidence_indicator"
       ],
       "dominantVerb": "比较",
-      "visibleAction": "词频、语音相似、疲劳、注意下降四张机制卡接入同一观察",
+      "visibleAction": "词频、语音相似、疲劳、注意下降四张固定机制卡依次显现",
       "visibleResult": "解释必须与普通原因竞争",
       "viewerFocus": "同一结果下的多解释对照",
       "persistentActors": [
@@ -1221,9 +1221,9 @@
         "confidence_indicator"
       ],
       "dominantVerb": "改写",
-      "visibleAction": "联想链自动重排为新故事，而预测卡显示失败",
-      "visibleResult": "能无限换故事的解释无法被结果淘汰",
-      "viewerFocus": "失败预测与仍成立的改写故事对照",
+      "visibleAction": "事前预测连接相反结果并明确失败，随后单独显现事后改写卡",
+      "visibleResult": "普通原因卡保持固定；失败预测与事后改写被清楚分开",
+      "viewerFocus": "预测失败之后才出现的事后改写卡",
       "persistentActors": [
         "evidence_card",
         "freud_interpretation",
@@ -1349,9 +1349,9 @@
         "attention_focus"
       ],
       "dominantVerb": "追问",
-      "visibleAction": "attention_focus 沿错误路径回溯，依次点亮可问的机制入口",
+      "visibleAction": "中心问题通过四条短直连接分别指向 2×2 机制卡",
       "visibleResult": "“为什么会错”成为调查起点而非答案",
-      "viewerFocus": "被逐项点亮的可检验入口",
+      "viewerFocus": "中心问题与四个固定机制入口",
       "persistentActors": [
         "error_token",
         "modern_mechanism",
@@ -1381,7 +1381,7 @@
         "attention_focus"
       ],
       "dominantVerb": "暂停",
-      "visibleAction": "红色“证据不足”闸门阻止 verdict 卡落下，置信度保持开放",
+      "visibleAction": "固定的“证据不足”闸门阻止 verdict 落下，不显示数值置信度",
       "visibleResult": "观众看到停止判断的具体原因",
       "viewerFocus": "空证据槽与被阻止的 verdict",
       "persistentActors": [
