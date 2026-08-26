@@ -2,9 +2,9 @@
 
 ## Verdict
 
-`PROSODY_PROBE = FAIL_REVIEW_CAPABILITY`
+`PROSODY_PROBE = PASS`
 
-The four probes are technically valid, provenance-valid, and first-attempt successful. They are not approved for a full 25-unit regeneration because the independent reviewer had no audio return channel and could not truthfully judge audible direction, speaker identity, over-performance, or pronunciation.
+The four probes are technically valid, provenance-valid, and first-attempt successful. The user approved N001, N005, and N025 directly, then partially rejected N012 for an unnatural pause. A punctuation-only N012 correction removed two disruptive commas and was approved on the second listening pass.
 
 `DELIVERY_EFFECTIVE = NO` for the current provider path: the typed delivery value reaches `tts-payload@1.1`, but the IndexTTS2 adapter sends only `text` and `speaker_id` upstream. Duration differences are not evidence that `soft`, `slow`, or `firm` metadata was applied.
 
@@ -27,16 +27,19 @@ The four probes are technically valid, provenance-valid, and first-attempt succe
 
 All four result payloads record `xlbnas@1`, the exact frozen reference SHA, PCM s16le / 22050 Hz / mono, and no error or retry.
 
-## Required human/audio-capable decision
+## Human listening decision
 
-Listen to each `*-v1.wav` / `*-probe-*.wav` pair in:
+The accepted files are in:
 
 `outputs/fresh-3778ffb0-c430-4499-9f7f-2590f45cb8cb/editorial-polish-v2/prosody-probes/`
 
-Approve only if identity is stable, the change is audible but restrained, direction matches the rhetorical role, there is no broadcaster/dramatic delivery, and pronunciation/cuts are clean. Until then:
+User decision:
 
-- full V2 TTS jobs: forbidden
-- narration audio V2: not created
-- subtitle timing V2: not created
-- reconciliation V2: not created
-- final render V2: not created
+- N001 soft: PASS
+- N005 slow: PASS
+- N012 firm corrected (`064f4b93-3db1-483a-9b4e-3ba9bba955be`): PASS
+- N025 soft: PASS
+
+## Downstream blocker
+
+`MISSING_AGENT_NATIVE_ENTRYPOINT`: the repository has a `narration-audio@2.0` schema and pure subtitle-v2 compiler, but no production finalizer/CLI path that can persist an exact master from 24 fingerprint-reused jobs plus one rebuilt job. The M6 finalizer only searches for 25 succeeded jobs attached to one M6 narration plan. No old run-stage fallback or synthetic job rows are permitted.
