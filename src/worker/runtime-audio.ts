@@ -17,6 +17,10 @@ import {
 } from '@/lib/final-render/schema';
 import type {RenderJobRow} from '@/lib/jobs';
 import {narrationAudioManifestSchema} from '@/lib/narration/audio';
+import {
+  narrationAudioManifestV2Schema,
+  NARRATION_AUDIO_V2_ARTIFACT_KIND,
+} from '@/lib/narration/audio-v2-manifest';
 import type {ZhiyingFullCutProps} from '@/lib/scene-schema';
 
 /**
@@ -93,6 +97,7 @@ export function resolveBundledPublicRoot(bundleLocation: string): string {
 interface ArtifactRow {
   id: string;
   project_id: string;
+  kind: string;
   version: number;
   content_json: string;
 }
@@ -284,14 +289,13 @@ export function stageRuntimeNarrationAudio(
 
   // exact historical audio artifact（不调 getCurrent*——上游前进后旧 job 仍渲染旧音频）
   const audioRow = getDb()
-    .prepare(`SELECT * FROM artifacts WHERE id = ? AND project_id = ? AND kind = ? AND version = ?`)
+    .prepare(`SELECT * FROM artifacts WHERE id = ? AND project_id = ? AND version = ?`)
     .get(
       source.source.narrationAudioArtifactId,
       job.project_id,
-      'narration_audio_manifest',
       source.source.narrationAudioArtifactVersion,
     ) as ArtifactRow | undefined;
-  if (!audioRow) {
+  if (!audioRow || !['narration_audio_manifest', NARRATION_AUDIO_V2_ARTIFACT_KIND].includes(audioRow.kind)) {
     throw new RuntimeAudioError(
       'NARRATION_SOURCE_INVALID',
       `historical audio artifact ${source.source.narrationAudioArtifactId} v${source.source.narrationAudioArtifactVersion} 缺失`,
@@ -303,7 +307,9 @@ export function stageRuntimeNarrationAudio(
   } catch {
     throw new RuntimeAudioError('NARRATION_SOURCE_INVALID', 'historical manifest 不是合法 JSON');
   }
-  const manifestParsed = narrationAudioManifestSchema.safeParse(manifestRaw);
+  const manifestParsed = audioRow.kind === NARRATION_AUDIO_V2_ARTIFACT_KIND
+    ? narrationAudioManifestV2Schema.safeParse(manifestRaw)
+    : narrationAudioManifestSchema.safeParse(manifestRaw);
   if (!manifestParsed.success) {
     throw new RuntimeAudioError('NARRATION_SOURCE_INVALID', 'historical manifest 未通过 schema');
   }

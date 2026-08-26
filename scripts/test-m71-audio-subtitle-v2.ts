@@ -32,6 +32,11 @@ import {
   SubtitleTimingV2Error,
 } from '../src/lib/subtitles/timing-v2';
 import {NARRATION_AUDIO_V2_ARTIFACT_KIND} from '../src/lib/narration/audio-v2-manifest';
+import {buildVisualSourceV2, getExactVisualSourceV2Artifact} from '../src/lib/visual-source-v2';
+import {buildTimingReconciliationV2, getExactTimingReconciliationV2} from '../src/lib/reconciliation/timing-v2';
+import {enqueueFinalRenderV2} from '../src/lib/final-render/bridge-v2';
+import {stageRuntimeNarrationAudio} from '../src/worker/runtime-audio';
+import {zhiyingFullCutPropsSchema} from '../src/lib/scene-schema';
 
 let pass = 0;
 let fail = 0;
@@ -331,6 +336,84 @@ async function main(): Promise<void> {
   const cliSubtitle = runCli(['subtitles', '--project', fixture.projectId, '--audio', `${first.artifact.id}@${first.artifact.version}`]);
   const cliSubtitleJson = JSON.parse(cliSubtitle.stdout) as {schemaVersion?: string; artifact?: {id?: string}; timing?: {source?: {narrationAudioV2ArtifactId?: string}}};
   ok(cliSubtitle.status === 0 && cliSubtitleJson.schemaVersion === 'subtitle-timing@2.0' && cliSubtitleJson.artifact?.id === subtitle1.artifact.id && cliSubtitleJson.timing?.source?.narrationAudioV2ArtifactId === first.artifact.id, '[C4] subtitles CLI routes exact Audio V2 and reuses exact Subtitle V2 artifact');
+
+  const designDuration = 250;
+  const design = {
+    chapterTiming: [{chapter: 1, title: 'T', start: 0, end: designDuration}],
+    scenes: fixture.plan.units.filter((unit) => unit.kind === 'speech').map((unit, index) => ({
+      id: `S${String(index + 1).padStart(3, '0')}`,
+      chapter: 1,
+      chapterTitle: 'T',
+      start: index * 10,
+      end: (index + 1) * 10,
+      duration: 10,
+      startFrame: index * 300,
+      durationInFrames: 300,
+      category: 'Minimal',
+      visualType: 'Minimal',
+      template: null,
+      sourceTemplate: null,
+      assetRequirements: [],
+      narrationSummary: unit.spokenText,
+      description: `scene ${unit.id}`,
+      notes: '',
+      assetIds: [],
+      licenseStatus: 'not-applicable',
+      subtitlePosition: 'bottom' as const,
+      transitionIn: index === 0 ? 'fade' : 'cut',
+      transitionOut: index === 24 ? 'fade-out' : 'cut',
+    })),
+  };
+  const designRow = generateVersion({
+    projectId: fixture.projectId,
+    stage: 'scenes',
+    content: JSON.stringify(design),
+    contentType: 'json',
+    source: 'manual_edit',
+  });
+  const visual1 = await buildVisualSourceV2({
+    projectId: fixture.projectId,
+    designScenes: {id: designRow.id, version: designRow.version},
+    narrationPlanV2: {id: fixture.artifact.id, version: fixture.artifact.version},
+    narrationAudioV2: first.artifact,
+    subtitleTimingV2: subtitle1.artifact,
+  });
+  ok(visual1.visual.data.scenes.length === 25 && visual1.visual.unitMappings.length === 25, '[V1] exact V2 visual source maps 25 scenes to 25 units');
+  ok(visual1.visual.source.masterSha256 === first.manifest.master.sha256 && visual1.visual.source.masterDurationMs === first.manifest.master.durationMs, '[V2] visual source preserves exact master SHA/duration');
+  ok(visual1.visual.data.scenes.at(-1)?.end === first.manifest.master.durationMs / 1000, '[V3] visual timeline ends at exact V2 master duration');
+  const visual2 = await buildVisualSourceV2({
+    projectId: fixture.projectId,
+    designScenes: {id: designRow.id, version: designRow.version},
+    narrationPlanV2: {id: fixture.artifact.id, version: fixture.artifact.version},
+    narrationAudioV2: first.artifact,
+    subtitleTimingV2: subtitle1.artifact,
+  });
+  ok(visual2.reused && visual2.artifact.id === visual1.artifact.id, '[V4] exact visual source idempotency');
+  ok((await getExactVisualSourceV2Artifact(fixture.projectId, {artifactId: visual1.artifact.id, version: visual1.artifact.version}))?.artifact.id === visual1.artifact.id, '[V5] exact visual source read validates all V2 parents');
+  ok(await getExactVisualSourceV2Artifact(fixture.projectId, {artifactId: visual1.artifact.id, version: visual1.artifact.version + 1}) === null, '[V6] wrong visual version fails closed');
+
+  const rec1 = buildTimingReconciliationV2(fixture.projectId, {visual: visual1, audio: first, subtitle: subtitle1});
+  ok(rec1.reconciliation.source.scenesVersionId === visual1.artifact.id && rec1.reconciliation.source.narrationAudioArtifactId === first.artifact.id && rec1.reconciliation.source.subtitleTimingArtifactId === subtitle1.artifact.id, '[R1] reconciliation persists exact V2 identities');
+  ok(rec1.reconciliation.target.totalFrames === Math.round(first.manifest.master.durationMs * 30 / 1000) && rec1.reconciliation.unresolvedNarrationUnitIds.length === 0, '[R2] reconciliation exact duration and unresolved=0');
+  ok(getExactTimingReconciliationV2(fixture.projectId, {artifactId: rec1.artifact.id, version: rec1.artifact.version}, {visual: visual1, audio: first, subtitle: subtitle1})?.artifact.id === rec1.artifact.id, '[R3] exact V2 reconciliation read');
+
+  const final = enqueueFinalRenderV2(fixture.projectId, {visual: visual1, audio: first, subtitle: subtitle1, reconciliation: rec1});
+  const payload = zhiyingFullCutPropsSchema.parse(JSON.parse(final.job.payload_json));
+  ok(payload.audio.narration === `runtime-audio/${fixture.projectId}/${first.artifact.id}.wav` && payload.data.project.durationInFrames === rec1.reconciliation.target.totalFrames, '[F1] frozen final props use exact V2 audio and reconciled frames');
+  ok(payload.data.scenes.length === 25 && payload.subtitles.length === subtitle1.timing.cues.length && payload.renderMode === 'final', '[F2] frozen props carry exact visual/subtitle content');
+  const fakeBundle = path.join(getDataDir(), 'fake-v2-bundle');
+  fs.mkdirSync(fakeBundle, {recursive: true});
+  const staged = stageRuntimeNarrationAudio(final.job, payload, fakeBundle);
+  ok(staged?.sha256 === first.manifest.master.sha256 && fs.existsSync(staged.stagedPath), '[F3] Worker stages exact narration_audio_manifest_v2 without V1 alias');
+  const renderJobs = (getDb().prepare('SELECT COUNT(*) AS count FROM render_jobs WHERE project_id = ?').get(fixture.projectId) as {count: number}).count;
+  ok(renderJobs === 1, '[F4] exactly one V2 render job enqueued');
+
+  const cliVisual = runCli(['visuals', '--project', fixture.projectId, '--design', `${designRow.id}@${designRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`]);
+  const cliVisualJson = JSON.parse(cliVisual.stdout) as {artifact?: {id?: string}; reused?: boolean};
+  ok(cliVisual.status === 0 && cliVisualJson.artifact?.id === visual1.artifact.id && cliVisualJson.reused === true, '[C5] visuals CLI routes exact identities and reuses artifact');
+  const cliReconcile = runCli(['reconcile', '--project', fixture.projectId, '--scenes', `${visual1.artifact.id}@${visual1.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`]);
+  const cliRecJson = JSON.parse(cliReconcile.stdout) as {mode?: string; artifact?: {id?: string}};
+  ok(cliReconcile.status === 0 && cliRecJson.mode === 'v2-exact' && cliRecJson.artifact?.id === rec1.artifact.id, '[C6] reconcile CLI routes exact V2 chain');
 
   closeDb();
   fs.rmSync(getDataDir(), {recursive: true, force: true});

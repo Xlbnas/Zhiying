@@ -142,10 +142,13 @@ export interface VisualReadinessOptions {
    * 缺省时按 locked 优先/最新 fallback 推导（见 currentScenesVersionId）。
    */
   scenesVersionId?: string;
+  /** Exact immutable visual sources already contain their final routing. */
+  applyOverrides?: boolean;
 }
 
 /** M6.3.13：scene 输入处应用生效中的「改用 MG」override（两个 gate 无需改）。 */
 function withVisualOverrides(projectId: string, scenes: Scene[], opts?: VisualReadinessOptions): Scene[] {
+  if (opts?.applyOverrides === false) return scenes;
   const overrides = listVisualOverrides(projectId);
   if (overrides.length === 0) return scenes;
   return applyVisualOverrides(scenes, overrides, opts?.scenesVersionId ?? currentScenesVersionId(projectId));

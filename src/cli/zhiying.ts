@@ -5,6 +5,7 @@ import {
   enqueueFinalRender,
   checkFinalRenderReadiness,
 } from '../lib/final-render/bridge';
+import {enqueueFinalRenderV2} from '../lib/final-render/bridge-v2';
 import {
   FINAL_RENDER_ATTEMPT_ARTIFACT_KIND,
   finalRenderAttemptSchema,
@@ -20,7 +21,10 @@ import {NARRATION_AUDIO_V2_ARTIFACT_KIND} from '../lib/narration/audio-v2-manife
 import {getCurrentNarrationPlan} from '../lib/narration/plan';
 import {getCurrentSubtitleTiming, getExactSubtitleTiming, checkSubtitleTimingReadiness, buildSubtitleTiming} from '../lib/subtitles/timing';
 import {buildSubtitleTimingV2} from '../lib/subtitles/timing-v2';
+import {getExactSubtitleTimingV2Artifact} from '../lib/subtitles/timing-v2';
 import {getCurrentTimingReconciliation, getExactTimingReconciliation, getExactReconciliationScenes, checkTimingReconciliationReadiness, buildTimingReconciliation} from '../lib/reconciliation/timing';
+import {buildTimingReconciliationV2, getExactTimingReconciliationV2} from '../lib/reconciliation/timing-v2';
+import {buildVisualSourceV2, getExactVisualSourceV2Artifact, VISUAL_SOURCE_V2_ARTIFACT_KIND} from '../lib/visual-source-v2';
 import {getStage, listStages} from '../lib/workflow/stages';
 import {getVersion} from '../lib/workflow/versions';
 import {getRenderArtifact, probeRenderOutput, resolveOutputAbs, sha256File} from '../lib/render/artifact';
@@ -48,8 +52,8 @@ function parseIdentity(raw: string | undefined, label: string): Identity {
 
 function parseArgs(argv: string[]): ParsedArgs {
   const command = argv[0];
-  if (!command || !['inspect', 'tts', 'subtitles', 'reconcile', 'render'].includes(command)) {
-    throw new CliError('INVALID_COMMAND', '用法: zhiying <inspect|tts|subtitles|reconcile|render> ...');
+  if (!command || !['inspect', 'tts', 'subtitles', 'visuals', 'reconcile', 'render'].includes(command)) {
+    throw new CliError('INVALID_COMMAND', '用法: zhiying <inspect|tts|subtitles|visuals|reconcile|render> ...');
   }
   const values = new Map<string, string>();
   const flags = new Set<string>();
@@ -69,11 +73,12 @@ function parseArgs(argv: string[]): ParsedArgs {
     inspect: ['project', 'artifact', 'job'],
     tts: ['project', 'plan', 'timeout-seconds', 'voice'],
     subtitles: ['project', 'audio'],
+    visuals: ['project', 'design', 'plan', 'audio', 'subtitles'],
     reconcile: ['project', 'scenes', 'audio', 'subtitles'],
     render: ['project', 'scenes', 'audio', 'subtitles', 'reconciliation', 'timeout-seconds'],
   };
   const allowedFlags: Record<string, string[]> = {
-    inspect: ['media'], tts: ['wait', 'finalize-only'], subtitles: [], reconcile: [], render: ['wait'],
+    inspect: ['media'], tts: ['wait', 'finalize-only'], subtitles: [], visuals: [], reconcile: [], render: ['wait'],
   };
   for (const key of values.keys()) {
     if (!allowedValues[command].includes(key)) throw new CliError('INVALID_ARGUMENT', `不支持 --${key}（command=${command}）`);
@@ -397,12 +402,61 @@ async function subtitles(args: ParsedArgs): Promise<Record<string, unknown>> {
   return {ok: true, command: 'subtitles', source: audio, artifact: result.artifact, reused: result.reused, timing: result.timing, readiness: checkSubtitleTimingReadiness(projectId)};
 }
 
+async function visuals(args: ParsedArgs): Promise<Record<string, unknown>> {
+  const projectId = required(args, 'project');
+  const design = parseIdentity(required(args, 'design'), '--design');
+  const plan = parseIdentity(required(args, 'plan'), '--plan');
+  const audio = parseIdentity(required(args, 'audio'), '--audio');
+  const subtitles = parseIdentity(required(args, 'subtitles'), '--subtitles');
+  projectRow(projectId);
+  const result = await buildVisualSourceV2({
+    projectId,
+    designScenes: design,
+    narrationPlanV2: plan,
+    narrationAudioV2: audio,
+    subtitleTimingV2: subtitles,
+  });
+  return {
+    ok: true,
+    command: 'visuals',
+    sources: {design, plan, audio, subtitles},
+    artifact: result.artifact,
+    reused: result.reused,
+    visual: result.visual,
+  };
+}
+
 async function reconcile(args: ParsedArgs): Promise<Record<string, unknown>> {
   const projectId = required(args, 'project');
   const scenes = parseIdentity(required(args, 'scenes'), '--scenes');
   const audio = parseIdentity(required(args, 'audio'), '--audio');
   const subtitle = parseIdentity(required(args, 'subtitles'), '--subtitles');
-  projectRow(projectId); artifactRow(projectId, audio); artifactRow(projectId, subtitle);
+  projectRow(projectId);
+  const audioRow = artifactRow(projectId, audio);
+  const subtitleRow = artifactRow(projectId, subtitle);
+  const visualRow = getDb().prepare('SELECT project_id, kind, version FROM artifacts WHERE id = ?').get(scenes.id) as
+    | {project_id: string; kind: string; version: number}
+    | undefined;
+  if (visualRow?.kind === VISUAL_SOURCE_V2_ARTIFACT_KIND) {
+    if (visualRow.project_id !== projectId || visualRow.version !== scenes.version ||
+        audioRow.kind !== NARRATION_AUDIO_V2_ARTIFACT_KIND || subtitleRow.kind !== 'subtitle_timing_v2') {
+      throw new CliError('SOURCE_MISMATCH', 'V2 reconcile 必须使用 exact visual/audio/subtitle V2 identities');
+    }
+    const exactVisual = await getExactVisualSourceV2Artifact(projectId, {artifactId: scenes.id, version: scenes.version});
+    const exactAudio = await getExactNarrationAudioV2Artifact(projectId, {artifactId: audio.id, version: audio.version});
+    const exactSubtitle = exactAudio ? getExactSubtitleTimingV2Artifact(projectId, {artifactId: subtitle.id, version: subtitle.version}, exactAudio) : null;
+    if (!exactVisual || !exactAudio || !exactSubtitle) throw new CliError('SOURCE_MISMATCH', 'V2 reconcile exact source validation failed');
+    const result = buildTimingReconciliationV2(projectId, {visual: exactVisual, audio: exactAudio, subtitle: exactSubtitle});
+    return {
+      ok: true,
+      command: 'reconcile',
+      mode: 'v2-exact',
+      sources: {scenes, audio, subtitles: subtitle},
+      artifact: result.artifact,
+      reused: result.reused,
+      reconciliation: result.reconciliation,
+    };
+  }
   const exactScenes = getExactReconciliationScenes(projectId, {
     versionId: scenes.id,
     version: scenes.version,
@@ -464,7 +518,55 @@ async function render(args: ParsedArgs): Promise<Record<string, unknown>> {
   const audio = parseIdentity(required(args, 'audio'), '--audio');
   const subtitle = parseIdentity(required(args, 'subtitles'), '--subtitles');
   const reconciliation = parseIdentity(required(args, 'reconciliation'), '--reconciliation');
-  projectRow(projectId); artifactRow(projectId, audio); artifactRow(projectId, subtitle); artifactRow(projectId, reconciliation);
+  projectRow(projectId);
+  const audioRow = artifactRow(projectId, audio);
+  const subtitleRow = artifactRow(projectId, subtitle);
+  artifactRow(projectId, reconciliation);
+  const visualRow = getDb().prepare('SELECT project_id, kind, version FROM artifacts WHERE id = ?').get(scenes.id) as
+    | {project_id: string; kind: string; version: number}
+    | undefined;
+  if (visualRow?.kind === VISUAL_SOURCE_V2_ARTIFACT_KIND) {
+    if (visualRow.project_id !== projectId || visualRow.version !== scenes.version ||
+        audioRow.kind !== NARRATION_AUDIO_V2_ARTIFACT_KIND || subtitleRow.kind !== 'subtitle_timing_v2') {
+      throw new CliError('SOURCE_MISMATCH', 'V2 render 必须使用 exact visual/audio/subtitle V2 identities');
+    }
+    const exactVisual = await getExactVisualSourceV2Artifact(projectId, {artifactId: scenes.id, version: scenes.version});
+    const exactAudio = await getExactNarrationAudioV2Artifact(projectId, {artifactId: audio.id, version: audio.version});
+    const exactSubtitle = exactAudio ? getExactSubtitleTimingV2Artifact(projectId, {artifactId: subtitle.id, version: subtitle.version}, exactAudio) : null;
+    if (!exactVisual || !exactAudio || !exactSubtitle) throw new CliError('SOURCE_MISMATCH', 'V2 render exact source validation failed');
+    const exactReconciliation = getExactTimingReconciliationV2(projectId, {
+      artifactId: reconciliation.id,
+      version: reconciliation.version,
+    }, {visual: exactVisual, audio: exactAudio, subtitle: exactSubtitle});
+    if (!exactReconciliation) throw new CliError('SOURCE_MISMATCH', 'V2 render exact reconciliation/source chain validation failed');
+    const result = enqueueFinalRenderV2(projectId, {
+      visual: exactVisual,
+      audio: exactAudio,
+      subtitle: exactSubtitle,
+      reconciliation: exactReconciliation,
+    });
+    const read = async (): Promise<Record<string, unknown> | null> => {
+      const job = getDb().prepare('SELECT * FROM render_jobs WHERE id = ?').get(result.job.id) as RenderJobRow | undefined;
+      if (!job) throw new CliError('JOB_NOT_FOUND', `render job 不存在: ${result.job.id}`);
+      if (job.status === 'failed' || job.status === 'cancelled') throw new CliError('RENDER_TERMINAL_FAILURE', `render job ${job.id} terminal status=${job.status}: ${job.error_message ?? ''}`);
+      if (!args.flags.has('wait')) return {job, attempt: latestAttempt(projectId, job.id)};
+      if (job.status !== 'succeeded') return null;
+      const manifest = getRenderArtifact(job.id);
+      if (!manifest || !job.output_path) throw new CliError('ARTIFACT_UNVALIDATED', 'exact render job 缺少 manifest/output');
+      if (manifest.output_path !== job.output_path) throw new CliError('ARTIFACT_PATH_MISMATCH', 'manifest 与 job output_path 不一致');
+      const media = await mediaFacts(manifest.output_path, 'video', manifest.output_sha256, manifest.output_size);
+      return {job, attempt: latestAttempt(projectId, job.id), manifest, media};
+    };
+    return {
+      ok: true,
+      command: 'render',
+      mode: 'v2-exact',
+      sources: {scenes, audio, subtitles: subtitle, reconciliation},
+      sourceArtifact: result.sourceArtifact,
+      sourceReused: result.sourceReused,
+      result: await waitFor(args.flags.has('wait') ? timeoutMs(args) : 1, read),
+    };
+  }
   const exactScenes = getExactReconciliationScenes(projectId, {
     versionId: scenes.id,
     version: scenes.version,
@@ -521,6 +623,7 @@ async function main(): Promise<void> {
     const result = args.command === 'inspect' ? await inspect(args)
       : args.command === 'tts' ? await tts(args)
       : args.command === 'subtitles' ? await subtitles(args)
+      : args.command === 'visuals' ? await visuals(args)
       : args.command === 'reconcile' ? await reconcile(args)
       : await render(args);
     process.stdout.write(`${JSON.stringify(result)}\n`);

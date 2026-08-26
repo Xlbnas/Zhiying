@@ -1,6 +1,7 @@
 import {z} from 'zod';
 import {subtitleCueSchema, type SubtitleCue} from '../scene-schema';
 import type {SubtitleTiming} from './schema';
+import type {SubtitleTimingV2} from './schema-v2';
 
 /**
  * Renderer Adapter（M3-C §十一）：Subtitle Timing（整数毫秒内部真相）
@@ -8,6 +9,21 @@ import type {SubtitleTiming} from './schema';
  * 本轮只证明契约兼容（z.array(subtitleCueSchema).parse），M3-D 再真正送入 renderer。
  */
 export function toRendererSubtitleCues(timing: SubtitleTiming): SubtitleCue[] {
+  return z.array(subtitleCueSchema).parse(
+    timing.cues.map((cue) => ({
+      id: cue.id,
+      segmentId: cue.segmentId,
+      chapter: cue.chapter,
+      text: cue.text,
+      start: cue.startMs / 1000,
+      end: cue.endMs / 1000,
+      position: cue.position,
+    })),
+  );
+}
+
+/** V2 exact timing uses the same renderer cue contract; unitId remains provenance-only. */
+export function toRendererSubtitleCuesV2(timing: SubtitleTimingV2): SubtitleCue[] {
   return z.array(subtitleCueSchema).parse(
     timing.cues.map((cue) => ({
       id: cue.id,
