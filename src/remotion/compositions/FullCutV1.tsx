@@ -34,6 +34,7 @@ import {
 import subtitleData from '../data/fullCutSubtitles.json';
 import {PilotVisualTrack} from './PilotCutV1';
 import {ProductionSceneRenderer} from './ProductionSceneRenderer';
+import {isV2VisualR2Scene} from '../templates/production/V2VisualR2Scene';
 
 const PILOT_VISUAL_END = 119.107;
 const CROSSFADE_FRAMES = 8;
@@ -136,7 +137,7 @@ const SceneContent = ({scene, chapterTiming, assetMap, templateProps}: {
   return (
     <AbsoluteFill>
       <ProductionSceneRenderer scene={schemaScene} assetMap={assetMap as Record<string, import('@/lib/scene-schema').ResolvedAsset[]>} />
-      <ChapterLabel scene={scene} chapterTiming={chapterTiming} />
+      {isV2VisualR2Scene(schemaScene) ? null : <ChapterLabel scene={scene} chapterTiming={chapterTiming} />}
     </AbsoluteFill>
   );
 };
@@ -190,8 +191,14 @@ const FullVisualTrack = ({scenes, chapterTiming, assetMap, showPilotIntro = fals
   <AbsoluteFill>
     {scenes.map((scene, index) => {
       const logicalStart = scene.startFrame;
-      const lead = index === 0 ? 0 : CROSSFADE_FRAMES;
-      const tail = index === scenes.length - 1 ? 0 : CROSSFADE_FRAMES;
+      const previousScene = scenes[index - 1];
+      const nextScene = scenes[index + 1];
+      const lead = index === 0 || isV2VisualR2Scene(scene) || (previousScene && isV2VisualR2Scene(previousScene))
+        ? 0
+        : CROSSFADE_FRAMES;
+      const tail = index === scenes.length - 1 || isV2VisualR2Scene(scene) || (nextScene && isV2VisualR2Scene(nextScene))
+        ? 0
+        : CROSSFADE_FRAMES;
       const from = Math.max(0, logicalStart - lead);
       return (
         <Sequence key={scene.id} from={from} durationInFrames={scene.durationInFrames + lead + tail} layout="none">
