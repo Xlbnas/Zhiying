@@ -216,7 +216,7 @@ const FullSubtitles = ({cues, scenes}: {cues: SubtitleCue[]; scenes: FullCutScen
   const cue = cues.find((item) => time >= item.start && time < item.end);
   if (!cue) return null;
   const scene = scenes.find((item) => time >= item.start && time < item.end);
-  const position = cue.position === 'mid' || scene?.subtitlePosition === 'midLower' ? 840 : scene?.subtitlePosition === 'lowerThird' ? 910 : 958;
+  const position = cue.position === 'mid' || scene?.subtitlePosition === 'midLower' ? 840 : scene?.subtitlePosition === 'lowerThird' ? 910 : 900;
   const alpha = interpolate(time, [cue.start, cue.start + .1], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
   return (
     <div style={{position: 'absolute', left: 300, top: position, width: 1320, display: 'flex', justifyContent: 'center', opacity: alpha, pointerEvents: 'none'}}>
