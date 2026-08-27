@@ -216,18 +216,18 @@ const FullVisualTrack = ({scenes, chapterTiming, assetMap, showPilotIntro = fals
   </AbsoluteFill>
 );
 
-const FullSubtitles = ({cues, scenes}: {cues: SubtitleCue[]; scenes: FullCutScene[]}) => {
+const FullSubtitles = ({cues, scenes, darkEditorial}: {cues: SubtitleCue[]; scenes: FullCutScene[]; darkEditorial: boolean}) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
   const time = frame / fps;
   const cue = cues.find((item) => time >= item.start && time < item.end);
   if (!cue) return null;
   const scene = scenes.find((item) => time >= item.start && time < item.end);
-  const position = cue.position === 'mid' || scene?.subtitlePosition === 'midLower' ? 840 : scene?.subtitlePosition === 'lowerThird' ? 910 : 900;
+  const position = darkEditorial ? 944 : cue.position === 'mid' || scene?.subtitlePosition === 'midLower' ? 840 : scene?.subtitlePosition === 'lowerThird' ? 910 : 900;
   const alpha = interpolate(time, [cue.start, cue.start + .1], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
   return (
     <div style={{position: 'absolute', left: 300, top: position, width: 1320, display: 'flex', justifyContent: 'center', opacity: alpha, pointerEvents: 'none'}}>
-      <div style={{fontFamily, fontSize: 42, fontWeight: 540, lineHeight: 1.36, color: '#f5f5f5', padding: '10px 22px 12px', borderRadius: borderRadius.sm, background: 'rgba(5,5,7,.58)', boxShadow: '0 8px 28px rgba(0,0,0,.2)', textShadow: '0 2px 10px rgba(0,0,0,.7)', textAlign: 'center'}}>{cue.text}</div>
+      <div style={{fontFamily, fontSize: darkEditorial ? 36 : 42, fontWeight: darkEditorial ? 470 : 540, lineHeight: 1.36, color: '#f5f5f5', padding: darkEditorial ? '7px 18px 9px' : '10px 22px 12px', borderRadius: borderRadius.sm, background: darkEditorial ? 'rgba(5,5,7,.42)' : 'rgba(5,5,7,.58)', boxShadow: darkEditorial ? 'none' : '0 8px 28px rgba(0,0,0,.2)', textShadow: '0 2px 10px rgba(0,0,0,.7)', textAlign: 'center'}}>{cue.text}</div>
     </div>
   );
 };
@@ -248,6 +248,11 @@ const bgmVolume = (frame: number) => {
  * 默认沿用原路径（Legacy 行为不变）；显式 null → 不挂载（Workflow Visual Preview）。
  */
 export const ZhiyingFullCut = ({data, subtitles, audio, showSubtitles, renderMode}: ZhiyingFullCutProps) => {
+  const darkEditorial = data.scenes.some((scene) => {
+    const marker = scene.templateProps?.v2VisualR2;
+    return typeof marker === 'object' && marker !== null &&
+      (marker as {version?: unknown}).version === 'dark-editorial-v1@1';
+  });
   const scenes = useMemo(() => data.scenes.map((s): FullCutScene => ({
     id: s.id, chapter: s.chapter, chapterTitle: s.chapterTitle,
     start: s.start, end: s.end, duration: s.duration,
@@ -268,7 +273,7 @@ export const ZhiyingFullCut = ({data, subtitles, audio, showSubtitles, renderMod
         {audio.bgm ? <Audio src={staticFile(audio.bgm)} volume={bgmVolume} /> : null}
         {audio.sfx ? <Audio src={staticFile(audio.sfx)} volume={0.9} /> : null}
         {audio.narration ? <Audio src={staticFile(audio.narration)} volume={1} /> : null}
-        {showSubtitles ? <FullSubtitles cues={subtitles} scenes={scenes} /> : null}
+        {showSubtitles ? <FullSubtitles cues={subtitles} scenes={scenes} darkEditorial={darkEditorial} /> : null}
       </AbsoluteFill>
     </RenderModeContext.Provider>
   );
