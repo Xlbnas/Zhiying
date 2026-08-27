@@ -93,5 +93,6 @@
     "S008": ["r3a-signorelli-self-portrait", "r3a-signorelli-elect-in-paradise"],
     "S009": ["r3a-signorelli-association-diagram-1922"],
     "S010": ["r3a-hague-congress-1920", "r3a-freud-portrait-1921"]
-  }
+  },
+  "archiveDominantSceneIds": ["S005", "S008", "S009", "S010"]
 }
