@@ -22,6 +22,7 @@ import {getCurrentNarrationPlan} from '../lib/narration/plan';
 import {getCurrentSubtitleTiming, getExactSubtitleTiming, checkSubtitleTimingReadiness, buildSubtitleTiming} from '../lib/subtitles/timing';
 import {buildSubtitleTimingV2} from '../lib/subtitles/timing-v2';
 import {getExactSubtitleTimingV2Artifact} from '../lib/subtitles/timing-v2';
+import {buildSubtitleTimingV2Sidecars} from '../lib/subtitles/renderer';
 import {getCurrentTimingReconciliation, getExactTimingReconciliation, getExactReconciliationScenes, checkTimingReconciliationReadiness, buildTimingReconciliation} from '../lib/reconciliation/timing';
 import {buildTimingReconciliationV2, getExactTimingReconciliationV2} from '../lib/reconciliation/timing-v2';
 import {buildVisualSourceV2, getExactVisualSourceV2Artifact, VISUAL_SOURCE_V2_ARTIFACT_KIND} from '../lib/visual-source-v2';
@@ -72,10 +73,10 @@ function parseArgs(argv: string[]): ParsedArgs {
   const allowedValues: Record<string, string[]> = {
     inspect: ['project', 'artifact', 'job'],
     tts: ['project', 'plan', 'timeout-seconds', 'voice'],
-    subtitles: ['project', 'audio'],
+    subtitles: ['project', 'audio', 'artifact', 'export-dir'],
     visuals: ['project', 'design', 'plan', 'audio', 'subtitles', 'choreography'],
     reconcile: ['project', 'scenes', 'audio', 'subtitles'],
-    render: ['project', 'scenes', 'audio', 'subtitles', 'reconciliation', 'timeout-seconds'],
+    render: ['project', 'scenes', 'audio', 'subtitles', 'reconciliation', 'timeout-seconds', 'subtitle-mode'],
   };
   const allowedFlags: Record<string, string[]> = {
     inspect: ['media'], tts: ['wait', 'finalize-only'], subtitles: [], visuals: [], reconcile: [], render: ['wait'],
@@ -369,12 +370,51 @@ async function subtitles(args: ParsedArgs): Promise<Record<string, unknown>> {
   const audio = parseIdentity(required(args, 'audio'), '--audio');
   projectRow(projectId);
   const exactAudioRow = artifactRow(projectId, audio);
+  const exportArtifactRaw = args.values.get('artifact');
+  const exportDirRaw = args.values.get('export-dir');
+  if ((exportArtifactRaw && !exportDirRaw) || (!exportArtifactRaw && exportDirRaw)) {
+    throw new CliError('MISSING_ARGUMENT', '--artifact 与 --export-dir 必须同时提供');
+  }
   if (exactAudioRow.kind === NARRATION_AUDIO_V2_ARTIFACT_KIND) {
     const exactAudioV2 = await getExactNarrationAudioV2Artifact(projectId, {
       artifactId: audio.id,
       version: audio.version,
     });
     if (!exactAudioV2) throw new CliError('AUDIO_SOURCE_MISMATCH', `exact narration audio v2 无效或不匹配: ${audio.id}@${audio.version}`);
+    if (exportArtifactRaw && exportDirRaw) {
+      const subtitleIdentity = parseIdentity(exportArtifactRaw, '--artifact');
+      const subtitleRow = artifactRow(projectId, subtitleIdentity);
+      if (subtitleRow.kind !== 'subtitle_timing_v2') {
+        throw new CliError('SOURCE_MISMATCH', `exact artifact 不是 subtitle_timing_v2: ${subtitleIdentity.id}@${subtitleIdentity.version}`);
+      }
+      const exactSubtitle = getExactSubtitleTimingV2Artifact(projectId, {
+        artifactId: subtitleIdentity.id,
+        version: subtitleIdentity.version,
+      }, exactAudioV2);
+      if (!exactSubtitle) {
+        throw new CliError('SOURCE_MISMATCH', `exact subtitle/audio source chain 无效: ${subtitleIdentity.id}@${subtitleIdentity.version}`);
+      }
+      const outputDir = path.resolve(exportDirRaw);
+      fs.mkdirSync(outputDir, {recursive: true});
+      const sidecars = buildSubtitleTimingV2Sidecars(exactSubtitle.timing);
+      const files: Record<string, string> = {};
+      for (const [filename, content] of Object.entries(sidecars)) {
+        const outputPath = path.join(outputDir, filename);
+        fs.writeFileSync(outputPath, content, 'utf8');
+        files[filename] = outputPath;
+      }
+      return {
+        ok: true,
+        command: 'subtitles',
+        mode: 'v2-exact-export',
+        source: {audio, subtitles: subtitleIdentity},
+        master: {
+          sha256: exactSubtitle.timing.source.masterSha256,
+          durationMs: exactSubtitle.timing.source.masterDurationMs,
+        },
+        files,
+      };
+    }
     const result = await buildSubtitleTimingV2({
       projectId,
       narrationAudioV2ArtifactId: audio.id,
@@ -521,6 +561,11 @@ async function render(args: ParsedArgs): Promise<Record<string, unknown>> {
   const audio = parseIdentity(required(args, 'audio'), '--audio');
   const subtitle = parseIdentity(required(args, 'subtitles'), '--subtitles');
   const reconciliation = parseIdentity(required(args, 'reconciliation'), '--reconciliation');
+  const subtitleModeRaw = args.values.get('subtitle-mode');
+  if (subtitleModeRaw && subtitleModeRaw !== 'none' && subtitleModeRaw !== 'burned') {
+    throw new CliError('INVALID_ARGUMENT', '--subtitle-mode 必须是 none 或 burned');
+  }
+  const subtitleMode = subtitleModeRaw as 'none' | 'burned' | undefined;
   projectRow(projectId);
   const audioRow = artifactRow(projectId, audio);
   const subtitleRow = artifactRow(projectId, subtitle);
@@ -547,7 +592,7 @@ async function render(args: ParsedArgs): Promise<Record<string, unknown>> {
       audio: exactAudio,
       subtitle: exactSubtitle,
       reconciliation: exactReconciliation,
-    });
+    }, {subtitleMode});
     const read = async (): Promise<Record<string, unknown> | null> => {
       const job = getDb().prepare('SELECT * FROM render_jobs WHERE id = ?').get(result.job.id) as RenderJobRow | undefined;
       if (!job) throw new CliError('JOB_NOT_FOUND', `render job 不存在: ${result.job.id}`);
@@ -597,12 +642,13 @@ async function render(args: ParsedArgs): Promise<Record<string, unknown>> {
   }
   const result = enqueueFinalRender(projectId, {
     expectedScenes: {versionId: scenes.id, version: scenes.version}, expectedAudio: {artifactId: audio.id, version: audio.version}, expectedSubtitle: {artifactId: subtitle.id, version: subtitle.version}, expectedReconciliation: {artifactId: reconciliation.id, version: reconciliation.version},
-    exactSources: {
+      exactSources: {
       scenes: exactScenes,
       audio: exactAudio,
       subtitle: exactSubtitle,
       reconciliation: exactReconciliation,
-    },
+      },
+      subtitleMode,
   });
   const read = async (): Promise<Record<string, unknown> | null> => {
     const job = getDb().prepare('SELECT * FROM render_jobs WHERE id = ?').get(result.job.id) as RenderJobRow | undefined;

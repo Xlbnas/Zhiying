@@ -40,6 +40,8 @@ export interface FinalRenderV2Sources {
   reconciliation: TimingReconciliationV2Artifact;
 }
 
+export type SubtitleMode = 'none' | 'burned';
+
 export class FinalRenderV2Error extends Error {
   constructor(public readonly code: string, message: string) {
     super(message);
@@ -74,6 +76,7 @@ export function buildFinalRenderPropsV2(input: {
   templateVersion: string;
   src: FinalRenderV2Sources;
   includeNarration?: boolean;
+  subtitleMode?: SubtitleMode;
 }): ZhiyingFullCutProps {
   validateSources(input.src);
   const rec = input.src.reconciliation.reconciliation;
@@ -110,7 +113,7 @@ export function buildFinalRenderPropsV2(input: {
       sfx: null,
     },
     subtitles: toRendererSubtitleCuesV2(input.src.subtitle.timing),
-    showSubtitles: true,
+    showSubtitles: input.subtitleMode !== 'none',
     renderMode: input.includeNarration === false ? 'preview' : 'final',
   });
 }
@@ -136,6 +139,7 @@ function parseSource(row: ArtifactRow): FinalRenderSource | null {
 export function enqueueFinalRenderV2(
   projectId: string,
   src: FinalRenderV2Sources,
+  options?: {subtitleMode?: SubtitleMode},
 ): {job: RenderJobRow; sourceArtifact: {id: string; version: number}; sourceReused: boolean; props: ZhiyingFullCutProps} {
   validateSources(src);
   const db = getDb();
@@ -144,7 +148,13 @@ export function enqueueFinalRenderV2(
       | {id: string; title: string; template_version: string}
       | undefined;
     if (!project) throw new FinalRenderV2Error('PROJECT_NOT_FOUND', `项目不存在: ${projectId}`);
-    const props = buildFinalRenderPropsV2({projectId, title: project.title, templateVersion: project.template_version, src});
+    const props = buildFinalRenderPropsV2({
+      projectId,
+      title: project.title,
+      templateVersion: project.template_version,
+      src,
+      subtitleMode: options?.subtitleMode,
+    });
     const visualGate = validateFinalVisualProps(props, {assetFileExists: publicAssetFileExists});
     if (!visualGate.ok) {
       const first = visualGate.issues[0]!;

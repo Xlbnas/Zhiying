@@ -40,7 +40,8 @@ import {
   VisualSourceV2Error,
 } from '../src/lib/visual-source-v2';
 import {buildTimingReconciliationV2, getExactTimingReconciliationV2} from '../src/lib/reconciliation/timing-v2';
-import {enqueueFinalRenderV2} from '../src/lib/final-render/bridge-v2';
+import {buildFinalRenderPropsV2, enqueueFinalRenderV2} from '../src/lib/final-render/bridge-v2';
+import {buildSubtitleTimingV2Sidecars} from '../src/lib/subtitles/renderer';
 import {stageRuntimeNarrationAudio} from '../src/worker/runtime-audio';
 import {zhiyingFullCutPropsSchema} from '../src/lib/scene-schema';
 
@@ -343,6 +344,24 @@ async function main(): Promise<void> {
   const cliSubtitleJson = JSON.parse(cliSubtitle.stdout) as {schemaVersion?: string; artifact?: {id?: string}; timing?: {source?: {narrationAudioV2ArtifactId?: string}}};
   ok(cliSubtitle.status === 0 && cliSubtitleJson.schemaVersion === 'subtitle-timing@2.0' && cliSubtitleJson.artifact?.id === subtitle1.artifact.id && cliSubtitleJson.timing?.source?.narrationAudioV2ArtifactId === first.artifact.id, '[C4] subtitles CLI routes exact Audio V2 and reuses exact Subtitle V2 artifact');
 
+  const exportA = path.join(getDataDir(), 'sidecars-a');
+  const exportB = path.join(getDataDir(), 'sidecars-b');
+  const cliExportA = runCli(['subtitles', '--project', fixture.projectId, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--artifact', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--export-dir', exportA]);
+  const cliExportB = runCli(['subtitles', '--project', fixture.projectId, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--artifact', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--export-dir', exportB]);
+  const cliExportJson = JSON.parse(cliExportA.stdout) as {mode?: string; source?: {subtitles?: {id?: string}}; master?: {sha256?: string; durationMs?: number}};
+  const expectedSidecars = buildSubtitleTimingV2Sidecars(subtitle1.timing);
+  const sidecarNames = Object.keys(expectedSidecars) as Array<keyof typeof expectedSidecars>;
+  ok(cliExportA.status === 0 && cliExportB.status === 0 && cliExportJson.mode === 'v2-exact-export' && cliExportJson.source?.subtitles?.id === subtitle1.artifact.id, '[C4a] sidecar CLI consumes explicit exact subtitle identity');
+  ok(sidecarNames.every((name) => fs.readFileSync(path.join(exportA, name), 'utf8') === expectedSidecars[name]), '[C4b] SRT/VTT/ASS/JSON text and timing derive from exact artifact');
+  ok(sidecarNames.every((name) => fs.readFileSync(path.join(exportA, name)).equals(fs.readFileSync(path.join(exportB, name)))), '[C4c] repeated sidecar export is byte-identical');
+  ok(cliExportJson.master?.sha256 === first.manifest.master.sha256 && cliExportJson.master?.durationMs === first.manifest.master.durationMs, '[C4d] sidecar response preserves exact master SHA/duration');
+  const wrongSubtitleId = runCli(['subtitles', '--project', fixture.projectId, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--artifact', `${crypto.randomUUID()}@1`, '--export-dir', path.join(getDataDir(), 'wrong-id')]);
+  const wrongSubtitleVersion = runCli(['subtitles', '--project', fixture.projectId, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--artifact', `${subtitle1.artifact.id}@${subtitle1.artifact.version + 1}`, '--export-dir', path.join(getDataDir(), 'wrong-version')]);
+  const wrongSubtitleProject = runCli(['subtitles', '--project', other.projectId, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--artifact', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--export-dir', path.join(getDataDir(), 'wrong-project')]);
+  ok(wrongSubtitleId.status !== 0 && JSON.parse(wrongSubtitleId.stdout).error.code === 'ARTIFACT_NOT_FOUND', '[C4e] sidecar wrong artifact id fails closed');
+  ok(wrongSubtitleVersion.status !== 0 && JSON.parse(wrongSubtitleVersion.stdout).error.code === 'VERSION_MISMATCH', '[C4f] sidecar wrong artifact version fails closed');
+  ok(wrongSubtitleProject.status !== 0 && JSON.parse(wrongSubtitleProject.stdout).error.code === 'PROJECT_MISMATCH', '[C4g] sidecar cross-project source fails closed');
+
   const designDuration = 250;
   const design = {
     chapterTiming: [{chapter: 1, title: 'T', start: 0, end: designDuration}],
@@ -436,7 +455,15 @@ async function main(): Promise<void> {
   ok(rec1.reconciliation.target.totalFrames === Math.round(first.manifest.master.durationMs * 30 / 1000) && rec1.reconciliation.unresolvedNarrationUnitIds.length === 0, '[R2] reconciliation exact duration and unresolved=0');
   ok(getExactTimingReconciliationV2(fixture.projectId, {artifactId: rec1.artifact.id, version: rec1.artifact.version}, {visual: visual1, audio: first, subtitle: subtitle1})?.artifact.id === rec1.artifact.id, '[R3] exact V2 reconciliation read');
 
-  const final = enqueueFinalRenderV2(fixture.projectId, {visual: visual1, audio: first, subtitle: subtitle1, reconciliation: rec1});
+  const finalSources = {visual: visual1, audio: first, subtitle: subtitle1, reconciliation: rec1};
+  const cleanProps = buildFinalRenderPropsV2({projectId: fixture.projectId, title: 'clean', templateVersion: 'test', src: finalSources, subtitleMode: 'none'});
+  const burnedProps = buildFinalRenderPropsV2({projectId: fixture.projectId, title: 'burned', templateVersion: 'test', src: finalSources, subtitleMode: 'burned'});
+  const legacyCompatibleProps = buildFinalRenderPropsV2({projectId: fixture.projectId, title: 'legacy', templateVersion: 'test', src: finalSources});
+  ok(cleanProps.showSubtitles === false && cleanProps.subtitles.length === subtitle1.timing.cues.length, '[F0a] clean profile hides subtitle track without discarding exact cues');
+  ok(burnedProps.showSubtitles === true, '[F0b] burned review profile shows subtitles');
+  ok(legacyCompatibleProps.showSubtitles === true, '[F0c] omitted subtitle mode preserves legacy burned behavior');
+
+  const final = enqueueFinalRenderV2(fixture.projectId, finalSources);
   const payload = zhiyingFullCutPropsSchema.parse(JSON.parse(final.job.payload_json));
   ok(payload.audio.narration === `runtime-audio/${fixture.projectId}/${first.artifact.id}.wav` && payload.data.project.durationInFrames === rec1.reconciliation.target.totalFrames, '[F1] frozen final props use exact V2 audio and reconciled frames');
   ok(payload.data.scenes.length === 25 && payload.subtitles.length === subtitle1.timing.cues.length && payload.renderMode === 'final', '[F2] frozen props carry exact visual/subtitle content');

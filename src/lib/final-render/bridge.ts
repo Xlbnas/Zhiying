@@ -200,6 +200,7 @@ export function buildFinalRenderProps(input: {
   title: string;
   templateVersion: string;
   src: FinalRenderSources;
+  subtitleMode?: 'none' | 'burned';
 }): ZhiyingFullCutProps {
   const {src} = input;
   const rec = src.reconciliation.reconciliation;
@@ -240,7 +241,7 @@ export function buildFinalRenderProps(input: {
       sfx: null,
     },
     subtitles: toRendererSubtitleCues(src.subtitle.timing),
-    showSubtitles: true,
+    showSubtitles: input.subtitleMode !== 'none',
   });
 }
 
@@ -481,6 +482,7 @@ export function enqueueFinalRender(projectId: string, options?: {
   expectedSubtitle?: {artifactId: string; version: number};
   expectedReconciliation?: {artifactId: string; version: number};
   exactSources?: FinalRenderSources;
+  subtitleMode?: 'none' | 'burned';
 }): EnqueueFinalRenderResult {
   const db = getDb();
   const tx = db.transaction((): EnqueueFinalRenderResult => {
@@ -532,6 +534,7 @@ export function enqueueFinalRender(projectId: string, options?: {
       title: project.title,
       templateVersion: project.template_version,
       src,
+      subtitleMode: options?.subtitleMode,
     });
     // M6.3.12：render-input 硬门禁 — 以最终 props 为准（assetMap 注入 /
     // MG templateProps 到达 renderer / 素材物理文件可读），杜绝 domain gate
