@@ -1,12 +1,13 @@
-import type {CSSProperties, ReactNode} from 'react';
+import {createContext, useContext, type CSSProperties, type ReactNode} from 'react';
 import {AbsoluteFill, Easing, Img, interpolate, staticFile, useCurrentFrame} from 'remotion';
 import type {ResolvedAsset, Scene as SchemaScene} from '@/lib/scene-schema';
 import choreography from '@/data/v2-visual-r2-choreography-plan.json';
 import {fontFamily} from '../../design/tokens';
 
 export const V2_VISUAL_R2_VERSION = 'v2-visual-r2@2';
+export const DARK_EDITORIAL_V1_VERSION = 'dark-editorial-v1@1';
 
-const palette = {
+const lightPalette = {
   paper: '#f3f0e8',
   paperDeep: '#e7e1d5',
   ink: '#17272b',
@@ -21,12 +22,41 @@ const palette = {
   white: '#fffdf8',
 };
 
+const darkPalette = {
+  paper: '#161719',
+  paperDeep: '#232326',
+  ink: '#f1eee8',
+  muted: '#a9afb2',
+  line: '#505358',
+  teal: '#4e9299',
+  tealSoft: '#20383c',
+  wine: '#9a4e52',
+  wineSoft: '#3b2528',
+  gold: '#b68c4e',
+  dark: '#11191e',
+  white: '#26272a',
+};
+
+type VisualPalette = typeof lightPalette;
+const PaletteContext = createContext<VisualPalette>(lightPalette);
+const DarkEditorialContext = createContext(false);
+const usePalette = () => useContext(PaletteContext);
+const useDarkEditorial = () => useContext(DarkEditorialContext);
+
 type Beat = (typeof choreography.beats)[number];
 
 export function isV2VisualR2Scene(scene: SchemaScene): boolean {
   const marker = scene.templateProps?.v2VisualR2;
+  const version = typeof marker === 'object' && marker !== null
+    ? (marker as {version?: unknown}).version
+    : null;
+  return version === V2_VISUAL_R2_VERSION || version === DARK_EDITORIAL_V1_VERSION;
+}
+
+function isDarkEditorialScene(scene: SchemaScene): boolean {
+  const marker = scene.templateProps?.v2VisualR2;
   return typeof marker === 'object' && marker !== null &&
-    (marker as {version?: unknown}).version === V2_VISUAL_R2_VERSION;
+    (marker as {version?: unknown}).version === DARK_EDITORIAL_V1_VERSION;
 }
 
 const clamp = (value: number) => Math.min(1, Math.max(0, value));
@@ -41,11 +71,27 @@ function activeBeat(sceneId: string, frame: number): Beat {
 }
 
 function Stage({chapter, label, children}: {chapter: string; label: string; children: ReactNode}) {
+  const palette = usePalette();
+  const dark = useDarkEditorial();
+  const background = dark
+    ? chapter === 'HISTORY' || chapter === 'HYPOTHESIS' || chapter === 'EXAMPLES' || chapter === 'CASE STUDY' || chapter === 'ASSOCIATION' || chapter === 'LEGACY'
+      ? '#1b1816'
+      : chapter === 'MODERN COGNITION' || chapter === 'LANGUAGE' || chapter === 'MONITOR' || chapter === 'MEMORY' || chapter === 'PROSPECTIVE MEMORY' || chapter === 'ACTION CONTROL' || chapter === 'MOTIVATION'
+        ? '#11191e'
+        : '#161719'
+    : palette.paper;
+  const chapterLabels: Record<string, string> = {
+    OPENING: '开场', THESIS: '问题', HISTORY: '历史', HYPOTHESIS: '核心想法', EXAMPLES: '日常失误',
+    'CASE STUDY': '案例', ASSOCIATION: '联想链', LEGACY: '影响', 'MODERN COGNITION': '现代认知',
+    LANGUAGE: '语言', MONITOR: '语言监控', MEMORY: '记忆', 'PROSPECTIVE MEMORY': '未来意图记忆',
+    'ACTION CONTROL': '行动控制', MOTIVATION: '动机与语境', REPLICATION: '复现', 'POST-HOC STORY': '事后解释',
+    EVALUATION: '评价', CONCLUSION: '结论', 'NEXT ERROR': '下一次失误', FINAL: '收束',
+  };
   return (
-    <AbsoluteFill style={{backgroundColor: palette.paper, color: palette.ink, overflow: 'hidden', fontFamily}}>
-      <div style={{position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(rgba(23,39,43,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(23,39,43,.035) 1px, transparent 1px)', backgroundSize: '64px 64px'}} />
+    <AbsoluteFill style={{backgroundColor: background, color: palette.ink, overflow: 'hidden', fontFamily}}>
+      {dark ? null : <div style={{position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(rgba(23,39,43,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(23,39,43,.035) 1px, transparent 1px)', backgroundSize: '64px 64px'}} />}
       <div style={{position: 'absolute', left: 84, top: 58, display: 'flex', alignItems: 'center', gap: 18}}>
-        <div style={{fontSize: 15, letterSpacing: 3.2, color: palette.wine, fontWeight: 700}}>{chapter}</div>
+        <div style={{fontSize: dark ? 20 : 15, letterSpacing: dark ? 1.2 : 3.2, color: palette.wine, fontWeight: 700}}>{dark ? chapterLabels[chapter] ?? chapter : chapter}</div>
         <div style={{width: 48, height: 2, background: palette.wine}} />
         <div style={{fontSize: 22, color: palette.muted, fontWeight: 560}}>{label}</div>
       </div>
@@ -54,11 +100,13 @@ function Stage({chapter, label, children}: {chapter: string; label: string; chil
   );
 }
 
-function Pill({children, x, y, width = 220, accent = palette.teal, opacity = 1, scale = 1, style}: {
+function Pill({children, x, y, width = 220, accent, opacity = 1, scale = 1, style}: {
   children: ReactNode; x: number; y: number; width?: number; accent?: string; opacity?: number; scale?: number; style?: CSSProperties;
 }) {
+  const palette = usePalette();
+  const resolvedAccent = accent ?? palette.teal;
   return (
-    <div style={{position: 'absolute', left: x, top: y, width, minHeight: 72, borderRadius: 18, border: `2px solid ${accent}`, background: palette.white, boxShadow: '0 16px 42px rgba(28,45,48,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px 20px', textAlign: 'center', fontSize: 25, lineHeight: 1.22, fontWeight: 700, color: palette.ink, opacity, scale, ...style}}>
+    <div style={{position: 'absolute', left: x, top: y, width, minHeight: 72, borderRadius: 18, border: `2px solid ${resolvedAccent}`, background: palette.white, boxShadow: '0 16px 42px rgba(0,0,0,.22)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px 20px', textAlign: 'center', fontSize: 25, lineHeight: 1.22, fontWeight: 700, color: palette.ink, opacity, scale, ...style}}>
       {children}
     </div>
   );
@@ -68,14 +116,16 @@ function Dot({x, y, color, size = 18, opacity = 1}: {x: number; y: number; color
   return <div style={{position: 'absolute', left: x - size / 2, top: y - size / 2, width: size, height: size, borderRadius: '50%', background: color, boxShadow: `0 0 0 8px ${color}22`, opacity}} />;
 }
 
-function Path({d, color = palette.teal, progress = 1, dashed = false, width = 4}: {d: string; color?: string; progress?: number; dashed?: boolean; width?: number}) {
+function Path({d, color, progress = 1, dashed = false, width = 4}: {d: string; color?: string; progress?: number; dashed?: boolean; width?: number}) {
+  const palette = usePalette();
   const length = 1000;
   return (
-    <path d={d} fill="none" stroke={color} strokeWidth={width} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={dashed ? '10 12' : length} strokeDashoffset={dashed ? 0 : length * (1 - clamp(progress))} />
+    <path d={d} fill="none" stroke={color ?? palette.teal} strokeWidth={width} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={dashed ? '10 12' : length} strokeDashoffset={dashed ? 0 : length * (1 - clamp(progress))} />
   );
 }
 
 function EvidenceRail({active, support}: {active: number; support: string}) {
+  const palette = usePalette();
   const labels = ['错误', '解释', '机制', '证据'];
   return (
     <div style={{position: 'absolute', left: 420, right: 180, top: 765, height: 70}}>
@@ -96,17 +146,21 @@ function EvidenceRail({active, support}: {active: number; support: string}) {
 }
 
 function ArchiveFrame({asset, x, y, width, height, label}: {asset?: ResolvedAsset; x: number; y: number; width: number; height: number; label: string}) {
+  const palette = usePalette();
+  const dark = useDarkEditorial();
   if (!asset) throw new Error(`V2 Visual R2 缺少已绑定 archive asset: ${label}`);
   return (
     <div style={{position: 'absolute', left: x, top: y, width, height, borderRadius: 22, overflow: 'hidden', border: `2px solid ${palette.ink}`, background: palette.paperDeep, boxShadow: '0 24px 70px rgba(28,45,48,.18)'}}>
-      <Img src={staticFile(asset.publicPath)} style={{width: '100%', height: '100%', objectFit: 'cover', filter: 'sepia(.18) saturate(.78) contrast(1.04)'}} />
-      <div style={{position: 'absolute', left: 18, top: 18, padding: '8px 13px', background: 'rgba(255,253,248,.9)', borderRadius: 10, fontSize: 14, letterSpacing: 1.5, fontWeight: 760, color: palette.wine}}>{label}</div>
+      <Img src={staticFile(asset.publicPath)} style={{width: '100%', height: '100%', objectFit: 'cover', filter: dark ? 'sepia(.26) saturate(.68) contrast(1.08) brightness(.82)' : 'sepia(.18) saturate(.78) contrast(1.04)'}} />
+      <div style={{position: 'absolute', left: 18, top: 18, padding: '8px 13px', background: dark ? 'rgba(27,24,22,.88)' : 'rgba(255,253,248,.9)', borderRadius: 10, fontSize: 15, letterSpacing: dark ? .6 : 1.5, fontWeight: 760, color: dark ? palette.gold : palette.wine}}>{label}</div>
       <div style={{position: 'absolute', left: 0, right: 0, bottom: 0, padding: '12px 18px', background: 'rgba(16,27,30,.78)', color: palette.white, fontSize: 13, lineHeight: 1.35}}>{asset.attribution}</div>
     </div>
   );
 }
 
 function HookVisual({scene, frame, beat, progress}: {scene: SchemaScene; frame: number; beat: Beat; progress: number}) {
+  const palette = usePalette();
+  const dark = useDarkEditorial();
   if (scene.id === 'S001') {
     const targetTravel = interpolate(progress, [.05, .62], [0, .72], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.bezier(.16, 1, .3, 1)});
     const rivalTravel = interpolate(progress, [.18, .58], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.bezier(.16, 1, .3, 1)});
@@ -173,6 +227,8 @@ function HookVisual({scene, frame, beat, progress}: {scene: SchemaScene; frame: 
 }
 
 function HistoryVisual({scene, beat, progress, asset}: {scene: SchemaScene; beat: Beat; progress: number; asset?: ResolvedAsset}) {
+  const palette = usePalette();
+  const dark = useDarkEditorial();
   if (scene.id === 'S005') {
     const topics = ['忘记名字', '口误', '误读误写', '忘记办事', '拿错 / 弄丢'];
     return (
@@ -279,13 +335,15 @@ function HistoryVisual({scene, beat, progress, asset}: {scene: SchemaScene; beat
 }
 
 function ActivationRace({progress}: {progress: number}) {
+  const palette = usePalette();
+  const dark = useDarkEditorial();
   const target = interpolate(progress, [0, .38, .68, 1], [.18, .74, .64, .9], {extrapolateRight: 'clamp'});
   const rival = interpolate(progress, [0, .38, .68, 1], [.12, .52, .94, .74], {extrapolateRight: 'clamp'});
   const other = interpolate(progress, [0, .5, 1], [.08, .46, .34], {extrapolateRight: 'clamp'});
   const rivalAhead = rival > target;
   return (
-    <div style={{position: 'absolute', left: 320, top: 260, width: 940, height: 440, borderRadius: 28, background: '#fffdf8', border: `1px solid ${palette.line}`, padding: 42}}>
-      <div style={{fontSize: 18, letterSpacing: 2.5, color: palette.muted}}>LEXICAL ACTIVATION RACE</div>
+    <div style={{position: 'absolute', left: 320, top: 260, width: 940, height: 440, borderRadius: 28, background: palette.white, border: `1px solid ${palette.line}`, padding: 42}}>
+      <div style={{fontSize: 20, letterSpacing: dark ? .4 : 2.5, color: palette.muted}}>{dark ? '多个词同时竞争' : 'LEXICAL ACTIVATION RACE'}</div>
       {[['目标词：现任', target, palette.teal], ['竞争词：前任', rival, palette.wine], ['其他候选', other, palette.gold]].map(([label, value, color]) => (
         <div key={String(label)} style={{marginTop: 46}}>
           <div style={{display: 'flex', justifyContent: 'space-between', fontSize: 22, fontWeight: 650}}><span>{label}</span><span style={{color: String(color)}}>{String(label).includes('其他') ? '低激活' : rivalAhead === String(label).includes('竞争词') ? '暂时领先' : '竞争中'}</span></div>
@@ -300,6 +358,8 @@ function ActivationRace({progress}: {progress: number}) {
 }
 
 function MechanismVisual({scene, frame, beat, progress}: {scene: SchemaScene; frame: number; beat: Beat; progress: number}) {
+  const palette = usePalette();
+  const dark = useDarkEditorial();
   if (scene.id === 'S011') {
     return (
       <Stage chapter="MODERN COGNITION" label="错误不变，解释空间扩大">
@@ -363,6 +423,8 @@ function MechanismVisual({scene, frame, beat, progress}: {scene: SchemaScene; fr
 }
 
 function AppliedMechanismVisual({scene, beat, progress}: {scene: SchemaScene; beat: Beat; progress: number}) {
+  const palette = usePalette();
+  const dark = useDarkEditorial();
   if (scene.id === 'S015') {
     const load = beat.beatId === 'B026';
     const taskX = interpolate(progress, [0, 1], [250, 1450], {extrapolateRight: 'clamp'});
@@ -447,6 +509,7 @@ function AppliedMechanismVisual({scene, beat, progress}: {scene: SchemaScene; be
 }
 
 function EvidenceCard({x, y, title, status, accent, opacity = 1}: {x: number; y: number; title: string; status: string; accent: string; opacity?: number}) {
+  const palette = usePalette();
   return (
     <div style={{position: 'absolute', left: x, top: y, width: 360, minHeight: 150, padding: '28px 30px', borderRadius: 20, border: `2px solid ${accent}`, background: palette.white, boxShadow: '0 18px 48px rgba(28,45,48,.1)', opacity}}>
       <div style={{fontSize: 24, fontWeight: 760}}>{title}</div>
@@ -456,6 +519,8 @@ function EvidenceCard({x, y, title, status, accent, opacity = 1}: {x: number; y:
 }
 
 function EvaluationVisual({scene, beat, progress}: {scene: SchemaScene; beat: Beat; progress: number}) {
+  const palette = usePalette();
+  const dark = useDarkEditorial();
   if (scene.id === 'S020') {
     const prediction = beat.beatId === 'B035';
     return (
@@ -523,6 +588,8 @@ function EvaluationVisual({scene, beat, progress}: {scene: SchemaScene; beat: Be
 }
 
 function ClosingVisual({scene, beat, progress}: {scene: SchemaScene; beat: Beat; progress: number}) {
+  const palette = usePalette();
+  const dark = useDarkEditorial();
   if (scene.id === 'S024') {
     const pause = beat.beatId === 'B042';
     const questions = ['语言竞争？', '记忆取回？', '注意负荷？', '行动控制？'];
@@ -575,23 +642,31 @@ export const V2VisualR2Scene = ({scene, assets}: {scene: SchemaScene; assets?: R
   const beat = activeBeat(scene.id, frame);
   const progress = beatProgress(frame, beat);
 
-  if (['S001', 'S002', 'S003', 'S004'].includes(scene.id)) {
-    return <HookVisual scene={scene} frame={frame} beat={beat} progress={progress} />;
-  }
-  if (['S005', 'S006', 'S007', 'S008', 'S009', 'S010'].includes(scene.id)) {
-    return <HistoryVisual scene={scene} beat={beat} progress={progress} asset={assets?.[0]} />;
-  }
-  if (['S011', 'S012', 'S013', 'S014'].includes(scene.id)) {
-    return <MechanismVisual scene={scene} frame={frame} beat={beat} progress={progress} />;
-  }
-  if (['S015', 'S016', 'S017', 'S018', 'S019'].includes(scene.id)) {
-    return <AppliedMechanismVisual scene={scene} beat={beat} progress={progress} />;
-  }
-  if (['S020', 'S021', 'S022', 'S023'].includes(scene.id)) {
-    return <EvaluationVisual scene={scene} beat={beat} progress={progress} />;
-  }
-  if (['S024', 'S025'].includes(scene.id)) {
-    return <ClosingVisual scene={scene} beat={beat} progress={progress} />;
-  }
-  throw new Error(`V2 Visual R2 prototype scene 未实现: ${scene.id}`);
+  const dark = isDarkEditorialScene(scene);
+  const content = (() => {
+    if (['S001', 'S002', 'S003', 'S004'].includes(scene.id)) {
+      return <HookVisual scene={scene} frame={frame} beat={beat} progress={progress} />;
+    }
+    if (['S005', 'S006', 'S007', 'S008', 'S009', 'S010'].includes(scene.id)) {
+      return <HistoryVisual scene={scene} beat={beat} progress={progress} asset={assets?.[0]} />;
+    }
+    if (['S011', 'S012', 'S013', 'S014'].includes(scene.id)) {
+      return <MechanismVisual scene={scene} frame={frame} beat={beat} progress={progress} />;
+    }
+    if (['S015', 'S016', 'S017', 'S018', 'S019'].includes(scene.id)) {
+      return <AppliedMechanismVisual scene={scene} beat={beat} progress={progress} />;
+    }
+    if (['S020', 'S021', 'S022', 'S023'].includes(scene.id)) {
+      return <EvaluationVisual scene={scene} beat={beat} progress={progress} />;
+    }
+    if (['S024', 'S025'].includes(scene.id)) {
+      return <ClosingVisual scene={scene} beat={beat} progress={progress} />;
+    }
+    throw new Error(`V2 Visual R2 prototype scene 未实现: ${scene.id}`);
+  })();
+  return (
+    <DarkEditorialContext.Provider value={dark}>
+      <PaletteContext.Provider value={dark ? darkPalette : lightPalette}>{content}</PaletteContext.Provider>
+    </DarkEditorialContext.Provider>
+  );
 };

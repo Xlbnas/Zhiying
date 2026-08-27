@@ -19,6 +19,10 @@ const reconciliation = readJson('--reconciliation');
 const subtitleTiming = readJson('--subtitles');
 const output = resolve(args.get('--output'));
 const markedSceneIds = new Set((args.get('--scene-ids') ?? '').split(',').filter(Boolean));
+const rendererVersion = args.get('--renderer-version') ?? 'v2-visual-r2@2';
+if (!['v2-visual-r2@2', 'dark-editorial-v1@1'].includes(rendererVersion)) {
+  throw new Error(`Unsupported preview renderer version: ${rendererVersion}`);
+}
 
 if (visual.schemaVersion !== 'visual-source@2.0') throw new Error('Expected visual-source@2.0');
 if (reconciliation.schemaVersion !== 'timing-reconciliation@1.0') throw new Error('Expected timing-reconciliation@1.0');
@@ -50,7 +54,7 @@ const scenes = sourceScenes.map((scene) => {
   const startFrame = timing.effectiveStartFrame;
   const durationInFrames = timing.effectiveDurationFrames;
   const marker = markedSceneIds.has(scene.id)
-    ? {v2VisualR2: {version: 'v2-visual-r2@2'}}
+    ? {v2VisualR2: {version: rendererVersion}}
     : {};
   return {
     ...scene,
@@ -117,4 +121,5 @@ console.log(JSON.stringify({
   frames: props.data.project.durationInFrames,
   exactAudio: `${visualAudio.id}@${visualAudio.version}`,
   masterSha256: visual.source.masterSha256,
+  rendererVersion,
 }, null, 2));
