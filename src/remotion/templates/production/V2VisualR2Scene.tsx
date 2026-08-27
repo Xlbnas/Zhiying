@@ -145,13 +145,13 @@ function EvidenceRail({active, support}: {active: number; support: string}) {
   );
 }
 
-function ArchiveFrame({asset, x, y, width, height, label}: {asset?: ResolvedAsset; x: number; y: number; width: number; height: number; label: string}) {
+function ArchiveFrame({asset, x, y, width, height, label, fit = 'cover', objectPosition = 'center'}: {asset?: ResolvedAsset; x: number; y: number; width: number; height: number; label: string; fit?: 'cover' | 'contain'; objectPosition?: string}) {
   const palette = usePalette();
   const dark = useDarkEditorial();
   if (!asset) throw new Error(`V2 Visual R2 缺少已绑定 archive asset: ${label}`);
   return (
     <div style={{position: 'absolute', left: x, top: y, width, height, borderRadius: 22, overflow: 'hidden', border: `2px solid ${palette.ink}`, background: palette.paperDeep, boxShadow: '0 24px 70px rgba(28,45,48,.18)'}}>
-      <Img src={staticFile(asset.publicPath)} style={{width: '100%', height: '100%', objectFit: 'cover', filter: dark ? 'sepia(.26) saturate(.68) contrast(1.08) brightness(.82)' : 'sepia(.18) saturate(.78) contrast(1.04)'}} />
+      <Img src={staticFile(asset.publicPath)} style={{width: '100%', height: '100%', objectFit: fit, objectPosition, padding: fit === 'contain' ? 18 : 0, filter: dark ? 'sepia(.26) saturate(.68) contrast(1.08) brightness(.82)' : 'sepia(.18) saturate(.78) contrast(1.04)'}} />
       <div style={{position: 'absolute', left: 18, top: 18, padding: '8px 13px', background: dark ? 'rgba(27,24,22,.88)' : 'rgba(255,253,248,.9)', borderRadius: 10, fontSize: 15, letterSpacing: dark ? .6 : 1.5, fontWeight: 760, color: dark ? palette.gold : palette.wine}}>{label}</div>
       <div style={{position: 'absolute', left: 0, right: 0, bottom: 0, padding: '12px 18px', background: 'rgba(16,27,30,.78)', color: palette.white, fontSize: 13, lineHeight: 1.35}}>{asset.attribution}</div>
     </div>
@@ -226,9 +226,96 @@ function HookVisual({scene, frame, beat, progress}: {scene: SchemaScene; frame: 
   );
 }
 
-function HistoryVisual({scene, beat, progress, asset}: {scene: SchemaScene; beat: Beat; progress: number; asset?: ResolvedAsset}) {
+function DarkHistoryVisual({scene, beat, progress, assets}: {scene: SchemaScene; beat: Beat; progress: number; assets: ResolvedAsset[]}) {
+  const palette = usePalette();
+  const reveal = (from: number, to: number) => interpolate(progress, [from, to], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
+
+  if (scene.id === 'S005') {
+    return (
+      <Stage chapter="HISTORY" label="一部研究日常失误的书">
+        <ArchiveFrame asset={assets[0]} x={150} y={180} width={750} height={740} label="1904 年德文单行本" fit="contain" />
+        <div style={{position: 'absolute', left: 1030, top: 230, width: 650}}>
+          <div style={{fontSize: 46, lineHeight: 1.18, fontWeight: 760}}>日常生活心理病理学</div>
+          <div style={{marginTop: 18, fontSize: 23, color: palette.gold}}>Zur Psychopathologie des Alltagslebens</div>
+          <div style={{marginTop: 66, borderLeft: `4px solid ${palette.wine}`, paddingLeft: 28, fontSize: 29, lineHeight: 1.8, color: palette.muted, opacity: reveal(.16, .48)}}>忘记名字　·　口误<br />误读误写　·　忘记办事<br />拿错或弄丢东西</div>
+          <div style={{marginTop: 44, fontSize: 24, color: palette.ink, opacity: reveal(.48, .72)}}>弗洛伊德把这些小事放进同一个研究计划。</div>
+        </div>
+      </Stage>
+    );
+  }
+
+  if (scene.id === 'S006') {
+    const interference = beat.beatId === 'B009';
+    return (
+      <Stage chapter="HYPOTHESIS" label="弗洛伊德的核心想法">
+        <ArchiveFrame asset={assets[0]} x={145} y={190} width={610} height={720} label="西格蒙德·弗洛伊德，约 1921" objectPosition="center 18%" />
+        <div style={{position: 'absolute', left: 900, top: 215, width: 760}}>
+          {!interference ? <>
+            <div style={{fontSize: 31, color: palette.muted}}>不是：</div>
+            <div style={{marginTop: 20, fontSize: 48, lineHeight: 1.28, fontWeight: 760, color: palette.ink}}>错误本身<br />会自动说出真话</div>
+            <div style={{marginTop: 38, width: 600, height: 5, background: palette.wine, transformOrigin: 'left', scale: `${reveal(.08, .64)} 1`}} />
+          </> : <>
+            {['原本要说的事', '另一股没有承认的念头', '实际说出口'].map((text, index) => <div key={text} style={{marginTop: index === 0 ? 0 : 30, borderTop: `1px solid ${palette.line}`, paddingTop: 24, fontSize: index === 1 ? 32 : 38, color: index === 1 ? palette.wine : palette.ink, opacity: reveal(index * .16, index * .16 + .26)}}>{text}</div>)}
+            <div style={{marginTop: 46, fontSize: 23, color: palette.gold}}>他的解释：两股念头可能彼此干扰</div>
+          </>}
+        </div>
+      </Stage>
+    );
+  }
+
+  if (scene.id === 'S007') {
+    const intention = beat.beatId === 'B011';
+    return (
+      <Stage chapter="EXAMPLES" label="同一本书里的两类日常失误">
+        <ArchiveFrame asset={assets[0]} x={1180} y={175} width={560} height={735} label="弗洛伊德，约 1921" objectPosition="center 15%" />
+        <div style={{position: 'absolute', left: 150, top: 225, width: 840}}>
+          <div style={{fontSize: 26, color: palette.gold}}>具体例子</div>
+          <div style={{marginTop: 32, fontSize: 58, fontWeight: 760}}>{intention ? '忘记办事' : '口误'}</div>
+          <div style={{marginTop: 34, width: 760, fontSize: 31, lineHeight: 1.55, color: palette.muted}}>{intention ? '原本打算稍后完成的事，没有在正确时刻被想起来。' : '两种表达挤到了一起，错误词先被说出口。'}</div>
+          <div style={{marginTop: 66, paddingTop: 28, borderTop: `1px solid ${palette.line}`, fontSize: 24, color: palette.ink, opacity: reveal(.44, .72)}}>这是弗洛伊德的解释框架，尚不是对所有失误的统一结论。</div>
+        </div>
+      </Stage>
+    );
+  }
+
+  if (scene.id === 'S008') {
+    const alternatives = beat.beatId === 'B013';
+    return (
+      <Stage chapter="CASE STUDY" label="西尼奥雷利忘名案例">
+        <ArchiveFrame asset={assets[0]} x={120} y={190} width={560} height={720} label="卢卡·西尼奥雷利自画像" objectPosition="center 12%" />
+        <ArchiveFrame asset={assets[1]} x={740} y={190} width={1050} height={590} label="《天堂中的获选者》，1499–1502" objectPosition="center 42%" />
+        <div style={{position: 'absolute', left: 810, top: 825, width: 900, display: 'flex', justifyContent: 'space-between', fontSize: 28, color: palette.ink, opacity: reveal(.28, .58)}}>
+          <span>想不起：西尼奥雷利</span><span style={{color: palette.wine}}>{alternatives ? '却冒出两个相近名字' : '姓名一时空缺'}</span>
+        </div>
+      </Stage>
+    );
+  }
+
+  if (scene.id === 'S009') {
+    const limitation = beat.beatId === 'B015';
+    return (
+      <Stage chapter="ASSOCIATION" label="弗洛伊德的个案解释">
+        <ArchiveFrame asset={assets[0]} x={110} y={180} width={1700} height={710} label="1922 年英译本中的联想图" fit="contain" />
+        <div style={{position: 'absolute', right: 150, bottom: 118, width: 720, padding: '18px 24px', background: 'rgba(27,24,22,.9)', borderLeft: `5px solid ${limitation ? palette.gold : palette.wine}`, fontSize: 24, lineHeight: 1.45, opacity: reveal(.42, .7)}}>{limitation ? '他也承认：并非所有忘名都来自压抑。' : '替代名字被连回此前关于死亡与痛苦的谈话。'}</div>
+      </Stage>
+    );
+  }
+
+  const zoom = beat.beatId === 'B017';
+  return (
+    <Stage chapter="LEGACY" label="一种解释如何进入公共生活">
+      <ArchiveFrame asset={assets[0]} x={110} y={190} width={1110} height={700} label="海牙国际精神分析大会，1920" objectPosition="center 38%" />
+      <ArchiveFrame asset={assets[1]} x={1280} y={190} width={500} height={520} label="弗洛伊德，约 1921" objectPosition="center 18%" />
+      <div style={{position: 'absolute', left: 1280, top: 765, width: 500, fontSize: 29, lineHeight: 1.45, color: zoom ? palette.gold : palette.ink, opacity: reveal(.22, .55)}}>{zoom ? '一个小错误，也可能成为观察心理冲突的窗口。' : '精神分析从诊室走进了普通人的日常语言。'}</div>
+    </Stage>
+  );
+}
+
+function HistoryVisual({scene, beat, progress, assets}: {scene: SchemaScene; beat: Beat; progress: number; assets?: ResolvedAsset[]}) {
   const palette = usePalette();
   const dark = useDarkEditorial();
+  if (dark) return <DarkHistoryVisual scene={scene} beat={beat} progress={progress} assets={assets ?? []} />;
+  const asset = assets?.[0];
   if (scene.id === 'S005') {
     const topics = ['忘记名字', '口误', '误读误写', '忘记办事', '拿错 / 弄丢'];
     return (
@@ -648,7 +735,7 @@ export const V2VisualR2Scene = ({scene, assets}: {scene: SchemaScene; assets?: R
       return <HookVisual scene={scene} frame={frame} beat={beat} progress={progress} />;
     }
     if (['S005', 'S006', 'S007', 'S008', 'S009', 'S010'].includes(scene.id)) {
-      return <HistoryVisual scene={scene} beat={beat} progress={progress} asset={assets?.[0]} />;
+      return <HistoryVisual scene={scene} beat={beat} progress={progress} assets={assets} />;
     }
     if (['S011', 'S012', 'S013', 'S014'].includes(scene.id)) {
       return <MechanismVisual scene={scene} frame={frame} beat={beat} progress={progress} />;

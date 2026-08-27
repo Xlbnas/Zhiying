@@ -1,0 +1,97 @@
+{
+  "schemaVersion": "r3a-historical-assets@1",
+  "assets": [
+    {
+      "assetId": "r3a-freud-title-page-1904",
+      "publicPath": "assets/3778ffb0-c430-4499-9f7f-2590f45cb8cb/6ce6f1fb-d52b-4a8f-8892-7651857b5a86.jpg",
+      "mediaType": "image",
+      "width": 591,
+      "height": 914,
+      "creator": "Sigmund Freud",
+      "date": "1904",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Zur_psychopathologie_1904_freud.jpg",
+      "license": "Public domain",
+      "publicDomainBasis": "Published in 1904; Wikimedia Commons marks the scan public domain.",
+      "description": "Title page of the first book edition of Zur Psychopathologie des Alltagslebens.",
+      "intendedUsage": "S005 primary book evidence"
+    },
+    {
+      "assetId": "r3a-freud-portrait-1921",
+      "publicPath": "assets/3778ffb0-c430-4499-9f7f-2590f45cb8cb/r3a/freud-max-halberstadt-1921.jpg",
+      "mediaType": "image",
+      "width": 1647,
+      "height": 2240,
+      "creator": "Max Halberstadt",
+      "date": "circa 1921",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Sigmund_Freud,_by_Max_Halberstadt_(cropped).jpg",
+      "license": "Public domain",
+      "publicDomainBasis": "Wikimedia Commons marks the photograph public domain.",
+      "description": "Portrait of Sigmund Freud by Max Halberstadt.",
+      "intendedUsage": "S006-S007 author and historical context"
+    },
+    {
+      "assetId": "r3a-signorelli-self-portrait",
+      "publicPath": "assets/3778ffb0-c430-4499-9f7f-2590f45cb8cb/d0832799-c7e0-405a-8e57-d6d5d36ee140.jpg",
+      "mediaType": "image",
+      "width": 1037,
+      "height": 1427,
+      "creator": "Luca Signorelli",
+      "date": "circa 1500",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Signorelli,_Luca_-_selfportrait_alone.jpg",
+      "license": "Public domain",
+      "publicDomainBasis": "The artwork is centuries out of copyright; Wikimedia Commons marks the reproduction public domain.",
+      "description": "Self-portrait of Luca Signorelli.",
+      "intendedUsage": "S008 identify the painter in the forgetting-name case"
+    },
+    {
+      "assetId": "r3a-signorelli-elect-in-paradise",
+      "publicPath": "assets/3778ffb0-c430-4499-9f7f-2590f45cb8cb/r3a/signorelli-elect-in-paradise.jpg",
+      "mediaType": "image",
+      "width": 972,
+      "height": 670,
+      "creator": "Luca Signorelli",
+      "date": "1499-1502",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Luca_signorelli,_cappella_di_san_brizio,_eletti_in_paradiso_01.jpg",
+      "license": "Public domain",
+      "publicDomainBasis": "The artwork is centuries out of copyright; Wikimedia Commons marks the reproduction public domain.",
+      "description": "The Elect in Paradise, San Brizio Chapel, Orvieto Cathedral.",
+      "intendedUsage": "S008 show a real work by Signorelli alongside his portrait"
+    },
+    {
+      "assetId": "r3a-signorelli-association-diagram-1922",
+      "publicPath": "assets/3778ffb0-c430-4499-9f7f-2590f45cb8cb/r3a/signorelli-association-diagram-1922.png",
+      "mediaType": "image",
+      "width": 2540,
+      "height": 1374,
+      "creator": "Sigmund Freud; English translation by A. A. Brill",
+      "date": "1922 edition",
+      "sourceUrl": "https://www.gutenberg.org/files/67332/67332-h/67332-h.htm",
+      "license": "Public domain in the United States",
+      "publicDomainBasis": "Project Gutenberg eBook 67332 is distributed as public domain in the United States.",
+      "description": "Association diagram printed with the Signorelli case in the 1922 English edition.",
+      "intendedUsage": "S009 primary-source evidence for Freud's own association chain"
+    },
+    {
+      "assetId": "r3a-hague-congress-1920",
+      "publicPath": "assets/3778ffb0-c430-4499-9f7f-2590f45cb8cb/r3a/freud-hague-congress-1920.jpg",
+      "mediaType": "image",
+      "width": 1920,
+      "height": 1541,
+      "creator": "Unknown photographer; Library of Congress collection",
+      "date": "1920",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Sigmund_Freud_with_colleagues_at_the_Congress_at_the_Hague_LCCN2010651704.jpg",
+      "license": "Public domain",
+      "publicDomainBasis": "Library of Congress image; Wikimedia Commons marks the file public domain.",
+      "description": "Sigmund Freud with colleagues at the International Psychoanalytical Congress in The Hague.",
+      "intendedUsage": "S010 evidence of early psychoanalytic circulation rather than generic period atmosphere"
+    }
+  ],
+  "sceneAssets": {
+    "S005": ["r3a-freud-title-page-1904"],
+    "S006": ["r3a-freud-portrait-1921"],
+    "S007": ["r3a-freud-portrait-1921"],
+    "S008": ["r3a-signorelli-self-portrait", "r3a-signorelli-elect-in-paradise"],
+    "S009": ["r3a-signorelli-association-diagram-1922"],
+    "S010": ["r3a-hague-congress-1920", "r3a-freud-portrait-1921"]
+  }
+}
