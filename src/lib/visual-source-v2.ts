@@ -10,8 +10,8 @@ import {
 } from './narration/audio-v2';
 import {getNarrationPlanV2Artifact} from './narration/plan-v2';
 import {scenesAiOutputSchema, type ScenesAiOutput} from './prompts/scenes';
-import {resolvedAssetSchema} from './scene-schema';
-import {getActiveBinding, getAssetById} from './assets/model';
+import {resolvedAssetSchema, type ResolvedAsset} from './scene-schema';
+import {getActiveBinding, getAssetById, insertAsset, listAssetsForProject, type AssetRow} from './assets/model';
 import {buildAssetMap, evaluateVisualReadiness} from './assets/readiness';
 import {buildSceneAssetPlan} from './assets/requirements';
 import {
@@ -20,12 +20,15 @@ import {
 } from './subtitles/timing-v2';
 import {validateScenesSemantics} from './workflow/scenes-semantic-validation';
 import v2VisualR2Choreography from '../data/v2-visual-r2-choreography-plan.json';
+import r3aHistoricalAssets from '../data/r3a-historical-assets.json';
 
 export const VISUAL_SOURCE_V2_ARTIFACT_KIND = 'visual_source_v2';
 export const VISUAL_SOURCE_V2_SCHEMA_VERSION = 'visual-source@2.0';
 export const VISUAL_SOURCE_V2_COMPILER_VERSION = '1.0';
 export const V2_VISUAL_R2_CHOREOGRAPHY = {id: 'v2-visual-r2', version: 2} as const;
 export const V2_VISUAL_R2_RENDERER_VERSION = 'v2-visual-r2@2';
+export const DARK_EDITORIAL_V1_CHOREOGRAPHY = {id: 'dark-editorial-v1', version: 1} as const;
+export const DARK_EDITORIAL_V1_RENDERER_VERSION = 'dark-editorial-v1@1';
 const FPS = 30;
 
 const identitySchema = z.object({id: z.string().min(1), version: z.number().int().positive()});
@@ -43,11 +46,15 @@ export const visualSourceV2Schema = z.object({
     masterDurationMs: z.number().int().positive(),
   }),
   timingBasis: z.literal('narration_audio_v2_unit_timeline'),
-  choreography: z.object({
+  choreography: z.union([z.object({
     id: z.literal(V2_VISUAL_R2_CHOREOGRAPHY.id),
     version: z.literal(V2_VISUAL_R2_CHOREOGRAPHY.version),
     beatCount: z.number().int().positive(),
-  }).optional(),
+  }), z.object({
+    id: z.literal(DARK_EDITORIAL_V1_CHOREOGRAPHY.id),
+    version: z.literal(DARK_EDITORIAL_V1_CHOREOGRAPHY.version),
+    beatCount: z.number().int().positive(),
+  })]).optional(),
   unitMappings: z.array(z.object({
     sceneId: z.string().regex(/^S\d{3}$/),
     unitId: z.string().regex(/^N\d{3}$/),
@@ -160,9 +167,12 @@ function applyExactChoreography(
   identity?: {id: string; version: number},
 ): Pick<VisualSourceV2, 'data' | 'choreography'> {
   if (!identity) return {data};
-  if (identity.id !== V2_VISUAL_R2_CHOREOGRAPHY.id || identity.version !== V2_VISUAL_R2_CHOREOGRAPHY.version) {
+  const isR2 = identity.id === V2_VISUAL_R2_CHOREOGRAPHY.id && identity.version === V2_VISUAL_R2_CHOREOGRAPHY.version;
+  const isDarkEditorial = identity.id === DARK_EDITORIAL_V1_CHOREOGRAPHY.id && identity.version === DARK_EDITORIAL_V1_CHOREOGRAPHY.version;
+  if (!isR2 && !isDarkEditorial) {
     throw new VisualSourceV2Error('CHOREOGRAPHY_INVALID', `不支持 exact choreography: ${identity.id}@${identity.version}`);
   }
+  const rendererVersion = isDarkEditorial ? DARK_EDITORIAL_V1_RENDERER_VERSION : V2_VISUAL_R2_RENDERER_VERSION;
   const beatsByScene = new Map<string, string[]>();
   for (const beat of v2VisualR2Choreography.beats) {
     const ids = beatsByScene.get(beat.sceneId) ?? [];
@@ -178,17 +188,15 @@ function applyExactChoreography(
       ...scene,
       templateProps: {
         ...(scene.templateProps ?? {}),
-        v2VisualR2: {version: V2_VISUAL_R2_RENDERER_VERSION, beatIds},
+        v2VisualR2: {version: rendererVersion, beatIds},
       },
     };
   });
   return {
     data: scenesAiOutputSchema.parse({...data, scenes}),
-    choreography: {
-      id: V2_VISUAL_R2_CHOREOGRAPHY.id,
-      version: V2_VISUAL_R2_CHOREOGRAPHY.version,
-      beatCount: v2VisualR2Choreography.beats.length,
-    },
+    choreography: isDarkEditorial
+      ? {...DARK_EDITORIAL_V1_CHOREOGRAPHY, beatCount: v2VisualR2Choreography.beats.length}
+      : {...V2_VISUAL_R2_CHOREOGRAPHY, beatCount: v2VisualR2Choreography.beats.length},
   };
 }
 
@@ -312,6 +320,98 @@ function exactAssets(projectId: string, data: ScenesAiOutput): Pick<VisualSource
   };
 }
 
+const darkEditorialManifestSchema = z.object({
+  assets: z.array(z.object({
+    assetId: z.string().min(1),
+    publicPath: z.string().min(1),
+    mediaType: z.literal('image'),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    creator: z.string().min(1),
+    date: z.string().min(1),
+    sourceProvider: z.string().min(1),
+    sourceUrl: z.string().url(),
+    license: z.string().min(1),
+    publicDomainBasis: z.string().min(1),
+    description: z.string().min(1),
+  })),
+  sceneAssets: z.record(z.string().regex(/^S\d{3}$/), z.array(z.string().min(1)).min(1)),
+});
+
+function resolvedAsset(asset: AssetRow): ResolvedAsset {
+  return resolvedAssetSchema.parse({
+    assetId: asset.id,
+    publicPath: asset.local_path,
+    mediaType: asset.media_type,
+    width: asset.width,
+    height: asset.height,
+    description: asset.description ?? '',
+    attribution: asset.attribution ?? '',
+    sourceUrl: asset.source_url ?? '',
+  });
+}
+
+function darkEditorialAssetMap(projectId: string, registerMissing: boolean): VisualSourceV2['assetMap'] {
+  const manifest = darkEditorialManifestSchema.parse(r3aHistoricalAssets);
+  const rows = listAssetsForProject(projectId);
+  const byManifestId = new Map<string, AssetRow>();
+
+  // Validate the complete fixed manifest before making any asset-row writes.
+  for (const item of manifest.assets) {
+    const physical = path.join(process.cwd(), 'public', item.publicPath);
+    if (!item.publicPath.startsWith('assets/') || !fs.existsSync(physical) || fs.statSync(physical).size === 0) {
+      throw new VisualSourceV2Error('VISUAL_READINESS_FAILED', `dark editorial 史料文件缺失: ${item.assetId}`);
+    }
+  }
+
+  for (const item of manifest.assets) {
+    let row = rows.find((candidate) => candidate.local_path === item.publicPath);
+    if (!row && registerMissing) {
+      row = insertAsset({
+        ...(getAssetById(item.assetId) ? {} : {id: item.assetId}),
+        projectId,
+        sceneId: Object.entries(manifest.sceneAssets).find(([, ids]) => ids.includes(item.assetId))?.[0] ?? null,
+        mediaType: item.mediaType,
+        sourceType: 'archive',
+        sourceProvider: item.sourceProvider,
+        sourceUrl: item.sourceUrl,
+        localPath: item.publicPath,
+        mimeType: item.publicPath.endsWith('.png') ? 'image/png' : 'image/jpeg',
+        width: item.width,
+        height: item.height,
+        licenseStatus: 'usable',
+        licenseNote: item.publicDomainBasis,
+        attribution: `${item.creator}, ${item.date}; ${item.license}`,
+        description: item.description,
+      });
+      rows.push(row);
+    }
+    if (
+      !row || row.project_id !== projectId || row.media_type !== item.mediaType ||
+      row.source_type !== 'archive' || row.source_provider !== item.sourceProvider ||
+      row.source_url !== item.sourceUrl || row.license_status !== 'usable' ||
+      row.local_path !== item.publicPath
+    ) {
+      throw new VisualSourceV2Error('VISUAL_READINESS_FAILED', `dark editorial 史料 provenance 无效: ${item.assetId}`);
+    }
+    byManifestId.set(item.assetId, row);
+  }
+
+  const assetMap: VisualSourceV2['assetMap'] = {};
+  for (const [sceneId, assetIds] of Object.entries(manifest.sceneAssets)) {
+    assetMap[sceneId] = assetIds.map((assetId) => {
+      const row = byManifestId.get(assetId);
+      if (!row) throw new VisualSourceV2Error('VISUAL_READINESS_FAILED', `dark editorial 史料未解析: ${assetId}`);
+      return resolvedAsset(row);
+    });
+  }
+  return assetMap;
+}
+
+function isDarkEditorial(choreography: VisualSourceV2['choreography']): boolean {
+  return choreography?.id === DARK_EDITORIAL_V1_CHOREOGRAPHY.id && choreography.version === DARK_EDITORIAL_V1_CHOREOGRAPHY.version;
+}
+
 async function readExactSources(input: {
   projectId: string;
   designScenes: {id: string; version: number};
@@ -363,7 +463,10 @@ export async function buildVisualSourceV2(input: {
   const choreographed = applyExactChoreography(retimed.data, input.choreography);
   const data = choreographed.data;
   const unitMappings = retimed.unitMappings;
-  const assets = exactAssets(input.projectId, data);
+  const baseAssets = exactAssets(input.projectId, data);
+  const assets = isDarkEditorial(choreographed.choreography)
+    ? {...baseAssets, assetMap: {...baseAssets.assetMap, ...darkEditorialAssetMap(input.projectId, true)}}
+    : baseAssets;
   const expected = visualSourceV2Schema.parse({
     schemaVersion: VISUAL_SOURCE_V2_SCHEMA_VERSION,
     compilerVersion: VISUAL_SOURCE_V2_COMPILER_VERSION,
@@ -428,6 +531,10 @@ export async function getExactVisualSourceV2Artifact(
     const choreographed = applyExactChoreography(retimed.data, visual.choreography
       ? {id: visual.choreography.id, version: visual.choreography.version}
       : undefined);
+    const baseAssets = exactAssets(projectId, choreographed.data);
+    const expectedAssetMap = isDarkEditorial(choreographed.choreography)
+      ? {...baseAssets.assetMap, ...darkEditorialAssetMap(projectId, false)}
+      : baseAssets.assetMap;
     if (
       visual.compilerVersion !== VISUAL_SOURCE_V2_COMPILER_VERSION ||
       visual.source.scriptV2.id !== exact.scriptV2.id ||
@@ -436,6 +543,9 @@ export async function getExactVisualSourceV2Artifact(
       visual.source.masterDurationMs !== exact.audio.manifest.master.durationMs ||
       !isDeepStrictEqual(visual.data, choreographed.data) ||
       !isDeepStrictEqual(visual.unitMappings, retimed.unitMappings) ||
+      !isDeepStrictEqual(visual.assetMap, expectedAssetMap) ||
+      !isDeepStrictEqual(visual.assetBindings, baseAssets.assetBindings) ||
+      !isDeepStrictEqual(visual.visualReadiness, baseAssets.visualReadiness) ||
       !isDeepStrictEqual(visual.visualFamilies, visualFamiliesFor(choreographed.data, choreographed.choreography))
     ) return null;
     for (const assets of Object.values(visual.assetMap)) {

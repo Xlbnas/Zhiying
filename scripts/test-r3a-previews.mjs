@@ -33,8 +33,8 @@ ok(vttBlocks.length === timing.cues.length && vttBlocks.every((block, index) => 
 ok(timing.cues.every((cue) => ass.includes(`exact-ms:${cue.startMs}-${cue.endMs},${cue.segmentId}`) && ass.includes(`,,${cue.text}`)), '[R3A-5c] ASS retains every exact-ms pair and cue text');
 
 const uniqueAssetIds = new Set(manifest.assets.map((asset) => asset.assetId));
-ok(manifest.assets.length === 6 && uniqueAssetIds.size === 6, '[R3A-6] six unique traceable historical assets');
-ok(manifest.assets.every((asset) => /^https:\/\//.test(asset.sourceUrl) && asset.creator && asset.date && asset.license && asset.publicDomainBasis && asset.intendedUsage), '[R3A-7] historical provenance fields complete');
+ok(manifest.assets.length === 7 && uniqueAssetIds.size === 7, '[R3A-6] seven unique traceable historical assets');
+ok(manifest.assets.every((asset) => /^https:\/\//.test(asset.sourceUrl) && asset.sourceProvider && asset.creator && asset.date && asset.license && asset.publicDomainBasis && asset.intendedUsage), '[R3A-7] historical provenance fields complete');
 ok(manifest.assets.every((asset) => {
   const file = path.resolve(root, 'public', asset.publicPath);
   return fs.existsSync(file) && fs.statSync(file).size > 0;
@@ -43,10 +43,10 @@ ok(Object.entries(manifest.sceneAssets).every(([sceneId, assetIds]) => props.dat
 
 const sceneById = new Map(props.data.scenes.map((scene) => [scene.id, scene]));
 const archiveDominantSeconds = manifest.archiveDominantSceneIds.reduce((sum, sceneId) => sum + sceneById.get(sceneId).duration, 0);
-ok(archiveDominantSeconds >= 40 && archiveDominantSeconds <= 50, `[R3A-10] archive-dominant runtime is ${archiveDominantSeconds.toFixed(2)}s`);
+ok(archiveDominantSeconds >= 50 && archiveDominantSeconds <= 60, `[R3A-10] archive-dominant runtime is ${archiveDominantSeconds.toFixed(2)}s`);
 
 const sceneSource = fs.readFileSync(path.resolve(root, 'src/remotion/templates/production/V2VisualR2Scene.tsx'), 'utf8');
-ok(['#1b1816', '#11191e', '#161719', '#f1eee8', '#a9afb2', '#9a4e52', '#4e9299', '#b68c4e'].every((token) => sceneSource.includes(token)), '[R3A-10a] dark editorial palette is explicit and contains no pure-black background token');
+ok(['#1b1816', '#11191e', '#161719', '#f1eee8', '#b9bdc0', '#9a4e52', '#4e9299', '#b68c4e'].every((token) => sceneSource.includes(token)), '[R3A-10a] dark editorial palette is explicit and contains no pure-black background token');
 ok(sceneSource.includes("dark ? null : <div style={{position: 'absolute', inset: 0, backgroundImage:"), '[R3A-10b] global grid is disabled on the dark editorial path');
 
 for (const id of ['history', 'language', 'editorial']) {

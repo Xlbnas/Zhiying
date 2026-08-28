@@ -26,7 +26,7 @@ const darkPalette = {
   paper: '#161719',
   paperDeep: '#232326',
   ink: '#f1eee8',
-  muted: '#a9afb2',
+  muted: '#b9bdc0',
   line: '#505358',
   teal: '#4e9299',
   tealSoft: '#20383c',
@@ -167,14 +167,12 @@ function HookVisual({scene, frame, beat, progress}: {scene: SchemaScene; frame: 
     const resolved = interpolate(progress, [.58, .72], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
     return (
       <Stage chapter="OPENING" label="一次口误如何发生">
-        <div style={{position: 'absolute', left: 210, top: 240, color: palette.teal, fontSize: 17, fontWeight: 760}}>目标词</div>
-        <div style={{position: 'absolute', left: 210, top: 500, color: palette.wine, fontSize: 17, fontWeight: 760}}>竞争词</div>
-        <div style={{position: 'absolute', left: 210, right: 590, top: 347, height: 2, background: palette.line}} />
-        <div style={{position: 'absolute', left: 210, right: 590, top: 607, height: 2, background: palette.line}} />
-        <Pill x={260 + targetTravel * 960} y={275} width={250} accent={palette.teal} opacity={1 - resolved * .75}>现任</Pill>
-        <Pill x={260 + rivalTravel * 1080} y={535} width={250} accent={palette.wine} opacity={1 - resolved}>前任</Pill>
-        <Pill x={1370} y={395} width={350} accent={resolved > .4 ? palette.wine : palette.line}>{dark ? (resolved > .4 ? '说出口：前任' : '还没说出口') : `OUTPUT：${resolved > .4 ? '前任' : '等待候选'}`}</Pill>
-        <div style={{position: 'absolute', left: 1250, top: 690, width: 500, fontSize: 21, color: palette.wine, fontWeight: 760, opacity: resolved}}>竞争词先到达同一个输出槽</div>
+        <div style={{position: 'absolute', left: 180, right: 610, top: 363, height: 2, background: palette.line}} />
+        <div style={{position: 'absolute', left: 180, right: 610, top: 648, height: 2, background: palette.line}} />
+        <Pill x={220 + targetTravel * 960} y={270} width={330} accent={palette.teal} opacity={1 - resolved * .75} style={{minHeight: 104, fontSize: 36}}>现任</Pill>
+        <Pill x={220 + rivalTravel * 1060} y={555} width={330} accent={palette.wine} opacity={1 - resolved} style={{minHeight: 104, fontSize: 36}}>前任</Pill>
+        <Pill x={1320} y={395} width={440} accent={resolved > .4 ? palette.wine : palette.line} style={{minHeight: 112, fontSize: 35}}>{dark ? (resolved > .4 ? '说出口：前任' : '还没说出口') : `OUTPUT：${resolved > .4 ? '前任' : '等待候选'}`}</Pill>
+        <div style={{position: 'absolute', left: 1240, top: 700, width: 540, fontSize: 28, color: palette.wine, fontWeight: 760, opacity: resolved}}>竞争词先到达同一个输出槽</div>
       </Stage>
     );
   }
@@ -185,11 +183,11 @@ function HookVisual({scene, frame, beat, progress}: {scene: SchemaScene; frame: 
       <Stage chapter="OPENING" label="错误先发生，解释后进入">
         <Pill x={820} y={330} width={280} accent={palette.wine} scale={1.06}>前任</Pill>
         <div style={{position: 'absolute', left: 882, top: 425, color: palette.wine, fontWeight: 700, fontSize: dark ? 23 : 18}}>{dark ? '这次口误' : 'ERROR TOKEN'}</div>
-        <Pill x={260} y={560} width={360} accent={palette.teal} opacity={interpolate(explanation, [.12, .4], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}>普通口误</Pill>
-        <Pill x={1300} y={560} width={360} accent={palette.wine} opacity={interpolate(explanation, [.35, .65], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}>潜意识解释</Pill>
+        <Pill x={210} y={540} width={460} accent={palette.teal} opacity={interpolate(explanation, [.12, .4], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})} style={{minHeight: 110, fontSize: 34}}>普通口误</Pill>
+        <Pill x={1250} y={540} width={460} accent={palette.wine} opacity={interpolate(explanation, [.35, .65], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})} style={{minHeight: 110, fontSize: 34}}>潜意识解释</Pill>
         <div style={{position: 'absolute', left: 570, top: 485, fontSize: 52, color: palette.teal, opacity: explanation}}>↙</div>
         <div style={{position: 'absolute', left: 1280, top: 485, fontSize: 52, color: palette.wine, opacity: explanation}}>↘</div>
-        <div style={{position: 'absolute', left: 650, top: 720, width: 620, textAlign: 'center', color: palette.muted, fontSize: dark ? 28 : 21, opacity: explanation}}>{dark ? '同一次口误，可以有不止一种解释。' : '同一错误产生两种候选解释；此处尚未裁决'}</div>
+        <div style={{position: 'absolute', left: 590, top: 735, width: 740, textAlign: 'center', color: palette.muted, fontSize: dark ? 30 : 21, opacity: explanation}}>同一次口误，可以有不止一种解释。</div>
       </Stage>
     );
   }
@@ -197,13 +195,12 @@ function HookVisual({scene, frame, beat, progress}: {scene: SchemaScene; frame: 
   if (scene.id === 'S003') {
     return (
       <Stage chapter="OPENING" label="同一错误，两条解释">
-        <Pill x={180} y={350} width={380} accent={palette.wine}>{dark ? '这次口误：叫成前任' : 'ERROR：叫成前任'}</Pill>
-        <Pill x={770} y={350} width={380} accent={palette.gold}>{dark ? '缺失的证据环节' : 'MISSING EVIDENCE'}</Pill>
-        <Pill x={1360} y={350} width={380} accent={palette.wine} opacity={interpolate(progress, [.2, .5], [.35, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}>{dark ? '被推断的隐藏动机' : 'HIDDEN MOTIVE'}</Pill>
-        <div style={{position: 'absolute', left: 590, top: 363, fontSize: 50, color: palette.gold}}>→</div>
-        <div style={{position: 'absolute', left: 1185, top: 363, fontSize: 50, color: palette.wine}}>⇢</div>
-        <div style={{position: 'absolute', left: 750, top: 510, width: 420, textAlign: 'center', color: palette.gold, fontSize: 22, fontWeight: 760}}>没有证据，推断不能跨过这里</div>
-        <EvidenceRail active={1} support="缺少关键证据" />
+        <Pill x={110} y={350} width={460} accent={palette.wine} style={{minHeight: 118, fontSize: 33}}>{dark ? '这次口误' : 'ERROR：叫成前任'}</Pill>
+        <Pill x={730} y={350} width={460} accent={palette.gold} style={{minHeight: 118, fontSize: 31}}>{dark ? '缺失的证据环节' : 'MISSING EVIDENCE'}</Pill>
+        <Pill x={1350} y={350} width={460} accent={palette.wine} opacity={interpolate(progress, [.2, .5], [.35, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})} style={{minHeight: 118, fontSize: 31}}>{dark ? '被推断的隐藏动机' : 'HIDDEN MOTIVE'}</Pill>
+        <div style={{position: 'absolute', left: 620, top: 377, fontSize: 62, color: palette.gold}}>→</div>
+        <div style={{position: 'absolute', left: 1240, top: 377, fontSize: 62, color: palette.wine}}>⇢</div>
+        <div style={{position: 'absolute', left: 700, top: 545, width: 520, textAlign: 'center', color: palette.gold, fontSize: 30, fontWeight: 760}}>没有证据，推断不能跨过这里</div>
       </Stage>
     );
   }
@@ -233,12 +230,11 @@ function DarkHistoryVisual({scene, beat, progress, assets}: {scene: SchemaScene;
   if (scene.id === 'S005') {
     return (
       <Stage chapter="HISTORY" label="一部研究日常失误的书">
-        <ArchiveFrame asset={assets[0]} x={150} y={180} width={750} height={740} label="1904 年德文单行本" fit="contain" />
-        <div style={{position: 'absolute', left: 1030, top: 230, width: 650}}>
+        <ArchiveFrame asset={assets[0]} x={105} y={145} width={825} height={795} label="1904 年德文单行本" fit="contain" />
+        <div style={{position: 'absolute', left: 1040, top: 230, width: 650}}>
           <div style={{fontSize: 46, lineHeight: 1.18, fontWeight: 760}}>日常生活心理病理学</div>
-          <div style={{marginTop: 18, fontSize: 23, color: palette.gold}}>Zur Psychopathologie des Alltagslebens</div>
-          <div style={{marginTop: 66, borderLeft: `4px solid ${palette.wine}`, paddingLeft: 28, fontSize: 29, lineHeight: 1.8, color: palette.muted, opacity: reveal(.16, .48)}}>忘记名字　·　口误<br />误读误写　·　忘记办事<br />拿错或弄丢东西</div>
-          <div style={{marginTop: 44, fontSize: 24, color: palette.ink, opacity: reveal(.48, .72)}}>弗洛伊德把这些小事放进同一个研究计划。</div>
+          <div style={{marginTop: 22, fontSize: 27, color: palette.gold}}>1904 年 · 德文单行本</div>
+          <div style={{marginTop: 62, borderLeft: `4px solid ${palette.wine}`, paddingLeft: 28, fontSize: 32, lineHeight: 1.85, color: palette.muted, opacity: reveal(.16, .48)}}>忘记名字　·　口误<br />误读误写　·　忘记办事<br />拿错或弄丢东西</div>
         </div>
       </Stage>
     );
@@ -267,12 +263,12 @@ function DarkHistoryVisual({scene, beat, progress, assets}: {scene: SchemaScene;
     const intention = beat.beatId === 'B011';
     return (
       <Stage chapter="EXAMPLES" label="同一本书里的两类日常失误">
-        <ArchiveFrame asset={assets[0]} x={1180} y={175} width={560} height={735} label="弗洛伊德，约 1921" objectPosition="center 15%" />
-        <div style={{position: 'absolute', left: 150, top: 225, width: 840}}>
-          <div style={{fontSize: 26, color: palette.gold}}>具体例子</div>
-          <div style={{marginTop: 32, fontSize: 58, fontWeight: 760}}>{intention ? '忘记办事' : '口误'}</div>
-          <div style={{marginTop: 34, width: 760, fontSize: 31, lineHeight: 1.55, color: palette.muted}}>{intention ? '原本打算稍后完成的事，没有在正确时刻被想起来。' : '两种表达挤到了一起，错误词先被说出口。'}</div>
-          <div style={{marginTop: 66, paddingTop: 28, borderTop: `1px solid ${palette.line}`, fontSize: 24, color: palette.ink, opacity: reveal(.44, .72)}}>这是弗洛伊德的解释框架，尚不是对所有失误的统一结论。</div>
+        <ArchiveFrame asset={assets[0]} x={95} y={165} width={1080} height={760} label="1922 年英译本目录原页" objectPosition="center 55%" />
+        <div style={{position: 'absolute', left: 1260, top: 240, width: 500}}>
+          <div style={{fontSize: 27, color: palette.gold}}>原书中的分类</div>
+          <div style={{marginTop: 42, padding: '30px 0', borderTop: `3px solid ${intention ? palette.line : palette.wine}`, fontSize: 52, fontWeight: 760, color: intention ? palette.muted : palette.ink}}>第五章　口误</div>
+          <div style={{padding: '30px 0', borderTop: `3px solid ${intention ? palette.gold : palette.line}`, fontSize: 47, fontWeight: 760, color: intention ? palette.ink : palette.muted}}>第七章　忘记办事</div>
+          <div style={{marginTop: 36, fontSize: 29, lineHeight: 1.5, color: palette.muted, opacity: reveal(.38, .68)}}>{intention ? '原本的意图，没有在正确时刻被想起来。' : '两种表达挤到一起，错误词先被说出口。'}</div>
         </div>
       </Stage>
     );
@@ -284,7 +280,7 @@ function DarkHistoryVisual({scene, beat, progress, assets}: {scene: SchemaScene;
       <Stage chapter="CASE STUDY" label="西尼奥雷利忘名案例">
         <ArchiveFrame asset={assets[0]} x={120} y={190} width={560} height={720} label="卢卡·西尼奥雷利自画像" objectPosition="center 12%" />
         <ArchiveFrame asset={assets[1]} x={740} y={190} width={1050} height={590} label="《天堂中的获选者》，1499–1502" objectPosition="center 42%" />
-        <div style={{position: 'absolute', left: 810, top: 825, width: 900, display: 'flex', justifyContent: 'space-between', fontSize: 28, color: palette.ink, opacity: reveal(.28, .58)}}>
+        <div style={{position: 'absolute', left: 760, top: 825, width: 980, display: 'flex', justifyContent: 'space-between', fontSize: 32, color: palette.ink, opacity: reveal(.28, .58)}}>
           <span>想不起：西尼奥雷利</span><span style={{color: palette.wine}}>{alternatives ? '却冒出两个相近名字' : '姓名一时空缺'}</span>
         </div>
       </Stage>
@@ -293,10 +289,18 @@ function DarkHistoryVisual({scene, beat, progress, assets}: {scene: SchemaScene;
 
   if (scene.id === 'S009') {
     const limitation = beat.beatId === 'B015';
+    const namesFocus = !limitation && progress >= .38;
+    const sourceScale = limitation ? 1.48 : namesFocus ? 1.3 : 1;
+    const sourceTranslate = limitation ? '-165px -92px' : namesFocus ? '135px 72px' : '0px 0px';
     return (
       <Stage chapter="ASSOCIATION" label="弗洛伊德的个案解释">
-        <ArchiveFrame asset={assets[0]} x={110} y={180} width={1700} height={710} label="1922 年英译本中的联想图" fit="contain" />
-        <div style={{position: 'absolute', right: 150, bottom: 118, width: 720, padding: '18px 24px', background: 'rgba(27,24,22,.9)', borderLeft: `5px solid ${limitation ? palette.gold : palette.wine}`, fontSize: 24, lineHeight: 1.45, opacity: reveal(.42, .7)}}>{limitation ? '他也承认：并非所有忘名都来自压抑。' : '替代名字被连回此前关于死亡与痛苦的谈话。'}</div>
+        {assets[0] ? <div style={{position: 'absolute', left: 90, top: 160, width: 1740, height: 760, borderRadius: 22, overflow: 'hidden', border: `2px solid ${palette.ink}`, background: palette.paperDeep}}>
+          <Img src={staticFile(assets[0].publicPath)} style={{width: '100%', height: '100%', objectFit: 'contain', filter: 'sepia(.26) saturate(.68) contrast(1.08) brightness(.82)', scale: sourceScale, translate: sourceTranslate}} />
+          <div style={{position: 'absolute', left: 22, top: 22, padding: '10px 15px', borderRadius: 10, background: 'rgba(27,24,22,.9)', color: palette.gold, fontSize: 18, fontWeight: 760}}>1922 年英译本 · 原始联想图</div>
+          <div style={{position: 'absolute', left: 0, right: 0, bottom: 0, padding: '13px 20px', background: 'rgba(16,27,30,.82)', color: palette.ink, fontSize: 14}}>{assets[0].attribution}</div>
+        </div> : <ArchiveFrame asset={assets[0]} x={90} y={160} width={1740} height={760} label="1922 年英译本 · 原始联想图" fit="contain" />}
+        <div style={{position: 'absolute', right: 135, top: 215, width: 500, padding: '20px 26px', background: 'rgba(27,24,22,.92)', borderLeft: `5px solid ${limitation ? palette.gold : palette.wine}`, fontSize: 31, lineHeight: 1.42}}>{limitation ? '死亡话题　→　痛苦联想' : namesFocus ? '姓名空缺　→　替代名字' : '先看原始联想图全貌'}</div>
+        <div style={{position: 'absolute', right: 135, bottom: 110, width: 680, padding: '18px 24px', background: 'rgba(27,24,22,.92)', borderLeft: `5px solid ${limitation ? palette.gold : palette.wine}`, fontSize: 27, lineHeight: 1.45, opacity: reveal(.42, .7)}}>{limitation ? '他也承认：并非所有忘名都来自压抑。' : '图中把替代名字连回此前关于死亡与痛苦的谈话。'}</div>
       </Stage>
     );
   }
@@ -304,9 +308,8 @@ function DarkHistoryVisual({scene, beat, progress, assets}: {scene: SchemaScene;
   const zoom = beat.beatId === 'B017';
   return (
     <Stage chapter="LEGACY" label="一种解释如何进入公共生活">
-      <ArchiveFrame asset={assets[0]} x={110} y={190} width={1110} height={700} label="海牙国际精神分析大会，1920" objectPosition="center 38%" />
-      <ArchiveFrame asset={assets[1]} x={1280} y={190} width={500} height={520} label="弗洛伊德，约 1921" objectPosition="center 18%" />
-      <div style={{position: 'absolute', left: 1280, top: 765, width: 500, fontSize: 29, lineHeight: 1.45, color: zoom ? palette.gold : palette.ink, opacity: reveal(.22, .55)}}>{zoom ? '一个小错误，也可能成为观察心理冲突的窗口。' : '精神分析从诊室走进了普通人的日常语言。'}</div>
+      <ArchiveFrame asset={assets[0]} x={90} y={165} width={1740} height={760} label="海牙国际精神分析大会，1920" objectPosition="center 38%" />
+      <div style={{position: 'absolute', right: 130, bottom: 110, width: 720, padding: '24px 30px', background: 'rgba(27,24,22,.92)', borderLeft: `5px solid ${palette.gold}`, fontSize: 34, lineHeight: 1.42, color: zoom ? palette.gold : palette.ink, opacity: reveal(.22, .55)}}>{zoom ? '小错误，也被当作观察心理冲突的窗口。' : '精神分析从诊室进入普通人的日常语言。'}</div>
     </Stage>
   );
 }
@@ -465,6 +468,24 @@ function MechanismVisual({scene, frame, beat, progress}: {scene: SchemaScene; fr
   const palette = usePalette();
   const dark = useDarkEditorial();
   if (scene.id === 'S011') {
+    if (dark) {
+      const modules = [
+        ['语言竞争', '多个词项同时活跃'],
+        ['记忆取回', '知道，不等于此刻能想起'],
+        ['注意负荷', '资源被眼前任务占用'],
+        ['行动控制', '熟练动作可能抢先'],
+      ] as const;
+      return (
+        <Stage chapter="MODERN COGNITION" label="同一次失误，可以拆成四个机制问题">
+          <div style={{position: 'absolute', left: 150, top: 205, width: 1620, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 34}}>
+            {modules.map(([title, note], index) => {
+              const reveal = interpolate(progress, [.08 + index * .1, .34 + index * .1], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
+              return <div key={title} style={{minHeight: 250, padding: '44px 48px', borderTop: `5px solid ${index === 0 ? palette.wine : palette.teal}`, background: palette.white, opacity: reveal}}><div style={{fontSize: 47, fontWeight: 760}}>{title}</div><div style={{marginTop: 34, fontSize: 30, lineHeight: 1.45, color: palette.muted}}>{note}</div></div>;
+            })}
+          </div>
+        </Stage>
+      );
+    }
     return (
       <Stage chapter="MODERN COGNITION" label="错误不变，解释空间扩大">
         <Pill x={160} y={350} width={340} accent={palette.wine} opacity={interpolate(progress, [0, .42], [1, .42], {extrapolateRight: 'clamp'})}>旧框架：隐藏动机</Pill>
@@ -499,14 +520,13 @@ function MechanismVisual({scene, frame, beat, progress}: {scene: SchemaScene; fr
 
   if (scene.id === 'S013') {
     const wrongWins = beat.beatId === 'B022';
-    const travel = interpolate(progress, [.12, .7], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.bezier(.16, 1, .3, 1)});
+    const stateReveal = interpolate(progress, [.22, .62], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
     return (
-      <Stage chapter="MONITOR" label={wrongWins ? '偶尔，错误候选抢先' : '大多数时候，错误被拦住'}>
-        <div style={{position: 'absolute', left: 170, right: 230, top: 456, height: 3, background: palette.line}} />
-        <Pill x={220 + travel * (wrongWins ? 860 : 480)} y={350} width={300} accent={palette.wine}>竞争词：前任</Pill>
-        <div style={{position: 'absolute', left: 1030, top: 290, width: 170, height: 270, borderRadius: 24, border: `4px solid ${palette.teal}`, background: palette.white, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: palette.teal, fontSize: 22, lineHeight: 1.35, fontWeight: 780}}>{dark ? <>语言<br />监控</> : <>MONITOR<br />监控闸门</>}</div>
-        <Pill x={1420} y={350} width={320} accent={wrongWins ? palette.wine : palette.teal} opacity={interpolate(progress, [.66, .86], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}>{wrongWins ? '说出口：前任' : '放行目标：现任'}</Pill>
-        {!wrongWins ? <div style={{position: 'absolute', left: 790, top: 585, width: 420, textAlign: 'center', color: palette.wine, fontSize: 23, fontWeight: 760, opacity: interpolate(progress, [.5, .72], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}}>{dark ? '大脑通常会及时拦住错误词' : '不匹配　×　错误候选在闸门前停止'}</div> : <div style={{position: 'absolute', left: 1170, top: 585, width: 420, textAlign: 'center', color: palette.wine, fontSize: 23, fontWeight: 760, opacity: interpolate(progress, [.5, .72], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}}>{dark ? '错误词先被说出口' : '候选先越线，监控来迟'}</div>}
+      <Stage chapter="MONITOR" label={wrongWins ? '偶尔，错误候选被放行' : '大多数时候，错误候选被拦住'}>
+        <Pill x={170} y={365} width={420} accent={palette.wine} style={{minHeight: 112, fontSize: 33}}>错误候选：前任</Pill>
+        <div style={{position: 'absolute', left: 790, top: 270, width: 340, height: 320, borderRadius: 24, border: `4px solid ${wrongWins ? palette.wine : palette.teal}`, background: palette.white, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: wrongWins ? palette.wine : palette.teal, fontSize: 32, lineHeight: 1.45, fontWeight: 780}}><span>语言监控</span><span style={{marginTop: 30, fontSize: 38}}>{wrongWins ? '放行' : '拦住'}</span></div>
+        <Pill x={1330} y={365} width={420} accent={wrongWins ? palette.wine : palette.teal} opacity={stateReveal} style={{minHeight: 112, fontSize: 32}}>{wrongWins ? '放行说出口' : '拦住错误词'}</Pill>
+        <div style={{position: 'absolute', left: 1215, top: 585, width: 650, textAlign: 'center', color: wrongWins ? palette.wine : palette.teal, fontSize: 29, fontWeight: 760, opacity: stateReveal}}>{wrongWins ? '结果：说出口“前任”' : '结果：错误词没有出口'}</div>
       </Stage>
     );
   }
@@ -567,18 +587,17 @@ function AppliedMechanismVisual({scene, beat, progress}: {scene: SchemaScene; be
       const candidates = [
         ['普通候选', '平时更容易出现', palette.teal],
         ['语境相关候选', context ? '眼下更容易被想到' : '也可能出现', palette.wine],
-        ['其他候选', '仍有可能', palette.gold],
+        ['其他候选', '仍然可能出现', palette.gold],
       ] as const;
       return (
         <Stage chapter="MOTIVATION" label="动机可能参与，但不能替我们下结论">
-          <div style={{position: 'absolute', left: 155, top: 230, width: 620}}>
-            <div style={{fontSize: 24, color: palette.gold}}>一种有限的说法</div>
-            <div style={{marginTop: 34, fontSize: 52, lineHeight: 1.3, fontWeight: 760}}>眼下的语境<br />会改变哪类口误<br />更容易出现</div>
+          <div style={{position: 'absolute', left: 150, top: 205, width: 1620}}>
+            <div style={{fontSize: 48, lineHeight: 1.3, fontWeight: 760}}>语境可能改变候选词的竞争权重</div>
+            <div style={{marginTop: 48, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 32}}>
+              {candidates.map(([label, note, color], index) => <div key={label} style={{minHeight: 270, padding: '38px 36px', borderTop: `5px solid ${color}`, background: palette.white, opacity: index === 1 && context ? 1 : .74}}><div style={{fontSize: 36, fontWeight: 760, color: index === 1 && context ? color : palette.ink}}>{label}</div><div style={{marginTop: 54, fontSize: 30, lineHeight: 1.4, color}}>{note}</div></div>)}
+            </div>
+            <div style={{marginTop: 42, paddingTop: 28, borderTop: `2px solid ${palette.wine}`, fontSize: 34, color: palette.ink}}>但这不等于已经发现被压抑的欲望。</div>
           </div>
-          <div style={{position: 'absolute', left: 970, top: 245, width: 700, borderLeft: `2px solid ${palette.line}`, paddingLeft: 55}}>
-            {candidates.map(([label, note, color], index) => <div key={label} style={{display: 'grid', gridTemplateColumns: '280px 1fr', padding: '26px 0', borderTop: `1px solid ${palette.line}`, opacity: index === 1 && context ? 1 : .72}}><div style={{fontSize: 29, fontWeight: 720, color: index === 1 && context ? color : palette.ink}}>{label}</div><div style={{fontSize: 25, color, textAlign: 'right'}}>{note}</div></div>)}
-          </div>
-          <div style={{position: 'absolute', left: 970, top: 735, width: 700, paddingTop: 24, borderTop: `1px solid ${palette.line}`, fontSize: 28, color: palette.muted}}>概率变了，不等于隐藏动机已经被证实。</div>
         </Stage>
       );
     }
@@ -606,14 +625,13 @@ function AppliedMechanismVisual({scene, beat, progress}: {scene: SchemaScene; be
     if (dark) {
       return (
         <Stage chapter="REPLICATION" label={boundary ? '心理状态可能参与，不等于欲望已经被证实' : '复现之后，支持没有稳定下来'}>
-          <div style={{position: 'absolute', left: 250, top: 210, width: 1250, height: 610}}>
-            <div style={{position: 'absolute', left: 24, top: 0, bottom: 0, width: 2, background: palette.line}} />
+          <div style={{position: 'absolute', left: 100, top: 265, width: 1720, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 26}}>
             {cards.map(([label, state], index) => {
               const reveal = interpolate(progress, [index * .1, index * .1 + .25], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
-              return <div key={label} style={{position: 'absolute', left: 0, top: index * 145, width: 1180, display: 'grid', gridTemplateColumns: '80px 280px 1fr', alignItems: 'center', opacity: reveal}}><Dot x={25} y={28} color={index < 2 ? palette.teal : palette.gold} size={18} /><div style={{fontSize: 29, fontWeight: 720}}>{label}</div><div style={{fontSize: 28, color: index < 2 ? palette.teal : palette.gold}}>{state}</div></div>;
+              return <div key={label} style={{position: 'relative', minHeight: 300, padding: '38px 32px', borderTop: `6px solid ${index < 2 ? palette.teal : palette.gold}`, background: palette.white, opacity: reveal}}><div style={{fontSize: 26, color: palette.muted}}>{label}</div><div style={{marginTop: 64, fontSize: 38, lineHeight: 1.35, fontWeight: 760, color: index < 2 ? palette.teal : palette.gold}}>{state}</div>{index < 3 ? <div style={{position: 'absolute', right: -25, top: 132, fontSize: 46, color: palette.line}}>→</div> : null}</div>;
             })}
           </div>
-          <div style={{position: 'absolute', right: 160, bottom: 140, width: 560, borderTop: `2px solid ${palette.wine}`, paddingTop: 24, fontSize: 28, lineHeight: 1.4, color: boundary ? palette.ink : palette.muted}}>{boundary ? '“可能参与竞争”与“被压抑欲望已被抓住”，不是同一个结论。' : '一次有趣的结果，还需要经得住再次检验。'}</div>
+          <div style={{position: 'absolute', left: 310, right: 310, bottom: 140, borderTop: `2px solid ${palette.wine}`, paddingTop: 24, textAlign: 'center', fontSize: 31, lineHeight: 1.4, color: boundary ? palette.ink : palette.muted}}>{boundary ? '“可能参与竞争”与“被压抑欲望已被抓住”，不是同一个结论。' : '一次有趣的结果，还需要经得住再次检验。'}</div>
         </Stage>
       );
     }
@@ -701,7 +719,6 @@ function EvaluationVisual({scene, beat, progress}: {scene: SchemaScene; beat: Be
           return <Pill key={label} x={180 + index * 420} y={470} width={300} accent={palette.teal} opacity={reveal}>{label}</Pill>;
         })}
         {rewrite ? <div style={{position: 'absolute', left: 590, top: 635, width: 740, minHeight: 84, padding: '20px 28px', borderRadius: 18, background: palette.wineSoft, border: `2px solid ${palette.wine}`, textAlign: 'center', color: palette.wine, fontSize: 23, fontWeight: 760, opacity: rewriteReveal}}>结果之后：换一条联想，改写故事</div> : null}
-        <EvidenceRail active={3} support={rewrite ? '预测失败后仍可改写' : '正在比较替代原因'} />
       </Stage>
     );
   }
@@ -735,10 +752,10 @@ function EvaluationVisual({scene, beat, progress}: {scene: SchemaScene; beat: Be
   if (dark) {
     return (
       <Stage chapter="CONCLUSION" label="把一个大问题，拆成四条可以检验的线索">
-        <div style={{position: 'absolute', left: 150, top: 255, width: 1620, borderTop: `1px solid ${palette.line}`}}>
+        <div style={{position: 'absolute', left: 150, top: 215, width: 1620, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32}}>
           {modules.map(([title, note], index) => {
             const reveal = interpolate(progress, [index * .1, index * .1 + .32], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
-            return <div key={title} style={{display: 'grid', gridTemplateColumns: '180px 1fr 180px', padding: '34px 20px', borderBottom: `1px solid ${palette.line}`, alignItems: 'center', opacity: reveal}}><div style={{fontSize: 37, fontWeight: 760}}>{title}</div><div style={{fontSize: 29, color: palette.muted}}>{note}</div><div style={{fontSize: 23, color: palette.teal, textAlign: 'right'}}>可以分别检验</div></div>;
+            return <div key={title} style={{minHeight: 285, padding: '42px 46px', borderTop: `5px solid ${index < 2 ? palette.teal : palette.gold}`, background: palette.white, opacity: reveal}}><div style={{display: 'flex', alignItems: 'baseline', gap: 26}}><div style={{fontSize: 49, fontWeight: 760}}>{title}</div><div style={{fontSize: 33, color: palette.muted}}>{note}</div></div><div style={{marginTop: 62, fontSize: 27, color: palette.teal}}>可以分别检验</div></div>;
           })}
         </div>
       </Stage>

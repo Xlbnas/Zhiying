@@ -9,6 +9,7 @@
       "height": 914,
       "creator": "Sigmund Freud",
       "date": "1904",
+      "sourceProvider": "wikimedia",
       "sourceUrl": "https://commons.wikimedia.org/wiki/File:Zur_psychopathologie_1904_freud.jpg",
       "license": "Public domain",
       "publicDomainBasis": "Published in 1904; Wikimedia Commons marks the scan public domain.",
@@ -23,11 +24,27 @@
       "height": 2240,
       "creator": "Max Halberstadt",
       "date": "circa 1921",
+      "sourceProvider": "wikimedia",
       "sourceUrl": "https://commons.wikimedia.org/wiki/File:Sigmund_Freud,_by_Max_Halberstadt_(cropped).jpg",
       "license": "Public domain",
       "publicDomainBasis": "Wikimedia Commons marks the photograph public domain.",
       "description": "Portrait of Sigmund Freud by Max Halberstadt.",
-      "intendedUsage": "S006-S007 author and historical context"
+      "intendedUsage": "S006 primary author portrait"
+    },
+    {
+      "assetId": "r3b-freud-contents-1922",
+      "publicPath": "assets/3778ffb0-c430-4499-9f7f-2590f45cb8cb/r3a/freud-1922-contents.png",
+      "mediaType": "image",
+      "width": 1440,
+      "height": 1100,
+      "creator": "Sigmund Freud; English translation by A. A. Brill",
+      "date": "1922 edition",
+      "sourceProvider": "project_gutenberg",
+      "sourceUrl": "https://www.gutenberg.org/files/67332/67332-h/67332-h.htm",
+      "license": "Public domain in the United States",
+      "publicDomainBasis": "Project Gutenberg eBook 67332 is distributed as public domain in the United States.",
+      "description": "Unaltered browser capture of the 1922 edition contents page, including chapter V Mistakes in Speech and chapter VII Forgetting of Impressions and Resolutions.",
+      "intendedUsage": "S007 direct archival text evidence for slips of the tongue and forgotten intentions"
     },
     {
       "assetId": "r3a-signorelli-self-portrait",
@@ -37,6 +54,7 @@
       "height": 1427,
       "creator": "Luca Signorelli",
       "date": "circa 1500",
+      "sourceProvider": "wikimedia",
       "sourceUrl": "https://commons.wikimedia.org/wiki/File:Signorelli,_Luca_-_selfportrait_alone.jpg",
       "license": "Public domain",
       "publicDomainBasis": "The artwork is centuries out of copyright; Wikimedia Commons marks the reproduction public domain.",
@@ -51,6 +69,7 @@
       "height": 670,
       "creator": "Luca Signorelli",
       "date": "1499-1502",
+      "sourceProvider": "wikimedia",
       "sourceUrl": "https://commons.wikimedia.org/wiki/File:Luca_signorelli,_cappella_di_san_brizio,_eletti_in_paradiso_01.jpg",
       "license": "Public domain",
       "publicDomainBasis": "The artwork is centuries out of copyright; Wikimedia Commons marks the reproduction public domain.",
@@ -65,6 +84,7 @@
       "height": 1374,
       "creator": "Sigmund Freud; English translation by A. A. Brill",
       "date": "1922 edition",
+      "sourceProvider": "project_gutenberg",
       "sourceUrl": "https://www.gutenberg.org/files/67332/67332-h/67332-h.htm",
       "license": "Public domain in the United States",
       "publicDomainBasis": "Project Gutenberg eBook 67332 is distributed as public domain in the United States.",
@@ -79,6 +99,7 @@
       "height": 1541,
       "creator": "Unknown photographer; Library of Congress collection",
       "date": "1920",
+      "sourceProvider": "wikimedia",
       "sourceUrl": "https://commons.wikimedia.org/wiki/File:Sigmund_Freud_with_colleagues_at_the_Congress_at_the_Hague_LCCN2010651704.jpg",
       "license": "Public domain",
       "publicDomainBasis": "Library of Congress image; Wikimedia Commons marks the file public domain.",
@@ -89,10 +110,10 @@
   "sceneAssets": {
     "S005": ["r3a-freud-title-page-1904"],
     "S006": ["r3a-freud-portrait-1921"],
-    "S007": ["r3a-freud-portrait-1921"],
+    "S007": ["r3b-freud-contents-1922"],
     "S008": ["r3a-signorelli-self-portrait", "r3a-signorelli-elect-in-paradise"],
     "S009": ["r3a-signorelli-association-diagram-1922"],
-    "S010": ["r3a-hague-congress-1920", "r3a-freud-portrait-1921"]
+    "S010": ["r3a-hague-congress-1920"]
   },
-  "archiveDominantSceneIds": ["S005", "S008", "S009", "S010"]
+  "archiveDominantSceneIds": ["S005", "S007", "S008", "S009", "S010"]
 }

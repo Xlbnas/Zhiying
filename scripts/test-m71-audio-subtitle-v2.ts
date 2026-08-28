@@ -34,6 +34,8 @@ import {
 import {NARRATION_AUDIO_V2_ARTIFACT_KIND} from '../src/lib/narration/audio-v2-manifest';
 import {
   buildVisualSourceV2,
+  DARK_EDITORIAL_V1_CHOREOGRAPHY,
+  DARK_EDITORIAL_V1_RENDERER_VERSION,
   getExactVisualSourceV2Artifact,
   V2_VISUAL_R2_CHOREOGRAPHY,
   V2_VISUAL_R2_RENDERER_VERSION,
@@ -436,6 +438,30 @@ async function main(): Promise<void> {
     choreography: V2_VISUAL_R2_CHOREOGRAPHY,
   });
   ok(visualR2Again.reused && visualR2Again.artifact.id === visualR2.artifact.id, '[V10] exact choreography visual source is idempotent');
+  const visualDark = await buildVisualSourceV2({
+    projectId: fixture.projectId,
+    designScenes: {id: designRow.id, version: designRow.version},
+    narrationPlanV2: {id: fixture.artifact.id, version: fixture.artifact.version},
+    narrationAudioV2: first.artifact,
+    subtitleTimingV2: subtitle1.artifact,
+    choreography: DARK_EDITORIAL_V1_CHOREOGRAPHY,
+  });
+  ok(!visualDark.reused && visualDark.visual.data.scenes.every((scene) => (scene.templateProps?.v2VisualR2 as {version?: unknown} | undefined)?.version === DARK_EDITORIAL_V1_RENDERER_VERSION), '[V10a] exact dark editorial marker propagates to all scenes');
+  ok(Object.values(visualDark.visual.assetMap).flat().length === 7 && visualDark.visual.assetMap.S007?.[0]?.sourceUrl.includes('gutenberg.org') === true, '[V10b] dark editorial exact archive manifest resolves seven provenance-backed assets');
+  ok((await getExactVisualSourceV2Artifact(fixture.projectId, {artifactId: visualDark.artifact.id, version: visualDark.artifact.version}))?.artifact.id === visualDark.artifact.id, '[V10c] exact dark editorial visual source recomputes and validates assets');
+  const visualDarkAgain = await buildVisualSourceV2({
+    projectId: fixture.projectId,
+    designScenes: {id: designRow.id, version: designRow.version},
+    narrationPlanV2: {id: fixture.artifact.id, version: fixture.artifact.version},
+    narrationAudioV2: first.artifact,
+    subtitleTimingV2: subtitle1.artifact,
+    choreography: DARK_EDITORIAL_V1_CHOREOGRAPHY,
+  });
+  ok(visualDarkAgain.reused && visualDarkAgain.artifact.id === visualDark.artifact.id, '[V10d] exact dark editorial visual source is idempotent');
+  const darkS007Asset = visualDark.visual.assetMap.S007![0]!;
+  getDb().prepare('UPDATE assets SET source_provider = ? WHERE id = ?').run('tampered', darkS007Asset.assetId);
+  ok(await getExactVisualSourceV2Artifact(fixture.projectId, {artifactId: visualDark.artifact.id, version: visualDark.artifact.version}) === null, '[V10e] dark editorial archive provenance mutation fails closed');
+  getDb().prepare('UPDATE assets SET source_provider = ? WHERE id = ?').run('project_gutenberg', darkS007Asset.assetId);
   try {
     await buildVisualSourceV2({
       projectId: fixture.projectId,
@@ -480,6 +506,9 @@ async function main(): Promise<void> {
   const cliVisualR2 = runCli(['visuals', '--project', fixture.projectId, '--design', `${designRow.id}@${designRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--choreography', 'v2-visual-r2@2']);
   const cliVisualR2Json = JSON.parse(cliVisualR2.stdout) as {artifact?: {id?: string}; reused?: boolean; sources?: {choreography?: {id?: string; version?: number}}};
   ok(cliVisualR2.status === 0 && cliVisualR2Json.artifact?.id === visualR2.artifact.id && cliVisualR2Json.reused === true && cliVisualR2Json.sources?.choreography?.version === 2, '[C5-R2] visuals CLI routes explicit exact choreography');
+  const cliVisualDark = runCli(['visuals', '--project', fixture.projectId, '--design', `${designRow.id}@${designRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--choreography', 'dark-editorial-v1@1']);
+  const cliVisualDarkJson = JSON.parse(cliVisualDark.stdout) as {artifact?: {id?: string}; reused?: boolean; sources?: {choreography?: {id?: string; version?: number}}};
+  ok(cliVisualDark.status === 0 && cliVisualDarkJson.artifact?.id === visualDark.artifact.id && cliVisualDarkJson.reused === true && cliVisualDarkJson.sources?.choreography?.id === 'dark-editorial-v1', '[C5-R3] visuals CLI routes explicit exact dark editorial profile');
   const cliReconcile = runCli(['reconcile', '--project', fixture.projectId, '--scenes', `${visual1.artifact.id}@${visual1.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`]);
   const cliRecJson = JSON.parse(cliReconcile.stdout) as {mode?: string; artifact?: {id?: string}};
   ok(cliReconcile.status === 0 && cliRecJson.mode === 'v2-exact' && cliRecJson.artifact?.id === rec1.artifact.id, '[C6] reconcile CLI routes exact V2 chain');
