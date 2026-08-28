@@ -412,6 +412,18 @@ function isDarkEditorial(choreography: VisualSourceV2['choreography']): boolean 
   return choreography?.id === DARK_EDITORIAL_V1_CHOREOGRAPHY.id && choreography.version === DARK_EDITORIAL_V1_CHOREOGRAPHY.version;
 }
 
+function mergeDarkEditorialAssets(
+  base: VisualSourceV2['assetMap'],
+  supplemental: VisualSourceV2['assetMap'],
+): VisualSourceV2['assetMap'] {
+  const merged = {...base};
+  for (const [sceneId, editorialAssets] of Object.entries(supplemental)) {
+    const seen = new Set(editorialAssets.map((asset) => asset.assetId));
+    merged[sceneId] = [...editorialAssets, ...(base[sceneId] ?? []).filter((asset) => !seen.has(asset.assetId))];
+  }
+  return merged;
+}
+
 async function readExactSources(input: {
   projectId: string;
   designScenes: {id: string; version: number};
@@ -465,7 +477,7 @@ export async function buildVisualSourceV2(input: {
   const unitMappings = retimed.unitMappings;
   const baseAssets = exactAssets(input.projectId, data);
   const assets = isDarkEditorial(choreographed.choreography)
-    ? {...baseAssets, assetMap: {...baseAssets.assetMap, ...darkEditorialAssetMap(input.projectId, true)}}
+    ? {...baseAssets, assetMap: mergeDarkEditorialAssets(baseAssets.assetMap, darkEditorialAssetMap(input.projectId, true))}
     : baseAssets;
   const expected = visualSourceV2Schema.parse({
     schemaVersion: VISUAL_SOURCE_V2_SCHEMA_VERSION,
@@ -533,7 +545,7 @@ export async function getExactVisualSourceV2Artifact(
       : undefined);
     const baseAssets = exactAssets(projectId, choreographed.data);
     const expectedAssetMap = isDarkEditorial(choreographed.choreography)
-      ? {...baseAssets.assetMap, ...darkEditorialAssetMap(projectId, false)}
+      ? mergeDarkEditorialAssets(baseAssets.assetMap, darkEditorialAssetMap(projectId, false))
       : baseAssets.assetMap;
     if (
       visual.compilerVersion !== VISUAL_SOURCE_V2_COMPILER_VERSION ||

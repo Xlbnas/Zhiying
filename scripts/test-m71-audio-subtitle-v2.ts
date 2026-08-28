@@ -46,6 +46,7 @@ import {buildFinalRenderPropsV2, enqueueFinalRenderV2} from '../src/lib/final-re
 import {buildSubtitleTimingV2Sidecars} from '../src/lib/subtitles/renderer';
 import {stageRuntimeNarrationAudio} from '../src/worker/runtime-audio';
 import {zhiyingFullCutPropsSchema} from '../src/lib/scene-schema';
+import {bindAssetToRequirement, insertAsset} from '../src/lib/assets/model';
 
 let pass = 0;
 let fail = 0;
@@ -438,20 +439,49 @@ async function main(): Promise<void> {
     choreography: V2_VISUAL_R2_CHOREOGRAPHY,
   });
   ok(visualR2Again.reused && visualR2Again.artifact.id === visualR2.artifact.id, '[V10] exact choreography visual source is idempotent');
+  const darkBaseLocalPath = path.posix.join('assets', fixture.projectId, 'dark-base.jpg');
+  const darkBasePhysicalPath = path.join('public', darkBaseLocalPath);
+  fs.mkdirSync(path.dirname(darkBasePhysicalPath), {recursive: true});
+  fs.writeFileSync(darkBasePhysicalPath, Buffer.from('dark-base-binding-fixture'));
+  const darkBaseAsset = insertAsset({
+    projectId: fixture.projectId,
+    sceneId: 'S010',
+    mediaType: 'image',
+    sourceType: 'archive',
+    sourceProvider: 'fixture',
+    sourceUrl: 'https://example.invalid/dark-base.jpg',
+    localPath: darkBaseLocalPath,
+    width: 10,
+    height: 10,
+    licenseStatus: 'usable',
+    description: 'frozen base binding fixture',
+  });
+  bindAssetToRequirement({projectId: fixture.projectId, sceneId: 'S010', requirementId: 'S010-R01', assetId: darkBaseAsset.id});
+  const darkDesign = {
+    ...design,
+    scenes: design.scenes.map((scene) => scene.id === 'S010' ? {
+      ...scene,
+      category: 'Archive',
+      visualType: 'Archive',
+      assetRequirements: [{requirementId: 'S010-R01', kind: 'image' as const, subject: 'base binding', query: 'base binding', usage: 'primary' as const, policy: 'public_domain' as const, authenticity: 'authentic_required' as const}],
+    } : scene),
+  };
+  const darkDesignRow = generateVersion({projectId: fixture.projectId, stage: 'scenes', content: JSON.stringify(darkDesign), contentType: 'json', source: 'manual_edit'});
   const visualDark = await buildVisualSourceV2({
     projectId: fixture.projectId,
-    designScenes: {id: designRow.id, version: designRow.version},
+    designScenes: {id: darkDesignRow.id, version: darkDesignRow.version},
     narrationPlanV2: {id: fixture.artifact.id, version: fixture.artifact.version},
     narrationAudioV2: first.artifact,
     subtitleTimingV2: subtitle1.artifact,
     choreography: DARK_EDITORIAL_V1_CHOREOGRAPHY,
   });
   ok(!visualDark.reused && visualDark.visual.data.scenes.every((scene) => (scene.templateProps?.v2VisualR2 as {version?: unknown} | undefined)?.version === DARK_EDITORIAL_V1_RENDERER_VERSION), '[V10a] exact dark editorial marker propagates to all scenes');
-  ok(Object.values(visualDark.visual.assetMap).flat().length === 7 && visualDark.visual.assetMap.S007?.[0]?.sourceUrl.includes('gutenberg.org') === true, '[V10b] dark editorial exact archive manifest resolves seven provenance-backed assets');
+  ok(Object.values(visualDark.visual.assetMap).flat().length === 8 && visualDark.visual.assetMap.S007?.[0]?.sourceUrl.includes('gutenberg.org') === true, '[V10b] dark editorial exact archive manifest resolves seven provenance-backed assets');
+  ok(visualDark.visual.assetMap.S010?.length === 2 && visualDark.visual.assetMap.S010[0]?.assetId !== darkBaseAsset.id && visualDark.visual.assetMap.S010[1]?.assetId === darkBaseAsset.id, '[V10bb] dark editorial asset stays primary while frozen exact binding remains present');
   ok((await getExactVisualSourceV2Artifact(fixture.projectId, {artifactId: visualDark.artifact.id, version: visualDark.artifact.version}))?.artifact.id === visualDark.artifact.id, '[V10c] exact dark editorial visual source recomputes and validates assets');
   const visualDarkAgain = await buildVisualSourceV2({
     projectId: fixture.projectId,
-    designScenes: {id: designRow.id, version: designRow.version},
+    designScenes: {id: darkDesignRow.id, version: darkDesignRow.version},
     narrationPlanV2: {id: fixture.artifact.id, version: fixture.artifact.version},
     narrationAudioV2: first.artifact,
     subtitleTimingV2: subtitle1.artifact,
@@ -506,7 +536,7 @@ async function main(): Promise<void> {
   const cliVisualR2 = runCli(['visuals', '--project', fixture.projectId, '--design', `${designRow.id}@${designRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--choreography', 'v2-visual-r2@2']);
   const cliVisualR2Json = JSON.parse(cliVisualR2.stdout) as {artifact?: {id?: string}; reused?: boolean; sources?: {choreography?: {id?: string; version?: number}}};
   ok(cliVisualR2.status === 0 && cliVisualR2Json.artifact?.id === visualR2.artifact.id && cliVisualR2Json.reused === true && cliVisualR2Json.sources?.choreography?.version === 2, '[C5-R2] visuals CLI routes explicit exact choreography');
-  const cliVisualDark = runCli(['visuals', '--project', fixture.projectId, '--design', `${designRow.id}@${designRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--choreography', 'dark-editorial-v1@1']);
+  const cliVisualDark = runCli(['visuals', '--project', fixture.projectId, '--design', `${darkDesignRow.id}@${darkDesignRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--choreography', 'dark-editorial-v1@1']);
   const cliVisualDarkJson = JSON.parse(cliVisualDark.stdout) as {artifact?: {id?: string}; reused?: boolean; sources?: {choreography?: {id?: string; version?: number}}};
   ok(cliVisualDark.status === 0 && cliVisualDarkJson.artifact?.id === visualDark.artifact.id && cliVisualDarkJson.reused === true && cliVisualDarkJson.sources?.choreography?.id === 'dark-editorial-v1', '[C5-R3] visuals CLI routes explicit exact dark editorial profile');
   const cliReconcile = runCli(['reconcile', '--project', fixture.projectId, '--scenes', `${visual1.artifact.id}@${visual1.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`]);
@@ -515,6 +545,7 @@ async function main(): Promise<void> {
 
   closeDb();
   fs.rmSync(getDataDir(), {recursive: true, force: true});
+  fs.rmSync(path.dirname(darkBasePhysicalPath), {recursive: true, force: true});
   console.log(`\n[test] 汇总: PASS=${pass} FAIL=${fail}`);
   if (fail > 0) process.exit(1);
 }
