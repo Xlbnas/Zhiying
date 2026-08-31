@@ -6,7 +6,7 @@ FROM ${DOCKER_CLI_IMAGE} AS docker_cli
 FROM ${NODE_IMAGE}
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends bash ca-certificates curl git iproute2 openssl procps \
+  && apt-get install -y --no-install-recommends bash ca-certificates curl ffmpeg git iproute2 openssl procps \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=docker_cli /usr/local/bin/docker /usr/local/bin/docker
