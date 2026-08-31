@@ -519,8 +519,9 @@ async function main(): Promise<void> {
   ok(burnedProps.showSubtitles === true, '[F0b] burned review profile shows subtitles');
   ok(legacyCompatibleProps.showSubtitles === true, '[F0c] omitted subtitle mode preserves legacy burned behavior');
 
-  const final = enqueueFinalRenderV2(fixture.projectId, finalSources);
+  const final = enqueueFinalRenderV2(fixture.projectId, finalSources, {subtitleMode: 'none'});
   const payload = zhiyingFullCutPropsSchema.parse(JSON.parse(final.job.payload_json));
+  ok(final.job.kind === 'no-subtitles' && payload.showSubtitles === false, '[F0d] clean V2 enqueue preserves subtitle mode through Worker job kind');
   ok(payload.audio.narration === `runtime-audio/${fixture.projectId}/${first.artifact.id}.wav` && payload.data.project.durationInFrames === rec1.reconciliation.target.totalFrames, '[F1] frozen final props use exact V2 audio and reconciled frames');
   ok(payload.data.scenes.length === 25 && payload.subtitles.length === subtitle1.timing.cues.length && payload.renderMode === 'final', '[F2] frozen props carry exact visual/subtitle content');
   const fakeBundle = path.join(getDataDir(), 'fake-v2-bundle');

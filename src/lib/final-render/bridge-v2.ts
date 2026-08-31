@@ -220,7 +220,11 @@ export function enqueueFinalRenderV2(
       const row = db.prepare('SELECT version FROM artifacts WHERE id = ?').get(id) as {version: number};
       sourceArtifact = {id, version: row.version};
     }
-    const job = enqueueRenderJob(projectId, 'fullcut', props);
+    const job = enqueueRenderJob(
+      projectId,
+      options?.subtitleMode === 'none' ? 'no-subtitles' : 'fullcut',
+      props,
+    );
     db.prepare(
       `INSERT INTO artifacts (id, project_id, kind, version, content_json, file_path, created_at)
        VALUES (?, ?, ?, (SELECT COALESCE(MAX(version),0)+1 FROM artifacts WHERE project_id=? AND kind=?), ?, NULL, ?)`,
