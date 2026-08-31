@@ -166,21 +166,39 @@ function ConfidenceTimeline({data, progress}: {data: MemoryLabProps; progress: n
   </>;
 }
 
-function LongitudinalRecord({data, progress}: {data: MemoryLabProps; progress: number}) {
+const continuitySteps: Record<string, {family: Family; step: number}> = {
+  S069: {family: 'longitudinal-record', step: 0},
+  S070: {family: 'longitudinal-record', step: 1},
+  S071: {family: 'longitudinal-record', step: 2},
+  S072: {family: 'longitudinal-record', step: 3},
+  S073: {family: 'longitudinal-record', step: 4},
+  S092: {family: 'classification-funnel', step: 0},
+  S093: {family: 'classification-funnel', step: 1},
+  S094: {family: 'classification-funnel', step: 2},
+  S095: {family: 'classification-funnel', step: 3},
+};
+
+export function memoryLabContinuityStep(scene: SchemaScene, data: MemoryLabProps): number | null {
+  const continuity = continuitySteps[scene.id];
+  return continuity?.family === data.family ? continuity.step : null;
+}
+
+function LongitudinalRecord({data, progress, continuityStep}: {data: MemoryLabProps; progress: number; continuityStep: number | null}) {
   const points = data.items?.length ? data.items : ['T0 初次记录', '数周后', '数年后', '十年后'];
+  const activePoint = continuityStep === null || continuityStep > 3 ? null : continuityStep;
   return <>
     <div style={{position: 'absolute', left: 110, top: 165, width: 1380, fontSize: 57, fontWeight: 720, lineHeight: 1.18}}>{data.headline}</div>
     <div style={{position: 'absolute', left: 120, right: 120, top: 395, display: 'flex', gap: 22, alignItems: 'center'}}>
       {points.slice(0, 4).map((point, index) => <div key={point} style={{display: 'contents'}}>
-        <div style={{position: 'relative', width: 330, height: 115, border: `3px ${index === 0 ? 'double' : 'solid'} ${index === 0 ? palette.red : palette.blue}`, background: index === 0 ? '#ead3ca' : palette.white, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontWeight: 680, opacity: revealAt(progress, index, 4)}}>{index === 0 ? <span style={{position: 'absolute', top: -20, left: 14, padding: '5px 9px', color: palette.white, background: palette.red, fontSize: 16}}>保留原件</span> : null}{point}</div>
+        <div style={{position: 'relative', width: 330, height: 115, border: `3px ${index === 0 ? 'double' : 'solid'} ${index === 0 ? palette.red : palette.blue}`, background: activePoint === index ? palette.blueSoft : index === 0 ? '#ead3ca' : palette.white, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontWeight: 680, opacity: revealAt(progress, index, 4)}}>{index === 0 ? <span style={{position: 'absolute', top: -20, left: 14, padding: '5px 9px', color: palette.white, background: palette.red, fontSize: 16}}>保留原件</span> : null}{activePoint === index && index > 0 ? <span style={{position: 'absolute', top: -18, left: 14, padding: '5px 9px', color: palette.white, background: palette.blue, fontSize: 16}}>当前比较</span> : null}{point}</div>
         {index < 3 ? <div style={{height: 2, flex: 1, background: palette.blue}} /> : null}
       </div>)}
     </div>
     <div style={{position: 'absolute', left: 160, right: 160, top: 650}}>
-      <div style={{fontSize: 28, color: palette.blue, marginBottom: 22}}>报告一致性 <span style={{display: 'inline-block', marginLeft: 30, width: 700, height: 22, background: `linear-gradient(90deg, ${palette.blue} 0%, ${palette.blueSoft} 78%)`, transform: `scaleX(${progress})`, transformOrigin: 'left'}} /></div>
-      <div style={{fontSize: 28, color: palette.red}}>主观确信 <span style={{display: 'inline-block', marginLeft: 58, width: 700, height: 22, background: palette.red, transform: `scaleX(${progress})`, transformOrigin: 'left'}} /></div>
+      <div style={{fontSize: 28, color: palette.blue, marginBottom: 22, opacity: continuityStep === null || continuityStep === 2 ? 1 : .48}}>报告一致性 <span style={{display: 'inline-block', marginLeft: 30, width: 700, height: 22, background: `linear-gradient(90deg, ${palette.blue} 0%, ${palette.blueSoft} 78%)`, transform: `scaleX(${progress})`, transformOrigin: 'left'}} /></div>
+      <div style={{fontSize: 28, color: palette.red, opacity: continuityStep === null || continuityStep === 3 ? 1 : .48}}>主观确信 <span style={{display: 'inline-block', marginLeft: 58, width: 700, height: 22, background: palette.red, transform: `scaleX(${progress})`, transformOrigin: 'left'}} /></div>
     </div>
-    <div style={{position: 'absolute', right: 155, bottom: 118, fontSize: 28, fontWeight: 710, color: palette.red}}>比较的是后来报告与 T0，不是客观录像</div>
+    <div style={{position: 'absolute', right: 155, bottom: 106, padding: '12px 16px', fontSize: 28, fontWeight: 710, color: palette.red, background: continuityStep === 4 ? '#ead3ca' : 'transparent'}}>比较的是后来报告与 T0，不是客观录像</div>
   </>;
 }
 
@@ -195,13 +213,14 @@ function ExternalVerification({data, progress}: {data: MemoryLabProps; progress:
   </>;
 }
 
-function ClassificationFunnel({data, progress}: {data: MemoryLabProps; progress: number}) {
+function ClassificationFunnel({data, progress, continuityStep}: {data: MemoryLabProps; progress: number; continuityStep: number | null}) {
   const items = (data.items?.length ? data.items : ['可能性', '相信发生过', '意象', '片段回忆', '完整自传体记忆']).slice(0, 6);
+  const activeIndex = continuityStep === null ? null : Math.min(items.length - 1, continuityStep + 1);
   return <>
     <div style={{position: 'absolute', left: 110, top: 165, width: 1350, fontSize: 57, fontWeight: 720}}>{data.headline}</div>
     <div style={{position: 'absolute', left: 185, right: 185, top: 385, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 24}}>
       {items.map((item, index) => {
-        return <div key={item} style={{height: 125, background: index === items.length - 1 ? '#ead3ca' : index % 2 ? palette.blueSoft : palette.white, border: `2px solid ${index === items.length - 1 ? palette.red : palette.blue}88`, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: 32, fontWeight: 650, opacity: revealAt(progress, index, items.length)}}>{item}</div>;
+        return <div key={item} style={{position: 'relative', height: 125, background: activeIndex === index ? palette.blueSoft : index === items.length - 1 ? '#ead3ca' : index % 2 ? '#e3ebe7' : palette.white, border: `${activeIndex === index ? 4 : 2}px solid ${index === items.length - 1 ? palette.red : palette.blue}${activeIndex === index ? '' : '88'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: 32, fontWeight: 650, opacity: revealAt(progress, index, items.length)}}>{activeIndex === index ? <span style={{position: 'absolute', top: -19, left: 14, padding: '5px 9px', color: palette.white, background: palette.blue, fontSize: 16}}>当前讨论</span> : null}{item}</div>;
       })}
     </div>
     <div style={{position: 'absolute', left: 560, bottom: 125, width: 800, padding: '18px 24px', border: `2px dashed ${palette.red}`, color: palette.red, textAlign: 'center', fontSize: 30, fontWeight: 720}}>这些是不同分类，不是一条自动升级路径</div>
@@ -213,14 +232,17 @@ export const MemoryLabEditorialScene = ({scene, assets}: {scene: SchemaScene; as
   if (!data) throw new Error(`${scene.id} 缺少 memoryLab renderer props`);
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
-  const progress = spring({frame, fps, config: {damping: 18, stiffness: 82, mass: .85}, durationInFrames: Math.min(scene.durationInFrames, 34)});
+  const continuityStep = memoryLabContinuityStep(scene, data);
+  const progress = continuityStep !== null && continuityStep > 0
+    ? 1
+    : spring({frame, fps, config: {damping: 18, stiffness: 82, mass: .85}, durationInFrames: Math.min(scene.durationInFrames, 34)});
   const content = (() => {
     if (data.family === 'fragment-assembly') return <FragmentAssembly data={data} progress={progress} />;
     if (data.family === 'source-document') return <SourceDocument data={data} progress={progress} asset={assets?.[0]} />;
     if (data.family === 'semantic-field') return <SemanticField data={data} progress={progress} />;
-    if (data.family === 'longitudinal-record') return <LongitudinalRecord data={data} progress={progress} />;
+    if (data.family === 'longitudinal-record') return <LongitudinalRecord data={data} progress={progress} continuityStep={continuityStep} />;
     if (data.family === 'trace-comparison') return <TwoTrack data={data} progress={progress} />;
-    if (data.family === 'classification-funnel') return <ClassificationFunnel data={data} progress={progress} />;
+    if (data.family === 'classification-funnel') return <ClassificationFunnel data={data} progress={progress} continuityStep={continuityStep} />;
     if (data.variant === 'confidence-feedback' || data.variant === 'contamination') return <ConfidenceTimeline data={data} progress={progress} />;
     if (data.variant === 'external-verification') return <ExternalVerification data={data} progress={progress} />;
     return <HorizontalProcess data={data} progress={progress} tone={data.family === 'procedure-safeguard' ? 'red' : 'blue'} />;
