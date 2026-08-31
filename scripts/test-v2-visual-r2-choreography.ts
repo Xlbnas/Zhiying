@@ -4,7 +4,9 @@ import path from 'node:path';
 import choreography from '../src/data/v2-visual-r2-choreography-plan.json';
 import {
   DARK_EDITORIAL_V1_PACING_VERSION,
+  DARK_EDITORIAL_V1_STATE_PERSISTENCE_VERSION,
   darkEditorialPacedBeatProgress,
+  persistentBeatProgress,
 } from '../src/remotion/templates/production/V2VisualR2Scene';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -68,6 +70,10 @@ const longBeat = {startFrame: 200, endFrame: 500};
 assert.ok(darkEditorialPacedBeatProgress(470, longBeat) < 1);
 assert.equal(darkEditorialPacedBeatProgress(481, longBeat), 1);
 assert.equal(DARK_EDITORIAL_V1_PACING_VERSION, 'dark-editorial-v1@2');
+assert.equal(DARK_EDITORIAL_V1_STATE_PERSISTENCE_VERSION, 'dark-editorial-v1@3');
+assert.equal(persistentBeatProgress('S020', 'B034', .4), .4);
+assert.equal(persistentBeatProgress('S020', 'B035', 0), 1);
+assert.equal(persistentBeatProgress('S020', 'B035', .5), 1);
 
 console.log(JSON.stringify({
   status: 'PASS',

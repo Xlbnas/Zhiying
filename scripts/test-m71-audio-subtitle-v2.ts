@@ -38,6 +38,8 @@ import {
   DARK_EDITORIAL_V1_PACING_CHOREOGRAPHY,
   DARK_EDITORIAL_V1_PACING_RENDERER_VERSION,
   DARK_EDITORIAL_V1_RENDERER_VERSION,
+  DARK_EDITORIAL_V1_STATE_PERSISTENCE_CHOREOGRAPHY,
+  DARK_EDITORIAL_V1_STATE_PERSISTENCE_RENDERER_VERSION,
   getExactVisualSourceV2Artifact,
   V2_VISUAL_R2_CHOREOGRAPHY,
   V2_VISUAL_R2_RENDERER_VERSION,
@@ -511,6 +513,27 @@ async function main(): Promise<void> {
     choreography: DARK_EDITORIAL_V1_PACING_CHOREOGRAPHY,
   });
   ok(visualDarkPacedAgain.reused && visualDarkPacedAgain.artifact.id === visualDarkPaced.artifact.id, '[V10j] exact pacing visual source is idempotent');
+  const visualDarkPersistent = await buildVisualSourceV2({
+    projectId: fixture.projectId,
+    designScenes: {id: darkDesignRow.id, version: darkDesignRow.version},
+    narrationPlanV2: {id: fixture.artifact.id, version: fixture.artifact.version},
+    narrationAudioV2: first.artifact,
+    subtitleTimingV2: subtitle1.artifact,
+    choreography: DARK_EDITORIAL_V1_STATE_PERSISTENCE_CHOREOGRAPHY,
+  });
+  ok(!visualDarkPersistent.reused && visualDarkPersistent.artifact.id !== visualDarkPaced.artifact.id, '[V10k] beat-state persistence creates a distinct exact visual artifact without replacing pacing v2');
+  ok(visualDarkPersistent.visual.data.scenes.every((scene) => (scene.templateProps?.v2VisualR2 as {version?: unknown} | undefined)?.version === DARK_EDITORIAL_V1_STATE_PERSISTENCE_RENDERER_VERSION), '[V10l] exact beat-state persistence marker propagates to all scenes');
+  ok(visualDarkPersistent.visual.source.masterSha256 === visualDarkPaced.visual.source.masterSha256 && visualDarkPersistent.visual.source.masterDurationMs === visualDarkPaced.visual.source.masterDurationMs, '[V10m] beat-state persistence preserves exact audio media facts');
+  ok(JSON.stringify(visualDarkPersistent.visual.assetMap) === JSON.stringify(visualDarkPaced.visual.assetMap), '[V10n] beat-state persistence preserves frozen historical asset map');
+  const visualDarkPersistentAgain = await buildVisualSourceV2({
+    projectId: fixture.projectId,
+    designScenes: {id: darkDesignRow.id, version: darkDesignRow.version},
+    narrationPlanV2: {id: fixture.artifact.id, version: fixture.artifact.version},
+    narrationAudioV2: first.artifact,
+    subtitleTimingV2: subtitle1.artifact,
+    choreography: DARK_EDITORIAL_V1_STATE_PERSISTENCE_CHOREOGRAPHY,
+  });
+  ok(visualDarkPersistentAgain.reused && visualDarkPersistentAgain.artifact.id === visualDarkPersistent.artifact.id, '[V10o] exact beat-state persistence visual source is idempotent');
   const darkS007Asset = visualDark.visual.assetMap.S007![0]!;
   getDb().prepare('UPDATE assets SET source_provider = ? WHERE id = ?').run('tampered', darkS007Asset.assetId);
   ok(await getExactVisualSourceV2Artifact(fixture.projectId, {artifactId: visualDark.artifact.id, version: visualDark.artifact.version}) === null, '[V10e] dark editorial archive provenance mutation fails closed');
@@ -566,6 +589,9 @@ async function main(): Promise<void> {
   const cliVisualDarkPaced = runCli(['visuals', '--project', fixture.projectId, '--design', `${darkDesignRow.id}@${darkDesignRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--choreography', 'dark-editorial-v1@2']);
   const cliVisualDarkPacedJson = JSON.parse(cliVisualDarkPaced.stdout) as {artifact?: {id?: string}; reused?: boolean; sources?: {choreography?: {id?: string; version?: number}}};
   ok(cliVisualDarkPaced.status === 0 && cliVisualDarkPacedJson.artifact?.id === visualDarkPaced.artifact.id && cliVisualDarkPacedJson.reused === true && cliVisualDarkPacedJson.sources?.choreography?.version === 2, '[C5-R4] visuals CLI routes explicit exact pacing polish profile');
+  const cliVisualDarkPersistent = runCli(['visuals', '--project', fixture.projectId, '--design', `${darkDesignRow.id}@${darkDesignRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--choreography', 'dark-editorial-v1@3']);
+  const cliVisualDarkPersistentJson = JSON.parse(cliVisualDarkPersistent.stdout) as {artifact?: {id?: string}; reused?: boolean; sources?: {choreography?: {id?: string; version?: number}}};
+  ok(cliVisualDarkPersistent.status === 0 && cliVisualDarkPersistentJson.artifact?.id === visualDarkPersistent.artifact.id && cliVisualDarkPersistentJson.reused === true && cliVisualDarkPersistentJson.sources?.choreography?.version === 3, '[C5-R5] visuals CLI routes explicit exact beat-state persistence profile');
   const cliReconcile = runCli(['reconcile', '--project', fixture.projectId, '--scenes', `${visual1.artifact.id}@${visual1.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`]);
   const cliRecJson = JSON.parse(cliReconcile.stdout) as {mode?: string; artifact?: {id?: string}};
   ok(cliReconcile.status === 0 && cliRecJson.mode === 'v2-exact' && cliRecJson.artifact?.id === rec1.artifact.id, '[C6] reconcile CLI routes exact V2 chain');

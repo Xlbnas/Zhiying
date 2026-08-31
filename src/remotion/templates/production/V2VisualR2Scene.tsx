@@ -7,6 +7,7 @@ import {fontFamily} from '../../design/tokens';
 export const V2_VISUAL_R2_VERSION = 'v2-visual-r2@2';
 export const DARK_EDITORIAL_V1_VERSION = 'dark-editorial-v1@1';
 export const DARK_EDITORIAL_V1_PACING_VERSION = 'dark-editorial-v1@2';
+export const DARK_EDITORIAL_V1_STATE_PERSISTENCE_VERSION = 'dark-editorial-v1@3';
 
 const lightPalette = {
   paper: '#f3f0e8',
@@ -53,7 +54,8 @@ export function isV2VisualR2Scene(scene: SchemaScene): boolean {
     : null;
   return version === V2_VISUAL_R2_VERSION ||
     version === DARK_EDITORIAL_V1_VERSION ||
-    version === DARK_EDITORIAL_V1_PACING_VERSION;
+    version === DARK_EDITORIAL_V1_PACING_VERSION ||
+    version === DARK_EDITORIAL_V1_STATE_PERSISTENCE_VERSION;
 }
 
 function sceneRendererVersion(scene: SchemaScene): unknown {
@@ -65,7 +67,9 @@ function sceneRendererVersion(scene: SchemaScene): unknown {
 
 function isDarkEditorialScene(scene: SchemaScene): boolean {
   const version = sceneRendererVersion(scene);
-  return version === DARK_EDITORIAL_V1_VERSION || version === DARK_EDITORIAL_V1_PACING_VERSION;
+  return version === DARK_EDITORIAL_V1_VERSION ||
+    version === DARK_EDITORIAL_V1_PACING_VERSION ||
+    version === DARK_EDITORIAL_V1_STATE_PERSISTENCE_VERSION;
 }
 
 const clamp = (value: number) => Math.min(1, Math.max(0, value));
@@ -82,6 +86,12 @@ export function darkEditorialPacedBeatProgress(
   const settleFrames = Math.min(18, Math.max(10, Math.round(availableFrames * .24)));
   const motionFrames = Math.max(1, availableFrames - settleFrames);
   return clamp((frame - beat.startFrame) / motionFrames);
+}
+
+export function persistentBeatProgress(sceneId: string, beatId: string, activeProgress: number): number {
+  const sceneBeats = choreography.beats.filter((candidate) => candidate.sceneId === sceneId);
+  const beatIndex = sceneBeats.findIndex((candidate) => candidate.beatId === beatId);
+  return beatIndex > 0 ? 1 : activeProgress;
 }
 
 function activeBeat(sceneId: string, frame: number): Beat {
@@ -177,7 +187,7 @@ function ArchiveFrame({asset, x, y, width, height, label, fit = 'cover', objectP
   );
 }
 
-function HookVisual({scene, frame, beat, progress}: {scene: SchemaScene; frame: number; beat: Beat; progress: number}) {
+function HookVisual({scene, frame, beat, progress, activeProgress}: {scene: SchemaScene; frame: number; beat: Beat; progress: number; activeProgress: number}) {
   const palette = usePalette();
   const dark = useDarkEditorial();
   if (scene.id === 'S001') {
@@ -197,7 +207,7 @@ function HookVisual({scene, frame, beat, progress}: {scene: SchemaScene; frame: 
   }
 
   if (scene.id === 'S002') {
-    const explanation = beat.beatId === 'B003' ? progress : 0;
+    const explanation = beat.beatId === 'B003' ? activeProgress : 0;
     return (
       <Stage chapter="OPENING" label="错误先发生，解释后进入">
         <Pill x={820} y={330} width={280} accent={palette.wine} scale={1.06}>前任</Pill>
@@ -234,7 +244,7 @@ function HookVisual({scene, frame, beat, progress}: {scene: SchemaScene; frame: 
       {labels.map((label, index) => {
         const x = 170 + index * 580;
         const reveal = interpolate(progress, [index * .16, index * .16 + .24], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
-        return <Pill key={label} x={x} y={350 + (secondBeat ? index * 70 : 0)} width={380} accent={index === 2 ? palette.wine : palette.teal} opacity={reveal} scale={interpolate(reveal, [0, 1], [.88, 1], {extrapolateRight: 'clamp'})}>{label}</Pill>;
+        return <Pill key={label} x={x} y={350 + (secondBeat ? index * 70 * activeProgress : 0)} width={380} accent={index === 2 ? palette.wine : palette.teal} opacity={reveal} scale={interpolate(reveal, [0, 1], [.88, 1], {extrapolateRight: 'clamp'})}>{label}</Pill>;
       })}
       <div style={{position: 'absolute', left: 640, top: 575, width: 640, textAlign: 'center', color: palette.muted, fontSize: 22, opacity: interpolate(progress, [.45, .72], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}}>{secondBeat ? '主张越强，需要跨过的证据门槛越高' : '不是一步推断，而是一整段待检验路径'}</div>
       <EvidenceRail active={secondBeat ? 2 : 1} support={secondBeat ? '主张增强，证据未足' : '仍是待检验路径'} />
@@ -242,7 +252,7 @@ function HookVisual({scene, frame, beat, progress}: {scene: SchemaScene; frame: 
   );
 }
 
-function DarkHistoryVisual({scene, beat, progress, assets}: {scene: SchemaScene; beat: Beat; progress: number; assets: ResolvedAsset[]}) {
+function DarkHistoryVisual({scene, beat, progress, activeProgress, assets}: {scene: SchemaScene; beat: Beat; progress: number; activeProgress: number; assets: ResolvedAsset[]}) {
   const palette = usePalette();
   const reveal = (from: number, to: number) => interpolate(progress, [from, to], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
 
@@ -261,6 +271,7 @@ function DarkHistoryVisual({scene, beat, progress, assets}: {scene: SchemaScene;
 
   if (scene.id === 'S006') {
     const interference = beat.beatId === 'B009';
+    const interferenceProgress = interference ? activeProgress : progress;
     return (
       <Stage chapter="HYPOTHESIS" label="弗洛伊德的核心想法">
         <ArchiveFrame asset={assets[0]} x={145} y={190} width={610} height={720} label="西格蒙德·弗洛伊德，约 1921" objectPosition="center 18%" />
@@ -270,7 +281,7 @@ function DarkHistoryVisual({scene, beat, progress, assets}: {scene: SchemaScene;
             <div style={{marginTop: 20, fontSize: 48, lineHeight: 1.28, fontWeight: 760, color: palette.ink}}>错误本身<br />会自动说出真话</div>
             <div style={{marginTop: 38, width: 600, height: 5, background: palette.wine, transformOrigin: 'left', scale: `${reveal(.08, .64)} 1`}} />
           </> : <>
-            {['原本要说的事', '另一股没有承认的念头', '实际说出口'].map((text, index) => <div key={text} style={{marginTop: index === 0 ? 0 : 30, borderTop: `1px solid ${palette.line}`, paddingTop: 24, fontSize: index === 1 ? 32 : 38, color: index === 1 ? palette.wine : palette.ink, opacity: reveal(index * .16, index * .16 + .26)}}>{text}</div>)}
+            {['原本要说的事', '另一股没有承认的念头', '实际说出口'].map((text, index) => <div key={text} style={{marginTop: index === 0 ? 0 : 30, borderTop: `1px solid ${palette.line}`, paddingTop: 24, fontSize: index === 1 ? 32 : 38, color: index === 1 ? palette.wine : palette.ink, opacity: interpolate(interferenceProgress, [index * .16, index * .16 + .26], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}}>{text}</div>)}
             <div style={{marginTop: 46, fontSize: 23, color: palette.gold}}>他的解释：两股念头可能彼此干扰</div>
           </>}
         </div>
@@ -309,8 +320,13 @@ function DarkHistoryVisual({scene, beat, progress, assets}: {scene: SchemaScene;
   if (scene.id === 'S009') {
     const limitation = beat.beatId === 'B015';
     const namesFocus = !limitation && progress >= .38;
-    const sourceScale = limitation ? 1.48 : namesFocus ? 1.3 : 1;
-    const sourceTranslate = limitation ? '-165px -92px' : namesFocus ? '135px 72px' : '0px 0px';
+    const focusTransition = limitation
+      ? interpolate(activeProgress, [0, .58], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.bezier(.16, 1, .3, 1)})
+      : 0;
+    const sourceScale = limitation ? interpolate(focusTransition, [0, 1], [1.3, 1.48]) : namesFocus ? 1.3 : 1;
+    const sourceTranslate = limitation
+      ? `${interpolate(focusTransition, [0, 1], [135, -165])}px ${interpolate(focusTransition, [0, 1], [72, -92])}px`
+      : namesFocus ? '135px 72px' : '0px 0px';
     return (
       <Stage chapter="ASSOCIATION" label="弗洛伊德的个案解释">
         {assets[0] ? <div style={{position: 'absolute', left: 90, top: 160, width: 1740, height: 760, borderRadius: 22, overflow: 'hidden', border: `2px solid ${palette.ink}`, background: palette.paperDeep}}>
@@ -333,10 +349,10 @@ function DarkHistoryVisual({scene, beat, progress, assets}: {scene: SchemaScene;
   );
 }
 
-function HistoryVisual({scene, beat, progress, assets}: {scene: SchemaScene; beat: Beat; progress: number; assets?: ResolvedAsset[]}) {
+function HistoryVisual({scene, beat, progress, activeProgress, assets}: {scene: SchemaScene; beat: Beat; progress: number; activeProgress: number; assets?: ResolvedAsset[]}) {
   const palette = usePalette();
   const dark = useDarkEditorial();
-  if (dark) return <DarkHistoryVisual scene={scene} beat={beat} progress={progress} assets={assets ?? []} />;
+  if (dark) return <DarkHistoryVisual scene={scene} beat={beat} progress={progress} activeProgress={activeProgress} assets={assets ?? []} />;
   const asset = assets?.[0];
   if (scene.id === 'S005') {
     const topics = ['忘记名字', '口误', '误读误写', '忘记办事', '拿错 / 弄丢'];
@@ -483,7 +499,7 @@ function ActivationRace({progress}: {progress: number}) {
   );
 }
 
-function MechanismVisual({scene, frame, beat, progress}: {scene: SchemaScene; frame: number; beat: Beat; progress: number}) {
+function MechanismVisual({scene, frame, beat, progress, activeProgress}: {scene: SchemaScene; frame: number; beat: Beat; progress: number; activeProgress: number}) {
   const palette = usePalette();
   const dark = useDarkEditorial();
   if (scene.id === 'S011') {
@@ -534,7 +550,8 @@ function MechanismVisual({scene, frame, beat, progress}: {scene: SchemaScene; fr
   }
 
   if (scene.id === 'S012') {
-    return <Stage chapter="LANGUAGE" label="多个词项同时竞争"><ActivationRace progress={progress} /><Pill x={1390} y={390} width={260} accent={palette.gold} opacity={interpolate(progress, [.58, .82], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}>{dark ? '领先的词进入语言监控' : '领先者进入监控闸门'}</Pill></Stage>;
+    const raceProgress = beat.beatId === 'B020' ? activeProgress : progress;
+    return <Stage chapter="LANGUAGE" label="多个词项同时竞争"><ActivationRace progress={raceProgress} /><Pill x={1390} y={390} width={260} accent={palette.gold} opacity={interpolate(raceProgress, [.58, .82], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}>{dark ? '领先的词进入语言监控' : '领先者进入监控闸门'}</Pill></Stage>;
   }
 
   if (scene.id === 'S013') {
@@ -551,21 +568,22 @@ function MechanismVisual({scene, frame, beat, progress}: {scene: SchemaScene; fr
   }
 
   const funnel = beat.beatId === 'B024';
+  const retrievalProgress = funnel ? activeProgress : progress;
   return (
     <Stage chapter="MEMORY" label="信息仍在，但暂时不可达">
       <Pill x={250} y={300} width={310} accent={palette.teal}>姓名记忆痕迹</Pill>
       <svg width="1920" height="1080" style={{position: 'absolute', inset: 0}}>
-        <Path d="M 560 336 C 770 336 760 600 1030 600 C 1240 600 1280 430 1450 430" progress={funnel ? progress : .25} color={palette.teal} />
+        <Path d="M 560 336 C 770 336 760 600 1030 600 C 1240 600 1280 430 1450 430" progress={funnel ? interpolate(activeProgress, [0, 1], [.25, 1]) : .25} color={palette.teal} />
         <line x1="1010" y1="535" x2="1010" y2="690" stroke={palette.gold} strokeWidth="5" strokeDasharray="12 10" />
       </svg>
-      <Pill x={1380} y={390} width={320} accent={palette.wine} opacity={funnel ? interpolate(progress, [.58, .8], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'}) : .2}>输出槽：空</Pill>
+      <Pill x={1380} y={390} width={320} accent={palette.wine} opacity={funnel ? interpolate(activeProgress, [.58, .8], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'}) : .2}>输出槽：空</Pill>
       <div style={{position: 'absolute', left: 855, top: 705, color: palette.gold, fontSize: 20, fontWeight: 720}}>取回阈值</div>
-      <div style={{position: 'absolute', left: 705, top: 260, width: 560, textAlign: 'center', fontSize: 28, fontWeight: 720, color: palette.ink, opacity: interpolate(progress, [.15, .42], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}}>{funnel ? '痕迹没有越过阈值' : '仍在记忆里 ≠ 此刻能说出来'}</div>
+      <div style={{position: 'absolute', left: 705, top: 260, width: 560, textAlign: 'center', fontSize: 28, fontWeight: 720, color: palette.ink, opacity: interpolate(retrievalProgress, [.15, .42], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}}>{funnel ? '痕迹没有越过阈值' : '仍在记忆里 ≠ 此刻能说出来'}</div>
     </Stage>
   );
 }
 
-function AppliedMechanismVisual({scene, beat, progress}: {scene: SchemaScene; beat: Beat; progress: number}) {
+function AppliedMechanismVisual({scene, beat, progress, activeProgress}: {scene: SchemaScene; beat: Beat; progress: number; activeProgress: number}) {
   const palette = usePalette();
   const dark = useDarkEditorial();
   if (scene.id === 'S015') {
@@ -576,7 +594,7 @@ function AppliedMechanismVisual({scene, beat, progress}: {scene: SchemaScene; be
         <div style={{position: 'absolute', left: 210, right: 220, top: 510, height: 7, borderRadius: 4, background: palette.line}} />
         {[['现在', 250], [dark ? '环境提示' : '环境 cue', 870], ['稍后执行', 1450]].map(([label, x], index) => <div key={String(label)} style={{position: 'absolute', left: Number(x), top: 475}}><Dot x={0} y={38} color={index === 1 ? palette.gold : palette.teal} size={22} /><div style={{marginTop: 62, fontSize: dark ? 24 : 18, fontWeight: 700}}>{label}</div></div>)}
         <Pill x={taskX} y={350} width={330} accent={palette.teal}>买牛奶 / 回消息 / 带钥匙</Pill>
-        {load ? <div style={{position: 'absolute', left: 650, top: 245, width: 630, height: 330, borderRadius: 28, background: palette.wineSoft, border: `3px solid ${palette.wine}`, opacity: interpolate(progress, [.15, .5], [.2, .94], {extrapolateRight: 'clamp'}), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontWeight: 780, color: palette.wine}}>{dark ? '手头的事太占注意力' : '当前任务高负荷'}<div style={{position: 'absolute', right: 24, bottom: 20, fontSize: 16}}>40 篇研究系统综述</div></div> : null}
+        {load ? <div style={{position: 'absolute', left: 650, top: 245, width: 630, height: 330, borderRadius: 28, background: palette.wineSoft, border: `3px solid ${palette.wine}`, opacity: interpolate(activeProgress, [.15, .5], [.2, .94], {extrapolateRight: 'clamp'}), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontWeight: 780, color: palette.wine}}>{dark ? '手头的事太占注意力' : '当前任务高负荷'}<div style={{position: 'absolute', right: 24, bottom: 20, fontSize: 16}}>40 篇研究系统综述</div></div> : null}
       </Stage>
     );
   }
@@ -584,7 +602,7 @@ function AppliedMechanismVisual({scene, beat, progress}: {scene: SchemaScene; be
   if (scene.id === 'S016') {
     const takeover = beat.beatId === 'B028';
     const familiar = interpolate(progress, [.08, .68], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
-    const current = takeover ? interpolate(progress, [.36, .9], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'}) : progress * .32;
+    const current = takeover ? interpolate(activeProgress, [.36, .9], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'}) : progress * .32;
     return (
       <Stage chapter="ACTION CONTROL" label={takeover ? '当前目标来迟一步' : '熟练脚本抢先启动'}>
         <Pill x={170} y={385} width={300} accent={palette.teal}>动作起点</Pill>
@@ -702,7 +720,7 @@ function EvidenceCard({x, y, title, status, accent, opacity = 1}: {x: number; y:
   );
 }
 
-function EvaluationVisual({scene, beat, progress}: {scene: SchemaScene; beat: Beat; progress: number}) {
+function EvaluationVisual({scene, beat, progress, activeProgress}: {scene: SchemaScene; beat: Beat; progress: number; activeProgress: number}) {
   const palette = usePalette();
   const dark = useDarkEditorial();
   if (scene.id === 'S020') {
@@ -722,8 +740,8 @@ function EvaluationVisual({scene, beat, progress}: {scene: SchemaScene; beat: Be
   if (scene.id === 'S021') {
     const rewrite = beat.beatId === 'B037';
     const alternatives = ['词频', '语音相似', '疲劳', '注意下降'];
-    const outcomeReveal = interpolate(progress, [.18, .42], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
-    const rewriteReveal = interpolate(progress, [.58, .82], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
+    const outcomeReveal = interpolate(activeProgress, [.18, .42], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
+    const rewriteReveal = interpolate(activeProgress, [.58, .82], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
     return (
       <Stage chapter="EVALUATION" label={rewrite ? '结果相反，故事还能改写吗？' : '让普通原因进入同一比较'}>
         {!rewrite ? <Pill x={760} y={220} width={400} accent={palette.wine}>隐藏动机解释</Pill> : <>
@@ -793,7 +811,7 @@ function EvaluationVisual({scene, beat, progress}: {scene: SchemaScene; beat: Be
   );
 }
 
-function ClosingVisual({scene, beat, progress}: {scene: SchemaScene; beat: Beat; progress: number}) {
+function ClosingVisual({scene, beat, progress, activeProgress}: {scene: SchemaScene; beat: Beat; progress: number; activeProgress: number}) {
   const palette = usePalette();
   const dark = useDarkEditorial();
   if (scene.id === 'S024') {
@@ -810,13 +828,14 @@ function ClosingVisual({scene, beat, progress}: {scene: SchemaScene; beat: Beat;
           <Path d="M 1160 431 L 1170 596" progress={progress} />
         </svg>
         {questions.map((question, index) => <Pill key={question} x={positions[index]![0]} y={positions[index]![1]} width={300} accent={palette.teal} opacity={interpolate(progress, [index * .1, index * .1 + .3], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}>{question}</Pill>)}
-        {pause ? <div style={{position: 'absolute', left: 635, top: 735, width: 650, height: 94, borderRadius: 22, background: palette.wine, color: palette.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontWeight: 820, scale: interpolate(progress, [0, .48], [.72, 1], {extrapolateRight: 'clamp'})}}>{dark ? '证据不足，暂不下结论' : '证据不足　｜　VERDICT HOLD'}</div> : null}
+        {pause ? <div style={{position: 'absolute', left: 635, top: 735, width: 650, height: 94, borderRadius: 22, background: palette.wine, color: palette.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontWeight: 820, scale: interpolate(activeProgress, [0, .48], [.72, 1], {extrapolateRight: 'clamp'})}}>{dark ? '证据不足，暂不下结论' : '证据不足　｜　VERDICT HOLD'}</div> : null}
       </Stage>
     );
   }
 
   const finalBeat = beat.beatId === 'B044';
-  const reveal = interpolate(progress, [0, .78], [0, 1], {extrapolateRight: 'clamp'});
+  const revealProgress = finalBeat ? activeProgress : progress;
+  const reveal = interpolate(revealProgress, [0, .78], [0, 1], {extrapolateRight: 'clamp'});
   const slots = ['观察', '机制', '替代原因', '提前预测', '可失败结果', '复现'];
   return (
     <Stage chapter="FINAL" label={finalBeat ? '从错误到动机，还缺整条证据链' : '一次失误可以分流'}>
@@ -835,7 +854,7 @@ function ClosingVisual({scene, beat, progress}: {scene: SchemaScene; beat: Beat;
         })}
         <Pill x={1590} y={360} width={250} accent={palette.wine} opacity={.28}>隐藏动机</Pill>
         <svg width="1920" height="1080" style={{position: 'absolute', inset: 0}}><Path d="M 340 396 C 650 396 1050 396 1590 396" progress={reveal} color={palette.wine} dashed /></svg>
-        <div style={{position: 'absolute', left: 520, top: 635, width: 880, textAlign: 'center', fontSize: 28, lineHeight: 1.35, fontWeight: 780, color: palette.ink, opacity: interpolate(progress, [.58, .86], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}}>缺的不是一个漂亮故事<br /><span style={{color: palette.wine}}>而是一整条可以检验的证据链</span></div>
+        <div style={{position: 'absolute', left: 520, top: 635, width: 880, textAlign: 'center', fontSize: 28, lineHeight: 1.35, fontWeight: 780, color: palette.ink, opacity: interpolate(revealProgress, [.58, .86], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}}>缺的不是一个漂亮故事<br /><span style={{color: palette.wine}}>而是一整条可以检验的证据链</span></div>
       </>}
       <EvidenceRail active={3} support={finalBeat ? '证据链尚未完成' : '先看证据'} />
     </Stage>
@@ -846,29 +865,33 @@ export const V2VisualR2Scene = ({scene, assets}: {scene: SchemaScene; assets?: R
   const localFrame = useCurrentFrame();
   const frame = scene.startFrame + localFrame;
   const beat = activeBeat(scene.id, frame);
-  const progress = sceneRendererVersion(scene) === DARK_EDITORIAL_V1_PACING_VERSION
+  const rendererVersion = sceneRendererVersion(scene);
+  const activeProgress = rendererVersion === DARK_EDITORIAL_V1_PACING_VERSION || rendererVersion === DARK_EDITORIAL_V1_STATE_PERSISTENCE_VERSION
     ? darkEditorialPacedBeatProgress(frame, beat)
     : beatProgress(frame, beat);
+  const progress = rendererVersion === DARK_EDITORIAL_V1_STATE_PERSISTENCE_VERSION
+    ? persistentBeatProgress(scene.id, beat.beatId, activeProgress)
+    : activeProgress;
 
   const dark = isDarkEditorialScene(scene);
   const content = (() => {
     if (['S001', 'S002', 'S003', 'S004'].includes(scene.id)) {
-      return <HookVisual scene={scene} frame={frame} beat={beat} progress={progress} />;
+      return <HookVisual scene={scene} frame={frame} beat={beat} progress={progress} activeProgress={activeProgress} />;
     }
     if (['S005', 'S006', 'S007', 'S008', 'S009', 'S010'].includes(scene.id)) {
-      return <HistoryVisual scene={scene} beat={beat} progress={progress} assets={assets} />;
+      return <HistoryVisual scene={scene} beat={beat} progress={progress} activeProgress={activeProgress} assets={assets} />;
     }
     if (['S011', 'S012', 'S013', 'S014'].includes(scene.id)) {
-      return <MechanismVisual scene={scene} frame={frame} beat={beat} progress={progress} />;
+      return <MechanismVisual scene={scene} frame={frame} beat={beat} progress={progress} activeProgress={activeProgress} />;
     }
     if (['S015', 'S016', 'S017', 'S018', 'S019'].includes(scene.id)) {
-      return <AppliedMechanismVisual scene={scene} beat={beat} progress={progress} />;
+      return <AppliedMechanismVisual scene={scene} beat={beat} progress={progress} activeProgress={activeProgress} />;
     }
     if (['S020', 'S021', 'S022', 'S023'].includes(scene.id)) {
-      return <EvaluationVisual scene={scene} beat={beat} progress={progress} />;
+      return <EvaluationVisual scene={scene} beat={beat} progress={progress} activeProgress={activeProgress} />;
     }
     if (['S024', 'S025'].includes(scene.id)) {
-      return <ClosingVisual scene={scene} beat={beat} progress={progress} />;
+      return <ClosingVisual scene={scene} beat={beat} progress={progress} activeProgress={activeProgress} />;
     }
     throw new Error(`V2 Visual R2 prototype scene 未实现: ${scene.id}`);
   })();

@@ -20,7 +20,7 @@ const subtitleTiming = readJson('--subtitles');
 const output = resolve(args.get('--output'));
 const markedSceneIds = new Set((args.get('--scene-ids') ?? '').split(',').filter(Boolean));
 const rendererVersion = args.get('--renderer-version') ?? 'v2-visual-r2@2';
-if (!['v2-visual-r2@2', 'dark-editorial-v1@1', 'dark-editorial-v1@2'].includes(rendererVersion)) {
+if (!['v2-visual-r2@2', 'dark-editorial-v1@1', 'dark-editorial-v1@2', 'dark-editorial-v1@3'].includes(rendererVersion)) {
   throw new Error(`Unsupported preview renderer version: ${rendererVersion}`);
 }
 

@@ -17,7 +17,7 @@ const outputDir = path.resolve(root, valueAfter('--output-dir') ?? 'outputs/v2-v
 const bundleDir = path.join(outputDir, 'bundle-preview');
 const sourceProps = JSON.parse(fs.readFileSync(propsPath, 'utf8'));
 const rendererVersion = valueAfter('--renderer-version');
-if (rendererVersion && !['v2-visual-r2@2', 'dark-editorial-v1@1', 'dark-editorial-v1@2'].includes(rendererVersion)) {
+if (rendererVersion && !['v2-visual-r2@2', 'dark-editorial-v1@1', 'dark-editorial-v1@2', 'dark-editorial-v1@3'].includes(rendererVersion)) {
   throw new Error(`Unsupported renderer version: ${rendererVersion}`);
 }
 const inputProps = {
@@ -38,7 +38,17 @@ const inputProps = {
 
 const semanticCleanup = process.argv.includes('--semantic-cleanup');
 const pacingQc = process.argv.includes('--pacing-qc');
-const configuredPrototypes = pacingQc ? [
+const beatBoundaryQc = process.argv.includes('--beat-boundary-qc');
+const choreography = JSON.parse(fs.readFileSync(path.join(root, 'src/data/v2-visual-r2-choreography-plan.json'), 'utf8'));
+const beatBoundaries = choreography.beats.flatMap((beat, index, beats) => {
+  const previous = beats[index - 1];
+  if (!previous || previous.sceneId !== beat.sceneId) return [];
+  return [{
+    name: `${beat.sceneId}-${previous.beatId}-${beat.beatId}`,
+    frameRange: [Math.max(0, beat.startFrame - 30), Math.min(choreography.beats.at(-1).endFrame - 1, beat.startFrame + 44)],
+  }];
+});
+const configuredPrototypes = beatBoundaryQc ? beatBoundaries : pacingQc ? [
   {name: 'pacing-history-entry', frameRange: [860, 979]},
   {name: 'pacing-mechanism-entry', frameRange: [2761, 2880]},
   {name: 'pacing-applied-entry', frameRange: [3772, 3891]},

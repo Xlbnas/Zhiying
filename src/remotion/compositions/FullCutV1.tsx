@@ -253,7 +253,9 @@ export const ZhiyingFullCut = ({data, subtitles, audio, showSubtitles, renderMod
     const version = typeof marker === 'object' && marker !== null
       ? (marker as {version?: unknown}).version
       : null;
-    return version === 'dark-editorial-v1@1' || version === 'dark-editorial-v1@2';
+    return version === 'dark-editorial-v1@1' ||
+      version === 'dark-editorial-v1@2' ||
+      version === 'dark-editorial-v1@3';
   });
   const scenes = useMemo(() => data.scenes.map((s): FullCutScene => ({
     id: s.id, chapter: s.chapter, chapterTitle: s.chapterTitle,
