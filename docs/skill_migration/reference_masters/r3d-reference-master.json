@@ -1,0 +1,41 @@
+{
+  "referenceId": "zhiying-video-r3d-reference-v1",
+  "status": "FROZEN",
+  "userAccepted": true,
+  "projectId": "3778ffb0-c430-4499-9f7f-2590f45cb8cb",
+  "commit": "14586bddb9bbaba735eb752a3126b10a8028a2b7",
+  "script": "046bb456-ec8c-431e-b117-186bb63953ab@3",
+  "narrationPlan": "76d3da1e-09dd-4af7-acc2-6116f3c3f4bb@2",
+  "narrationAudio": "ff7ef85f-bf59-4814-ba9a-6306e56e8cb6@1",
+  "subtitleTiming": "68a8a73c-7863-4fa6-a89f-d9965f66c92f@1",
+  "visual": "4a4eec86-fe60-42cd-a6dd-8a71543baddc@7",
+  "reconciliation": "ebe44bfe-e971-42eb-968c-68f9b80f7d19@7",
+  "finalRenderSource": "884a690f-323f-4ff3-8cbc-287dce27e8f4@8",
+  "renderJob": "f758355c-1bbd-4689-8c02-a63c45e5e98f",
+  "renderKind": "no-subtitles",
+  "masterPath": "outputs/r3d-final/master_clean.mp4",
+  "masterSha256": "89d747e542f906488793c5e0d109dc50e30084d54ab97e571d4f2453b9f2cc66",
+  "durationSeconds": 243.626,
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "videoCodec": "h264",
+  "audioCodec": "aac",
+  "rendererVersion": "dark-editorial-v1@3",
+  "subtitleDelivery": {
+    "cleanMaster": true,
+    "burnedSubtitles": false,
+    "timingAuthority": "68a8a73c-7863-4fa6-a89f-d9965f66c92f@1",
+    "srt": "outputs/r3-final/subtitles.zh-CN.srt",
+    "vtt": "outputs/r3-final/subtitles.zh-CN.vtt",
+    "ass": "outputs/r3-final/subtitles.zh-CN.ass",
+    "json": "outputs/r3-final/subtitle_timing_v2.json"
+  },
+  "boundaryReview": {
+    "status": "PASS",
+    "passed": 19,
+    "total": 19,
+    "evidence": "outputs/r3d-final/boundary-review/all-boundaries.png"
+  },
+  "narrationMaster": "outputs/r3-final/narration_master.wav"
+}

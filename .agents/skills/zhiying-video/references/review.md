@@ -17,6 +17,8 @@ Confirm:
 
 Review the whole narration for missing or duplicated passages, obvious truncation, wrong pronunciation, unnatural sentence breaks, unintended instruction leakage, and abrupt loudness changes. Confirm subtitles cover the spoken content, remain readable, and refer to the current audio source. An editorial mismatch is a reason to locate its source, not to hand-edit timing values.
 
+Listen for restrained variation that follows rhetorical function rather than mechanical delivery rotation. Confirm the formal delivery is a clean master plus exact SRT/VTT/ASS/JSON sidecars; a burned review copy does not replace the canonical subtitle-timing artifact. User listening judgment outranks a metadata-only prosody pass.
+
 ## Visual review
 
 Watch the result rather than accepting readiness metadata alone. Check:
@@ -28,6 +30,12 @@ Watch the result rather than accepting readiness metadata alone. Check:
 - there is no obvious overlap, clipping, aspect-ratio distortion, or repetitive layout fatigue;
 - motion graphics clarify relationships and hold long enough to read;
 - static images are not held implausibly long and suspicious asset reuse is reviewed.
+- factual and historical assets carry a traceable narrative or evidentiary role, and synthetic reconstructions are explicitly labeled;
+- on-screen copy is audience-facing, Chinese-first when serving a general Chinese audience, and free of debug or prompt-like language;
+- every prominent motion has a visible semantic cause and result rather than decorative travel;
+- same-scene beat boundaries do not re-enter objects, retract completed paths, reset positions or cameras, or replay completed reveals;
+- visual changes follow acoustic pauses, semantic completion, or object handoff instead of cutting mechanically at subtitle cues;
+- the actual MP4 remains readable on a mobile-sized display without depending on burned subtitles to explain the main visual.
 
 ## Technical final review
 
@@ -51,3 +59,5 @@ Trace a failure backward to the earliest source that is actually wrong:
 - missing media or manifest mismatch → exact render job diagnosis.
 
 A bad final visual does not automatically mean "render again." Preserve valid artifacts, change the smallest faulty source, inspect the resulting identities, and rebuild only its dependents. Do not turn failure recovery into a full-project rerun.
+
+Technical checks and aggregate reviewer scores do not supersede an informed user review of the actual video. Record the user's final visual or audio judgment explicitly.

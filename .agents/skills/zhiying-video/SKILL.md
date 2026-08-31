@@ -44,6 +44,12 @@ Use real artifacts, their exact source identities, and readiness to select the s
 
 These are causal dependencies, not a fixed workflow state machine. Preserve valid upstream work and redo only what the changed or faulty source invalidates.
 
+## Use references as quality evidence, not style presets
+
+The frozen R3-D master is indexed by `docs/skill_migration/reference_masters/r3d-reference-master.json`. Use it as evidence for exact identity, traceable sources, restrained delivery, semantic motion, visual pacing, scene-persistent state, clean-master delivery, and independent review.
+
+Do not copy its subject-specific art direction into a new project. Its dark palette, Freud material, 25-scene structure, chapter order, card layouts, and evidence-chain compositions are project facts rather than universal Zhiying rules. Choose a new art direction from the new topic, audience, evidence, and explanatory needs.
+
 ## Route references on demand
 
 Read only what the current request needs:
@@ -97,5 +103,6 @@ Before accepting a final result:
 
 - Different template filenames do not by themselves prove visual diversity; review rendered visual families, information density, and template repetition in actual frames.
 - Audio review includes prosody variation, not only file validity and voice identity.
+- Technical acceptance does not override an actual audiovisual review. The user's informed viewing or listening judgment is the final acceptance authority.
 
 Do not perform production deployment or other external publication unless the user explicitly requests and authorizes it.

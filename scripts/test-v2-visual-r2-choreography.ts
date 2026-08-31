@@ -74,6 +74,17 @@ assert.equal(DARK_EDITORIAL_V1_STATE_PERSISTENCE_VERSION, 'dark-editorial-v1@3')
 assert.equal(persistentBeatProgress('S020', 'B034', .4), .4);
 assert.equal(persistentBeatProgress('S020', 'B035', 0), 1);
 assert.equal(persistentBeatProgress('S020', 'B035', .5), 1);
+const beatsByScene = new Map<string, typeof beats>();
+for (const beat of beats) beatsByScene.set(beat.sceneId, [...(beatsByScene.get(beat.sceneId) ?? []), beat]);
+const multiBeatScenes = [...beatsByScene.entries()].filter(([, sceneBeats]) => sceneBeats.length > 1);
+assert.equal(multiBeatScenes.length, 19);
+for (const [sceneId, sceneBeats] of multiBeatScenes) {
+  assert.equal(persistentBeatProgress(sceneId, sceneBeats[0]!.beatId, .42), .42, `${sceneId} first beat keeps active progress`);
+  for (const beat of sceneBeats.slice(1)) {
+    assert.equal(persistentBeatProgress(sceneId, beat.beatId, 0), 1, `${sceneId}/${beat.beatId} must not regress at boundary`);
+    assert.equal(persistentBeatProgress(sceneId, beat.beatId, .5), 1, `${sceneId}/${beat.beatId} must not replay during later beat`);
+  }
+}
 
 console.log(JSON.stringify({
   status: 'PASS',
@@ -88,4 +99,5 @@ console.log(JSON.stringify({
   unlabeledMovingNodes: 0,
   s021CardReshuffle: 0,
   pacingTailHoldFrames: {minimum: 10, maximum: 18},
+  noReplayBoundaries: multiBeatScenes.length,
 }));
