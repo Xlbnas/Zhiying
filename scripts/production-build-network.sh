@@ -45,7 +45,11 @@ die() { echo "[build-network] ERROR: $*" >&2; exit 1; }
 port_free() {
   [ "$MOCK" = "external443" ] && return 1
   if command -v ss >/dev/null 2>&1; then
-    if ss -lnt 2>/dev/null | grep -qE "[:.]${LISTEN_PORT}[[:space:]]"; then
+    # Avoid `ss | grep -q` under pipefail: grep may close the pipe after the
+    # first match, making ss exit with SIGPIPE and turning a match into false.
+    local sockets
+    sockets="$(ss -lnt 2>/dev/null || true)"
+    if grep -qE "[:.]${LISTEN_PORT}[[:space:]]" <<<"$sockets"; then
       return 1
     fi
   else
@@ -74,7 +78,9 @@ listener_up() {
   # 测试钩子：mock 容器状态视为 listener 就绪（脚本逻辑测试用）
   [ -n "$MOCK" ] && return 0
   if command -v ss >/dev/null 2>&1; then
-    ss -lnt 2>/dev/null | grep -qE "127\.0\.0\.1:${LISTEN_PORT}[[:space:]]"
+    local sockets
+    sockets="$(ss -lnt 2>/dev/null || true)"
+    grep -qE "127\.0\.0\.1:${LISTEN_PORT}[[:space:]]" <<<"$sockets"
   else
     grep -qE ":$(printf '%04X' "$LISTEN_PORT") " /proc/net/tcp 2>/dev/null
   fi
