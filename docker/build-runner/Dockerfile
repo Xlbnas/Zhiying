@@ -5,7 +5,11 @@ FROM ${DOCKER_CLI_IMAGE} AS docker_cli
 
 FROM ${NODE_IMAGE}
 
-RUN apt-get update \
+ARG APT_MIRROR=
+RUN if [ -n "$APT_MIRROR" ]; then \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
+    fi \
+  && apt-get update \
   && apt-get install -y --no-install-recommends bash ca-certificates curl ffmpeg git iproute2 openssl procps \
   && rm -rf /var/lib/apt/lists/*
 

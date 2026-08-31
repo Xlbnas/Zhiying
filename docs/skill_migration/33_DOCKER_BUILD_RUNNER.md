@@ -22,6 +22,7 @@ Zhiying deployment no longer requires `agentvm`. The approved path is:
 - pnpm: `11.9.0`.
 - Docker CLI: `28.5.2`, matching the NAS Docker Server major/minor line used for this deployment.
 - ffmpeg/ffprobe: Debian Bookworm package, required by the exact audio-source regression test.
+- runner system packages use the existing NAS `APT_MIRROR` convention (default `mirrors.aliyun.com`).
 - Project Remotion remains exactly `4.0.492` from the repository lockfile.
 
 ## Capabilities and command

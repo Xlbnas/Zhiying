@@ -6,6 +6,8 @@ services:
     build:
       context: .
       dockerfile: docker/build-runner/Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
     network_mode: host
     restart: "no"
     environment:
