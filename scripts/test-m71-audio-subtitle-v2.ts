@@ -53,6 +53,27 @@ import {buildSubtitleTimingV2Sidecars} from '../src/lib/subtitles/renderer';
 import {stageRuntimeNarrationAudio} from '../src/worker/runtime-audio';
 import {zhiyingFullCutPropsSchema} from '../src/lib/scene-schema';
 import {bindAssetToRequirement, insertAsset} from '../src/lib/assets/model';
+import r3aHistoricalAssets from '../src/data/r3a-historical-assets.json';
+
+const createdHistoricalFixturePaths: string[] = [];
+
+function ensureHistoricalAssetFixtures(): void {
+  for (const item of r3aHistoricalAssets.assets) {
+    const physicalPath = path.join('public', item.publicPath);
+    if (fs.existsSync(physicalPath)) continue;
+    fs.mkdirSync(path.dirname(physicalPath), {recursive: true});
+    fs.writeFileSync(physicalPath, Buffer.from(`historical-asset-fixture:${item.assetId}`));
+    createdHistoricalFixturePaths.push(physicalPath);
+  }
+}
+
+function cleanupHistoricalAssetFixtures(): void {
+  for (const physicalPath of createdHistoricalFixturePaths.reverse()) {
+    fs.rmSync(physicalPath, {force: true});
+  }
+}
+
+process.once('exit', cleanupHistoricalAssetFixtures);
 
 let pass = 0;
 let fail = 0;
@@ -469,6 +490,7 @@ async function main(): Promise<void> {
   });
   ok(visualMemory.visual.choreography?.beatCount === 25 && visualMemory.visual.data.scenes.every((scene) => (scene.templateProps?.memoryLab as {version?: unknown} | undefined)?.version === MEMORY_LAB_EDITORIAL_RENDERER_VERSION), '[V10-memory] data-driven long-form choreography preserves one exact scene per speech unit');
   ok((await getExactVisualSourceV2Artifact(fixture.projectId, {artifactId: visualMemory.artifact.id, version: visualMemory.artifact.version}))?.artifact.id === visualMemory.artifact.id, '[V10-memory-read] memory editorial exact source recomputes and validates');
+  ensureHistoricalAssetFixtures();
   const darkBaseLocalPath = path.posix.join('assets', fixture.projectId, 'dark-base.jpg');
   const darkBasePhysicalPath = path.join('public', darkBaseLocalPath);
   fs.mkdirSync(path.dirname(darkBasePhysicalPath), {recursive: true});
