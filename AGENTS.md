@@ -3,18 +3,19 @@
 本文件为 agent（AI 编码代理 / 接力 agent）在本仓库工作时的约束与速查。技术状态以
 `docs/M7_IMPLEMENTATION_STATUS.md` 为准，部署细节见 `docs/PRODUCTION_BUILD_NETWORK.md` 与 `DEPLOY.md`。
 
-## 仓库与开发机
+## 仓库与开发路径
 
-- 开发机：`agentvm`，工作目录 `/home/agentvm/projects/ZhiYing`。
 - 长期分支 `m7`；生产部署在飞牛宿主机完成（见下）。
-- 开发、typecheck、测试、commit、push 在 agentvm 完成；backup、Docker build、
-  migration、up、smoke 在宿主机完成。
+- Zhiying 部署不再依赖 `agentvm`。授权 source 在 Mac/Codex 提交并 push 后，由 NAS
+  `zhiying-build-runner` 从 GitHub 获取 exact SHA，在隔离 checkout 内完成 test/build/image、
+  backup、scoped deploy 与 smoke；详见 `docs/skill_migration/33_DOCKER_BUILD_RUNNER.md`。
+- `agentvm` 可以继续服务其他用途，但不是 Zhiying build/deploy prerequisite。
 - Git：禁止 `git add .` / `git add -A` / force push；精确暂存，fast-forward push。
 - 提交信息风格：`type(scope): subject`，如 `fix(assets): ...` / `docs(m7): ...`。
 
 ## 生产环境
 
-- 宿主机：`VoicelessXlbnas@192.168.31.56 -p 2264`（SSH key `~/.ssh/id_ed25519_feiniu`）。
+- 宿主机：SSH alias `feiniu`（当前经 ProxyJump 连接；不要硬编码本机不存在的旧 key path）。
 - 部署根目录 `/vol1/1000/docker/zhiying`；备份目录 `/vol1/1000/backups/zhiying/`；
   DB `/vol1/1000/docker/zhiying/data/zhiying.db`；端口 3210。
 - Compose：`docker-compose.production.yml` + `docker-compose.production.gpu.yml`，
@@ -45,11 +46,11 @@ scripts/production-build-network.sh stop      # 构建完成后清理
 
 ## 测试
 
-- `pnpm typecheck`、`pnpm build`（agentvm）。
+- exact-SHA deploy gate 在 NAS ephemeral build runner 内执行 `pnpm install --frozen-lockfile`、
+  relevant tests、`pnpm typecheck`、`pnpm build`；本地可先运行同一套 scoped checks。
 - 测试脚本在 `scripts/test-*.ts`（`npx tsx scripts/<name>.ts`），清单与基线见
   `docs/M7_IMPLEMENTATION_STATUS.md` §11。
-- agentvm 无系统 ffmpeg；跑 TTS/音频类测试前
-  `export PATH=/tmp/ffmpeg-master-latest-linux64-gpl/bin:$PATH`（完整 GPL 构建）。
+- 若在 agentvm 跑历史 TTS/音频测试，其系统仍无 ffmpeg；需显式提供完整 GPL 构建。
 - runner 镜像不含 `scripts/`；容器内跑测试用宿主同 SHA 的 scripts 只读挂载：
   `docker run --rm -v <repo>/scripts:/app/scripts ...`（image code SHA 必须与
   mounted scripts 来源 SHA 精确一致）。

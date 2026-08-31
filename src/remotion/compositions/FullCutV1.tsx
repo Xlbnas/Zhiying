@@ -35,6 +35,7 @@ import subtitleData from '../data/fullCutSubtitles.json';
 import {PilotVisualTrack} from './PilotCutV1';
 import {ProductionSceneRenderer} from './ProductionSceneRenderer';
 import {isV2VisualR2Scene} from '../templates/production/V2VisualR2Scene';
+import {isMemoryLabEditorialScene} from '../templates/production/MemoryLabEditorialScene';
 
 const PILOT_VISUAL_END = 119.107;
 const CROSSFADE_FRAMES = 8;
@@ -137,7 +138,7 @@ const SceneContent = ({scene, chapterTiming, assetMap, templateProps}: {
   return (
     <AbsoluteFill>
       <ProductionSceneRenderer scene={schemaScene} assetMap={assetMap as Record<string, import('@/lib/scene-schema').ResolvedAsset[]>} />
-      {isV2VisualR2Scene(schemaScene) ? null : <ChapterLabel scene={scene} chapterTiming={chapterTiming} />}
+      {isV2VisualR2Scene(schemaScene) || isMemoryLabEditorialScene(schemaScene) ? null : <ChapterLabel scene={scene} chapterTiming={chapterTiming} />}
     </AbsoluteFill>
   );
 };
@@ -193,10 +194,13 @@ const FullVisualTrack = ({scenes, chapterTiming, assetMap, showPilotIntro = fals
       const logicalStart = scene.startFrame;
       const previousScene = scenes[index - 1];
       const nextScene = scenes[index + 1];
-      const lead = index === 0 || isV2VisualR2Scene(scene) || (previousScene && isV2VisualR2Scene(previousScene))
+      const exactEditorial = isV2VisualR2Scene(scene) || isMemoryLabEditorialScene(scene);
+      const previousExactEditorial = previousScene && (isV2VisualR2Scene(previousScene) || isMemoryLabEditorialScene(previousScene));
+      const nextExactEditorial = nextScene && (isV2VisualR2Scene(nextScene) || isMemoryLabEditorialScene(nextScene));
+      const lead = index === 0 || exactEditorial || previousExactEditorial
         ? 0
         : CROSSFADE_FRAMES;
-      const tail = index === scenes.length - 1 || isV2VisualR2Scene(scene) || (nextScene && isV2VisualR2Scene(nextScene))
+      const tail = index === scenes.length - 1 || exactEditorial || nextExactEditorial
         ? 0
         : CROSSFADE_FRAMES;
       const from = Math.max(0, logicalStart - lead);

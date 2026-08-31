@@ -33,6 +33,8 @@ export const DARK_EDITORIAL_V1_PACING_CHOREOGRAPHY = {id: 'dark-editorial-v1', v
 export const DARK_EDITORIAL_V1_PACING_RENDERER_VERSION = 'dark-editorial-v1@2';
 export const DARK_EDITORIAL_V1_STATE_PERSISTENCE_CHOREOGRAPHY = {id: 'dark-editorial-v1', version: 3} as const;
 export const DARK_EDITORIAL_V1_STATE_PERSISTENCE_RENDERER_VERSION = 'dark-editorial-v1@3';
+export const MEMORY_LAB_EDITORIAL_CHOREOGRAPHY = {id: 'memory-lab-editorial', version: 1} as const;
+export const MEMORY_LAB_EDITORIAL_RENDERER_VERSION = 'memory-lab-editorial@1';
 const FPS = 30;
 
 const identitySchema = z.object({id: z.string().min(1), version: z.number().int().positive()});
@@ -65,6 +67,10 @@ export const visualSourceV2Schema = z.object({
   }), z.object({
     id: z.literal(DARK_EDITORIAL_V1_STATE_PERSISTENCE_CHOREOGRAPHY.id),
     version: z.literal(DARK_EDITORIAL_V1_STATE_PERSISTENCE_CHOREOGRAPHY.version),
+    beatCount: z.number().int().positive(),
+  }), z.object({
+    id: z.literal(MEMORY_LAB_EDITORIAL_CHOREOGRAPHY.id),
+    version: z.literal(MEMORY_LAB_EDITORIAL_CHOREOGRAPHY.version),
     beatCount: z.number().int().positive(),
   })]).optional(),
   unitMappings: z.array(z.object({
@@ -161,6 +167,20 @@ function visualFamily(category: string, template: string | null): string {
 }
 
 function visualFamiliesFor(data: ScenesAiOutput, choreography?: VisualSourceV2['choreography']): string[] {
+  if (choreography?.id === MEMORY_LAB_EDITORIAL_CHOREOGRAPHY.id) {
+    return [
+      'Fragment Assembly',
+      'Source Document',
+      'Provenance Chain',
+      'Experimental Stage',
+      'Semantic Field',
+      'Trace Comparison',
+      'Source Attribution',
+      'Longitudinal Record',
+      'Procedure Safeguard',
+      'Classification Funnel',
+    ];
+  }
   if (choreography) {
     return [
       'Persistent Cognitive System',
@@ -183,9 +203,29 @@ function applyExactChoreography(
   const isDarkEditorialV1 = identity.id === DARK_EDITORIAL_V1_CHOREOGRAPHY.id && identity.version === DARK_EDITORIAL_V1_CHOREOGRAPHY.version;
   const isDarkEditorialPacing = identity.id === DARK_EDITORIAL_V1_PACING_CHOREOGRAPHY.id && identity.version === DARK_EDITORIAL_V1_PACING_CHOREOGRAPHY.version;
   const isDarkEditorialStatePersistence = identity.id === DARK_EDITORIAL_V1_STATE_PERSISTENCE_CHOREOGRAPHY.id && identity.version === DARK_EDITORIAL_V1_STATE_PERSISTENCE_CHOREOGRAPHY.version;
+  const isMemoryLabEditorial = identity.id === MEMORY_LAB_EDITORIAL_CHOREOGRAPHY.id && identity.version === MEMORY_LAB_EDITORIAL_CHOREOGRAPHY.version;
   const isDarkEditorial = isDarkEditorialV1 || isDarkEditorialPacing || isDarkEditorialStatePersistence;
-  if (!isR2 && !isDarkEditorial) {
+  if (!isR2 && !isDarkEditorial && !isMemoryLabEditorial) {
     throw new VisualSourceV2Error('CHOREOGRAPHY_INVALID', `不支持 exact choreography: ${identity.id}@${identity.version}`);
+  }
+  if (isMemoryLabEditorial) {
+    const scenes = data.scenes.map((scene) => {
+      const memoryLab = scene.templateProps?.memoryLab;
+      if (!memoryLab || typeof memoryLab !== 'object') {
+        throw new VisualSourceV2Error('CHOREOGRAPHY_INVALID', `${scene.id} 缺少 memoryLab 视觉参数`);
+      }
+      return {
+        ...scene,
+        templateProps: {
+          ...(scene.templateProps ?? {}),
+          memoryLab: {...(memoryLab as Record<string, unknown>), version: MEMORY_LAB_EDITORIAL_RENDERER_VERSION},
+        },
+      };
+    });
+    return {
+      data: scenesAiOutputSchema.parse({...data, scenes}),
+      choreography: {...MEMORY_LAB_EDITORIAL_CHOREOGRAPHY, beatCount: scenes.length},
+    };
   }
   const rendererVersion = isDarkEditorialStatePersistence
     ? DARK_EDITORIAL_V1_STATE_PERSISTENCE_RENDERER_VERSION

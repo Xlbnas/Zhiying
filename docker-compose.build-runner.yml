@@ -1,0 +1,22 @@
+name: zhiying-build
+
+services:
+  zhiying-build-runner:
+    image: zhiying-build-runner:node22.22.2-pnpm11.9.0
+    build:
+      context: .
+      dockerfile: docker/build-runner/Dockerfile
+    network_mode: host
+    restart: "no"
+    environment:
+      ZHIYING_REPOSITORY: ${ZHIYING_REPOSITORY:-https://github.com/Xlbnas/Zhiying.git}
+      ZHIYING_PRODUCTION_COMPOSE_DIR: /production
+      ZHIYING_BACKUP_HOST_DIR: /vol1/1000/backups/zhiying
+      ZHIYING_LONG_VIDEO_PROJECT_ID: ${ZHIYING_LONG_VIDEO_PROJECT_ID:-8f955b4c-42dd-4a02-8e76-e721a37fab41}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /vol1/1000/docker/zhiying:/production:ro
+      - /vol1/1000/backups/zhiying:/backups:rw
+      - zhiying-runner-pnpm-store:/pnpm-store
+volumes:
+  zhiying-runner-pnpm-store:

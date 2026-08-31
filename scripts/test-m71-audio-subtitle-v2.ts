@@ -41,6 +41,8 @@ import {
   DARK_EDITORIAL_V1_STATE_PERSISTENCE_CHOREOGRAPHY,
   DARK_EDITORIAL_V1_STATE_PERSISTENCE_RENDERER_VERSION,
   getExactVisualSourceV2Artifact,
+  MEMORY_LAB_EDITORIAL_CHOREOGRAPHY,
+  MEMORY_LAB_EDITORIAL_RENDERER_VERSION,
   V2_VISUAL_R2_CHOREOGRAPHY,
   V2_VISUAL_R2_RENDERER_VERSION,
   VisualSourceV2Error,
@@ -443,6 +445,30 @@ async function main(): Promise<void> {
     choreography: V2_VISUAL_R2_CHOREOGRAPHY,
   });
   ok(visualR2Again.reused && visualR2Again.artifact.id === visualR2.artifact.id, '[V10] exact choreography visual source is idempotent');
+  const memoryDesign = {
+    ...design,
+    scenes: design.scenes.map((scene) => ({
+      ...scene,
+      templateProps: {memoryLab: {
+        version: MEMORY_LAB_EDITORIAL_RENDERER_VERSION,
+        family: 'fragment-assembly',
+        label: '记忆测试',
+        headline: scene.narrationSummary,
+        items: ['线索', '后来信息', '当前版本'],
+      }},
+    })),
+  };
+  const memoryDesignRow = generateVersion({projectId: fixture.projectId, stage: 'scenes', content: JSON.stringify(memoryDesign), contentType: 'json', source: 'manual_edit'});
+  const visualMemory = await buildVisualSourceV2({
+    projectId: fixture.projectId,
+    designScenes: {id: memoryDesignRow.id, version: memoryDesignRow.version},
+    narrationPlanV2: {id: fixture.artifact.id, version: fixture.artifact.version},
+    narrationAudioV2: first.artifact,
+    subtitleTimingV2: subtitle1.artifact,
+    choreography: MEMORY_LAB_EDITORIAL_CHOREOGRAPHY,
+  });
+  ok(visualMemory.visual.choreography?.beatCount === 25 && visualMemory.visual.data.scenes.every((scene) => (scene.templateProps?.memoryLab as {version?: unknown} | undefined)?.version === MEMORY_LAB_EDITORIAL_RENDERER_VERSION), '[V10-memory] data-driven long-form choreography preserves one exact scene per speech unit');
+  ok((await getExactVisualSourceV2Artifact(fixture.projectId, {artifactId: visualMemory.artifact.id, version: visualMemory.artifact.version}))?.artifact.id === visualMemory.artifact.id, '[V10-memory-read] memory editorial exact source recomputes and validates');
   const darkBaseLocalPath = path.posix.join('assets', fixture.projectId, 'dark-base.jpg');
   const darkBasePhysicalPath = path.join('public', darkBaseLocalPath);
   fs.mkdirSync(path.dirname(darkBasePhysicalPath), {recursive: true});
@@ -592,6 +618,9 @@ async function main(): Promise<void> {
   const cliVisualDarkPersistent = runCli(['visuals', '--project', fixture.projectId, '--design', `${darkDesignRow.id}@${darkDesignRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--choreography', 'dark-editorial-v1@3']);
   const cliVisualDarkPersistentJson = JSON.parse(cliVisualDarkPersistent.stdout) as {artifact?: {id?: string}; reused?: boolean; sources?: {choreography?: {id?: string; version?: number}}};
   ok(cliVisualDarkPersistent.status === 0 && cliVisualDarkPersistentJson.artifact?.id === visualDarkPersistent.artifact.id && cliVisualDarkPersistentJson.reused === true && cliVisualDarkPersistentJson.sources?.choreography?.version === 3, '[C5-R5] visuals CLI routes explicit exact beat-state persistence profile');
+  const cliVisualMemory = runCli(['visuals', '--project', fixture.projectId, '--design', `${memoryDesignRow.id}@${memoryDesignRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--choreography', 'memory-lab-editorial@1']);
+  const cliVisualMemoryJson = JSON.parse(cliVisualMemory.stdout) as {artifact?: {id?: string}; reused?: boolean; sources?: {choreography?: {id?: string; version?: number}}};
+  ok(cliVisualMemory.status === 0 && cliVisualMemoryJson.artifact?.id === visualMemory.artifact.id && cliVisualMemoryJson.reused === true && cliVisualMemoryJson.sources?.choreography?.id === 'memory-lab-editorial', '[C5-memory] visuals CLI routes the long-form editorial profile');
   const cliReconcile = runCli(['reconcile', '--project', fixture.projectId, '--scenes', `${visual1.artifact.id}@${visual1.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`]);
   const cliRecJson = JSON.parse(cliReconcile.stdout) as {mode?: string; artifact?: {id?: string}};
   ok(cliReconcile.status === 0 && cliRecJson.mode === 'v2-exact' && cliRecJson.artifact?.id === rec1.artifact.id, '[C6] reconcile CLI routes exact V2 chain');

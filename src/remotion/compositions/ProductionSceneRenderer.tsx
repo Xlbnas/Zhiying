@@ -19,6 +19,7 @@ import {MG_ConceptCompare} from '../templates/production/MG_ConceptCompare';
 import {MG_MessageFocusProd} from '../templates/production/MG_MessageFocusProd';
 import {MG_ScheduleNodesProd} from '../templates/production/MG_ScheduleNodesProd';
 import {isV2VisualR2Scene, V2VisualR2Scene} from '../templates/production/V2VisualR2Scene';
+import {isMemoryLabEditorialScene, MemoryLabEditorialScene} from '../templates/production/MemoryLabEditorialScene';
 import {ProductionPlaceholder} from './ProductionPlaceholder';
 
 export interface ProductionSceneRendererProps {
@@ -38,6 +39,9 @@ const MG_COMPONENTS: Record<string, React.ComponentType<any>> = {
 };
 
 export const ProductionSceneRenderer = ({scene, assetMap}: ProductionSceneRendererProps) => {
+  if (isMemoryLabEditorialScene(scene)) {
+    return <MemoryLabEditorialScene scene={scene} assets={assetMap?.[scene.id]} />;
+  }
   if (isV2VisualR2Scene(scene)) {
     return <V2VisualR2Scene scene={scene} assets={assetMap?.[scene.id]} />;
   }
