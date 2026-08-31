@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import choreography from '../src/data/v2-visual-r2-choreography-plan.json';
+import {
+  DARK_EDITORIAL_V1_PACING_VERSION,
+  darkEditorialPacedBeatProgress,
+} from '../src/remotion/templates/production/V2VisualR2Scene';
 
 const root = path.resolve(import.meta.dirname, '..');
 const shotLibrary = JSON.parse(fs.readFileSync(path.join(root, '.agents/skills/remotion-code-motion-explainer/assets/shot-library/shot-library.json'), 'utf8')) as Array<{id: string}>;
@@ -56,6 +60,15 @@ assert.match(rendererSource, /结果之后：换一条联想，改写故事/);
 assert.match(rendererSource, /MISSING EVIDENCE/);
 assert.match(rendererSource, /行动阈值<br \/>未达到/);
 
+const shortBeat = {startFrame: 100, endFrame: 153};
+assert.equal(darkEditorialPacedBeatProgress(100, shortBeat), 0);
+assert.equal(darkEditorialPacedBeatProgress(140, shortBeat), 1);
+assert.equal(darkEditorialPacedBeatProgress(152, shortBeat), 1);
+const longBeat = {startFrame: 200, endFrame: 500};
+assert.ok(darkEditorialPacedBeatProgress(470, longBeat) < 1);
+assert.equal(darkEditorialPacedBeatProgress(481, longBeat), 1);
+assert.equal(DARK_EDITORIAL_V1_PACING_VERSION, 'dark-editorial-v1@2');
+
 console.log(JSON.stringify({
   status: 'PASS',
   beats: beats.length,
@@ -68,4 +81,5 @@ console.log(JSON.stringify({
   ornamentalPaths: 0,
   unlabeledMovingNodes: 0,
   s021CardReshuffle: 0,
+  pacingTailHoldFrames: {minimum: 10, maximum: 18},
 }));

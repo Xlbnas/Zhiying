@@ -8,13 +8,43 @@ import {renderMedia, selectComposition} from '@remotion/renderer';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, '..');
+const valueAfter = (flag) => {
+  const index = process.argv.indexOf(flag);
+  return index === -1 ? null : process.argv[index + 1];
+};
 const propsPath = path.resolve(root, process.argv[2] ?? 'outputs/v2-visual-r2/prototypes/preview-props.json');
-const outputDir = path.resolve(root, 'outputs/v2-visual-r2/prototypes');
-const bundleDir = path.resolve(root, 'outputs/v2-visual-r2/bundle-preview');
-const inputProps = JSON.parse(fs.readFileSync(propsPath, 'utf8'));
+const outputDir = path.resolve(root, valueAfter('--output-dir') ?? 'outputs/v2-visual-r2/prototypes');
+const bundleDir = path.join(outputDir, 'bundle-preview');
+const sourceProps = JSON.parse(fs.readFileSync(propsPath, 'utf8'));
+const rendererVersion = valueAfter('--renderer-version');
+if (rendererVersion && !['v2-visual-r2@2', 'dark-editorial-v1@1', 'dark-editorial-v1@2'].includes(rendererVersion)) {
+  throw new Error(`Unsupported renderer version: ${rendererVersion}`);
+}
+const inputProps = {
+  ...sourceProps,
+  data: {
+    ...sourceProps.data,
+    scenes: rendererVersion
+      ? sourceProps.data.scenes.map((scene) => ({
+          ...scene,
+          templateProps: {...(scene.templateProps ?? {}), v2VisualR2: {version: rendererVersion}},
+        }))
+      : sourceProps.data.scenes,
+  },
+  audio: process.argv.includes('--with-audio')
+    ? {...sourceProps.audio, narration: 'runtime-audio/3778ffb0-c430-4499-9f7f-2590f45cb8cb/r3a-exact-master.wav'}
+    : sourceProps.audio,
+};
 
 const semanticCleanup = process.argv.includes('--semantic-cleanup');
-const configuredPrototypes = semanticCleanup ? [
+const pacingQc = process.argv.includes('--pacing-qc');
+const configuredPrototypes = pacingQc ? [
+  {name: 'pacing-history-entry', frameRange: [860, 979]},
+  {name: 'pacing-mechanism-entry', frameRange: [2761, 2880]},
+  {name: 'pacing-applied-entry', frameRange: [3772, 3891]},
+  {name: 'pacing-evaluation-entry', frameRange: [5454, 5573]},
+  {name: 'pacing-closing-entry', frameRange: [6694, 6813]},
+] : semanticCleanup ? [
   {name: 'semantic-A-S001-S003', frameRange: [0, 424]},
   {name: 'semantic-B-S011-S013', frameRange: [2821, 3571]},
   {name: 'semantic-C1-S019-S021', frameRange: [5187, 6105]},

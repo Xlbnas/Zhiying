@@ -6,6 +6,7 @@ import {fontFamily} from '../../design/tokens';
 
 export const V2_VISUAL_R2_VERSION = 'v2-visual-r2@2';
 export const DARK_EDITORIAL_V1_VERSION = 'dark-editorial-v1@1';
+export const DARK_EDITORIAL_V1_PACING_VERSION = 'dark-editorial-v1@2';
 
 const lightPalette = {
   paper: '#f3f0e8',
@@ -50,19 +51,37 @@ export function isV2VisualR2Scene(scene: SchemaScene): boolean {
   const version = typeof marker === 'object' && marker !== null
     ? (marker as {version?: unknown}).version
     : null;
-  return version === V2_VISUAL_R2_VERSION || version === DARK_EDITORIAL_V1_VERSION;
+  return version === V2_VISUAL_R2_VERSION ||
+    version === DARK_EDITORIAL_V1_VERSION ||
+    version === DARK_EDITORIAL_V1_PACING_VERSION;
+}
+
+function sceneRendererVersion(scene: SchemaScene): unknown {
+  const marker = scene.templateProps?.v2VisualR2;
+  return typeof marker === 'object' && marker !== null
+    ? (marker as {version?: unknown}).version
+    : null;
 }
 
 function isDarkEditorialScene(scene: SchemaScene): boolean {
-  const marker = scene.templateProps?.v2VisualR2;
-  return typeof marker === 'object' && marker !== null &&
-    (marker as {version?: unknown}).version === DARK_EDITORIAL_V1_VERSION;
+  const version = sceneRendererVersion(scene);
+  return version === DARK_EDITORIAL_V1_VERSION || version === DARK_EDITORIAL_V1_PACING_VERSION;
 }
 
 const clamp = (value: number) => Math.min(1, Math.max(0, value));
 
 function beatProgress(frame: number, beat: Beat): number {
   return clamp((frame - beat.startFrame) / Math.max(1, beat.endFrame - beat.startFrame - 1));
+}
+
+export function darkEditorialPacedBeatProgress(
+  frame: number,
+  beat: Pick<Beat, 'startFrame' | 'endFrame'>,
+): number {
+  const availableFrames = Math.max(1, beat.endFrame - beat.startFrame - 1);
+  const settleFrames = Math.min(18, Math.max(10, Math.round(availableFrames * .24)));
+  const motionFrames = Math.max(1, availableFrames - settleFrames);
+  return clamp((frame - beat.startFrame) / motionFrames);
 }
 
 function activeBeat(sceneId: string, frame: number): Beat {
@@ -827,7 +846,9 @@ export const V2VisualR2Scene = ({scene, assets}: {scene: SchemaScene; assets?: R
   const localFrame = useCurrentFrame();
   const frame = scene.startFrame + localFrame;
   const beat = activeBeat(scene.id, frame);
-  const progress = beatProgress(frame, beat);
+  const progress = sceneRendererVersion(scene) === DARK_EDITORIAL_V1_PACING_VERSION
+    ? darkEditorialPacedBeatProgress(frame, beat)
+    : beatProgress(frame, beat);
 
   const dark = isDarkEditorialScene(scene);
   const content = (() => {

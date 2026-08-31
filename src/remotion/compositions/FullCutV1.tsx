@@ -250,8 +250,10 @@ const bgmVolume = (frame: number) => {
 export const ZhiyingFullCut = ({data, subtitles, audio, showSubtitles, renderMode}: ZhiyingFullCutProps) => {
   const darkEditorial = data.scenes.some((scene) => {
     const marker = scene.templateProps?.v2VisualR2;
-    return typeof marker === 'object' && marker !== null &&
-      (marker as {version?: unknown}).version === 'dark-editorial-v1@1';
+    const version = typeof marker === 'object' && marker !== null
+      ? (marker as {version?: unknown}).version
+      : null;
+    return version === 'dark-editorial-v1@1' || version === 'dark-editorial-v1@2';
   });
   const scenes = useMemo(() => data.scenes.map((s): FullCutScene => ({
     id: s.id, chapter: s.chapter, chapterTitle: s.chapterTitle,

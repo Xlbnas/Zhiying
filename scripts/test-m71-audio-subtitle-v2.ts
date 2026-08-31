@@ -35,6 +35,8 @@ import {NARRATION_AUDIO_V2_ARTIFACT_KIND} from '../src/lib/narration/audio-v2-ma
 import {
   buildVisualSourceV2,
   DARK_EDITORIAL_V1_CHOREOGRAPHY,
+  DARK_EDITORIAL_V1_PACING_CHOREOGRAPHY,
+  DARK_EDITORIAL_V1_PACING_RENDERER_VERSION,
   DARK_EDITORIAL_V1_RENDERER_VERSION,
   getExactVisualSourceV2Artifact,
   V2_VISUAL_R2_CHOREOGRAPHY,
@@ -488,6 +490,27 @@ async function main(): Promise<void> {
     choreography: DARK_EDITORIAL_V1_CHOREOGRAPHY,
   });
   ok(visualDarkAgain.reused && visualDarkAgain.artifact.id === visualDark.artifact.id, '[V10d] exact dark editorial visual source is idempotent');
+  const visualDarkPaced = await buildVisualSourceV2({
+    projectId: fixture.projectId,
+    designScenes: {id: darkDesignRow.id, version: darkDesignRow.version},
+    narrationPlanV2: {id: fixture.artifact.id, version: fixture.artifact.version},
+    narrationAudioV2: first.artifact,
+    subtitleTimingV2: subtitle1.artifact,
+    choreography: DARK_EDITORIAL_V1_PACING_CHOREOGRAPHY,
+  });
+  ok(!visualDarkPaced.reused && visualDarkPaced.artifact.id !== visualDark.artifact.id, '[V10f] pacing polish creates a distinct exact visual artifact without replacing dark editorial v1');
+  ok(visualDarkPaced.visual.data.scenes.every((scene) => (scene.templateProps?.v2VisualR2 as {version?: unknown} | undefined)?.version === DARK_EDITORIAL_V1_PACING_RENDERER_VERSION), '[V10g] exact pacing marker propagates to all scenes');
+  ok(visualDarkPaced.visual.source.masterSha256 === visualDark.visual.source.masterSha256 && visualDarkPaced.visual.source.masterDurationMs === visualDark.visual.source.masterDurationMs, '[V10h] pacing polish preserves exact audio media facts');
+  ok(JSON.stringify(visualDarkPaced.visual.assetMap) === JSON.stringify(visualDark.visual.assetMap), '[V10i] pacing polish preserves frozen historical asset map');
+  const visualDarkPacedAgain = await buildVisualSourceV2({
+    projectId: fixture.projectId,
+    designScenes: {id: darkDesignRow.id, version: darkDesignRow.version},
+    narrationPlanV2: {id: fixture.artifact.id, version: fixture.artifact.version},
+    narrationAudioV2: first.artifact,
+    subtitleTimingV2: subtitle1.artifact,
+    choreography: DARK_EDITORIAL_V1_PACING_CHOREOGRAPHY,
+  });
+  ok(visualDarkPacedAgain.reused && visualDarkPacedAgain.artifact.id === visualDarkPaced.artifact.id, '[V10j] exact pacing visual source is idempotent');
   const darkS007Asset = visualDark.visual.assetMap.S007![0]!;
   getDb().prepare('UPDATE assets SET source_provider = ? WHERE id = ?').run('tampered', darkS007Asset.assetId);
   ok(await getExactVisualSourceV2Artifact(fixture.projectId, {artifactId: visualDark.artifact.id, version: visualDark.artifact.version}) === null, '[V10e] dark editorial archive provenance mutation fails closed');
@@ -540,6 +563,9 @@ async function main(): Promise<void> {
   const cliVisualDark = runCli(['visuals', '--project', fixture.projectId, '--design', `${darkDesignRow.id}@${darkDesignRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--choreography', 'dark-editorial-v1@1']);
   const cliVisualDarkJson = JSON.parse(cliVisualDark.stdout) as {artifact?: {id?: string}; reused?: boolean; sources?: {choreography?: {id?: string; version?: number}}};
   ok(cliVisualDark.status === 0 && cliVisualDarkJson.artifact?.id === visualDark.artifact.id && cliVisualDarkJson.reused === true && cliVisualDarkJson.sources?.choreography?.id === 'dark-editorial-v1', '[C5-R3] visuals CLI routes explicit exact dark editorial profile');
+  const cliVisualDarkPaced = runCli(['visuals', '--project', fixture.projectId, '--design', `${darkDesignRow.id}@${darkDesignRow.version}`, '--plan', `${fixture.artifact.id}@${fixture.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`, '--choreography', 'dark-editorial-v1@2']);
+  const cliVisualDarkPacedJson = JSON.parse(cliVisualDarkPaced.stdout) as {artifact?: {id?: string}; reused?: boolean; sources?: {choreography?: {id?: string; version?: number}}};
+  ok(cliVisualDarkPaced.status === 0 && cliVisualDarkPacedJson.artifact?.id === visualDarkPaced.artifact.id && cliVisualDarkPacedJson.reused === true && cliVisualDarkPacedJson.sources?.choreography?.version === 2, '[C5-R4] visuals CLI routes explicit exact pacing polish profile');
   const cliReconcile = runCli(['reconcile', '--project', fixture.projectId, '--scenes', `${visual1.artifact.id}@${visual1.artifact.version}`, '--audio', `${first.artifact.id}@${first.artifact.version}`, '--subtitles', `${subtitle1.artifact.id}@${subtitle1.artifact.version}`]);
   const cliRecJson = JSON.parse(cliReconcile.stdout) as {mode?: string; artifact?: {id?: string}};
   ok(cliReconcile.status === 0 && cliRecJson.mode === 'v2-exact' && cliRecJson.artifact?.id === rec1.artifact.id, '[C6] reconcile CLI routes exact V2 chain');

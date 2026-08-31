@@ -29,6 +29,8 @@ export const V2_VISUAL_R2_CHOREOGRAPHY = {id: 'v2-visual-r2', version: 2} as con
 export const V2_VISUAL_R2_RENDERER_VERSION = 'v2-visual-r2@2';
 export const DARK_EDITORIAL_V1_CHOREOGRAPHY = {id: 'dark-editorial-v1', version: 1} as const;
 export const DARK_EDITORIAL_V1_RENDERER_VERSION = 'dark-editorial-v1@1';
+export const DARK_EDITORIAL_V1_PACING_CHOREOGRAPHY = {id: 'dark-editorial-v1', version: 2} as const;
+export const DARK_EDITORIAL_V1_PACING_RENDERER_VERSION = 'dark-editorial-v1@2';
 const FPS = 30;
 
 const identitySchema = z.object({id: z.string().min(1), version: z.number().int().positive()});
@@ -53,6 +55,10 @@ export const visualSourceV2Schema = z.object({
   }), z.object({
     id: z.literal(DARK_EDITORIAL_V1_CHOREOGRAPHY.id),
     version: z.literal(DARK_EDITORIAL_V1_CHOREOGRAPHY.version),
+    beatCount: z.number().int().positive(),
+  }), z.object({
+    id: z.literal(DARK_EDITORIAL_V1_PACING_CHOREOGRAPHY.id),
+    version: z.literal(DARK_EDITORIAL_V1_PACING_CHOREOGRAPHY.version),
     beatCount: z.number().int().positive(),
   })]).optional(),
   unitMappings: z.array(z.object({
@@ -168,11 +174,17 @@ function applyExactChoreography(
 ): Pick<VisualSourceV2, 'data' | 'choreography'> {
   if (!identity) return {data};
   const isR2 = identity.id === V2_VISUAL_R2_CHOREOGRAPHY.id && identity.version === V2_VISUAL_R2_CHOREOGRAPHY.version;
-  const isDarkEditorial = identity.id === DARK_EDITORIAL_V1_CHOREOGRAPHY.id && identity.version === DARK_EDITORIAL_V1_CHOREOGRAPHY.version;
+  const isDarkEditorialV1 = identity.id === DARK_EDITORIAL_V1_CHOREOGRAPHY.id && identity.version === DARK_EDITORIAL_V1_CHOREOGRAPHY.version;
+  const isDarkEditorialPacing = identity.id === DARK_EDITORIAL_V1_PACING_CHOREOGRAPHY.id && identity.version === DARK_EDITORIAL_V1_PACING_CHOREOGRAPHY.version;
+  const isDarkEditorial = isDarkEditorialV1 || isDarkEditorialPacing;
   if (!isR2 && !isDarkEditorial) {
     throw new VisualSourceV2Error('CHOREOGRAPHY_INVALID', `不支持 exact choreography: ${identity.id}@${identity.version}`);
   }
-  const rendererVersion = isDarkEditorial ? DARK_EDITORIAL_V1_RENDERER_VERSION : V2_VISUAL_R2_RENDERER_VERSION;
+  const rendererVersion = isDarkEditorialPacing
+    ? DARK_EDITORIAL_V1_PACING_RENDERER_VERSION
+    : isDarkEditorialV1
+      ? DARK_EDITORIAL_V1_RENDERER_VERSION
+      : V2_VISUAL_R2_RENDERER_VERSION;
   const beatsByScene = new Map<string, string[]>();
   for (const beat of v2VisualR2Choreography.beats) {
     const ids = beatsByScene.get(beat.sceneId) ?? [];
@@ -195,7 +207,7 @@ function applyExactChoreography(
   return {
     data: scenesAiOutputSchema.parse({...data, scenes}),
     choreography: isDarkEditorial
-      ? {...DARK_EDITORIAL_V1_CHOREOGRAPHY, beatCount: v2VisualR2Choreography.beats.length}
+      ? {...(isDarkEditorialPacing ? DARK_EDITORIAL_V1_PACING_CHOREOGRAPHY : DARK_EDITORIAL_V1_CHOREOGRAPHY), beatCount: v2VisualR2Choreography.beats.length}
       : {...V2_VISUAL_R2_CHOREOGRAPHY, beatCount: v2VisualR2Choreography.beats.length},
   };
 }
@@ -409,7 +421,9 @@ function darkEditorialAssetMap(projectId: string, registerMissing: boolean): Vis
 }
 
 function isDarkEditorial(choreography: VisualSourceV2['choreography']): boolean {
-  return choreography?.id === DARK_EDITORIAL_V1_CHOREOGRAPHY.id && choreography.version === DARK_EDITORIAL_V1_CHOREOGRAPHY.version;
+  return choreography?.id === DARK_EDITORIAL_V1_CHOREOGRAPHY.id &&
+    (choreography.version === DARK_EDITORIAL_V1_CHOREOGRAPHY.version ||
+      choreography.version === DARK_EDITORIAL_V1_PACING_CHOREOGRAPHY.version);
 }
 
 function mergeDarkEditorialAssets(
