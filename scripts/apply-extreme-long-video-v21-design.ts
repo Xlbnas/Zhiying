@@ -15,6 +15,14 @@ const requiredAssets: Record<string, string> = {
   S079: 'extreme-archive-S079-A06', S098: 'extreme-archive-S098-A07', S106: 'extreme-archive-S106-A15',
 };
 const chinese = (value: string) => value.replace(/[^\u4e00-\u9fff]/g, '');
+const hasHighOverlap = (narration: string, thesis: string) => {
+  const source = chinese(narration); const target = chinese(thesis);
+  if (!target || source === target) return true;
+  for (let width = Math.min(18, target.length); width >= 8; width -= 1) {
+    for (let index = 0; index <= target.length - width; index += 1) if (source.includes(target.slice(index, index + width))) return true;
+  }
+  return false;
+};
 const manifest = scenesAiOutputSchema.parse(JSON.parse(fs.readFileSync(manifestPath, 'utf8')));
 const stage = getDb().prepare('SELECT status, active_version, locked_version FROM project_stages WHERE project_id = ? AND stage = ?').get(projectId, 'scenes') as {status: string; active_version: number; locked_version: number | null} | undefined;
 if (!stage?.locked_version || stage.status !== 'locked') throw new Error('scenes stage must be locked before applying V2.1');
@@ -32,7 +40,7 @@ for (const [index, scene] of manifest.scenes.entries()) {
   assert.equal(memoryLab?.narrationText, scene.narrationSummary, `${scene.id}: narration authority mismatch`);
   assert.equal(memoryLab?.debugOverlay, undefined, `${scene.id}: debugOverlay must not be set`);
   assert.equal(memoryLab?.showSceneId, undefined, `${scene.id}: showSceneId must not be set`);
-  assert.ok(typeof memoryLab?.visualThesis === 'string' && !scene.narrationSummary.includes(String(memoryLab.visualThesis)), `${scene.id}: visual thesis conflicts with narration`);
+  assert.ok(typeof memoryLab?.visualThesis === 'string' && !hasHighOverlap(scene.narrationSummary, String(memoryLab.visualThesis)), `${scene.id}: visual thesis conflicts with narration`);
 }
 const theses = manifest.scenes.map((scene) => String((scene.templateProps?.memoryLab as {visualThesis?: unknown} | undefined)?.visualThesis));
 assert.equal(new Set(theses).size, 111, 'visual thesis must remain unique');
