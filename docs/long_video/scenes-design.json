@@ -1,0 +1,4557 @@
+{
+  "chapterTiming": [
+    {
+      "chapter": 1,
+      "title": "确信感不是证书",
+      "start": 0,
+      "end": 79.36666666666666
+    },
+    {
+      "chapter": 2,
+      "title": "从读取过去到重建过去",
+      "start": 79.36666666666666,
+      "end": 182.43333333333334
+    },
+    {
+      "chapter": 3,
+      "title": "别人一句话，能改写你报告的现场吗",
+      "start": 182.43333333333334,
+      "end": 298.23333333333335
+    },
+    {
+      "chapter": 4,
+      "title": "一个从未出现过的词",
+      "start": 298.23333333333335,
+      "end": 388.3
+    },
+    {
+      "chapter": 5,
+      "title": "错误记忆为什么会有真实感",
+      "start": 388.3,
+      "end": 497.1333333333333
+    },
+    {
+      "chapter": 6,
+      "title": "你越确定，就越可靠吗",
+      "start": 497.1333333333333,
+      "end": 585.9666666666667
+    },
+    {
+      "chapter": 7,
+      "title": "为什么闪光灯记忆也会变",
+      "start": 585.9666666666667,
+      "end": 679.1
+    },
+    {
+      "chapter": 8,
+      "title": "目击证词还能相信吗",
+      "start": 679.1,
+      "end": 782.4
+    },
+    {
+      "chapter": 9,
+      "title": "能否形成从未发生的人生片段",
+      "start": 782.4,
+      "end": 914.6666666666666
+    },
+    {
+      "chapter": 10,
+      "title": "所以，我们还能相信记忆吗",
+      "start": 914.6666666666666,
+      "end": 1011.8
+    }
+  ],
+  "scenes": [
+    {
+      "id": "S001",
+      "chapter": 1,
+      "chapterTitle": "确信感不是证书",
+      "start": 0,
+      "end": 7.566666666666666,
+      "duration": 7.566666666666666,
+      "startFrame": 0,
+      "durationInFrames": 227,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "VERSION_DIFF",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "你有没有和别人争过同一段往事？你记得他站在门边，说过一句很伤人的话。",
+          "visualThesis": "同一段往事",
+          "visualLabels": [
+            "门边",
+            "那句话",
+            "心跳"
+          ],
+          "label": "确信感不是证书"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "你有没有和别人争过同一段往事？你记得他站在门边，说过一句很伤人的话。",
+      "description": "VERSION_DIFF: 同一段往事",
+      "notes": "exact narration unit N001; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "fade",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S002",
+      "chapter": 1,
+      "chapterTitle": "确信感不是证书",
+      "start": 7.566666666666666,
+      "end": 15.333333333333334,
+      "duration": 7.766666666666667,
+      "startFrame": 227,
+      "durationInFrames": 233,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "VERSION_DIFF",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "对方却坚持，那句话根本没有出现。你甚至还能描述当时的光线和自己的心跳。",
+          "visualThesis": "两个版本",
+          "visualLabels": [
+            "版本 A",
+            "版本 B",
+            "细节冲突"
+          ],
+          "label": "确信感不是证书",
+          "evidenceRole": "原始研究"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "对方却坚持，那句话根本没有出现。你甚至还能描述当时的光线和自己的心跳。",
+      "description": "VERSION_DIFF: 两个版本",
+      "notes": "exact narration unit N002; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S003",
+      "chapter": 1,
+      "chapterTitle": "确信感不是证书",
+      "start": 15.333333333333334,
+      "end": 22.9,
+      "duration": 7.566666666666666,
+      "startFrame": 460,
+      "durationInFrames": 227,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "这种冲突最让人不安的，不是谁忘了。真正棘手的是，双方都可能非常确信。",
+          "visualThesis": "谁记错了？",
+          "visualLabels": [
+            "双方",
+            "确信",
+            "冲突"
+          ],
+          "label": "确信感不是证书",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "这种冲突最让人不安的，不是谁忘了。真正棘手的是，双方都可能非常确信。",
+      "description": "KINETIC_CLAIM: 谁记错了？",
+      "notes": "exact narration unit N003; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S004",
+      "chapter": 1,
+      "chapterTitle": "确信感不是证书",
+      "start": 22.9,
+      "end": 31.566666666666666,
+      "duration": 8.666666666666666,
+      "startFrame": 687,
+      "durationInFrames": 260,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "记忆的真实感，可以清楚、鲜明，还带着情绪。可这些感觉本身，不是一张准确性证书。",
+          "visualThesis": "真实感不是凭证",
+          "visualLabels": [
+            "鲜明",
+            "情绪",
+            "准确性"
+          ],
+          "label": "确信感不是证书",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "记忆的真实感，可以清楚、鲜明，还带着情绪。可这些感觉本身，不是一张准确性证书。",
+      "description": "CONCEPT_SPACE: 真实感不是凭证",
+      "notes": "exact narration unit N004; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S005",
+      "chapter": 1,
+      "chapterTitle": "确信感不是证书",
+      "start": 31.566666666666666,
+      "end": 38.233333333333334,
+      "duration": 6.666666666666667,
+      "startFrame": 947,
+      "durationInFrames": 200,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "这不等于记忆毫无价值。多数时候，我们确实记得事情的大体走向。",
+          "visualThesis": "价值仍然存在",
+          "visualLabels": [
+            "大体走向",
+            "原句",
+            "顺序"
+          ],
+          "label": "确信感不是证书",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "这不等于记忆毫无价值。多数时候，我们确实记得事情的大体走向。",
+      "description": "COMPARISON: 价值仍然存在",
+      "notes": "exact narration unit N005; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S006",
+      "chapter": 1,
+      "chapterTitle": "确信感不是证书",
+      "start": 38.233333333333334,
+      "end": 46.46666666666667,
+      "duration": 8.233333333333333,
+      "startFrame": 1147,
+      "durationInFrames": 247,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "我们知道见过谁，去过哪里，发生了什么。麻烦常藏在原话、顺序、来源和时间里。",
+          "visualThesis": "误差藏在细节",
+          "visualLabels": [
+            "原话",
+            "来源",
+            "时间"
+          ],
+          "label": "确信感不是证书",
+          "evidenceRole": "原始研究"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "我们知道见过谁，去过哪里，发生了什么。麻烦常藏在原话、顺序、来源和时间里。",
+      "description": "CONCEPT_SPACE: 误差藏在细节",
+      "notes": "exact narration unit N006; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S007",
+      "chapter": 1,
+      "chapterTitle": "确信感不是证书",
+      "start": 46.46666666666667,
+      "end": 54.46666666666667,
+      "duration": 8,
+      "startFrame": 1394,
+      "durationInFrames": 240,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "所以，这部片不打算证明“你的记忆都是假的”。我们要追问一个更精确的问题。",
+          "visualThesis": "不是全盘否定",
+          "visualLabels": [
+            "更精确",
+            "可检验"
+          ],
+          "label": "确信感不是证书"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "所以，这部片不打算证明“你的记忆都是假的”。我们要追问一个更精确的问题。",
+      "description": "KINETIC_CLAIM: 不是全盘否定",
+      "notes": "exact narration unit N007; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S008",
+      "chapter": 1,
+      "chapterTitle": "确信感不是证书",
+      "start": 54.46666666666667,
+      "end": 62.9,
+      "duration": 8.433333333333334,
+      "startFrame": 1634,
+      "durationInFrames": 253,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "为什么错误的回忆，也能带来如此强烈的确定感？回想过去时，大脑到底取出了什么？",
+          "visualThesis": "确定感从哪来？",
+          "visualLabels": [
+            "错误",
+            "回想",
+            "确定感"
+          ],
+          "label": "确信感不是证书"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "为什么错误的回忆，也能带来如此强烈的确定感？回想过去时，大脑到底取出了什么？",
+      "description": "KINETIC_CLAIM: 确定感从哪来？",
+      "notes": "exact narration unit N008; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S009",
+      "chapter": 1,
+      "chapterTitle": "确信感不是证书",
+      "start": 62.9,
+      "end": 70.46666666666667,
+      "duration": 7.566666666666666,
+      "startFrame": 1887,
+      "durationInFrames": 227,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "VERSION_DIFF",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "这也解释了为什么争论很难靠音量解决。一个版本被讲得越熟，往往越连贯。",
+          "visualThesis": "熟悉会变连贯",
+          "visualLabels": [
+            "重复",
+            "版本",
+            "争论"
+          ],
+          "label": "确信感不是证书"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "这也解释了为什么争论很难靠音量解决。一个版本被讲得越熟，往往越连贯。",
+      "description": "VERSION_DIFF: 熟悉会变连贯",
+      "notes": "exact narration unit N009; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S010",
+      "chapter": 1,
+      "chapterTitle": "确信感不是证书",
+      "start": 70.46666666666667,
+      "end": 79.36666666666666,
+      "duration": 8.9,
+      "startFrame": 2114,
+      "durationInFrames": 267,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "连贯会让人更容易再次说出它。可“更容易说出”与“更接近最初事件”，仍然是两件事。",
+          "visualThesis": "顺口不等于原样",
+          "visualLabels": [
+            "易说出",
+            "原事件"
+          ],
+          "label": "确信感不是证书",
+          "evidenceRole": "原始研究"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "连贯会让人更容易再次说出它。可“更容易说出”与“更接近最初事件”，仍然是两件事。",
+      "description": "COMPARISON: 顺口不等于原样",
+      "notes": "exact narration unit N010; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S011",
+      "chapter": 2,
+      "chapterTitle": "从读取过去到重建过去",
+      "start": 79.36666666666666,
+      "end": 85.8,
+      "duration": 6.433333333333334,
+      "startFrame": 2381,
+      "durationInFrames": 193,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CHAPTER_INTERSTITIAL",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "我们很容易把记忆想成录像。事件发生时，画面被存进某个地方。",
+          "visualThesis": "录像比喻会误导",
+          "visualLabels": [
+            "下一章"
+          ],
+          "label": "从读取过去到重建过去"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "我们很容易把记忆想成录像。事件发生时，画面被存进某个地方。",
+      "description": "CHAPTER_INTERSTITIAL: 录像比喻会误导",
+      "notes": "exact narration unit N012; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S012",
+      "chapter": 2,
+      "chapterTitle": "从读取过去到重建过去",
+      "start": 85.8,
+      "end": 93.36666666666666,
+      "duration": 7.566666666666666,
+      "startFrame": 2574,
+      "durationInFrames": 227,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "VERSION_DIFF",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "以后按下播放，它就重新出现。这个比喻直观，却会让我们误解回忆的工作。",
+          "visualThesis": "回想不是重播",
+          "visualLabels": [
+            "原版本",
+            "后来版本",
+            "差异"
+          ],
+          "label": "从读取过去到重建过去"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "以后按下播放，它就重新出现。这个比喻直观，却会让我们误解回忆的工作。",
+      "description": "VERSION_DIFF: 回想不是重播",
+      "notes": "exact narration unit N013; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S013",
+      "chapter": 2,
+      "chapterTitle": "从读取过去到重建过去",
+      "start": 93.36666666666666,
+      "end": 102.7,
+      "duration": 9.333333333333334,
+      "startFrame": 2801,
+      "durationInFrames": 280,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "二十世纪初，英国心理学家弗雷德里克·巴特利特换了一种问法。他没有只让人背无意义音节。",
+          "visualThesis": "线索在关系中重组",
+          "visualLabels": [
+            "线索",
+            "关系",
+            "缺口"
+          ],
+          "label": "从读取过去到重建过去"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "二十世纪初，英国心理学家弗雷德里克·巴特利特换了一种问法。他没有只让人背无意义音节。",
+      "description": "CONCEPT_SPACE: 线索在关系中重组",
+      "notes": "exact narration unit N014; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S014",
+      "chapter": 2,
+      "chapterTitle": "从读取过去到重建过去",
+      "start": 102.7,
+      "end": 111.36666666666666,
+      "duration": 8.666666666666666,
+      "startFrame": 3081,
+      "durationInFrames": 260,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "他给参与者读陌生的故事和材料。然后观察内容怎样在复述中被保留、删去和重新组织。",
+          "visualThesis": "陌生材料进入复述",
+          "visualLabels": [
+            "输入",
+            "条件",
+            "报告"
+          ],
+          "label": "从读取过去到重建过去",
+          "evidenceRole": "原始研究"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "他给参与者读陌生的故事和材料。然后观察内容怎样在复述中被保留、删去和重新组织。",
+      "description": "PROCESS_MAP: 陌生材料进入复述",
+      "notes": "exact narration unit N015; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S015",
+      "chapter": 2,
+      "chapterTitle": "从读取过去到重建过去",
+      "start": 111.36666666666666,
+      "end": 118.46666666666667,
+      "duration": 7.1,
+      "startFrame": 3341,
+      "durationInFrames": 213,
+      "category": "Archive",
+      "visualType": "Archive",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "EVIDENCE_ARCHIVE",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "最著名的材料叫《幽灵之战》。故事来自与英国参与者不同的文化传统。",
+          "visualThesis": "故事跨文化传递",
+          "visualLabels": [
+            "原始文本",
+            "故事链",
+            "非故事原页"
+          ],
+          "label": "从读取过去到重建过去",
+          "archiveDisclosure": "原始资料 · 故事链来源，不是故事原页"
+        }
+      },
+      "assetRequirements": [
+        {
+          "requirementId": "S015-R01",
+          "kind": "image",
+          "subject": "War of the Ghosts source record",
+          "query": "Kathlamet Texts War of the Ghosts public domain scan",
+          "usage": "primary",
+          "policy": "public_domain",
+          "authenticity": "authentic_required"
+        }
+      ],
+      "narrationSummary": "最著名的材料叫《幽灵之战》。故事来自与英国参与者不同的文化传统。",
+      "description": "EVIDENCE_ARCHIVE: 故事跨文化传递",
+      "notes": "exact narration unit N016; visual copy separated; archive audit retained=true",
+      "assetIds": [],
+      "licenseStatus": "review-required",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S016",
+      "chapter": 2,
+      "chapterTitle": "从读取过去到重建过去",
+      "start": 118.46666666666667,
+      "end": 127.36666666666666,
+      "duration": 8.9,
+      "startFrame": 3554,
+      "durationInFrames": 267,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "许多复述变短了，陌生细节被省略了。有些表达也被改得更符合讲述者熟悉的因果和语言。",
+          "visualThesis": "陌生细节先被省略",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "从读取过去到重建过去",
+          "evidenceRole": "原始研究"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "许多复述变短了，陌生细节被省略了。有些表达也被改得更符合讲述者熟悉的因果和语言。",
+      "description": "COMPARISON: 陌生细节先被省略",
+      "notes": "exact narration unit N017; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S017",
+      "chapter": 2,
+      "chapterTitle": "从读取过去到重建过去",
+      "start": 127.36666666666666,
+      "end": 133.13333333333333,
+      "duration": 5.766666666666667,
+      "startFrame": 3821,
+      "durationInFrames": 173,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "但经典不等于免检。后来的部分复现曾没有得到相同模式。",
+          "visualThesis": "经典也要复查",
+          "visualLabels": [
+            "原研究",
+            "复现",
+            "差异"
+          ],
+          "label": "从读取过去到重建过去",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "但经典不等于免检。后来的部分复现曾没有得到相同模式。",
+      "description": "CONCEPT_SPACE: 经典也要复查",
+      "notes": "exact narration unit N018; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S018",
+      "chapter": 2,
+      "chapterTitle": "从读取过去到重建过去",
+      "start": 133.13333333333333,
+      "end": 148.23333333333332,
+      "duration": 15.1,
+      "startFrame": 3994,
+      "durationInFrames": 453,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "VERSION_DIFF",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "更贴近原程序的研究，又观察到延迟后的遗漏、合理化和扭曲增加。稳妥的结论不是“复述必然越来越错”，而是回忆会受既有知识和当前理解参与组织。",
+          "visualThesis": "延迟后的三种变化",
+          "visualLabels": [
+            "遗漏",
+            "合理化",
+            "扭曲"
+          ],
+          "label": "从读取过去到重建过去",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "更贴近原程序的研究，又观察到延迟后的遗漏、合理化和扭曲增加。稳妥的结论不是“复述必然越来越错”，而是回忆会受既有知识和当前理解参与组织。",
+      "description": "VERSION_DIFF: 延迟后的三种变化",
+      "notes": "exact narration unit N019; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S019",
+      "chapter": 2,
+      "chapterTitle": "从读取过去到重建过去",
+      "start": 148.23333333333332,
+      "end": 160,
+      "duration": 11.766666666666667,
+      "startFrame": 4447,
+      "durationInFrames": 353,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "巴特利特还区分同一个人隔一段时间再讲，和故事在人与人之间传递。两种方法都可能改变材料，却不必走同一条路线。",
+          "visualThesis": "两条变化路线",
+          "visualLabels": [
+            "个人复述",
+            "人际传递"
+          ],
+          "label": "从读取过去到重建过去"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "巴特利特还区分同一个人隔一段时间再讲，和故事在人与人之间传递。两种方法都可能改变材料，却不必走同一条路线。",
+      "description": "COMPARISON: 两条变化路线",
+      "notes": "exact narration unit N020; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S020",
+      "chapter": 2,
+      "chapterTitle": "从读取过去到重建过去",
+      "start": 160,
+      "end": 170,
+      "duration": 10,
+      "startFrame": 4800,
+      "durationInFrames": 300,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "所谓结构，也不是一只专门制造错误的手。它先帮助我们理解，之后才可能在缺口里留下自己的形状。",
+          "visualThesis": "结构先帮助理解",
+          "visualLabels": [
+            "理解",
+            "缺口",
+            "补全"
+          ],
+          "label": "从读取过去到重建过去",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "所谓结构，也不是一只专门制造错误的手。它先帮助我们理解，之后才可能在缺口里留下自己的形状。",
+      "description": "CONCEPT_SPACE: 结构先帮助理解",
+      "notes": "exact narration unit N021; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S021",
+      "chapter": 2,
+      "chapterTitle": "从读取过去到重建过去",
+      "start": 170,
+      "end": 182.43333333333334,
+      "duration": 12.433333333333334,
+      "startFrame": 5100,
+      "durationInFrames": 373,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "巴特利特观察的是复述怎样变化。接下来，把变化压缩进一个可控瞬间：如果事件之后只换一句问法，后来的回答会不会不同？",
+          "visualThesis": "把变化压进瞬间",
+          "visualLabels": [
+            "复述",
+            "换问法",
+            "回答"
+          ],
+          "label": "从读取过去到重建过去"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "巴特利特观察的是复述怎样变化。接下来，把变化压缩进一个可控瞬间：如果事件之后只换一句问法，后来的回答会不会不同？",
+      "description": "PROCESS_MAP: 把变化压进瞬间",
+      "notes": "exact narration unit N022; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S022",
+      "chapter": 3,
+      "chapterTitle": "别人一句话，能改写你报告的现场吗",
+      "start": 182.43333333333334,
+      "end": 193.33333333333334,
+      "duration": 10.9,
+      "startFrame": 5473,
+      "durationInFrames": 327,
+      "category": "Archive",
+      "visualType": "Archive",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "EVIDENCE_ARCHIVE",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "一九七四年，伊丽莎白·洛夫特斯和约翰·帕尔默让参与者观看车祸影片。影片看完后，问题只换了一个动词。",
+          "visualThesis": "一个动词的实验",
+          "visualLabels": [
+            "1974",
+            "车祸影片",
+            "提问"
+          ],
+          "label": "别人一句话，能改写你报告的现场吗",
+          "archiveDisclosure": "研究者肖像 · 非 1974 实验现场"
+        }
+      },
+      "assetRequirements": [
+        {
+          "requirementId": "S022-R01",
+          "kind": "image",
+          "subject": "Elizabeth Loftus portrait",
+          "query": "Elizabeth Loftus CC BY-SA portrait",
+          "usage": "primary",
+          "policy": "public_domain",
+          "authenticity": "authentic_required"
+        }
+      ],
+      "narrationSummary": "一九七四年，伊丽莎白·洛夫特斯和约翰·帕尔默让参与者观看车祸影片。影片看完后，问题只换了一个动词。",
+      "description": "EVIDENCE_ARCHIVE: 一个动词的实验",
+      "notes": "exact narration unit N023; visual copy separated; archive audit retained=true",
+      "assetIds": [],
+      "licenseStatus": "review-required",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S023",
+      "chapter": 3,
+      "chapterTitle": "别人一句话，能改写你报告的现场吗",
+      "start": 193.33333333333334,
+      "end": 200.9,
+      "duration": 7.566666666666666,
+      "startFrame": 5800,
+      "durationInFrames": 227,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "有的人被问两辆车相撞时有多快。另一些人听到的词，更接近“猛烈撞碎”。",
+          "visualThesis": "换词，结果变了",
+          "visualLabels": [
+            "轻撞",
+            "猛撞",
+            "估计"
+          ],
+          "label": "别人一句话，能改写你报告的现场吗",
+          "evidenceRole": "原始研究"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "有的人被问两辆车相撞时有多快。另一些人听到的词，更接近“猛烈撞碎”。",
+      "description": "COMPARISON: 换词，结果变了",
+      "notes": "exact narration unit N024; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S024",
+      "chapter": 3,
+      "chapterTitle": "别人一句话，能改写你报告的现场吗",
+      "start": 200.9,
+      "end": 209.33333333333334,
+      "duration": 8.433333333333334,
+      "startFrame": 6027,
+      "durationInFrames": 253,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "用词更猛烈的一组，给出了更高的速度估计。一周后，他们也更常说自己见过碎玻璃。",
+          "visualThesis": "强动词抬高估计",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "别人一句话，能改写你报告的现场吗"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "用词更猛烈的一组，给出了更高的速度估计。一周后，他们也更常说自己见过碎玻璃。",
+      "description": "COMPARISON: 强动词抬高估计",
+      "notes": "exact narration unit N025; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S025",
+      "chapter": 3,
+      "chapterTitle": "别人一句话，能改写你报告的现场吗",
+      "start": 209.33333333333334,
+      "end": 215.76666666666668,
+      "duration": 6.433333333333334,
+      "startFrame": 6280,
+      "durationInFrames": 193,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "可原影片里并没有碎玻璃。事后语言，显然能够改变后来的报告。",
+          "visualThesis": "事后语言改变报告",
+          "visualLabels": [
+            "输入",
+            "条件",
+            "报告"
+          ],
+          "label": "别人一句话，能改写你报告的现场吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "可原影片里并没有碎玻璃。事后语言，显然能够改变后来的报告。",
+      "description": "PROCESS_MAP: 事后语言改变报告",
+      "notes": "exact narration unit N026; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S026",
+      "chapter": 3,
+      "chapterTitle": "别人一句话，能改写你报告的现场吗",
+      "start": 215.76666666666668,
+      "end": 221.33333333333334,
+      "duration": 5.566666666666666,
+      "startFrame": 6473,
+      "durationInFrames": 167,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "这里要留一道边界。实验支持“提问会影响回忆报告”。",
+          "visualThesis": "提问会改变报告",
+          "visualLabels": [
+            "线索",
+            "关系",
+            "缺口"
+          ],
+          "label": "别人一句话，能改写你报告的现场吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "这里要留一道边界。实验支持“提问会影响回忆报告”。",
+      "description": "CONCEPT_SPACE: 提问会改变报告",
+      "notes": "exact narration unit N027; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S027",
+      "chapter": 3,
+      "chapterTitle": "别人一句话，能改写你报告的现场吗",
+      "start": 221.33333333333334,
+      "end": 231.76666666666668,
+      "duration": 10.433333333333334,
+      "startFrame": 6640,
+      "durationInFrames": 313,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "它并没有单独证明，原始痕迹已经被整段删除。旧信息、后来信息和测试策略，也可能在提取时共同竞争。",
+          "visualThesis": "原痕迹没有被证明删除",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "别人一句话，能改写你报告的现场吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "它并没有单独证明，原始痕迹已经被整段删除。旧信息、后来信息和测试策略，也可能在提取时共同竞争。",
+      "description": "COMPARISON: 原痕迹没有被证明删除",
+      "notes": "exact narration unit N028; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S028",
+      "chapter": 3,
+      "chapterTitle": "别人一句话，能改写你报告的现场吗",
+      "start": 231.76666666666668,
+      "end": 239.76666666666668,
+      "duration": 8,
+      "startFrame": 6953,
+      "durationInFrames": 240,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "来源监控提供了一种解释。我们回忆时，往往不是读取一枚永不脱落的来源标签。",
+          "visualThesis": "来源不是固定标签",
+          "visualLabels": [
+            "线索",
+            "关系",
+            "缺口"
+          ],
+          "label": "别人一句话，能改写你报告的现场吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "来源监控提供了一种解释。我们回忆时，往往不是读取一枚永不脱落的来源标签。",
+      "description": "CONCEPT_SPACE: 来源不是固定标签",
+      "notes": "exact narration unit N029; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S029",
+      "chapter": 3,
+      "chapterTitle": "别人一句话，能改写你报告的现场吗",
+      "start": 239.76666666666668,
+      "end": 252.86666666666667,
+      "duration": 13.1,
+      "startFrame": 7193,
+      "durationInFrames": 393,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "大脑会根据图像、语义、情境和思考痕迹，判断某个内容来自亲眼所见、后来听说，还是自己的想象。这个判断很有用，也可能出错。",
+          "visualThesis": "判断来自多种线索",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "别人一句话，能改写你报告的现场吗",
+          "evidenceRole": "原始研究"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "大脑会根据图像、语义、情境和思考痕迹，判断某个内容来自亲眼所见、后来听说，还是自己的想象。这个判断很有用，也可能出错。",
+      "description": "COMPARISON: 判断来自多种线索",
+      "notes": "exact narration unit N030; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S030",
+      "chapter": 3,
+      "chapterTitle": "别人一句话，能改写你报告的现场吗",
+      "start": 252.86666666666667,
+      "end": 264.43333333333334,
+      "duration": 11.566666666666666,
+      "startFrame": 7586,
+      "durationInFrames": 347,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "因此，同一句误导并不会同样影响每个人。原始记忆有多清楚，事后信息出现多晚，测试怎样提问，都可能影响结果。",
+          "visualThesis": "误导不会同样生效",
+          "visualLabels": [
+            "输入",
+            "条件",
+            "报告"
+          ],
+          "label": "别人一句话，能改写你报告的现场吗"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "因此，同一句误导并不会同样影响每个人。原始记忆有多清楚，事后信息出现多晚，测试怎样提问，都可能影响结果。",
+      "description": "PROCESS_MAP: 误导不会同样生效",
+      "notes": "exact narration unit N031; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S031",
+      "chapter": 3,
+      "chapterTitle": "别人一句话，能改写你报告的现场吗",
+      "start": 264.43333333333334,
+      "end": 274,
+      "duration": 9.566666666666666,
+      "startFrame": 7933,
+      "durationInFrames": 287,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "我们看到的不是语言拥有魔法。我们看到的是，回忆报告会把多个时期的信息带到同一个回答里。",
+          "visualThesis": "多段信息同场竞争",
+          "visualLabels": [
+            "线索",
+            "关系",
+            "缺口"
+          ],
+          "label": "别人一句话，能改写你报告的现场吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "我们看到的不是语言拥有魔法。我们看到的是，回忆报告会把多个时期的信息带到同一个回答里。",
+      "description": "CONCEPT_SPACE: 多段信息同场竞争",
+      "notes": "exact narration unit N032; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S032",
+      "chapter": 3,
+      "chapterTitle": "别人一句话，能改写你报告的现场吗",
+      "start": 274,
+      "end": 284,
+      "duration": 10,
+      "startFrame": 8220,
+      "durationInFrames": 300,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "这一区分也影响我们怎样读实验数字。答错一道选择题，可能来自记忆、来源判断，也可能来自猜测。",
+          "visualThesis": "误差不只一种来源",
+          "visualLabels": [
+            "记忆",
+            "判断",
+            "猜测"
+          ],
+          "label": "别人一句话，能改写你报告的现场吗"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "这一区分也影响我们怎样读实验数字。答错一道选择题，可能来自记忆、来源判断，也可能来自猜测。",
+      "description": "KINETIC_CLAIM: 误差不只一种来源",
+      "notes": "exact narration unit N033; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S033",
+      "chapter": 3,
+      "chapterTitle": "别人一句话，能改写你报告的现场吗",
+      "start": 284,
+      "end": 298.23333333333335,
+      "duration": 14.233333333333333,
+      "startFrame": 8520,
+      "durationInFrames": 427,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "研究者必须比较不同条件，而不是把每个错误都叫作一段新记忆。片中说“被改写”的，是最后可报告的版本，不是已经证明被物理替换的文件。",
+          "visualThesis": "先比较，再解释",
+          "visualLabels": [
+            "线索",
+            "关系",
+            "缺口"
+          ],
+          "label": "别人一句话，能改写你报告的现场吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "研究者必须比较不同条件，而不是把每个错误都叫作一段新记忆。片中说“被改写”的，是最后可报告的版本，不是已经证明被物理替换的文件。",
+      "description": "CONCEPT_SPACE: 先比较，再解释",
+      "notes": "exact narration unit N034; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S034",
+      "chapter": 4,
+      "chapterTitle": "一个从未出现过的词",
+      "start": 298.23333333333335,
+      "end": 307.3333333333333,
+      "duration": 9.1,
+      "startFrame": 8947,
+      "durationInFrames": 273,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CHAPTER_INTERSTITIAL",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "前面是外部语言带来的误导。可就算没有人暗示，记忆也可能从材料的内部关系里产生错误。",
+          "visualThesis": "下一段，换个问题",
+          "visualLabels": [
+            "下一章"
+          ],
+          "label": "一个从未出现过的词"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "前面是外部语言带来的误导。可就算没有人暗示，记忆也可能从材料的内部关系里产生错误。",
+      "description": "CHAPTER_INTERSTITIAL: 下一段，换个问题",
+      "notes": "exact narration unit N035; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S035",
+      "chapter": 4,
+      "chapterTitle": "一个从未出现过的词",
+      "start": 307.3333333333333,
+      "end": 312.8333333333333,
+      "duration": 5.5,
+      "startFrame": 9220,
+      "durationInFrames": 165,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "现在做一个简短演示；它不是中文标准化实验。",
+          "visualThesis": "词表实验不等于自传记忆",
+          "visualLabels": [
+            "词表",
+            "联想",
+            "误报"
+          ],
+          "label": "一个从未出现过的词",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "现在做一个简短演示；它不是中文标准化实验。",
+      "description": "PROCESS_MAP: 词表实验不等于自传记忆",
+      "notes": "exact narration unit N036; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S036",
+      "chapter": 4,
+      "chapterTitle": "一个从未出现过的词",
+      "start": 312.8333333333333,
+      "end": 319.06666666666666,
+      "duration": 6.233333333333333,
+      "startFrame": 9385,
+      "durationInFrames": 187,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "请依次记住这些词：床、休息、清醒、疲倦、梦、被子、打盹。",
+          "visualThesis": "词表制造联想",
+          "visualLabels": [
+            "记忆",
+            "判断",
+            "边界"
+          ],
+          "label": "一个从未出现过的词"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "请依次记住这些词：床、休息、清醒、疲倦、梦、被子、打盹。",
+      "description": "KINETIC_CLAIM: 词表制造联想",
+      "notes": "exact narration unit N037; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S037",
+      "chapter": 4,
+      "chapterTitle": "一个从未出现过的词",
+      "start": 319.06666666666666,
+      "end": 324.56666666666666,
+      "duration": 5.5,
+      "startFrame": 9572,
+      "durationInFrames": 165,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "刚才的词里，有没有“睡眠”？它和整组词都很接近。",
+          "visualThesis": "诱饵词没有出现",
+          "visualLabels": [
+            "输入",
+            "条件",
+            "报告"
+          ],
+          "label": "一个从未出现过的词"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "刚才的词里，有没有“睡眠”？它和整组词都很接近。",
+      "description": "PROCESS_MAP: 诱饵词没有出现",
+      "notes": "exact narration unit N038; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S038",
+      "chapter": 4,
+      "chapterTitle": "一个从未出现过的词",
+      "start": 324.56666666666666,
+      "end": 332.8,
+      "duration": 8.233333333333333,
+      "startFrame": 9737,
+      "durationInFrames": 247,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "如果你觉得它好像出现过，正好能体会这种诱饵词的吸引力。可我们故意没有说它。",
+          "visualThesis": "熟悉感会误导",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "一个从未出现过的词",
+          "evidenceRole": "原始研究"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "如果你觉得它好像出现过，正好能体会这种诱饵词的吸引力。可我们故意没有说它。",
+      "description": "COMPARISON: 熟悉感会误导",
+      "notes": "exact narration unit N039; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S039",
+      "chapter": 4,
+      "chapterTitle": "一个从未出现过的词",
+      "start": 332.8,
+      "end": 343.7,
+      "duration": 10.9,
+      "startFrame": 9984,
+      "durationInFrames": 327,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "这就是德斯、罗迪格和麦克德莫特范式所研究的一类现象。具体项目之外，我们也会保存一组材料的共同意义。",
+          "visualThesis": "把诱饵变得可观察",
+          "visualLabels": [
+            "材料",
+            "诱饵",
+            "测试"
+          ],
+          "label": "一个从未出现过的词"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "这就是德斯、罗迪格和麦克德莫特范式所研究的一类现象。具体项目之外，我们也会保存一组材料的共同意义。",
+      "description": "PROCESS_MAP: 把诱饵变得可观察",
+      "notes": "exact narration unit N040; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S040",
+      "chapter": 4,
+      "chapterTitle": "一个从未出现过的词",
+      "start": 343.7,
+      "end": 351.26666666666665,
+      "duration": 7.566666666666666,
+      "startFrame": 10311,
+      "durationInFrames": 227,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "意义能帮助理解和概括。它也会让一个高度匹配、却未出现的项目显得熟悉。",
+          "visualThesis": "意义也会制造熟悉",
+          "visualLabels": [
+            "线索",
+            "关系",
+            "缺口"
+          ],
+          "label": "一个从未出现过的词",
+          "evidenceRole": "原始研究"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "意义能帮助理解和概括。它也会让一个高度匹配、却未出现的项目显得熟悉。",
+      "description": "CONCEPT_SPACE: 意义也会制造熟悉",
+      "notes": "exact narration unit N041; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S041",
+      "chapter": 4,
+      "chapterTitle": "一个从未出现过的词",
+      "start": 351.26666666666665,
+      "end": 361.03333333333336,
+      "duration": 9.766666666666667,
+      "startFrame": 10538,
+      "durationInFrames": 293,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "记错一个词，不等于形成了一段完整童年。这个范式的价值，是把内部推断造成的错误变得可观察。",
+          "visualThesis": "词错不等于童年",
+          "visualLabels": [
+            "记忆",
+            "判断",
+            "边界"
+          ],
+          "label": "一个从未出现过的词",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "记错一个词，不等于形成了一段完整童年。这个范式的价值，是把内部推断造成的错误变得可观察。",
+      "description": "KINETIC_CLAIM: 词错不等于童年",
+      "notes": "exact narration unit N042; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S042",
+      "chapter": 4,
+      "chapterTitle": "一个从未出现过的词",
+      "start": 361.03333333333336,
+      "end": 366.53333333333336,
+      "duration": 5.5,
+      "startFrame": 10831,
+      "durationInFrames": 165,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "虚假记忆并不一定需要外部的人先来欺骗你。",
+          "visualThesis": "错误不必来自暗示",
+          "visualLabels": [
+            "输入",
+            "条件",
+            "报告"
+          ],
+          "label": "一个从未出现过的词",
+          "evidenceRole": "原始研究"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "虚假记忆并不一定需要外部的人先来欺骗你。",
+      "description": "PROCESS_MAP: 错误不必来自暗示",
+      "notes": "exact narration unit N043; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S043",
+      "chapter": 4,
+      "chapterTitle": "一个从未出现过的词",
+      "start": 366.53333333333336,
+      "end": 376.3,
+      "duration": 9.766666666666667,
+      "startFrame": 10996,
+      "durationInFrames": 293,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "这个范式也提醒我们，正确和错误并非来自两套完全隔离的系统。抓住共同主题，通常能提高理解。",
+          "visualThesis": "正确和错误共用线索",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "一个从未出现过的词"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "这个范式也提醒我们，正确和错误并非来自两套完全隔离的系统。抓住共同主题，通常能提高理解。",
+      "description": "COMPARISON: 正确和错误共用线索",
+      "notes": "exact narration unit N044; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S044",
+      "chapter": 4,
+      "chapterTitle": "一个从未出现过的词",
+      "start": 376.3,
+      "end": 388.3,
+      "duration": 12,
+      "startFrame": 11289,
+      "durationInFrames": 360,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "精确细节又能帮助我们拒绝一个“很像、但没出现”的答案。两种信息在同一次测试里，可能相互支持，也可能相互拉扯。",
+          "visualThesis": "细节能排除相似项",
+          "visualLabels": [
+            "细节",
+            "相似",
+            "拒绝"
+          ],
+          "label": "一个从未出现过的词",
+          "evidenceRole": "原始研究"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "精确细节又能帮助我们拒绝一个“很像、但没出现”的答案。两种信息在同一次测试里，可能相互支持，也可能相互拉扯。",
+      "description": "KINETIC_CLAIM: 细节能排除相似项",
+      "notes": "exact narration unit N045; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S045",
+      "chapter": 5,
+      "chapterTitle": "错误记忆为什么会有真实感",
+      "start": 388.3,
+      "end": 396.53333333333336,
+      "duration": 8.233333333333333,
+      "startFrame": 11649,
+      "durationInFrames": 247,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CHAPTER_INTERSTITIAL",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "下面这些是彼此竞争、也可能共同起作用的候选解释，不是一条已经证实的因果链。",
+          "visualThesis": "解释不是单一因果",
+          "visualLabels": [
+            "下一章"
+          ],
+          "label": "错误记忆为什么会有真实感",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "下面这些是彼此竞争、也可能共同起作用的候选解释，不是一条已经证实的因果链。",
+      "description": "CHAPTER_INTERSTITIAL: 解释不是单一因果",
+      "notes": "exact narration unit N046; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S046",
+      "chapter": 5,
+      "chapterTitle": "错误记忆为什么会有真实感",
+      "start": 396.53333333333336,
+      "end": 405.6333333333333,
+      "duration": 9.1,
+      "startFrame": 11896,
+      "durationInFrames": 273,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "第一种来源，是主旨和细节的分离。我们常能保留事情的核心含义，却丢掉原句和精确顺序。",
+          "visualThesis": "主旨与细节分开",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "错误记忆为什么会有真实感"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "第一种来源，是主旨和细节的分离。我们常能保留事情的核心含义，却丢掉原句和精确顺序。",
+      "description": "COMPARISON: 主旨与细节分开",
+      "notes": "exact narration unit N047; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S047",
+      "chapter": 5,
+      "chapterTitle": "错误记忆为什么会有真实感",
+      "start": 405.6333333333333,
+      "end": 413.2,
+      "duration": 7.566666666666666,
+      "startFrame": 12169,
+      "durationInFrames": 227,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "回忆时，主旨帮助我们补齐一个合理版本。合理，不自动等于当时真的如此。",
+          "visualThesis": "主旨能补全缺失细节",
+          "visualLabels": [
+            "主旨",
+            "细节"
+          ],
+          "label": "错误记忆为什么会有真实感",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "回忆时，主旨帮助我们补齐一个合理版本。合理，不自动等于当时真的如此。",
+      "description": "COMPARISON: 主旨能补全缺失细节",
+      "notes": "exact narration unit N048; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S048",
+      "chapter": 5,
+      "chapterTitle": "错误记忆为什么会有真实感",
+      "start": 413.2,
+      "end": 419.2,
+      "duration": 6,
+      "startFrame": 12396,
+      "durationInFrames": 180,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "VERSION_DIFF",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "第二种来源，是来源归因。你可能记得一幅非常鲜明的画面。",
+          "visualThesis": "来源归因待检验",
+          "visualLabels": [
+            "原版本",
+            "后来版本",
+            "差异"
+          ],
+          "label": "错误记忆为什么会有真实感"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "第二种来源，是来源归因。你可能记得一幅非常鲜明的画面。",
+      "description": "VERSION_DIFF: 来源归因待检验",
+      "notes": "exact narration unit N049; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S049",
+      "chapter": 5,
+      "chapterTitle": "错误记忆为什么会有真实感",
+      "start": 419.2,
+      "end": 426.53333333333336,
+      "duration": 7.333333333333333,
+      "startFrame": 12576,
+      "durationInFrames": 220,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "可它究竟来自亲眼所见，还是后来读到的描述？鲜明度回答不了这个问题。",
+          "visualThesis": "熟悉感缺少出处",
+          "visualLabels": [
+            "记忆",
+            "判断",
+            "边界"
+          ],
+          "label": "错误记忆为什么会有真实感"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "可它究竟来自亲眼所见，还是后来读到的描述？鲜明度回答不了这个问题。",
+      "description": "KINETIC_CLAIM: 熟悉感缺少出处",
+      "notes": "exact narration unit N050; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S050",
+      "chapter": 5,
+      "chapterTitle": "错误记忆为什么会有真实感",
+      "start": 426.53333333333336,
+      "end": 432.03333333333336,
+      "duration": 5.5,
+      "startFrame": 12796,
+      "durationInFrames": 165,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "熟悉感也不能独自回答。",
+          "visualThesis": "熟悉感不够回答",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "错误记忆为什么会有真实感",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "熟悉感也不能独自回答。",
+      "description": "COMPARISON: 熟悉感不够回答",
+      "notes": "exact narration unit N051; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S051",
+      "chapter": 5,
+      "chapterTitle": "错误记忆为什么会有真实感",
+      "start": 432.03333333333336,
+      "end": 440.93333333333334,
+      "duration": 8.9,
+      "startFrame": 12961,
+      "durationInFrames": 267,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "VERSION_DIFF",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "第三种来源，是既有结构。我们用对餐厅、课堂、家庭和社会规则的知识，压缩日常经验。",
+          "visualThesis": "结构压缩日常",
+          "visualLabels": [
+            "原始细节",
+            "主旨",
+            "压缩"
+          ],
+          "label": "错误记忆为什么会有真实感"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "第三种来源，是既有结构。我们用对餐厅、课堂、家庭和社会规则的知识，压缩日常经验。",
+      "description": "VERSION_DIFF: 结构压缩日常",
+      "notes": "exact narration unit N052; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S052",
+      "chapter": 5,
+      "chapterTitle": "错误记忆为什么会有真实感",
+      "start": 440.93333333333334,
+      "end": 452.26666666666665,
+      "duration": 11.333333333333334,
+      "startFrame": 13228,
+      "durationInFrames": 340,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "没有这些结构，每次理解都要从零开始。代价是，不符合预期的细节更容易被忽略，符合预期的细节也可能被补上。",
+          "visualThesis": "压缩结构会抹平例外",
+          "visualLabels": [
+            "常见模式",
+            "例外"
+          ],
+          "label": "错误记忆为什么会有真实感",
+          "evidenceRole": "解释"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "没有这些结构，每次理解都要从零开始。代价是，不符合预期的细节更容易被忽略，符合预期的细节也可能被补上。",
+      "description": "COMPARISON: 压缩结构会抹平例外",
+      "notes": "exact narration unit N053; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S053",
+      "chapter": 5,
+      "chapterTitle": "错误记忆为什么会有真实感",
+      "start": 452.26666666666665,
+      "end": 465.6,
+      "duration": 13.333333333333334,
+      "startFrame": 13568,
+      "durationInFrames": 400,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "VERSION_DIFF",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "第四种来源，经常被一句话说得太满，叫做再巩固。动物研究和部分人类研究提示，某些记忆在特定重新激活条件下会进入可更新状态。",
+          "visualThesis": "再巩固不是万能解释",
+          "visualLabels": [
+            "原版本",
+            "后来版本",
+            "差异"
+          ],
+          "label": "错误记忆为什么会有真实感"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "第四种来源，经常被一句话说得太满，叫做再巩固。动物研究和部分人类研究提示，某些记忆在特定重新激活条件下会进入可更新状态。",
+      "description": "VERSION_DIFF: 再巩固不是万能解释",
+      "notes": "exact narration unit N054; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S054",
+      "chapter": 5,
+      "chapterTitle": "错误记忆为什么会有真实感",
+      "start": 465.6,
+      "end": 476.7,
+      "duration": 11.1,
+      "startFrame": 13968,
+      "durationInFrames": 333,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "但提取并不总会触发这个过程，不同记忆和任务的证据也不一样。它不是“每想一次，就把整段人生覆盖保存”。",
+          "visualThesis": "再巩固有条件",
+          "visualLabels": [
+            "记忆",
+            "判断",
+            "边界"
+          ],
+          "label": "错误记忆为什么会有真实感",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "但提取并不总会触发这个过程，不同记忆和任务的证据也不一样。它不是“每想一次，就把整段人生覆盖保存”。",
+      "description": "KINETIC_CLAIM: 再巩固有条件",
+      "notes": "exact narration unit N055; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S055",
+      "chapter": 5,
+      "chapterTitle": "错误记忆为什么会有真实感",
+      "start": 476.7,
+      "end": 489.8,
+      "duration": 13.1,
+      "startFrame": 14301,
+      "durationInFrames": 393,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "即使不把观察结果叫作再巩固，提醒后的变化也可能来自普通干扰或提取策略。想象一个事件，也可能提高它“似乎发生过”的信心。",
+          "visualThesis": "提醒后变化有多种解释",
+          "visualLabels": [
+            "线索",
+            "关系",
+            "缺口"
+          ],
+          "label": "错误记忆为什么会有真实感"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "即使不把观察结果叫作再巩固，提醒后的变化也可能来自普通干扰或提取策略。想象一个事件，也可能提高它“似乎发生过”的信心。",
+      "description": "CONCEPT_SPACE: 提醒后变化有多种解释",
+      "notes": "exact narration unit N056; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S056",
+      "chapter": 5,
+      "chapterTitle": "错误记忆为什么会有真实感",
+      "start": 489.8,
+      "end": 497.1333333333333,
+      "duration": 7.333333333333333,
+      "startFrame": 14694,
+      "durationInFrames": 220,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "报告变化是一种观察；再巩固、干扰和来源判断，是需要分别检验的解释。",
+          "visualThesis": "解释必须分开",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "错误记忆为什么会有真实感",
+          "evidenceRole": "解释"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "报告变化是一种观察；再巩固、干扰和来源判断，是需要分别检验的解释。",
+      "description": "COMPARISON: 解释必须分开",
+      "notes": "exact narration unit N057; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S057",
+      "chapter": 6,
+      "chapterTitle": "你越确定，就越可靠吗",
+      "start": 497.1333333333333,
+      "end": 504.03333333333336,
+      "duration": 6.9,
+      "startFrame": 14914,
+      "durationInFrames": 207,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CHAPTER_INTERSTITIAL",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "“越自信越准确”，太简单。“自信和准确完全没关系”，也太简单。",
+          "visualThesis": "信心和准确都非绝对",
+          "visualLabels": [
+            "下一章"
+          ],
+          "label": "你越确定，就越可靠吗"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "“越自信越准确”，太简单。“自信和准确完全没关系”，也太简单。",
+      "description": "CHAPTER_INTERSTITIAL: 信心和准确都非绝对",
+      "notes": "exact narration unit N058; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S058",
+      "chapter": 6,
+      "chapterTitle": "你越确定，就越可靠吗",
+      "start": 504.03333333333336,
+      "end": 510.7,
+      "duration": 6.666666666666667,
+      "startFrame": 15121,
+      "durationInFrames": 200,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "TIMELINE",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "真正关键的问题是，这份信心在什么时候记录？它经历过什么程序？",
+          "visualThesis": "记录时点决定含义",
+          "visualLabels": [
+            "T0",
+            "数周",
+            "数年"
+          ],
+          "label": "你越确定，就越可靠吗",
+          "evidenceRole": "解释"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "真正关键的问题是，这份信心在什么时候记录？它经历过什么程序？",
+      "description": "TIMELINE: 记录时点决定含义",
+      "notes": "exact narration unit N059; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S059",
+      "chapter": 6,
+      "chapterTitle": "你越确定，就越可靠吗",
+      "start": 510.7,
+      "end": 523.8,
+      "duration": 13.1,
+      "startFrame": 15321,
+      "durationInFrames": 393,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "一组研究综述认为，在公平、初次、未受污染的目击识别中，最初的高置信选择可以提供信息。低置信本身却不能告诉我们错在哪里。",
+          "visualThesis": "高信心依赖条件",
+          "visualLabels": [
+            "输入",
+            "条件",
+            "报告"
+          ],
+          "label": "你越确定，就越可靠吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "一组研究综述认为，在公平、初次、未受污染的目击识别中，最初的高置信选择可以提供信息。低置信本身却不能告诉我们错在哪里。",
+      "description": "PROCESS_MAP: 高信心依赖条件",
+      "notes": "exact narration unit N060; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S060",
+      "chapter": 6,
+      "chapterTitle": "你越确定，就越可靠吗",
+      "start": 523.8,
+      "end": 529.8,
+      "duration": 6,
+      "startFrame": 15714,
+      "durationInFrames": 180,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "这个结论依赖明确条件，不能直接搬到几年后的庭审陈述上。",
+          "visualThesis": "不能搬到庭审",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "你越确定，就越可靠吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "这个结论依赖明确条件，不能直接搬到几年后的庭审陈述上。",
+      "description": "COMPARISON: 不能搬到庭审",
+      "notes": "exact narration unit N061; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S061",
+      "chapter": 6,
+      "chapterTitle": "你越确定，就越可靠吗",
+      "start": 529.8,
+      "end": 535.3,
+      "duration": 5.5,
+      "startFrame": 15894,
+      "durationInFrames": 165,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "为什么？因为信心会被后来发生的事改变。",
+          "visualThesis": "反馈会改写评价",
+          "visualLabels": [
+            "记忆",
+            "判断",
+            "边界"
+          ],
+          "label": "你越确定，就越可靠吗"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "为什么？因为信心会被后来发生的事改变。",
+      "description": "KINETIC_CLAIM: 反馈会改写评价",
+      "notes": "exact narration unit N062; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S062",
+      "chapter": 6,
+      "chapterTitle": "你越确定，就越可靠吗",
+      "start": 535.3,
+      "end": 548.2,
+      "duration": 12.9,
+      "startFrame": 16059,
+      "durationInFrames": 387,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "一次“很好，你认出了嫌疑人”的确认反馈，就可能提高目击者后来的自信。它还可能让人回头觉得，自己当时看得更久、更清楚。",
+          "visualThesis": "确认反馈抬高信心",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "你越确定，就越可靠吗",
+          "evidenceRole": "解释"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "一次“很好，你认出了嫌疑人”的确认反馈，就可能提高目击者后来的自信。它还可能让人回头觉得，自己当时看得更久、更清楚。",
+      "description": "COMPARISON: 确认反馈抬高信心",
+      "notes": "exact narration unit N063; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S063",
+      "chapter": 6,
+      "chapterTitle": "你越确定，就越可靠吗",
+      "start": 548.2,
+      "end": 556.2,
+      "duration": 8,
+      "startFrame": 16446,
+      "durationInFrames": 240,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "TIMELINE",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "注意，反馈没有穿越时间，改善当时的观察。它改变的是后来对那次观察的评价。",
+          "visualThesis": "反馈不改变当时观察",
+          "visualLabels": [
+            "T0",
+            "数周",
+            "数年"
+          ],
+          "label": "你越确定，就越可靠吗"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "注意，反馈没有穿越时间，改善当时的观察。它改变的是后来对那次观察的评价。",
+      "description": "TIMELINE: 反馈不改变当时观察",
+      "notes": "exact narration unit N064; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S064",
+      "chapter": 6,
+      "chapterTitle": "你越确定，就越可靠吗",
+      "start": 556.2,
+      "end": 566.8666666666667,
+      "duration": 10.666666666666666,
+      "startFrame": 16686,
+      "durationInFrames": 320,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "所以司法上最珍贵的，不只是法庭里坚定的语气。还包括第一次识别当下、尚未被反馈污染的原始置信陈述。",
+          "visualThesis": "保存第一次信心",
+          "visualLabels": [
+            "输入",
+            "条件",
+            "报告"
+          ],
+          "label": "你越确定，就越可靠吗",
+          "evidenceRole": "解释"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "所以司法上最珍贵的，不只是法庭里坚定的语气。还包括第一次识别当下、尚未被反馈污染的原始置信陈述。",
+      "description": "PROCESS_MAP: 保存第一次信心",
+      "notes": "exact narration unit N065; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S065",
+      "chapter": 6,
+      "chapterTitle": "你越确定，就越可靠吗",
+      "start": 566.8666666666667,
+      "end": 576.8666666666667,
+      "duration": 10,
+      "startFrame": 17006,
+      "durationInFrames": 300,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "即使是第一次信心，也不能脱离现场条件。距离太远、光线太差、阵列不公平，都可能降低信息质量。",
+          "visualThesis": "现场条件仍关键",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "你越确定，就越可靠吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "即使是第一次信心，也不能脱离现场条件。距离太远、光线太差、阵列不公平，都可能降低信息质量。",
+      "description": "COMPARISON: 现场条件仍关键",
+      "notes": "exact narration unit N066; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S066",
+      "chapter": 6,
+      "chapterTitle": "你越确定，就越可靠吗",
+      "start": 576.8666666666667,
+      "end": 585.9666666666667,
+      "duration": 9.1,
+      "startFrame": 17306,
+      "durationInFrames": 273,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "研究说的是在明确程序下，信心可以帮助判断。它不是把一个百分数变成有罪结论的计算器。",
+          "visualThesis": "信心不是定罪器",
+          "visualLabels": [
+            "记忆",
+            "判断",
+            "边界"
+          ],
+          "label": "你越确定，就越可靠吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "研究说的是在明确程序下，信心可以帮助判断。它不是把一个百分数变成有罪结论的计算器。",
+      "description": "KINETIC_CLAIM: 信心不是定罪器",
+      "notes": "exact narration unit N067; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S067",
+      "chapter": 7,
+      "chapterTitle": "为什么闪光灯记忆也会变",
+      "start": 585.9666666666667,
+      "end": 601.3,
+      "duration": 15.333333333333334,
+      "startFrame": 17579,
+      "durationInFrames": 460,
+      "category": "Archive",
+      "visualType": "Archive",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CHAPTER_INTERSTITIAL",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "重大消息常留下所谓“闪光灯记忆”。这个词不是说它像闪光灯一样准确，而是指人对得知消息时的情境记得格外鲜明：当时在哪里、在做什么、身边有谁。",
+          "visualThesis": "闪光灯不等于照片",
+          "visualLabels": [
+            "下一章"
+          ],
+          "label": "为什么闪光灯记忆也会变",
+          "archiveDisclosure": "背景资料 · 非研究参与者或事件",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [
+        {
+          "requirementId": "S067-R01",
+          "kind": "image",
+          "subject": "people receiving major news",
+          "query": "public domain television audience news archive",
+          "usage": "primary",
+          "policy": "public_domain",
+          "authenticity": "authentic_required"
+        }
+      ],
+      "narrationSummary": "重大消息常留下所谓“闪光灯记忆”。这个词不是说它像闪光灯一样准确，而是指人对得知消息时的情境记得格外鲜明：当时在哪里、在做什么、身边有谁。",
+      "description": "CHAPTER_INTERSTITIAL: 闪光灯不等于照片",
+      "notes": "exact narration unit N068; visual copy separated; archive audit retained=true",
+      "assetIds": [],
+      "licenseStatus": "review-required",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S068",
+      "chapter": 7,
+      "chapterTitle": "为什么闪光灯记忆也会变",
+      "start": 601.3,
+      "end": 606.8,
+      "duration": 5.5,
+      "startFrame": 18039,
+      "durationInFrames": 165,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "人也往往相信，它像照片一样被保存下来。",
+          "visualThesis": "鲜明感无法保存细节",
+          "visualLabels": [
+            "鲜明感",
+            "准确性"
+          ],
+          "label": "为什么闪光灯记忆也会变",
+          "evidenceRole": "后续证据"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "人也往往相信，它像照片一样被保存下来。",
+      "description": "COMPARISON: 鲜明感无法保存细节",
+      "notes": "exact narration unit N069; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S069",
+      "chapter": 7,
+      "chapterTitle": "为什么闪光灯记忆也会变",
+      "start": 606.8,
+      "end": 615.4666666666667,
+      "duration": 8.666666666666666,
+      "startFrame": 18204,
+      "durationInFrames": 260,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "TIMELINE",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "研究者在重大事件后很快记录参与者的答案。几周、几年，甚至十年后，再问相同问题。",
+          "visualThesis": "先留下 T0",
+          "visualLabels": [
+            "事件后",
+            "原始记录"
+          ],
+          "label": "为什么闪光灯记忆也会变",
+          "sequence": {
+            "id": "flashbulb-longitudinal",
+            "phase": 0,
+            "view": "establish"
+          }
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "研究者在重大事件后很快记录参与者的答案。几周、几年，甚至十年后，再问相同问题。",
+      "description": "TIMELINE: 先留下 T0",
+      "notes": "exact narration unit N070; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S070",
+      "chapter": 7,
+      "chapterTitle": "为什么闪光灯记忆也会变",
+      "start": 615.4666666666667,
+      "end": 622.3666666666667,
+      "duration": 6.9,
+      "startFrame": 18464,
+      "durationInFrames": 207,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "VERSION_DIFF",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "这样就不必依靠后来版本判断后来版本。最初记录成了一份外部基线。",
+          "visualThesis": "后来版本有基线",
+          "visualLabels": [
+            "T0",
+            "后来报告"
+          ],
+          "label": "为什么闪光灯记忆也会变",
+          "evidenceRole": "后续证据",
+          "sequence": {
+            "id": "flashbulb-longitudinal",
+            "phase": 1,
+            "view": "compare"
+          }
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "这样就不必依靠后来版本判断后来版本。最初记录成了一份外部基线。",
+      "description": "VERSION_DIFF: 后来版本有基线",
+      "notes": "exact narration unit N071; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S071",
+      "chapter": 7,
+      "chapterTitle": "为什么闪光灯记忆也会变",
+      "start": 622.3666666666667,
+      "end": 629.4666666666667,
+      "duration": 7.1,
+      "startFrame": 18671,
+      "durationInFrames": 213,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "TIMELINE",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "结果很耐人寻味。得知消息时的个人情境，与最初报告的一致性会下降。",
+          "visualThesis": "细节会慢慢分叉",
+          "visualLabels": [
+            "数周",
+            "数年",
+            "差异"
+          ],
+          "label": "为什么闪光灯记忆也会变",
+          "sequence": {
+            "id": "flashbulb-longitudinal",
+            "phase": 2,
+            "view": "compare"
+          }
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "结果很耐人寻味。得知消息时的个人情境，与最初报告的一致性会下降。",
+      "description": "TIMELINE: 细节会慢慢分叉",
+      "notes": "exact narration unit N072; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S072",
+      "chapter": 7,
+      "chapterTitle": "为什么闪光灯记忆也会变",
+      "start": 629.4666666666667,
+      "end": 637.9,
+      "duration": 8.433333333333334,
+      "startFrame": 18884,
+      "durationInFrames": 253,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "可鲜明感和对自己记得准确的信心，往往保持得更高。这里的一致性不是客观准确率；",
+          "visualThesis": "鲜明感保持更久",
+          "visualLabels": [
+            "鲜明感",
+            "确信",
+            "准确性"
+          ],
+          "label": "为什么闪光灯记忆也会变",
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "flashbulb-longitudinal",
+            "phase": 3,
+            "view": "conclusion"
+          }
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "可鲜明感和对自己记得准确的信心，往往保持得更高。这里的一致性不是客观准确率；",
+      "description": "COMPARISON: 鲜明感保持更久",
+      "notes": "exact narration unit N073; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S073",
+      "chapter": 7,
+      "chapterTitle": "为什么闪光灯记忆也会变",
+      "start": 637.9,
+      "end": 643.4,
+      "duration": 5.5,
+      "startFrame": 19137,
+      "durationInFrames": 165,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "它只比较后来报告是否还和最初记录相同。",
+          "visualThesis": "稳定不等于准确",
+          "visualLabels": [
+            "后来",
+            "T0",
+            "一致性"
+          ],
+          "label": "为什么闪光灯记忆也会变",
+          "evidenceRole": "后续证据",
+          "sequence": {
+            "id": "flashbulb-longitudinal",
+            "phase": 4,
+            "view": "conclusion"
+          }
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "它只比较后来报告是否还和最初记录相同。",
+      "description": "KINETIC_CLAIM: 稳定不等于准确",
+      "notes": "exact narration unit N074; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S074",
+      "chapter": 7,
+      "chapterTitle": "为什么闪光灯记忆也会变",
+      "start": 643.4,
+      "end": 655.8333333333334,
+      "duration": 12.433333333333334,
+      "startFrame": 19302,
+      "durationInFrames": 373,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "TIMELINE",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "重大事件当然不只留下幻觉，人们可能长期保留不少核心信息。更准确的表述是，情绪和反复讲述可能与真实感长期保持有关。",
+          "visualThesis": "核心信息可以留下",
+          "visualLabels": [
+            "T0",
+            "数周",
+            "数年"
+          ],
+          "label": "为什么闪光灯记忆也会变"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "重大事件当然不只留下幻觉，人们可能长期保留不少核心信息。更准确的表述是，情绪和反复讲述可能与真实感长期保持有关。",
+      "description": "TIMELINE: 核心信息可以留下",
+      "notes": "exact narration unit N075; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S075",
+      "chapter": 7,
+      "chapterTitle": "为什么闪光灯记忆也会变",
+      "start": 655.8333333333334,
+      "end": 661.3333333333334,
+      "duration": 5.5,
+      "startFrame": 19675,
+      "durationInFrames": 165,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "VERSION_DIFF",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "真实感的寿命，不等于每个细节的保质期。",
+          "visualThesis": "真实感不保细节",
+          "visualLabels": [
+            "原版本",
+            "后来版本",
+            "差异"
+          ],
+          "label": "为什么闪光灯记忆也会变",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "真实感的寿命，不等于每个细节的保质期。",
+      "description": "VERSION_DIFF: 真实感不保细节",
+      "notes": "exact narration unit N076; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S076",
+      "chapter": 7,
+      "chapterTitle": "为什么闪光灯记忆也会变",
+      "start": 661.3333333333334,
+      "end": 670.6666666666666,
+      "duration": 9.333333333333334,
+      "startFrame": 19840,
+      "durationInFrames": 280,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "十年研究还发现，较大的变化常集中在早期。后来，人们可能稳定地重复一个已经成形的版本。",
+          "visualThesis": "变化多在早期",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "为什么闪光灯记忆也会变"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "十年研究还发现，较大的变化常集中在早期。后来，人们可能稳定地重复一个已经成形的版本。",
+      "description": "COMPARISON: 变化多在早期",
+      "notes": "exact narration unit N077; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S077",
+      "chapter": 7,
+      "chapterTitle": "为什么闪光灯记忆也会变",
+      "start": 670.6666666666666,
+      "end": 679.1,
+      "duration": 8.433333333333334,
+      "startFrame": 20120,
+      "durationInFrames": 253,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "稳定只说明这个版本不再频繁变化。它不能自动证明，这个版本与最初记录完全一致。",
+          "visualThesis": "稳定仍要看内容",
+          "visualLabels": [
+            "稳定",
+            "版本",
+            "变化"
+          ],
+          "label": "为什么闪光灯记忆也会变",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "稳定只说明这个版本不再频繁变化。它不能自动证明，这个版本与最初记录完全一致。",
+      "description": "KINETIC_CLAIM: 稳定仍要看内容",
+      "notes": "exact narration unit N078; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S078",
+      "chapter": 8,
+      "chapterTitle": "目击证词还能相信吗",
+      "start": 679.1,
+      "end": 692.4333333333333,
+      "duration": 13.333333333333334,
+      "startFrame": 20373,
+      "durationInFrames": 400,
+      "category": "Archive",
+      "visualType": "Archive",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CHAPTER_INTERSTITIAL",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "闪光灯研究有一份较早的外部基线，后来版本还能与它比较。司法现场却常只有一次机会，所以第一次询问怎样发生，会变得格外重要。",
+          "visualThesis": "司法只有一次起点",
+          "visualLabels": [
+            "下一章"
+          ],
+          "label": "目击证词还能相信吗",
+          "archiveDisclosure": "背景资料 · 非引用研究或案件"
+        }
+      },
+      "assetRequirements": [
+        {
+          "requirementId": "S078-R01",
+          "kind": "image",
+          "subject": "historical police lineup room",
+          "query": "St Louis Police lineup room DPLA no known copyright",
+          "usage": "primary",
+          "policy": "public_domain",
+          "authenticity": "authentic_required"
+        }
+      ],
+      "narrationSummary": "闪光灯研究有一份较早的外部基线，后来版本还能与它比较。司法现场却常只有一次机会，所以第一次询问怎样发生，会变得格外重要。",
+      "description": "CHAPTER_INTERSTITIAL: 司法只有一次起点",
+      "notes": "exact narration unit N079; visual copy separated; archive audit retained=true",
+      "assetIds": [],
+      "licenseStatus": "review-required",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S079",
+      "chapter": 8,
+      "chapterTitle": "目击证词还能相信吗",
+      "start": 692.4333333333333,
+      "end": 700.6666666666666,
+      "duration": 8.233333333333333,
+      "startFrame": 20773,
+      "durationInFrames": 247,
+      "category": "Archive",
+      "visualType": "Archive",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "VERSION_DIFF",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "如果记忆会重建，最现实的压力落在司法现场。目击者可能诚实，也可能非常认真。",
+          "visualThesis": "早期记录才可比较",
+          "visualLabels": [
+            "外部基线",
+            "后来版本"
+          ],
+          "label": "目击证词还能相信吗",
+          "archiveDisclosure": "背景资料 · 非引用研究或案件"
+        }
+      },
+      "assetRequirements": [
+        {
+          "requirementId": "S079-R01",
+          "kind": "image",
+          "subject": "historical police lineup room",
+          "query": "St Louis Police lineup room DPLA no known copyright",
+          "usage": "primary",
+          "policy": "public_domain",
+          "authenticity": "authentic_required"
+        }
+      ],
+      "narrationSummary": "如果记忆会重建，最现实的压力落在司法现场。目击者可能诚实，也可能非常认真。",
+      "description": "VERSION_DIFF: 早期记录才可比较",
+      "notes": "exact narration unit N080; visual copy separated; archive audit retained=true",
+      "assetIds": [],
+      "licenseStatus": "review-required",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S080",
+      "chapter": 8,
+      "chapterTitle": "目击证词还能相信吗",
+      "start": 700.6666666666666,
+      "end": 708,
+      "duration": 7.333333333333333,
+      "startFrame": 21020,
+      "durationInFrames": 220,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "问题不只在这个人有没有记忆。还在记忆形成、询问和识别时经历了什么。",
+          "visualThesis": "形成条件同样重要",
+          "visualLabels": [
+            "输入",
+            "条件",
+            "报告"
+          ],
+          "label": "目击证词还能相信吗"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "问题不只在这个人有没有记忆。还在记忆形成、询问和识别时经历了什么。",
+      "description": "PROCESS_MAP: 形成条件同样重要",
+      "notes": "exact narration unit N081; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S081",
+      "chapter": 8,
+      "chapterTitle": "目击证词还能相信吗",
+      "start": 708,
+      "end": 716,
+      "duration": 8,
+      "startFrame": 21240,
+      "durationInFrames": 240,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "带暗示的问题，会把新信息带进来。反复访谈，会增加不同版本彼此接触的机会。",
+          "visualThesis": "新信息会进入首次报告",
+          "visualLabels": [
+            "原始信息",
+            "暗示",
+            "报告"
+          ],
+          "label": "目击证词还能相信吗"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "带暗示的问题，会把新信息带进来。反复访谈，会增加不同版本彼此接触的机会。",
+      "description": "PROCESS_MAP: 新信息会进入首次报告",
+      "notes": "exact narration unit N082; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S082",
+      "chapter": 8,
+      "chapterTitle": "目击证词还能相信吗",
+      "start": 716,
+      "end": 725.7666666666667,
+      "duration": 9.766666666666667,
+      "startFrame": 21480,
+      "durationInFrames": 293,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "列队管理员如果知道谁是嫌疑人，也可能无意中提供线索。识别后的确认反馈，还会继续改变信心。",
+          "visualThesis": "主持人也会给线索",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "目击证词还能相信吗",
+          "evidenceRole": "后续证据"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "列队管理员如果知道谁是嫌疑人，也可能无意中提供线索。识别后的确认反馈，还会继续改变信心。",
+      "description": "COMPARISON: 主持人也会给线索",
+      "notes": "exact narration unit N083; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S083",
+      "chapter": 8,
+      "chapterTitle": "目击证词还能相信吗",
+      "start": 725.7666666666667,
+      "end": 731.7666666666667,
+      "duration": 6,
+      "startFrame": 21773,
+      "durationInFrames": 180,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "因此，改进重点是程序。由不知道嫌疑人身份的人主持列队。",
+          "visualThesis": "程序要隔离暗示",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "目击证词还能相信吗"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "因此，改进重点是程序。由不知道嫌疑人身份的人主持列队。",
+      "description": "COMPARISON: 程序要隔离暗示",
+      "notes": "exact narration unit N084; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S084",
+      "chapter": 8,
+      "chapterTitle": "目击证词还能相信吗",
+      "start": 731.7666666666667,
+      "end": 742.8666666666667,
+      "duration": 11.1,
+      "startFrame": 21953,
+      "durationInFrames": 333,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "明确告诉目击者，嫌疑人可能根本不在其中。在第一次选择时，就用目击者自己的话记录信心，并保存完整过程。",
+          "visualThesis": "先记录，再解释",
+          "visualLabels": [
+            "线索",
+            "关系",
+            "缺口"
+          ],
+          "label": "目击证词还能相信吗",
+          "evidenceRole": "后续证据"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "明确告诉目击者，嫌疑人可能根本不在其中。在第一次选择时，就用目击者自己的话记录信心，并保存完整过程。",
+      "description": "CONCEPT_SPACE: 先记录，再解释",
+      "notes": "exact narration unit N085; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S085",
+      "chapter": 8,
+      "chapterTitle": "目击证词还能相信吗",
+      "start": 742.8666666666667,
+      "end": 752.8666666666667,
+      "duration": 10,
+      "startFrame": 22286,
+      "durationInFrames": 300,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "这些措施不是因为目击证词毫无价值。恰恰相反，是因为一份形成条件良好的首次记忆报告很有价值。",
+          "visualThesis": "首报要在暗示前留下",
+          "visualLabels": [
+            "首次报告",
+            "暗示前",
+            "保存"
+          ],
+          "label": "目击证词还能相信吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "这些措施不是因为目击证词毫无价值。恰恰相反，是因为一份形成条件良好的首次记忆报告很有价值。",
+      "description": "PROCESS_MAP: 首报要在暗示前留下",
+      "notes": "exact narration unit N086; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S086",
+      "chapter": 8,
+      "chapterTitle": "目击证词还能相信吗",
+      "start": 752.8666666666667,
+      "end": 762.2,
+      "duration": 9.333333333333334,
+      "startFrame": 22586,
+      "durationInFrames": 280,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "我们要保护它，不让后续信息偷偷混进来。可信度来自记录链，而不只来自一个人的坚定表情。",
+          "visualThesis": "原始记录才可追溯",
+          "visualLabels": [
+            "线索",
+            "关系",
+            "缺口"
+          ],
+          "label": "目击证词还能相信吗",
+          "evidenceRole": "后续证据"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "我们要保护它，不让后续信息偷偷混进来。可信度来自记录链，而不只来自一个人的坚定表情。",
+      "description": "CONCEPT_SPACE: 原始记录才可追溯",
+      "notes": "exact narration unit N087; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S087",
+      "chapter": 8,
+      "chapterTitle": "目击证词还能相信吗",
+      "start": 762.2,
+      "end": 770.6333333333333,
+      "duration": 8.433333333333334,
+      "startFrame": 22866,
+      "durationInFrames": 253,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "有些因素，事后程序无法修复。目击距离、遮挡、压力和注意方向，已经发生在现场。",
+          "visualThesis": "有些风险无法补救",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "目击证词还能相信吗"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "有些因素，事后程序无法修复。目击距离、遮挡、压力和注意方向，已经发生在现场。",
+      "description": "COMPARISON: 有些风险无法补救",
+      "notes": "exact narration unit N088; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S088",
+      "chapter": 8,
+      "chapterTitle": "目击证词还能相信吗",
+      "start": 770.6333333333333,
+      "end": 782.4,
+      "duration": 11.766666666666667,
+      "startFrame": 23119,
+      "durationInFrames": 353,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "另一些因素却可以控制，比如主持人提示、列队公平和反馈。司法改革的现实目标，是先减少那些本来可以避免的污染。",
+          "visualThesis": "有些风险不能补救",
+          "visualLabels": [
+            "事前",
+            "事后",
+            "限制"
+          ],
+          "label": "目击证词还能相信吗",
+          "evidenceRole": "后续证据"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "另一些因素却可以控制，比如主持人提示、列队公平和反馈。司法改革的现实目标，是先减少那些本来可以避免的污染。",
+      "description": "KINETIC_CLAIM: 有些风险不能补救",
+      "notes": "exact narration unit N089; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S089",
+      "chapter": 9,
+      "chapterTitle": "能否形成从未发生的人生片段",
+      "start": 782.4,
+      "end": 796.6333333333333,
+      "duration": 14.233333333333333,
+      "startFrame": 23472,
+      "durationInFrames": 427,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CHAPTER_INTERSTITIAL",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "前面讨论的是，一个真实发生过的事件怎样被后来信息污染。现在把问题推进一步：如果事件根本没发生，提示能不能让人报告出某种回忆体验？",
+          "visualThesis": "提示能走多远",
+          "visualLabels": [
+            "下一章"
+          ],
+          "label": "能否形成从未发生的人生片段",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "前面讨论的是，一个真实发生过的事件怎样被后来信息污染。现在把问题推进一步：如果事件根本没发生，提示能不能让人报告出某种回忆体验？",
+      "description": "CHAPTER_INTERSTITIAL: 提示能走多远",
+      "notes": "exact narration unit N090; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S090",
+      "chapter": 9,
+      "chapterTitle": "能否形成从未发生的人生片段",
+      "start": 796.6333333333333,
+      "end": 807.3,
+      "duration": 10.666666666666666,
+      "startFrame": 23899,
+      "durationInFrames": 320,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "实验室里更大胆的一步，是提示一段自传体事件。经典的“迷路商场”研究，会先请家人提供真实童年故事。",
+          "visualThesis": "真事掺入虚构事件",
+          "visualLabels": [
+            "真实故事",
+            "虚构事件",
+            "报告"
+          ],
+          "label": "能否形成从未发生的人生片段"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "实验室里更大胆的一步，是提示一段自传体事件。经典的“迷路商场”研究，会先请家人提供真实童年故事。",
+      "description": "PROCESS_MAP: 真事掺入虚构事件",
+      "notes": "exact narration unit N091; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S091",
+      "chapter": 9,
+      "chapterTitle": "能否形成从未发生的人生片段",
+      "start": 807.3,
+      "end": 814.2,
+      "duration": 6.9,
+      "startFrame": 24219,
+      "durationInFrames": 207,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "研究者再加入一件家人确认没有发生的事。参与者随后接受两轮访谈。",
+          "visualThesis": "两轮访谈塑造体验",
+          "visualLabels": [
+            "故事",
+            "引导",
+            "报告"
+          ],
+          "label": "能否形成从未发生的人生片段",
+          "evidenceRole": "后续证据"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "研究者再加入一件家人确认没有发生的事。参与者随后接受两轮访谈。",
+      "description": "PROCESS_MAP: 两轮访谈塑造体验",
+      "notes": "exact narration unit N092; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S092",
+      "chapter": 9,
+      "chapterTitle": "能否形成从未发生的人生片段",
+      "start": 814.2,
+      "end": 821.3,
+      "duration": 7.1,
+      "startFrame": 24426,
+      "durationInFrames": 213,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "部分参与者后来接受了这个故事。有的人还报告图像、情绪或额外细节。",
+          "visualThesis": "体验从何处开始",
+          "visualLabels": [
+            "故事",
+            "接受",
+            "距离"
+          ],
+          "label": "能否形成从未发生的人生片段",
+          "sequence": {
+            "id": "memory-experience-spectrum",
+            "phase": 0,
+            "view": "spectrum"
+          }
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "部分参与者后来接受了这个故事。有的人还报告图像、情绪或额外细节。",
+      "description": "CONCEPT_SPACE: 体验从何处开始",
+      "notes": "exact narration unit N093; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S093",
+      "chapter": 9,
+      "chapterTitle": "能否形成从未发生的人生片段",
+      "start": 821.3,
+      "end": 833.0666666666667,
+      "duration": 11.766666666666667,
+      "startFrame": 24639,
+      "durationInFrames": 353,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "VERSION_DIFF",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "这说明，在权威信息、想象和反复提取共同作用下，人可能对虚构事件产生某种回忆体验。它是一个重要的可能性证明。",
+          "visualThesis": "线索共同塑形",
+          "visualLabels": [
+            "权威",
+            "想象",
+            "提取"
+          ],
+          "label": "能否形成从未发生的人生片段",
+          "evidenceRole": "后续证据",
+          "sequence": {
+            "id": "memory-experience-spectrum",
+            "phase": 1,
+            "view": "spectrum"
+          }
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "这说明，在权威信息、想象和反复提取共同作用下，人可能对虚构事件产生某种回忆体验。它是一个重要的可能性证明。",
+      "description": "VERSION_DIFF: 线索共同塑形",
+      "notes": "exact narration unit N094; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S094",
+      "chapter": 9,
+      "chapterTitle": "能否形成从未发生的人生片段",
+      "start": 833.0666666666667,
+      "end": 841.3,
+      "duration": 8.233333333333333,
+      "startFrame": 24992,
+      "durationInFrames": 247,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "但“某种回忆体验”不是一个简单开关。相信事情发生过，不等于看见了完整情节。",
+          "visualThesis": "体验不是开关",
+          "visualLabels": [
+            "可能",
+            "意象",
+            "回忆"
+          ],
+          "label": "能否形成从未发生的人生片段",
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "memory-experience-spectrum",
+            "phase": 2,
+            "view": "spectrum"
+          }
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "但“某种回忆体验”不是一个简单开关。相信事情发生过，不等于看见了完整情节。",
+      "description": "CONCEPT_SPACE: 体验不是开关",
+      "notes": "exact narration unit N095; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S095",
+      "chapter": 9,
+      "chapterTitle": "能否形成从未发生的人生片段",
+      "start": 841.3,
+      "end": 850.2,
+      "duration": 8.9,
+      "startFrame": 25239,
+      "durationInFrames": 267,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "配合实验要求，也不等于内心确信。部分细节、熟悉感、信念和完整记忆，应该分开编码。",
+          "visualThesis": "配合不等于确信",
+          "visualLabels": [
+            "实验要求",
+            "内心确信"
+          ],
+          "label": "能否形成从未发生的人生片段",
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "memory-experience-spectrum",
+            "phase": 3,
+            "view": "conclusion"
+          }
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "配合实验要求，也不等于内心确信。部分细节、熟悉感、信念和完整记忆，应该分开编码。",
+      "description": "COMPARISON: 配合不等于确信",
+      "notes": "exact narration unit N096; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S096",
+      "chapter": 9,
+      "chapterTitle": "能否形成从未发生的人生片段",
+      "start": 850.2,
+      "end": 861.7666666666667,
+      "duration": 11.566666666666666,
+      "startFrame": 25506,
+      "durationInFrames": 347,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "VERSION_DIFF",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "近年的重新分析正质疑一些宽口径判定。某些被研究者归为虚假记忆的报告，甚至缺少“真的迷路”这样的核心细节。",
+          "visualThesis": "成功定义决定比例",
+          "visualLabels": [
+            "严格口径",
+            "宽口径",
+            "比例"
+          ],
+          "label": "能否形成从未发生的人生片段"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "近年的重新分析正质疑一些宽口径判定。某些被研究者归为虚假记忆的报告，甚至缺少“真的迷路”这样的核心细节。",
+      "description": "VERSION_DIFF: 成功定义决定比例",
+      "notes": "exact narration unit N097; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S097",
+      "chapter": 9,
+      "chapterTitle": "能否形成从未发生的人生片段",
+      "start": 861.7666666666667,
+      "end": 872.2,
+      "duration": 10.433333333333334,
+      "startFrame": 25853,
+      "durationInFrames": 313,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "争论没有让提示效应消失。它提醒我们，不能把“部分人受影响”夸张成“科学家能随意植入完整人生”。",
+          "visualThesis": "效应不能夸大",
+          "visualLabels": [
+            "观察结果",
+            "范围",
+            "边界"
+          ],
+          "label": "能否形成从未发生的人生片段",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "争论没有让提示效应消失。它提醒我们，不能把“部分人受影响”夸张成“科学家能随意植入完整人生”。",
+      "description": "PROCESS_MAP: 效应不能夸大",
+      "notes": "exact narration unit N098; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S098",
+      "chapter": 9,
+      "chapterTitle": "能否形成从未发生的人生片段",
+      "start": 872.2,
+      "end": 882.4333333333333,
+      "duration": 10.233333333333333,
+      "startFrame": 26166,
+      "durationInFrames": 307,
+      "category": "Archive",
+      "visualType": "Archive",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "想象膨胀研究提供了另一层区分。请一个人想象低概率的童年事件，后来“发生过”的评分可能会上升。",
+          "visualThesis": "想象会抬高评分",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "能否形成从未发生的人生片段",
+          "archiveDisclosure": "背景资料 · 非实验参与者或结果"
+        }
+      },
+      "assetRequirements": [
+        {
+          "requirementId": "S098-R01",
+          "kind": "image",
+          "subject": "historical family album alternative",
+          "query": "public domain family daguerreotype",
+          "usage": "primary",
+          "policy": "public_domain",
+          "authenticity": "authentic_required"
+        }
+      ],
+      "narrationSummary": "想象膨胀研究提供了另一层区分。请一个人想象低概率的童年事件，后来“发生过”的评分可能会上升。",
+      "description": "COMPARISON: 想象会抬高评分",
+      "notes": "exact narration unit N099; visual copy separated; archive audit retained=true",
+      "assetIds": [],
+      "licenseStatus": "review-required",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S099",
+      "chapter": 9,
+      "chapterTitle": "能否形成从未发生的人生片段",
+      "start": 882.4333333333333,
+      "end": 892.6666666666666,
+      "duration": 10.233333333333333,
+      "startFrame": 26473,
+      "durationInFrames": 307,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CONCEPT_SPACE",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "上升首先是信念和信心的变化。它距离一段带时间、地点和连续情节的完整记忆，还有很长的测量距离。",
+          "visualThesis": "信念离完整记忆很远",
+          "visualLabels": [
+            "线索",
+            "关系",
+            "缺口"
+          ],
+          "label": "能否形成从未发生的人生片段",
+          "evidenceRole": "后续证据"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "上升首先是信念和信心的变化。它距离一段带时间、地点和连续情节的完整记忆，还有很长的测量距离。",
+      "description": "CONCEPT_SPACE: 信念离完整记忆很远",
+      "notes": "exact narration unit N100; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S100",
+      "chapter": 9,
+      "chapterTitle": "能否形成从未发生的人生片段",
+      "start": 892.6666666666666,
+      "end": 902.6666666666666,
+      "duration": 10,
+      "startFrame": 26780,
+      "durationInFrames": 300,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "PROCESS_MAP",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "实验需求和配合也必须进入讨论。参与者可能猜到研究者期待什么，或者不愿反复回答“我不知道”。",
+          "visualThesis": "实验需求也会影响",
+          "visualLabels": [
+            "任务",
+            "推测",
+            "报告"
+          ],
+          "label": "能否形成从未发生的人生片段"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "实验需求和配合也必须进入讨论。参与者可能猜到研究者期待什么，或者不愿反复回答“我不知道”。",
+      "description": "PROCESS_MAP: 实验需求也会影响",
+      "notes": "exact narration unit N101; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S101",
+      "chapter": 9,
+      "chapterTitle": "能否形成从未发生的人生片段",
+      "start": 902.6666666666666,
+      "end": 914.6666666666666,
+      "duration": 12,
+      "startFrame": 27080,
+      "durationInFrames": 360,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "但这也不能反过来抹去所有新增细节和主观体验。争论的核心，是怎样给报告分类，而不是先宣布每个报告都真，或都假。",
+          "visualThesis": "先分开信念与回忆",
+          "visualLabels": [
+            "信念",
+            "回忆"
+          ],
+          "label": "能否形成从未发生的人生片段",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "但这也不能反过来抹去所有新增细节和主观体验。争论的核心，是怎样给报告分类，而不是先宣布每个报告都真，或都假。",
+      "description": "COMPARISON: 先分开信念与回忆",
+      "notes": "exact narration unit N102; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S102",
+      "chapter": 10,
+      "chapterTitle": "所以，我们还能相信记忆吗",
+      "start": 914.6666666666666,
+      "end": 922.2333333333333,
+      "duration": 7.566666666666666,
+      "startFrame": 27440,
+      "durationInFrames": 227,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "CHAPTER_INTERSTITIAL",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "答案不是信，或者不信。记忆最擅长的，往往是保留意义、关系和行动线索。",
+          "visualThesis": "记忆不只可信或不可信",
+          "visualLabels": [
+            "下一章"
+          ],
+          "label": "所以，我们还能相信记忆吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "答案不是信，或者不信。记忆最擅长的，往往是保留意义、关系和行动线索。",
+      "description": "CHAPTER_INTERSTITIAL: 记忆不只可信或不可信",
+      "notes": "exact narration unit N103; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S103",
+      "chapter": 10,
+      "chapterTitle": "所以，我们还能相信记忆吗",
+      "start": 922.2333333333333,
+      "end": 930.2333333333333,
+      "duration": 8,
+      "startFrame": 27667,
+      "durationInFrames": 240,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "它不必逐像素保存世界，才能帮助我们生活。高效和精确，从来不是同一个目标。",
+          "visualThesis": "高效不是精确",
+          "visualLabels": [
+            "记忆",
+            "判断",
+            "边界"
+          ],
+          "label": "所以，我们还能相信记忆吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "它不必逐像素保存世界，才能帮助我们生活。高效和精确，从来不是同一个目标。",
+      "description": "KINETIC_CLAIM: 高效不是精确",
+      "notes": "exact narration unit N104; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S104",
+      "chapter": 10,
+      "chapterTitle": "所以，我们还能相信记忆吗",
+      "start": 930.2333333333333,
+      "end": 940.2333333333333,
+      "duration": 10,
+      "startFrame": 27907,
+      "durationInFrames": 300,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "COMPARISON",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "风险更高的，是原句、来源、先后顺序和被反复询问的细节。情绪可以告诉你，这段经历对你很重要。",
+          "visualThesis": "高风险细节要留证",
+          "visualLabels": [
+            "细节",
+            "主旨",
+            "对照"
+          ],
+          "label": "所以，我们还能相信记忆吗"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "风险更高的，是原句、来源、先后顺序和被反复询问的细节。情绪可以告诉你，这段经历对你很重要。",
+      "description": "COMPARISON: 高风险细节要留证",
+      "notes": "exact narration unit N105; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S105",
+      "chapter": 10,
+      "chapterTitle": "所以，我们还能相信记忆吗",
+      "start": 940.2333333333333,
+      "end": 947.1333333333333,
+      "duration": 6.9,
+      "startFrame": 28207,
+      "durationInFrames": 207,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "FINAL_SYNTHESIS",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "它不能单独证明每个细节都准确。确信度也需要和形成条件一起理解。",
+          "visualThesis": "确信也要有条件",
+          "visualLabels": [
+            "照片",
+            "文字",
+            "时间戳",
+            "证人"
+          ],
+          "label": "所以，我们还能相信记忆吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "它不能单独证明每个细节都准确。确信度也需要和形成条件一起理解。",
+      "description": "FINAL_SYNTHESIS: 确信也要有条件",
+      "notes": "exact narration unit N106; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S106",
+      "chapter": 10,
+      "chapterTitle": "所以，我们还能相信记忆吗",
+      "start": 947.1333333333333,
+      "end": 962.2333333333333,
+      "duration": 15.1,
+      "startFrame": 28414,
+      "durationInFrames": 453,
+      "category": "Archive",
+      "visualType": "Archive",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "EVIDENCE_ARCHIVE",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "当一段记忆要决定刑罚、重大关系或不可逆选择时，最好的做法不是嘲笑记忆。是尽早留下记录，保护第一次报告，寻找照片、文字、时间戳和独立证人。",
+          "visualThesis": "高风险，要多条证据",
+          "visualLabels": [
+            "刑罚",
+            "关系",
+            "不可逆"
+          ],
+          "label": "所以，我们还能相信记忆吗",
+          "archiveDisclosure": "背景资料 · 非具体案件证据",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [
+        {
+          "requirementId": "S106-R01",
+          "kind": "image",
+          "subject": "archival evidence materials",
+          "query": "public domain diary photograph timestamp archive",
+          "usage": "primary",
+          "policy": "public_domain",
+          "authenticity": "authentic_required"
+        }
+      ],
+      "narrationSummary": "当一段记忆要决定刑罚、重大关系或不可逆选择时，最好的做法不是嘲笑记忆。是尽早留下记录，保护第一次报告，寻找照片、文字、时间戳和独立证人。",
+      "description": "EVIDENCE_ARCHIVE: 高风险，要多条证据",
+      "notes": "exact narration unit N107; visual copy separated; archive audit retained=true",
+      "assetIds": [],
+      "licenseStatus": "review-required",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S107",
+      "chapter": 10,
+      "chapterTitle": "所以，我们还能相信记忆吗",
+      "start": 962.2333333333333,
+      "end": 968.2333333333333,
+      "duration": 6,
+      "startFrame": 28867,
+      "durationInFrames": 180,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "FINAL_SYNTHESIS",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "外部证据不是对人的不信任，而是给记忆增加一条校验路径。",
+          "visualThesis": "给记忆一条校验路",
+          "visualLabels": [
+            "照片",
+            "文字",
+            "时间戳",
+            "证人"
+          ],
+          "label": "所以，我们还能相信记忆吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "外部证据不是对人的不信任，而是给记忆增加一条校验路径。",
+      "description": "FINAL_SYNTHESIS: 给记忆一条校验路",
+      "notes": "exact narration unit N108; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S108",
+      "chapter": 10,
+      "chapterTitle": "所以，我们还能相信记忆吗",
+      "start": 968.2333333333333,
+      "end": 977.5666666666667,
+      "duration": 9.333333333333334,
+      "startFrame": 29047,
+      "durationInFrames": 280,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "VERSION_DIFF",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "下一次你和别人争论“我明明记得”时，也许可以换一个问题。不要急着问，究竟是谁记错了。",
+          "visualThesis": "争论先看版本",
+          "visualLabels": [
+            "我记得",
+            "你记得",
+            "条件"
+          ],
+          "label": "所以，我们还能相信记忆吗"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "下一次你和别人争论“我明明记得”时，也许可以换一个问题。不要急着问，究竟是谁记错了。",
+      "description": "VERSION_DIFF: 争论先看版本",
+      "notes": "exact narration unit N109; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S109",
+      "chapter": 10,
+      "chapterTitle": "所以，我们还能相信记忆吗",
+      "start": 977.5666666666667,
+      "end": 993.5666666666667,
+      "duration": 16,
+      "startFrame": 29327,
+      "durationInFrames": 480,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "FINAL_SYNTHESIS",
+          "compositionVariant": 1,
+          "backgroundMode": "dark",
+          "narrationText": "先问，我们各自的版本，是在什么条件下形成，又被怎样反复保存的。记忆不像一块从过去挖出的化石，它更像一份不断生成新版本、却很少保留修改记录的档案。",
+          "visualThesis": "版本如何被保存",
+          "visualLabels": [
+            "形成",
+            "重复",
+            "保存"
+          ],
+          "label": "所以，我们还能相信记忆吗",
+          "evidenceRole": "后续证据"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "先问，我们各自的版本，是在什么条件下形成，又被怎样反复保存的。记忆不像一块从过去挖出的化石，它更像一份不断生成新版本、却很少保留修改记录的档案。",
+      "description": "FINAL_SYNTHESIS: 版本如何被保存",
+      "notes": "exact narration unit N110; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S110",
+      "chapter": 10,
+      "chapterTitle": "所以，我们还能相信记忆吗",
+      "start": 993.5666666666667,
+      "end": 1001.5666666666667,
+      "duration": 8,
+      "startFrame": 29807,
+      "durationInFrames": 240,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "VERSION_DIFF",
+          "compositionVariant": 0,
+          "backgroundMode": "dark",
+          "narrationText": "这份档案并不因此一无是处。它让有限的大脑保留意义，让经验能够迁移到未来。",
+          "visualThesis": "档案仍有价值",
+          "visualLabels": [
+            "线索",
+            "边界",
+            "校验"
+          ],
+          "label": "所以，我们还能相信记忆吗"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "这份档案并不因此一无是处。它让有限的大脑保留意义，让经验能够迁移到未来。",
+      "description": "VERSION_DIFF: 档案仍有价值",
+      "notes": "exact narration unit N111; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "cut"
+    },
+    {
+      "id": "S111",
+      "chapter": 10,
+      "chapterTitle": "所以，我们还能相信记忆吗",
+      "start": 1001.5666666666667,
+      "end": 1011.8,
+      "duration": 10.233333333333333,
+      "startFrame": 30047,
+      "durationInFrames": 307,
+      "category": "Minimal",
+      "visualType": "Minimal",
+      "template": null,
+      "sourceTemplate": null,
+      "templateProps": {
+        "memoryLab": {
+          "version": "memory-lab-editorial@1",
+          "family": "KINETIC_CLAIM",
+          "compositionVariant": 2,
+          "backgroundMode": "dark",
+          "narrationText": "成熟的怀疑，不是把记忆全部判为伪造。是知道什么时候可以依靠主旨，什么时候必须停下来寻找校验。",
+          "visualThesis": "怀疑不是放弃判断",
+          "visualLabels": [
+            "怀疑",
+            "判断",
+            "证据"
+          ],
+          "label": "所以，我们还能相信记忆吗",
+          "evidenceRole": "边界"
+        }
+      },
+      "assetRequirements": [],
+      "narrationSummary": "成熟的怀疑，不是把记忆全部判为伪造。是知道什么时候可以依靠主旨，什么时候必须停下来寻找校验。",
+      "description": "KINETIC_CLAIM: 怀疑不是放弃判断",
+      "notes": "exact narration unit N112; visual copy separated; archive audit retained=false",
+      "assetIds": [],
+      "licenseStatus": "not-applicable",
+      "subtitlePosition": "bottom",
+      "transitionIn": "cut",
+      "transitionOut": "fade-out"
+    }
+  ]
+}
