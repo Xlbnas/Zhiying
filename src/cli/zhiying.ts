@@ -34,6 +34,8 @@ import {getTtsJob, type TtsJobRow} from '../lib/tts-jobs';
 import {resolveRequestedVoice} from '../lib/tts/voice-registry';
 import {getTtsProvider} from '../lib/tts';
 import type {RenderJobRow} from '../lib/jobs';
+import {getProjectInput} from '../lib/project-inputs';
+import {resolveProductionSubtitleMode} from '../lib/workflow/production-baseline';
 
 type Identity = {id: string; version: number};
 type ParsedArgs = {command: string; values: Map<string, string>; flags: Set<string>};
@@ -194,7 +196,7 @@ async function inspect(args: ParsedArgs): Promise<Record<string, unknown>> {
   const projectId = required(args, 'project');
   const project = projectRow(projectId);
   const result: Record<string, unknown> = {
-    ok: true, command: 'inspect', project: {id: project.id, title: project.title, pipelineVersion: project.pipeline_version ?? null, row: project},
+    ok: true, command: 'inspect', project: {id: project.id, title: project.title, pipelineVersion: project.pipeline_version ?? null, workflow: getProjectInput(projectId), row: project},
     stages: listStages(projectId), currentSources: currentSources(projectId), readiness: {
       subtitles: checkSubtitleTimingReadiness(projectId), reconciliation: checkTimingReconciliationReadiness(projectId), render: checkFinalRenderReadiness(projectId),
     },
@@ -565,7 +567,7 @@ async function render(args: ParsedArgs): Promise<Record<string, unknown>> {
   if (subtitleModeRaw && subtitleModeRaw !== 'none' && subtitleModeRaw !== 'burned') {
     throw new CliError('INVALID_ARGUMENT', '--subtitle-mode 必须是 none 或 burned');
   }
-  const subtitleMode = subtitleModeRaw as 'none' | 'burned' | undefined;
+  const subtitleMode = resolveProductionSubtitleMode(subtitleModeRaw as 'none' | 'burned' | undefined);
   projectRow(projectId);
   const audioRow = artifactRow(projectId, audio);
   const subtitleRow = artifactRow(projectId, subtitle);

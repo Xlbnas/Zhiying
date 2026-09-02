@@ -31,6 +31,10 @@ import {getVersion} from '../workflow/versions';
 import {buildAssetMap, evaluateVisualReadiness} from '../assets/readiness';
 import {applyVisualOverrides, listVisualOverrides} from '../scenes/visual-overrides';
 import {
+  resolveProductionRenderJobKind,
+  resolveProductionSubtitleMode,
+} from '../workflow/production-baseline';
+import {
   buildRuntimeNarrationLogicalPath,
   computePropsSha256,
   computeSourceKey,
@@ -529,12 +533,13 @@ export function enqueueFinalRender(projectId: string, options?: {
       );
     }
 
+    const subtitleMode = resolveProductionSubtitleMode(options?.subtitleMode);
     const props = buildFinalRenderProps({
       projectId,
       title: project.title,
       templateVersion: project.template_version,
       src,
-      subtitleMode: options?.subtitleMode,
+      subtitleMode,
     });
     // M6.3.12：render-input 硬门禁 — 以最终 props 为准（assetMap 注入 /
     // MG templateProps 到达 renderer / 素材物理文件可读），杜绝 domain gate
@@ -625,7 +630,11 @@ export function enqueueFinalRender(projectId: string, options?: {
     }
 
     // 每次 Render 都是新 attempt（新 job + 新 attempt artifact，一一绑定）
-    const job = enqueueRenderJob(projectId, 'fullcut', props);
+    const job = enqueueRenderJob(
+      projectId,
+      resolveProductionRenderJobKind(subtitleMode),
+      props,
+    );
     db.prepare(
       `INSERT INTO artifacts (id, project_id, kind, version, content_json, file_path, created_at)
        VALUES (?, ?, ?,

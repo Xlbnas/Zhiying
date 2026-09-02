@@ -10,6 +10,7 @@ import {
 } from './project-inputs';
 import {initProjectStages, listStages} from './workflow/stages';
 import type {ProjectStageRow} from './workflow/types';
+import {resolveWorkflowBaseline} from './workflow/production-baseline';
 
 /**
  * 项目创建（M2-C）：projects + project_inputs + 10 个 project_stages
@@ -44,6 +45,10 @@ export function getProjectRow(id: string): ProjectRow | undefined {
 /** 原子创建：zod 校验 → BEGIN（单事务）→ project + inputs + 10 stages。 */
 export function createProjectWithWorkflow(rawInput: unknown): CreateProjectResult {
   const input: ProjectInput = projectInputSchema.parse(rawInput);
+  resolveWorkflowBaseline({
+    channel: input.workflowChannel,
+    experimentalOverride: input.experimentalOverride,
+  });
   const db = getDb();
   const at = new Date().toISOString();
   const projectId = crypto.randomUUID();

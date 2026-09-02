@@ -6,7 +6,12 @@
   "notGoldenFinal": true,
   "projectId": "8f955b4c-42dd-4a02-8e76-e721a37fab41",
   "frozenAt": "2026-09-02",
+  "freezeCommit": "ffee9e9330de0d88c8b6318f855b24dcd677338a",
   "tag": "long-video-initial-production-v1",
+  "conformanceFixture": {
+    "projectId": "8f955b4c-42dd-4a02-8e76-e721a37fab41",
+    "role": "CONFORMANCE_FIXTURE"
+  },
   "renderer": {
     "branch": "codex/fresh-exact-audio-subtitles",
     "commit": "511b8b26772fb87488b40943511504437e7f7865",

@@ -1,6 +1,11 @@
 import {z} from 'zod';
 import {getDb} from './db';
 import type {StagePromptInput} from './prompts/shared';
+import {
+  DEFAULT_PRODUCTION_BASELINE,
+  productionWorkflowChannelSchema,
+  type ProductionWorkflowChannel,
+} from './workflow/production-baseline';
 
 /**
  * 项目生产参数持久化（M2-C）。
@@ -21,9 +26,14 @@ export const projectInputSchema = z.object({
   /** 允许空串：空 = 由 AI 按项目上下文提案（见 prompts/shared.projectVarsBlock）。 */
   visualStyle: z.string().trim().default(''),
   scientificRigor: z.enum(['高', '中', '低']).default('高'),
+  /** 项目级 workflow ownership；不是 artifact，也不是动态 latest 指针。 */
+  productionBaseline: z.literal(DEFAULT_PRODUCTION_BASELINE).default(DEFAULT_PRODUCTION_BASELINE),
+  workflowChannel: productionWorkflowChannelSchema.default('production'),
+  experimentalOverride: z.string().trim().min(1).nullable().default(null),
 });
 
 export type ProjectInput = z.infer<typeof projectInputSchema>;
+export type {ProductionWorkflowChannel};
 
 export const PROJECT_INPUT_SCHEMA_VERSION = '1.0';
 
