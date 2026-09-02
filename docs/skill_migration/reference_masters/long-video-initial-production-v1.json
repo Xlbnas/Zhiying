@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "1.0",
+  "id": "INITIAL_PRODUCTION_BASELINE_V1",
+  "status": "FROZEN_INITIAL_PRODUCTION",
+  "userApproved": true,
+  "notGoldenFinal": true,
+  "projectId": "8f955b4c-42dd-4a02-8e76-e721a37fab41",
+  "frozenAt": "2026-09-02",
+  "tag": "long-video-initial-production-v1",
+  "renderer": {
+    "branch": "codex/fresh-exact-audio-subtitles",
+    "commit": "511b8b26772fb87488b40943511504437e7f7865",
+    "workerImageId": "sha256:eeb8b6f1eaa5f287512b19b3ebf38d6a89a8533e144fa595bd0382c68d7ff300",
+    "remotionVersion": "4.0.492"
+  },
+  "sources": {
+    "sceneDesign": "bae52f12-1686-420e-bf36-0d20a77ed10c@3",
+    "visualSource": "576ce0f2-4653-403c-9d12-6e9747bf572d@2",
+    "narrationPlan": "43da40d7-ba4f-4016-8bf7-8de37b2c4c5c@1",
+    "audio": "ae26c0bd-0d99-4557-9f39-44781b0d8bba@1",
+    "subtitles": "277908e8-ad94-402d-8b8e-b1c3496bf4af@1",
+    "reconciliation": "1fc81651-3c16-4e62-90f1-c05001db7d64@2",
+    "finalSourceArtifact": "b40dbd77-d4fb-42cb-8b38-28f29d169fb4@2"
+  },
+  "formalRenderAttempt2": {
+    "jobId": "d822fcb9-2625-4586-83af-00af4fe5dcef",
+    "kind": "no-subtitles",
+    "showSubtitles": false,
+    "status": "succeeded",
+    "outputPath": "projects/8f955b4c-42dd-4a02-8e76-e721a37fab41/renders/d822fcb9-2625-4586-83af-00af4fe5dcef.mp4",
+    "localMasterPath": "outputs/extreme-long-video/final/master_clean.mp4",
+    "sha256": "3f79bf4215964f2dbb35d64da61ebdee5a6a58e0aafaed61f53c47df2f865239",
+    "sizeBytes": 130058310,
+    "durationSec": 1013.354,
+    "frameCount": 30399,
+    "fps": 30,
+    "width": 1920,
+    "height": 1080,
+    "videoCodec": "h264",
+    "audioCodec": "aac",
+    "audioSampleRateHz": 48000,
+    "audioChannels": 2,
+    "payloadSha256": "8289a196d0aa7ff6f6aa9ae46e8a67f8bf1d6e13a2b6b0d4b4cfec734e50b23f",
+    "bundleKey": "freud-mg-v1.0-a1cdd2047a89"
+  },
+  "review": {
+    "archiveUtilityVerdict": "PASS_WITH_MINOR_NOTES",
+    "formalMasterVerdict": "PASS",
+    "p0": 0,
+    "p1": 0,
+    "p2": 0,
+    "productionDecode": "PASS",
+    "localDecode": "PASS",
+    "archiveAudit": "reports/extreme-long-video/archive-visual-usefulness-audit-v1.md",
+    "formalReport": "reports/extreme-long-video/formal-render-attempt-2-final-report.md",
+    "contactSheet": "outputs/extreme-long-video/final/formal-attempt-2-review-contact-sheet.jpg"
+  },
+  "frozenRules": {
+    "visualGrammar": true,
+    "darkTheme": true,
+    "sequenceWorlds": true,
+    "semanticStateDensity": true,
+    "coralAccentRules": true,
+    "drmRevealChronology": true,
+    "visualThesis": true,
+    "imageSemanticUtilityGate": true
+  },
+  "formalRenderAccounting": {
+    "attempt1": "USED",
+    "attempt2": "USED",
+    "remainingAuthorizedAttempts": 0
+  },
+  "note": "Approved as an initial production workflow baseline. This is not a golden or permanent final design."
+}
