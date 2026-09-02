@@ -46,6 +46,8 @@ pnpm zhiying subtitles --project <projectId> --artifact <subtitleArtifactId>@<ve
 
 Choose visuals by explanatory purpose rather than sentence count:
 
+- When a user has not specified a background, start from a dark canvas. Use a light main background only when the requested paper, archive, magazine, medical-chart, or brand language makes it semantically necessary; an archival page may still be a bright material layer inside a dark scene.
+
 - Reality B-roll establishes context.
 - Archive supports historical reality and should use authentic material.
 - Motion graphics explain abstract relationships; use fast change followed by a readable hold.
@@ -63,6 +65,17 @@ Use the existing asset backend only:
 For every real-material requirement, preserve exact scene/requirement binding, provenance, usable license, and physical-file readiness. Historical people, events, documents, artifacts, and places that require authenticity must not be replaced by AI imagery presented as archive. Generated or synthetic imagery is acceptable only where the requirement permits it and must remain identifiable by provenance. Never fabricate asset IDs or construct `assetMap`.
 
 For factual or historical material, prefer traceable primary material or reliable archives. An archive asset must support the argument, chronology, or evidence rather than act as decorative atmosphere. Label AI reconstruction explicitly and never present it as historical evidence.
+
+### Image semantic utility gate
+
+Every visible image must have one declared visual job: `EXACT_EVIDENCE`, `IDENTITY`, `CONTEXT`, or `CONTENT_BEARING_DOCUMENT`. Correct source and rights do not by themselves make a rendered image useful. Before keeping an image, answer:
+
+1. Why this image?
+2. Why at this exact narration moment?
+3. What can the viewer learn or inspect from it?
+4. What would be lost if it were removed?
+
+An image may not be the primary visual only because it looks historical or attractive. A cover, blank page, texture, generic old photo, or unreadable document must not occupy the primary frame. If the answers amount only to atmosphere or “it looks old,” prefer a content-bearing crop, then explicit context, then an editorial replacement.
 
 For a general Chinese audience, prefer clear Chinese on-screen language. Remove unnecessary English, internal state-machine wording, debug UI, and prompt-like copy. Translate specialist terms into language the viewer can understand without the subtitle track.
 

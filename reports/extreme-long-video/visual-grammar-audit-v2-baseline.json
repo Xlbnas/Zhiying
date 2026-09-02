@@ -1,0 +1,1387 @@
+{
+  "generatedAt": "2026-09-01T00:34:19.676Z",
+  "scenes": [
+    {
+      "id": "S001",
+      "start": 0,
+      "end": 7.566666666666666,
+      "narration": "你有没有和别人争过同一段往事？你记得他站在门边，说过一句很伤人的话。",
+      "family": "fragment-assembly",
+      "thesis": "你有没有和别人争过同一段往事",
+      "labels": "最初线索 / 后来信息 / 当前推断 / 情绪 / 反复讲述",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S002",
+      "start": 7.566666666666666,
+      "end": 15.333333333333334,
+      "narration": "对方却坚持，那句话根本没有出现。你甚至还能描述当时的光线和自己的心跳。",
+      "family": "trace-comparison",
+      "thesis": "对方却坚持，那句话根本没有出现",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S003",
+      "start": 15.333333333333334,
+      "end": 22.9,
+      "narration": "这种冲突最让人不安的，不是谁忘了。真正棘手的是，双方都可能非常确信。",
+      "family": "source-attribution",
+      "thesis": "这种冲突最让人不安的，不是谁忘了",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S004",
+      "start": 22.9,
+      "end": 31.566666666666666,
+      "narration": "记忆的真实感，可以清楚、鲜明，还带着情绪。可这些感觉本身，不是一张准确性证书。",
+      "family": "fragment-assembly",
+      "thesis": "记忆的真实感，可以清楚、鲜明，还带着情绪",
+      "labels": "最初线索 / 后来信息 / 当前推断 / 情绪 / 反复讲述",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S005",
+      "start": 31.566666666666666,
+      "end": 38.233333333333334,
+      "narration": "这不等于记忆毫无价值。多数时候，我们确实记得事情的大体走向。",
+      "family": "trace-comparison",
+      "thesis": "这不等于记忆毫无价值",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S006",
+      "start": 38.233333333333334,
+      "end": 46.46666666666667,
+      "narration": "我们知道见过谁，去过哪里，发生了什么。麻烦常藏在原话、顺序、来源和时间里。",
+      "family": "source-attribution",
+      "thesis": "我们知道见过谁，去过哪里，发生了什么",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S007",
+      "start": 46.46666666666667,
+      "end": 54.46666666666667,
+      "narration": "所以，这部片不打算证明“你的记忆都是假的”。我们要追问一个更精确的问题。",
+      "family": "fragment-assembly",
+      "thesis": "所以，这部片不打算证明“你的记忆都是假的”",
+      "labels": "最初线索 / 后来信息 / 当前推断 / 情绪 / 反复讲述",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S008",
+      "start": 54.46666666666667,
+      "end": 62.9,
+      "narration": "为什么错误的回忆，也能带来如此强烈的确定感？回想过去时，大脑到底取出了什么？",
+      "family": "trace-comparison",
+      "thesis": "为什么错误的回忆，也能带来如此强烈的确定感",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S009",
+      "start": 62.9,
+      "end": 70.46666666666667,
+      "narration": "这也解释了为什么争论很难靠音量解决。一个版本被讲得越熟，往往越连贯。",
+      "family": "source-attribution",
+      "thesis": "这也解释了为什么争论很难靠音量解决",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S010",
+      "start": 70.46666666666667,
+      "end": 79.36666666666666,
+      "narration": "连贯会让人更容易再次说出它。可“更容易说出”与“更接近最初事件”，仍然是两件事。",
+      "family": "fragment-assembly",
+      "thesis": "连贯会让人更容易再次说出它",
+      "labels": "最初线索 / 后来信息 / 当前推断 / 情绪 / 反复讲述",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S011",
+      "start": 79.36666666666666,
+      "end": 85.8,
+      "narration": "我们很容易把记忆想成录像。事件发生时，画面被存进某个地方。",
+      "family": "source-document",
+      "thesis": "我们很容易把记忆想成录像",
+      "labels": "我们很容易把记忆想成录像 / 事件发生时 / 画面被存进某个地方",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S012",
+      "start": 85.8,
+      "end": 93.36666666666666,
+      "narration": "以后按下播放，它就重新出现。这个比喻直观，却会让我们误解回忆的工作。",
+      "family": "provenance-chain",
+      "thesis": "以后按下播放，它就重新出现",
+      "labels": "讲述者 / 记录与翻译 / 实验材料 / 参与者复述",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S013",
+      "start": 93.36666666666666,
+      "end": 102.7,
+      "narration": "二十世纪初，英国心理学家弗雷德里克·巴特利特换了一种问法。他没有只让人背无意义音节。",
+      "family": "source-document",
+      "thesis": "二十世纪初，英国心理学家弗雷德里克·巴特利特换了一种问法",
+      "labels": "二十世纪初 / 英国心理学家弗雷德里克·巴特利特换了一种问法 / 他没有只让人背无意义音节",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S014",
+      "start": 102.7,
+      "end": 111.36666666666666,
+      "narration": "他给参与者读陌生的故事和材料。然后观察内容怎样在复述中被保留、删去和重新组织。",
+      "family": "source-document",
+      "thesis": "他给参与者读陌生的故事和材料",
+      "labels": "他给参与者读陌生的故事和材料 / 然后观察内容怎样在复述中被保留、删去和重新组织",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S015",
+      "start": 111.36666666666666,
+      "end": 118.46666666666667,
+      "narration": "最著名的材料叫《幽灵之战》。故事来自与英国参与者不同的文化传统。",
+      "family": "source-document",
+      "thesis": "最著名的材料叫《幽灵之战》",
+      "labels": "最著名的材料叫《幽灵之战》 / 故事来自与英国参与者不同的文化传统",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S016",
+      "start": 118.46666666666667,
+      "end": 127.36666666666666,
+      "narration": "许多复述变短了，陌生细节被省略了。有些表达也被改得更符合讲述者熟悉的因果和语言。",
+      "family": "trace-comparison",
+      "thesis": "许多复述变短了，陌生细节被省略了",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S017",
+      "start": 127.36666666666666,
+      "end": 133.13333333333333,
+      "narration": "但经典不等于免检。后来的部分复现曾没有得到相同模式。",
+      "family": "source-document",
+      "thesis": "但经典不等于免检",
+      "labels": "但经典不等于免检 / 后来的部分复现曾没有得到相同模式",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S018",
+      "start": 133.13333333333333,
+      "end": 148.23333333333332,
+      "narration": "更贴近原程序的研究，又观察到延迟后的遗漏、合理化和扭曲增加。稳妥的结论不是“复述必然越来越错”，而是回忆会受既有知识和当前理解参与组织。",
+      "family": "source-document",
+      "thesis": "更贴近原程序的研究，又观察到延迟后的遗漏、合理化和扭曲增加",
+      "labels": "更贴近原程序的研究 / 又观察到延迟后的遗漏、合理化和扭曲增加 / 稳妥的结论不是“复述必然越来越错” / 而是回忆会受既有知识和当前理解参与组织",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S019",
+      "start": 148.23333333333332,
+      "end": 160,
+      "narration": "巴特利特还区分同一个人隔一段时间再讲，和故事在人与人之间传递。两种方法都可能改变材料，却不必走同一条路线。",
+      "family": "source-document",
+      "thesis": "巴特利特还区分同一个人隔一段时间再讲，和故事在人与人之间传递",
+      "labels": "巴特利特还区分同一个人隔一段时间再讲 / 和故事在人与人之间传递 / 两种方法都可能改变材料 / 却不必走同一条路线",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S020",
+      "start": 160,
+      "end": 170,
+      "narration": "所谓结构，也不是一只专门制造错误的手。它先帮助我们理解，之后才可能在缺口里留下自己的形状。",
+      "family": "source-document",
+      "thesis": "所谓结构，也不是一只专门制造错误的手",
+      "labels": "所谓结构 / 也不是一只专门制造错误的手 / 它先帮助我们理解 / 之后才可能在缺口里留下自己的形状",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S021",
+      "start": 170,
+      "end": 182.43333333333334,
+      "narration": "巴特利特观察的是复述怎样变化。接下来，把变化压缩进一个可控瞬间：如果事件之后只换一句问法，后来的回答会不会不同？",
+      "family": "source-document",
+      "thesis": "巴特利特观察的是复述怎样变化",
+      "labels": "巴特利特观察的是复述怎样变化 / 接下来 / 把变化压缩进一个可控瞬间：如果事件之后只换一句问法 / 后来的回答会不会不同？",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S022",
+      "start": 182.43333333333334,
+      "end": 193.33333333333334,
+      "narration": "一九七四年，伊丽莎白·洛夫特斯和约翰·帕尔默让参与者观看车祸影片。影片看完后，问题只换了一个动词。",
+      "family": "source-document",
+      "thesis": "一九七四年，伊丽莎白·洛夫特斯和约翰·帕尔默让参与者观看车祸影片",
+      "labels": "一九七四年 / 伊丽莎白·洛夫特斯和约翰·帕尔默让参与者观看车祸影片 / 影片看完后 / 问题只换了一个动词",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S023",
+      "start": 193.33333333333334,
+      "end": 200.9,
+      "narration": "有的人被问两辆车相撞时有多快。另一些人听到的词，更接近“猛烈撞碎”。",
+      "family": "source-attribution",
+      "thesis": "有的人被问两辆车相撞时有多快",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S024",
+      "start": 200.9,
+      "end": 209.33333333333334,
+      "narration": "用词更猛烈的一组，给出了更高的速度估计。一周后，他们也更常说自己见过碎玻璃。",
+      "family": "trace-comparison",
+      "thesis": "用词更猛烈的一组，给出了更高的速度估计",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S025",
+      "start": 209.33333333333334,
+      "end": 215.76666666666668,
+      "narration": "可原影片里并没有碎玻璃。事后语言，显然能够改变后来的报告。",
+      "family": "experimental-stage",
+      "thesis": "可原影片里并没有碎玻璃",
+      "labels": "固定刺激 / 改变一个变量 / 记录回答 / 比较条件",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S026",
+      "start": 215.76666666666668,
+      "end": 221.33333333333334,
+      "narration": "这里要留一道边界。实验支持“提问会影响回忆报告”。",
+      "family": "source-attribution",
+      "thesis": "这里要留一道边界",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S027",
+      "start": 221.33333333333334,
+      "end": 231.76666666666668,
+      "narration": "它并没有单独证明，原始痕迹已经被整段删除。旧信息、后来信息和测试策略，也可能在提取时共同竞争。",
+      "family": "trace-comparison",
+      "thesis": "它并没有单独证明，原始痕迹已经被整段删除",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S028",
+      "start": 231.76666666666668,
+      "end": 239.76666666666668,
+      "narration": "来源监控提供了一种解释。我们回忆时，往往不是读取一枚永不脱落的来源标签。",
+      "family": "experimental-stage",
+      "thesis": "来源监控提供了一种解释",
+      "labels": "固定刺激 / 改变一个变量 / 记录回答 / 比较条件",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S029",
+      "start": 239.76666666666668,
+      "end": 252.86666666666667,
+      "narration": "大脑会根据图像、语义、情境和思考痕迹，判断某个内容来自亲眼所见、后来听说，还是自己的想象。这个判断很有用，也可能出错。",
+      "family": "source-attribution",
+      "thesis": "大脑会根据图像、语义、情境和思考痕迹，判断某个内容来自亲眼所见、后来听说，还是自己的想象",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S030",
+      "start": 252.86666666666667,
+      "end": 264.43333333333334,
+      "narration": "因此，同一句误导并不会同样影响每个人。原始记忆有多清楚，事后信息出现多晚，测试怎样提问，都可能影响结果。",
+      "family": "trace-comparison",
+      "thesis": "因此，同一句误导并不会同样影响每个人",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S031",
+      "start": 264.43333333333334,
+      "end": 274,
+      "narration": "我们看到的不是语言拥有魔法。我们看到的是，回忆报告会把多个时期的信息带到同一个回答里。",
+      "family": "experimental-stage",
+      "thesis": "我们看到的不是语言拥有魔法",
+      "labels": "固定刺激 / 改变一个变量 / 记录回答 / 比较条件",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S032",
+      "start": 274,
+      "end": 284,
+      "narration": "这一区分也影响我们怎样读实验数字。答错一道选择题，可能来自记忆、来源判断，也可能来自猜测。",
+      "family": "source-attribution",
+      "thesis": "这一区分也影响我们怎样读实验数字",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S033",
+      "start": 284,
+      "end": 298.23333333333335,
+      "narration": "研究者必须比较不同条件，而不是把每个错误都叫作一段新记忆。片中说“被改写”的，是最后可报告的版本，不是已经证明被物理替换的文件。",
+      "family": "trace-comparison",
+      "thesis": "研究者必须比较不同条件，而不是把每个错误都叫作一段新记忆",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S034",
+      "start": 298.23333333333335,
+      "end": 307.3333333333333,
+      "narration": "前面是外部语言带来的误导。可就算没有人暗示，记忆也可能从材料的内部关系里产生错误。",
+      "family": "semantic-field",
+      "thesis": "前面是外部语言带来的误导",
+      "labels": "首次报告 T0 / 暗示问题 / 反复访谈 / 新信息混入",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S035",
+      "start": 307.3333333333333,
+      "end": 312.8333333333333,
+      "narration": "现在做一个简短演示；它不是中文标准化实验。",
+      "family": "trace-comparison",
+      "thesis": "现在做一个简短演示；它不是中文标准化实验",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S036",
+      "start": 312.8333333333333,
+      "end": 319.06666666666666,
+      "narration": "请依次记住这些词：床、休息、清醒、疲倦、梦、被子、打盹。",
+      "family": "experimental-stage",
+      "thesis": "请依次记住这些词：床、休息、清醒、疲倦、梦、被子、打盹",
+      "labels": "固定刺激 / 改变一个变量 / 记录回答 / 比较条件",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S037",
+      "start": 319.06666666666666,
+      "end": 324.56666666666666,
+      "narration": "刚才的词里，有没有“睡眠”？它和整组词都很接近。",
+      "family": "semantic-field",
+      "thesis": "刚才的词里，有没有“睡眠”",
+      "labels": "床 / 休息 / 清醒 / 疲倦 / 梦 / 被子 / 打盹",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S038",
+      "start": 324.56666666666666,
+      "end": 332.8,
+      "narration": "如果你觉得它好像出现过，正好能体会这种诱饵词的吸引力。可我们故意没有说它。",
+      "family": "trace-comparison",
+      "thesis": "如果你觉得它好像出现过，正好能体会这种诱饵词的吸引力",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S039",
+      "start": 332.8,
+      "end": 343.7,
+      "narration": "这就是德斯、罗迪格和麦克德莫特范式所研究的一类现象。具体项目之外，我们也会保存一组材料的共同意义。",
+      "family": "experimental-stage",
+      "thesis": "这就是德斯、罗迪格和麦克德莫特范式所研究的一类现象",
+      "labels": "固定刺激 / 改变一个变量 / 记录回答 / 比较条件",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S040",
+      "start": 343.7,
+      "end": 351.26666666666665,
+      "narration": "意义能帮助理解和概括。它也会让一个高度匹配、却未出现的项目显得熟悉。",
+      "family": "semantic-field",
+      "thesis": "意义能帮助理解和概括",
+      "labels": "床 / 休息 / 清醒 / 疲倦 / 梦 / 被子 / 打盹",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S041",
+      "start": 351.26666666666665,
+      "end": 361.03333333333336,
+      "narration": "记错一个词，不等于形成了一段完整童年。这个范式的价值，是把内部推断造成的错误变得可观察。",
+      "family": "trace-comparison",
+      "thesis": "记错一个词，不等于形成了一段完整童年",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S042",
+      "start": 361.03333333333336,
+      "end": 366.53333333333336,
+      "narration": "虚假记忆并不一定需要外部的人先来欺骗你。",
+      "family": "experimental-stage",
+      "thesis": "虚假记忆并不一定需要外部的人先来欺骗你",
+      "labels": "固定刺激 / 改变一个变量 / 记录回答 / 比较条件",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S043",
+      "start": 366.53333333333336,
+      "end": 376.3,
+      "narration": "这个范式也提醒我们，正确和错误并非来自两套完全隔离的系统。抓住共同主题，通常能提高理解。",
+      "family": "semantic-field",
+      "thesis": "这个范式也提醒我们，正确和错误并非来自两套完全隔离的系统",
+      "labels": "床 / 休息 / 清醒 / 疲倦 / 梦 / 被子 / 打盹",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S044",
+      "start": 376.3,
+      "end": 388.3,
+      "narration": "精确细节又能帮助我们拒绝一个“很像、但没出现”的答案。两种信息在同一次测试里，可能相互支持，也可能相互拉扯。",
+      "family": "trace-comparison",
+      "thesis": "精确细节又能帮助我们拒绝一个“很像、但没出现”的答案",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S045",
+      "start": 388.3,
+      "end": 396.53333333333336,
+      "narration": "下面这些是彼此竞争、也可能共同起作用的候选解释，不是一条已经证实的因果链。",
+      "family": "trace-comparison",
+      "thesis": "下面这些是彼此竞争、也可能共同起作用的候选解释，不是一条已经证实的因果链",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S046",
+      "start": 396.53333333333336,
+      "end": 405.6333333333333,
+      "narration": "第一种来源，是主旨和细节的分离。我们常能保留事情的核心含义，却丢掉原句和精确顺序。",
+      "family": "source-attribution",
+      "thesis": "第一种来源，是主旨和细节的分离",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S047",
+      "start": 405.6333333333333,
+      "end": 413.2,
+      "narration": "回忆时，主旨帮助我们补齐一个合理版本。合理，不自动等于当时真的如此。",
+      "family": "fragment-assembly",
+      "thesis": "回忆时，主旨帮助我们补齐一个合理版本",
+      "labels": "最初线索 / 后来信息 / 当前推断 / 情绪 / 反复讲述",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S048",
+      "start": 413.2,
+      "end": 419.2,
+      "narration": "第二种来源，是来源归因。你可能记得一幅非常鲜明的画面。",
+      "family": "trace-comparison",
+      "thesis": "第二种来源，是来源归因",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S049",
+      "start": 419.2,
+      "end": 426.53333333333336,
+      "narration": "可它究竟来自亲眼所见，还是后来读到的描述？鲜明度回答不了这个问题。",
+      "family": "source-attribution",
+      "thesis": "可它究竟来自亲眼所见，还是后来读到的描述",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S050",
+      "start": 426.53333333333336,
+      "end": 432.03333333333336,
+      "narration": "熟悉感也不能独自回答。",
+      "family": "fragment-assembly",
+      "thesis": "熟悉感也不能独自回答",
+      "labels": "最初线索 / 后来信息 / 当前推断 / 情绪 / 反复讲述",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S051",
+      "start": 432.03333333333336,
+      "end": 440.93333333333334,
+      "narration": "第三种来源，是既有结构。我们用对餐厅、课堂、家庭和社会规则的知识，压缩日常经验。",
+      "family": "trace-comparison",
+      "thesis": "第三种来源，是既有结构",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S052",
+      "start": 440.93333333333334,
+      "end": 452.26666666666665,
+      "narration": "没有这些结构，每次理解都要从零开始。代价是，不符合预期的细节更容易被忽略，符合预期的细节也可能被补上。",
+      "family": "source-attribution",
+      "thesis": "没有这些结构，每次理解都要从零开始",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S053",
+      "start": 452.26666666666665,
+      "end": 465.6,
+      "narration": "第四种来源，经常被一句话说得太满，叫做再巩固。动物研究和部分人类研究提示，某些记忆在特定重新激活条件下会进入可更新状态。",
+      "family": "source-document",
+      "thesis": "第四种来源，经常被一句话说得太满，叫做再巩固",
+      "labels": "第四种来源 / 经常被一句话说得太满 / 叫做再巩固 / 动物研究和部分人类研究提示",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S054",
+      "start": 465.6,
+      "end": 476.7,
+      "narration": "但提取并不总会触发这个过程，不同记忆和任务的证据也不一样。它不是“每想一次，就把整段人生覆盖保存”。",
+      "family": "trace-comparison",
+      "thesis": "但提取并不总会触发这个过程，不同记忆和任务的证据也不一样",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S055",
+      "start": 476.7,
+      "end": 489.8,
+      "narration": "即使不把观察结果叫作再巩固，提醒后的变化也可能来自普通干扰或提取策略。想象一个事件，也可能提高它“似乎发生过”的信心。",
+      "family": "source-attribution",
+      "thesis": "即使不把观察结果叫作再巩固，提醒后的变化也可能来自普通干扰或提取策略",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S056",
+      "start": 489.8,
+      "end": 497.1333333333333,
+      "narration": "报告变化是一种观察；再巩固、干扰和来源判断，是需要分别检验的解释。",
+      "family": "fragment-assembly",
+      "thesis": "报告变化是一种观察；再巩固、干扰和来源判断，是需要分别检验的解释",
+      "labels": "最初线索 / 后来信息 / 当前推断 / 情绪 / 反复讲述",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S057",
+      "start": 497.1333333333333,
+      "end": 504.03333333333336,
+      "narration": "“越自信越准确”，太简单。“自信和准确完全没关系”，也太简单。",
+      "family": "longitudinal-record",
+      "thesis": "“越自信越准确”，太简单",
+      "labels": "T0 初次记录 / 数周后 / 数年后 / 十年后",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S058",
+      "start": 504.03333333333336,
+      "end": 510.7,
+      "narration": "真正关键的问题是，这份信心在什么时候记录？它经历过什么程序？",
+      "family": "source-document",
+      "thesis": "真正关键的问题是，这份信心在什么时候记录",
+      "labels": "真正关键的问题是 / 这份信心在什么时候记录？它经历过什么程序？",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S059",
+      "start": 510.7,
+      "end": 523.8,
+      "narration": "一组研究综述认为，在公平、初次、未受污染的目击识别中，最初的高置信选择可以提供信息。低置信本身却不能告诉我们错在哪里。",
+      "family": "procedure-safeguard",
+      "thesis": "一组研究综述认为，在公平、初次、未受污染的目击识别中，最初的高置信选择可以提供信息",
+      "labels": "双盲主持 / 嫌疑人可能不在 / 即时记录信心 / 禁止反馈",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S060",
+      "start": 523.8,
+      "end": 529.8,
+      "narration": "这个结论依赖明确条件，不能直接搬到几年后的庭审陈述上。",
+      "family": "longitudinal-record",
+      "thesis": "这个结论依赖明确条件，不能直接搬到几年后的庭审陈述上",
+      "labels": "T0 初次记录 / 数周后 / 数年后 / 十年后",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S061",
+      "start": 529.8,
+      "end": 535.3,
+      "narration": "为什么？因为信心会被后来发生的事改变。",
+      "family": "experimental-stage",
+      "thesis": "为什么",
+      "labels": "固定刺激 / 改变一个变量 / 记录回答 / 比较条件",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S062",
+      "start": 535.3,
+      "end": 548.2,
+      "narration": "一次“很好，你认出了嫌疑人”的确认反馈，就可能提高目击者后来的自信。它还可能让人回头觉得，自己当时看得更久、更清楚。",
+      "family": "procedure-safeguard",
+      "thesis": "一次“很好，你认出了嫌疑人”的确认反馈，就可能提高目击者后来的自信",
+      "labels": "首次选择 / 即时信心 T0 / 确认反馈 / 后来信心",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S063",
+      "start": 548.2,
+      "end": 556.2,
+      "narration": "注意，反馈没有穿越时间，改善当时的观察。它改变的是后来对那次观察的评价。",
+      "family": "longitudinal-record",
+      "thesis": "注意，反馈没有穿越时间，改善当时的观察",
+      "labels": "T0 初次记录 / 数周后 / 数年后 / 十年后",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S064",
+      "start": 556.2,
+      "end": 566.8666666666667,
+      "narration": "所以司法上最珍贵的，不只是法庭里坚定的语气。还包括第一次识别当下、尚未被反馈污染的原始置信陈述。",
+      "family": "procedure-safeguard",
+      "thesis": "所以司法上最珍贵的，不只是法庭里坚定的语气",
+      "labels": "双盲主持 / 嫌疑人可能不在 / 即时记录信心 / 禁止反馈",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S065",
+      "start": 566.8666666666667,
+      "end": 576.8666666666667,
+      "narration": "即使是第一次信心，也不能脱离现场条件。距离太远、光线太差、阵列不公平，都可能降低信息质量。",
+      "family": "procedure-safeguard",
+      "thesis": "即使是第一次信心，也不能脱离现场条件",
+      "labels": "双盲主持 / 嫌疑人可能不在 / 即时记录信心 / 禁止反馈",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S066",
+      "start": 576.8666666666667,
+      "end": 585.9666666666667,
+      "narration": "研究说的是在明确程序下，信心可以帮助判断。它不是把一个百分数变成有罪结论的计算器。",
+      "family": "source-document",
+      "thesis": "研究说的是在明确程序下，信心可以帮助判断",
+      "labels": "研究说的是在明确程序下 / 信心可以帮助判断 / 它不是把一个百分数变成有罪结论的计算器",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S067",
+      "start": 585.9666666666667,
+      "end": 601.3,
+      "narration": "重大消息常留下所谓“闪光灯记忆”。这个词不是说它像闪光灯一样准确，而是指人对得知消息时的情境记得格外鲜明：当时在哪里、在做什么、身边有谁。",
+      "family": "source-document",
+      "thesis": "重大消息常留下所谓“闪光灯记忆”",
+      "labels": "重大消息常留下所谓“闪光灯记忆” / 这个词不是说它像闪光灯一样准确 / 而是指人对得知消息时的情境记得格外鲜明：当时在哪里、在做什么、身边有谁",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S068",
+      "start": 601.3,
+      "end": 606.8,
+      "narration": "人也往往相信，它像照片一样被保存下来。",
+      "family": "trace-comparison",
+      "thesis": "人也往往相信，它像照片一样被保存下来",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S069",
+      "start": 606.8,
+      "end": 615.4666666666667,
+      "narration": "研究者在重大事件后很快记录参与者的答案。几周、几年，甚至十年后，再问相同问题。",
+      "family": "longitudinal-record",
+      "thesis": "研究者在重大事件后很快记录参与者的答案",
+      "labels": "T0 初次记录 / 数周后 / 数年后 / 十年后",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S070",
+      "start": 615.4666666666667,
+      "end": 622.3666666666667,
+      "narration": "这样就不必依靠后来版本判断后来版本。最初记录成了一份外部基线。",
+      "family": "longitudinal-record",
+      "thesis": "这样就不必依靠后来版本判断后来版本",
+      "labels": "T0 初次记录 / 数周后 / 数年后 / 十年后",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S071",
+      "start": 622.3666666666667,
+      "end": 629.4666666666667,
+      "narration": "结果很耐人寻味。得知消息时的个人情境，与最初报告的一致性会下降。",
+      "family": "longitudinal-record",
+      "thesis": "结果很耐人寻味",
+      "labels": "T0 初次记录 / 数周后 / 数年后 / 十年后",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S072",
+      "start": 629.4666666666667,
+      "end": 637.9,
+      "narration": "可鲜明感和对自己记得准确的信心，往往保持得更高。这里的一致性不是客观准确率；",
+      "family": "longitudinal-record",
+      "thesis": "可鲜明感和对自己记得准确的信心，往往保持得更高",
+      "labels": "T0 初次记录 / 数周后 / 数年后 / 十年后",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S073",
+      "start": 637.9,
+      "end": 643.4,
+      "narration": "它只比较后来报告是否还和最初记录相同。",
+      "family": "longitudinal-record",
+      "thesis": "它只比较后来报告是否还和最初记录相同",
+      "labels": "T0 初次记录 / 数周后 / 数年后 / 十年后",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S074",
+      "start": 643.4,
+      "end": 655.8333333333334,
+      "narration": "重大事件当然不只留下幻觉，人们可能长期保留不少核心信息。更准确的表述是，情绪和反复讲述可能与真实感长期保持有关。",
+      "family": "trace-comparison",
+      "thesis": "重大事件当然不只留下幻觉，人们可能长期保留不少核心信息",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S075",
+      "start": 655.8333333333334,
+      "end": 661.3333333333334,
+      "narration": "真实感的寿命，不等于每个细节的保质期。",
+      "family": "source-document",
+      "thesis": "真实感的寿命，不等于每个细节的保质期",
+      "labels": "真实感的寿命 / 不等于每个细节的保质期",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S076",
+      "start": 661.3333333333334,
+      "end": 670.6666666666666,
+      "narration": "十年研究还发现，较大的变化常集中在早期。后来，人们可能稳定地重复一个已经成形的版本。",
+      "family": "source-document",
+      "thesis": "十年研究还发现，较大的变化常集中在早期",
+      "labels": "十年研究还发现 / 较大的变化常集中在早期 / 后来 / 人们可能稳定地重复一个已经成形的版本",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S077",
+      "start": 670.6666666666666,
+      "end": 679.1,
+      "narration": "稳定只说明这个版本不再频繁变化。它不能自动证明，这个版本与最初记录完全一致。",
+      "family": "longitudinal-record",
+      "thesis": "稳定只说明这个版本不再频繁变化",
+      "labels": "T0 初次记录 / 数周后 / 数年后 / 十年后",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S078",
+      "start": 679.1,
+      "end": 692.4333333333333,
+      "narration": "闪光灯研究有一份较早的外部基线，后来版本还能与它比较。司法现场却常只有一次机会，所以第一次询问怎样发生，会变得格外重要。",
+      "family": "source-document",
+      "thesis": "闪光灯研究有一份较早的外部基线，后来版本还能与它比较",
+      "labels": "闪光灯研究有一份较早的外部基线 / 后来版本还能与它比较 / 司法现场却常只有一次机会 / 所以第一次询问怎样发生",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S079",
+      "start": 692.4333333333333,
+      "end": 700.6666666666666,
+      "narration": "如果记忆会重建，最现实的压力落在司法现场。目击者可能诚实，也可能非常认真。",
+      "family": "source-document",
+      "thesis": "如果记忆会重建，最现实的压力落在司法现场",
+      "labels": "如果记忆会重建 / 最现实的压力落在司法现场 / 目击者可能诚实 / 也可能非常认真",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S080",
+      "start": 700.6666666666666,
+      "end": 708,
+      "narration": "问题不只在这个人有没有记忆。还在记忆形成、询问和识别时经历了什么。",
+      "family": "experimental-stage",
+      "thesis": "问题不只在这个人有没有记忆",
+      "labels": "固定刺激 / 改变一个变量 / 记录回答 / 比较条件",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S081",
+      "start": 708,
+      "end": 716,
+      "narration": "带暗示的问题，会把新信息带进来。反复访谈，会增加不同版本彼此接触的机会。",
+      "family": "procedure-safeguard",
+      "thesis": "带暗示的问题，会把新信息带进来",
+      "labels": "首次报告 T0 / 暗示问题 / 反复访谈 / 新信息混入",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S082",
+      "start": 716,
+      "end": 725.7666666666667,
+      "narration": "列队管理员如果知道谁是嫌疑人，也可能无意中提供线索。识别后的确认反馈，还会继续改变信心。",
+      "family": "procedure-safeguard",
+      "thesis": "列队管理员如果知道谁是嫌疑人，也可能无意中提供线索",
+      "labels": "首次选择 / 即时信心 T0 / 确认反馈 / 后来信心",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S083",
+      "start": 725.7666666666667,
+      "end": 731.7666666666667,
+      "narration": "因此，改进重点是程序。由不知道嫌疑人身份的人主持列队。",
+      "family": "source-document",
+      "thesis": "因此，改进重点是程序",
+      "labels": "因此 / 改进重点是程序 / 由不知道嫌疑人身份的人主持列队",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S084",
+      "start": 731.7666666666667,
+      "end": 742.8666666666667,
+      "narration": "明确告诉目击者，嫌疑人可能根本不在其中。在第一次选择时，就用目击者自己的话记录信心，并保存完整过程。",
+      "family": "source-document",
+      "thesis": "明确告诉目击者，嫌疑人可能根本不在其中",
+      "labels": "明确告诉目击者 / 嫌疑人可能根本不在其中 / 在第一次选择时 / 就用目击者自己的话记录信心",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S085",
+      "start": 742.8666666666667,
+      "end": 752.8666666666667,
+      "narration": "这些措施不是因为目击证词毫无价值。恰恰相反，是因为一份形成条件良好的首次记忆报告很有价值。",
+      "family": "source-attribution",
+      "thesis": "这些措施不是因为目击证词毫无价值",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S086",
+      "start": 752.8666666666667,
+      "end": 762.2,
+      "narration": "我们要保护它，不让后续信息偷偷混进来。可信度来自记录链，而不只来自一个人的坚定表情。",
+      "family": "experimental-stage",
+      "thesis": "我们要保护它，不让后续信息偷偷混进来",
+      "labels": "固定刺激 / 改变一个变量 / 记录回答 / 比较条件",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S087",
+      "start": 762.2,
+      "end": 770.6333333333333,
+      "narration": "有些因素，事后程序无法修复。目击距离、遮挡、压力和注意方向，已经发生在现场。",
+      "family": "source-document",
+      "thesis": "有些因素，事后程序无法修复",
+      "labels": "有些因素 / 事后程序无法修复 / 目击距离、遮挡、压力和注意方向 / 已经发生在现场",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S088",
+      "start": 770.6333333333333,
+      "end": 782.4,
+      "narration": "另一些因素却可以控制，比如主持人提示、列队公平和反馈。司法改革的现实目标，是先减少那些本来可以避免的污染。",
+      "family": "source-attribution",
+      "thesis": "另一些因素却可以控制，比如主持人提示、列队公平和反馈",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S089",
+      "start": 782.4,
+      "end": 796.6333333333333,
+      "narration": "前面讨论的是，一个真实发生过的事件怎样被后来信息污染。现在把问题推进一步：如果事件根本没发生，提示能不能让人报告出某种回忆体验？",
+      "family": "classification-funnel",
+      "thesis": "前面讨论的是，一个真实发生过的事件怎样被后来信息污染",
+      "labels": "认为可能 / 相信发生过 / 产生意象 / 片段回忆 / 完整自传体记忆",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S090",
+      "start": 796.6333333333333,
+      "end": 807.3,
+      "narration": "实验室里更大胆的一步，是提示一段自传体事件。经典的“迷路商场”研究，会先请家人提供真实童年故事。",
+      "family": "source-document",
+      "thesis": "实验室里更大胆的一步，是提示一段自传体事件",
+      "labels": "实验室里更大胆的一步 / 是提示一段自传体事件 / 经典的“迷路商场”研究 / 会先请家人提供真实童年故事",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S091",
+      "start": 807.3,
+      "end": 814.2,
+      "narration": "研究者再加入一件家人确认没有发生的事。参与者随后接受两轮访谈。",
+      "family": "source-attribution",
+      "thesis": "研究者再加入一件家人确认没有发生的事",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S092",
+      "start": 814.2,
+      "end": 821.3,
+      "narration": "部分参与者后来接受了这个故事。有的人还报告图像、情绪或额外细节。",
+      "family": "classification-funnel",
+      "thesis": "部分参与者后来接受了这个故事",
+      "labels": "认为可能 / 相信发生过 / 产生意象 / 片段回忆 / 完整自传体记忆",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S093",
+      "start": 821.3,
+      "end": 833.0666666666667,
+      "narration": "这说明，在权威信息、想象和反复提取共同作用下，人可能对虚构事件产生某种回忆体验。它是一个重要的可能性证明。",
+      "family": "classification-funnel",
+      "thesis": "这说明，在权威信息、想象和反复提取共同作用下，人可能对虚构事件产生某种回忆体验",
+      "labels": "认为可能 / 相信发生过 / 产生意象 / 片段回忆 / 完整自传体记忆",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S094",
+      "start": 833.0666666666667,
+      "end": 841.3,
+      "narration": "但“某种回忆体验”不是一个简单开关。相信事情发生过，不等于看见了完整情节。",
+      "family": "classification-funnel",
+      "thesis": "但“某种回忆体验”不是一个简单开关",
+      "labels": "认为可能 / 相信发生过 / 产生意象 / 片段回忆 / 完整自传体记忆",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S095",
+      "start": 841.3,
+      "end": 850.2,
+      "narration": "配合实验要求，也不等于内心确信。部分细节、熟悉感、信念和完整记忆，应该分开编码。",
+      "family": "classification-funnel",
+      "thesis": "配合实验要求，也不等于内心确信",
+      "labels": "认为可能 / 相信发生过 / 产生意象 / 片段回忆 / 完整自传体记忆",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S096",
+      "start": 850.2,
+      "end": 861.7666666666667,
+      "narration": "近年的重新分析正质疑一些宽口径判定。某些被研究者归为虚假记忆的报告，甚至缺少“真的迷路”这样的核心细节。",
+      "family": "source-document",
+      "thesis": "近年的重新分析正质疑一些宽口径判定",
+      "labels": "近年的重新分析正质疑一些宽口径判定 / 某些被研究者归为虚假记忆的报告 / 甚至缺少“真的迷路”这样的核心细节",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S097",
+      "start": 861.7666666666667,
+      "end": 872.2,
+      "narration": "争论没有让提示效应消失。它提醒我们，不能把“部分人受影响”夸张成“科学家能随意植入完整人生”。",
+      "family": "source-attribution",
+      "thesis": "争论没有让提示效应消失",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S098",
+      "start": 872.2,
+      "end": 882.4333333333333,
+      "narration": "想象膨胀研究提供了另一层区分。请一个人想象低概率的童年事件，后来“发生过”的评分可能会上升。",
+      "family": "source-document",
+      "thesis": "想象膨胀研究提供了另一层区分",
+      "labels": "想象膨胀研究提供了另一层区分 / 请一个人想象低概率的童年事件 / 后来“发生过”的评分可能会上升",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S099",
+      "start": 882.4333333333333,
+      "end": 892.6666666666666,
+      "narration": "上升首先是信念和信心的变化。它距离一段带时间、地点和连续情节的完整记忆，还有很长的测量距离。",
+      "family": "classification-funnel",
+      "thesis": "上升首先是信念和信心的变化",
+      "labels": "认为可能 / 相信发生过 / 产生意象 / 片段回忆 / 完整自传体记忆",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S100",
+      "start": 892.6666666666666,
+      "end": 902.6666666666666,
+      "narration": "实验需求和配合也必须进入讨论。参与者可能猜到研究者期待什么，或者不愿反复回答“我不知道”。",
+      "family": "source-attribution",
+      "thesis": "实验需求和配合也必须进入讨论",
+      "labels": "亲眼所见 / 后来听说 / 自己想象 / 当前判断",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S101",
+      "start": 902.6666666666666,
+      "end": 914.6666666666666,
+      "narration": "但这也不能反过来抹去所有新增细节和主观体验。争论的核心，是怎样给报告分类，而不是先宣布每个报告都真，或都假。",
+      "family": "classification-funnel",
+      "thesis": "但这也不能反过来抹去所有新增细节和主观体验",
+      "labels": "认为可能 / 相信发生过 / 产生意象 / 片段回忆 / 完整自传体记忆",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S102",
+      "start": 914.6666666666666,
+      "end": 922.2333333333333,
+      "narration": "答案不是信，或者不信。记忆最擅长的，往往是保留意义、关系和行动线索。",
+      "family": "fragment-assembly",
+      "thesis": "答案不是信，或者不信",
+      "labels": "最初线索 / 后来信息 / 当前推断 / 情绪 / 反复讲述",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S103",
+      "start": 922.2333333333333,
+      "end": 930.2333333333333,
+      "narration": "它不必逐像素保存世界，才能帮助我们生活。高效和精确，从来不是同一个目标。",
+      "family": "procedure-safeguard",
+      "thesis": "它不必逐像素保存世界，才能帮助我们生活",
+      "labels": "双盲主持 / 嫌疑人可能不在 / 即时记录信心 / 禁止反馈",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S104",
+      "start": 930.2333333333333,
+      "end": 940.2333333333333,
+      "narration": "风险更高的，是原句、来源、先后顺序和被反复询问的细节。情绪可以告诉你，这段经历对你很重要。",
+      "family": "trace-comparison",
+      "thesis": "风险更高的，是原句、来源、先后顺序和被反复询问的细节",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S105",
+      "start": 940.2333333333333,
+      "end": 947.1333333333333,
+      "narration": "它不能单独证明每个细节都准确。确信度也需要和形成条件一起理解。",
+      "family": "fragment-assembly",
+      "thesis": "它不能单独证明每个细节都准确",
+      "labels": "最初线索 / 后来信息 / 当前推断 / 情绪 / 反复讲述",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S106",
+      "start": 947.1333333333333,
+      "end": 962.2333333333333,
+      "narration": "当一段记忆要决定刑罚、重大关系或不可逆选择时，最好的做法不是嘲笑记忆。是尽早留下记录，保护第一次报告，寻找照片、文字、时间戳和独立证人。",
+      "family": "source-document",
+      "thesis": "当一段记忆要决定刑罚、重大关系或不可逆选择时，最好的做法不是嘲笑记忆",
+      "labels": "照片 / 文字 / 时间戳 / 独立证人",
+      "backgroundMode": "legacy-light",
+      "archive": true
+    },
+    {
+      "id": "S107",
+      "start": 962.2333333333333,
+      "end": 968.2333333333333,
+      "narration": "外部证据不是对人的不信任，而是给记忆增加一条校验路径。",
+      "family": "procedure-safeguard",
+      "thesis": "外部证据不是对人的不信任，而是给记忆增加一条校验路径",
+      "labels": "照片 / 文字 / 时间戳 / 独立证人",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S108",
+      "start": 968.2333333333333,
+      "end": 977.5666666666667,
+      "narration": "下一次你和别人争论“我明明记得”时，也许可以换一个问题。不要急着问，究竟是谁记错了。",
+      "family": "fragment-assembly",
+      "thesis": "下一次你和别人争论“我明明记得”时，也许可以换一个问题",
+      "labels": "最初线索 / 后来信息 / 当前推断 / 情绪 / 反复讲述",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S109",
+      "start": 977.5666666666667,
+      "end": 993.5666666666667,
+      "narration": "先问，我们各自的版本，是在什么条件下形成，又被怎样反复保存的。记忆不像一块从过去挖出的化石，它更像一份不断生成新版本、却很少保留修改记录的档案。",
+      "family": "procedure-safeguard",
+      "thesis": "先问，我们各自的版本，是在什么条件下形成，又被怎样反复保存的",
+      "labels": "双盲主持 / 嫌疑人可能不在 / 即时记录信心 / 禁止反馈",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S110",
+      "start": 993.5666666666667,
+      "end": 1001.5666666666667,
+      "narration": "这份档案并不因此一无是处。它让有限的大脑保留意义，让经验能够迁移到未来。",
+      "family": "trace-comparison",
+      "thesis": "这份档案并不因此一无是处",
+      "labels": "精确细节 / 共同意义",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    },
+    {
+      "id": "S111",
+      "start": 1001.5666666666667,
+      "end": 1011.8,
+      "narration": "成熟的怀疑，不是把记忆全部判为伪造。是知道什么时候可以依靠主旨，什么时候必须停下来寻找校验。",
+      "family": "fragment-assembly",
+      "thesis": "成熟的怀疑，不是把记忆全部判为伪造",
+      "labels": "照片 / 文字 / 时间戳 / 独立证人",
+      "backgroundMode": "legacy-light",
+      "archive": false
+    }
+  ],
+  "summary": {
+    "overlapCount": 109,
+    "secondsByFamily": [
+      [
+        "fragment-assembly",
+        {
+          "count": 11,
+          "seconds": 87.5666666666666
+        }
+      ],
+      [
+        "trace-comparison",
+        {
+          "count": 20,
+          "seconds": 182.10000000000008
+        }
+      ],
+      [
+        "source-attribution",
+        {
+          "count": 16,
+          "seconds": 149.5666666666668
+        }
+      ],
+      [
+        "source-document",
+        {
+          "count": 25,
+          "seconds": 251.43333333333297
+        }
+      ],
+      [
+        "provenance-chain",
+        {
+          "count": 1,
+          "seconds": 7.566666666666663
+        }
+      ],
+      [
+        "experimental-stage",
+        {
+          "count": 9,
+          "seconds": 68.80000000000007
+        }
+      ],
+      [
+        "semantic-field",
+        {
+          "count": 4,
+          "seconds": 31.93333333333328
+        }
+      ],
+      [
+        "longitudinal-record",
+        {
+          "count": 9,
+          "seconds": 65.93333333333345
+        }
+      ],
+      [
+        "procedure-safeguard",
+        {
+          "count": 9,
+          "seconds": 94.43333333333334
+        }
+      ],
+      [
+        "classification-funnel",
+        {
+          "count": 7,
+          "seconds": 72.4666666666667
+        }
+      ]
+    ],
+    "longRuns": [
+      {
+        "family": "source-document",
+        "start": 93.36666666666666,
+        "end": 118.46666666666667,
+        "scenes": [
+          "S013",
+          "S014",
+          "S015"
+        ]
+      },
+      {
+        "family": "source-document",
+        "start": 127.36666666666666,
+        "end": 193.33333333333334,
+        "scenes": [
+          "S017",
+          "S018",
+          "S019",
+          "S020",
+          "S021",
+          "S022"
+        ]
+      },
+      {
+        "family": "trace-comparison",
+        "start": 376.3,
+        "end": 396.53333333333336,
+        "scenes": [
+          "S044",
+          "S045"
+        ]
+      },
+      {
+        "family": "procedure-safeguard",
+        "start": 556.2,
+        "end": 576.8666666666667,
+        "scenes": [
+          "S064",
+          "S065"
+        ]
+      },
+      {
+        "family": "source-document",
+        "start": 576.8666666666667,
+        "end": 601.3,
+        "scenes": [
+          "S066",
+          "S067"
+        ]
+      },
+      {
+        "family": "longitudinal-record",
+        "start": 606.8,
+        "end": 643.4,
+        "scenes": [
+          "S069",
+          "S070",
+          "S071",
+          "S072",
+          "S073"
+        ]
+      },
+      {
+        "family": "source-document",
+        "start": 679.1,
+        "end": 700.6666666666666,
+        "scenes": [
+          "S078",
+          "S079"
+        ]
+      },
+      {
+        "family": "classification-funnel",
+        "start": 814.2,
+        "end": 850.2,
+        "scenes": [
+          "S092",
+          "S093",
+          "S094",
+          "S095"
+        ]
+      }
+    ],
+    "lightSeconds": 0,
+    "archiveSeconds": 203.4999999999999
+  }
+}

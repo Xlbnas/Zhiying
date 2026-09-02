@@ -6,7 +6,8 @@ type Scene = {id: string; start: number; end: number; narrationSummary: string; 
 type ArchiveClass = 'EXACT_EVIDENCE' | 'CONTEXTUAL_ARCHIVE' | 'EDITORIAL_REPLACEMENT' | 'BLOCKED';
 const root = process.cwd();
 const reportDir = path.join(root, 'reports/extreme-long-video');
-const design = JSON.parse(fs.readFileSync(path.join(root, 'docs/long_video/scenes-design.json'), 'utf8')) as {scenes: Scene[]};
+const manifestPath = process.env.ZHIYING_VISUAL_MANIFEST ?? path.join(root, 'docs/long_video/scenes-design.json');
+const design = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {scenes: Scene[]};
 const provenance = JSON.parse(fs.readFileSync(path.join(root, 'outputs/extreme-long-video/assets/archive/provenance.json'), 'utf8')) as {assets: Array<{filename: string; title: string; sourceProvider: string; license: string}>};
 const archive = [
   ['S013', 'Bartlett 身份或可靠书目记录', '—', '—', 'EDITORIAL_REPLACEMENT'],

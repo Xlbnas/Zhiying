@@ -24,6 +24,8 @@ Listen for restrained variation that follows rhetorical function rather than mec
 Watch the result rather than accepting readiness metadata alone. Check:
 
 - each asset fits the scene's subject and explanatory purpose;
+- every visible image has a declared job—`EXACT_EVIDENCE`, `IDENTITY`, `CONTEXT`, or `CONTENT_BEARING_DOCUMENT`—and the reviewer can state why it appears now, what can be inspected, and what information would be lost if it were removed;
+- a correct source and usable license are not treated as proof of visual usefulness; covers, blank pages, textures, generic old photos, and unreadable documents do not occupy the primary frame merely for atmosphere;
 - archive imagery is authentic where required and provenance is plausible;
 - no placeholder, demo text, blank/black frame, incorrect image, or missing visual appears;
 - composition, typography, emphasis, and subtitle placement remain legible;

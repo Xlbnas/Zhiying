@@ -80,6 +80,7 @@
           "version": "memory-lab-editorial@1",
           "family": "VERSION_DIFF",
           "compositionVariant": 0,
+          "compositionMode": "split-memory",
           "backgroundMode": "dark",
           "narrationText": "你有没有和别人争过同一段往事？你记得他站在门边，说过一句很伤人的话。",
           "visualThesis": "同一段往事",
@@ -88,7 +89,12 @@
             "那句话",
             "心跳"
           ],
-          "label": "确信感不是证书"
+          "label": "确信感不是证书",
+          "sequence": {
+            "id": "opening-disagreement",
+            "phase": 0,
+            "view": "establish"
+          }
         }
       },
       "assetRequirements": [],
@@ -119,6 +125,7 @@
           "version": "memory-lab-editorial@1",
           "family": "VERSION_DIFF",
           "compositionVariant": 2,
+          "compositionMode": "layer-accumulation",
           "backgroundMode": "dark",
           "narrationText": "对方却坚持，那句话根本没有出现。你甚至还能描述当时的光线和自己的心跳。",
           "visualThesis": "两个版本",
@@ -128,7 +135,12 @@
             "细节冲突"
           ],
           "label": "确信感不是证书",
-          "evidenceRole": "原始研究"
+          "evidenceRole": "原始研究",
+          "sequence": {
+            "id": "opening-disagreement",
+            "phase": 1,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -159,6 +171,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 1,
+          "compositionMode": "typographic-contradiction",
           "backgroundMode": "dark",
           "narrationText": "这种冲突最让人不安的，不是谁忘了。真正棘手的是，双方都可能非常确信。",
           "visualThesis": "谁记错了？",
@@ -168,7 +181,12 @@
             "冲突"
           ],
           "label": "确信感不是证书",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "opening-disagreement",
+            "phase": 2,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -199,6 +217,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 0,
+          "compositionMode": "overlap",
           "backgroundMode": "dark",
           "narrationText": "记忆的真实感，可以清楚、鲜明，还带着情绪。可这些感觉本身，不是一张准确性证书。",
           "visualThesis": "真实感不是凭证",
@@ -208,7 +227,12 @@
             "准确性"
           ],
           "label": "确信感不是证书",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "opening-disagreement",
+            "phase": 3,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -239,6 +263,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 2,
+          "compositionMode": "claim-vs-boundary",
           "backgroundMode": "dark",
           "narrationText": "这不等于记忆毫无价值。多数时候，我们确实记得事情的大体走向。",
           "visualThesis": "价值仍然存在",
@@ -248,7 +273,12 @@
             "顺序"
           ],
           "label": "确信感不是证书",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "opening-disagreement",
+            "phase": 4,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -279,6 +309,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 1,
+          "compositionMode": "source-cluster",
           "backgroundMode": "dark",
           "narrationText": "我们知道见过谁，去过哪里，发生了什么。麻烦常藏在原话、顺序、来源和时间里。",
           "visualThesis": "误差藏在细节",
@@ -288,7 +319,12 @@
             "时间"
           ],
           "label": "确信感不是证书",
-          "evidenceRole": "原始研究"
+          "evidenceRole": "原始研究",
+          "sequence": {
+            "id": "opening-disagreement",
+            "phase": 5,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -319,6 +355,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 0,
+          "compositionMode": "editorial-statement",
           "backgroundMode": "dark",
           "narrationText": "所以，这部片不打算证明“你的记忆都是假的”。我们要追问一个更精确的问题。",
           "visualThesis": "不是全盘否定",
@@ -326,7 +363,12 @@
             "更精确",
             "可检验"
           ],
-          "label": "确信感不是证书"
+          "label": "确信感不是证书",
+          "sequence": {
+            "id": "opening-disagreement",
+            "phase": 6,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -357,6 +399,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 2,
+          "compositionMode": "question-field",
           "backgroundMode": "dark",
           "narrationText": "为什么错误的回忆，也能带来如此强烈的确定感？回想过去时，大脑到底取出了什么？",
           "visualThesis": "确定感从哪来？",
@@ -365,7 +408,12 @@
             "回想",
             "确定感"
           ],
-          "label": "确信感不是证书"
+          "label": "确信感不是证书",
+          "sequence": {
+            "id": "opening-disagreement",
+            "phase": 7,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -396,6 +444,7 @@
           "version": "memory-lab-editorial@1",
           "family": "VERSION_DIFF",
           "compositionVariant": 1,
+          "compositionMode": "version-timeline",
           "backgroundMode": "dark",
           "narrationText": "这也解释了为什么争论很难靠音量解决。一个版本被讲得越熟，往往越连贯。",
           "visualThesis": "熟悉会变连贯",
@@ -404,7 +453,12 @@
             "版本",
             "争论"
           ],
-          "label": "确信感不是证书"
+          "label": "确信感不是证书",
+          "sequence": {
+            "id": "opening-disagreement",
+            "phase": 8,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -435,6 +489,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 0,
+          "compositionMode": "two-axis",
           "backgroundMode": "dark",
           "narrationText": "连贯会让人更容易再次说出它。可“更容易说出”与“更接近最初事件”，仍然是两件事。",
           "visualThesis": "顺口不等于原样",
@@ -443,7 +498,12 @@
             "原事件"
           ],
           "label": "确信感不是证书",
-          "evidenceRole": "原始研究"
+          "evidenceRole": "原始研究",
+          "sequence": {
+            "id": "opening-disagreement",
+            "phase": 9,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -480,7 +540,12 @@
           "visualLabels": [
             "下一章"
           ],
-          "label": "从读取过去到重建过去"
+          "label": "从读取过去到重建过去",
+          "sequence": {
+            "id": "opening-disagreement",
+            "phase": 10,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -511,6 +576,7 @@
           "version": "memory-lab-editorial@1",
           "family": "VERSION_DIFF",
           "compositionVariant": 0,
+          "compositionMode": "document-redline",
           "backgroundMode": "dark",
           "narrationText": "以后按下播放，它就重新出现。这个比喻直观，却会让我们误解回忆的工作。",
           "visualThesis": "回想不是重播",
@@ -519,7 +585,12 @@
             "后来版本",
             "差异"
           ],
-          "label": "从读取过去到重建过去"
+          "label": "从读取过去到重建过去",
+          "sequence": {
+            "id": "opening-disagreement",
+            "phase": 11,
+            "view": "conclusion"
+          }
         }
       },
       "assetRequirements": [],
@@ -550,6 +621,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 2,
+          "compositionMode": "distance-scale",
           "backgroundMode": "dark",
           "narrationText": "二十世纪初，英国心理学家弗雷德里克·巴特利特换了一种问法。他没有只让人背无意义音节。",
           "visualThesis": "线索在关系中重组",
@@ -558,7 +630,12 @@
             "关系",
             "缺口"
           ],
-          "label": "从读取过去到重建过去"
+          "label": "从读取过去到重建过去",
+          "sequence": {
+            "id": "bartlett-to-loftus",
+            "phase": 0,
+            "view": "establish"
+          }
         }
       },
       "assetRequirements": [],
@@ -589,6 +666,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 1,
+          "compositionMode": "progressive-accumulation",
           "backgroundMode": "dark",
           "narrationText": "他给参与者读陌生的故事和材料。然后观察内容怎样在复述中被保留、删去和重新组织。",
           "visualThesis": "陌生材料进入复述",
@@ -598,7 +676,12 @@
             "报告"
           ],
           "label": "从读取过去到重建过去",
-          "evidenceRole": "原始研究"
+          "evidenceRole": "原始研究",
+          "sequence": {
+            "id": "bartlett-to-loftus",
+            "phase": 1,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -638,7 +721,12 @@
             "非故事原页"
           ],
           "label": "从读取过去到重建过去",
-          "archiveDisclosure": "原始资料 · 故事链来源，不是故事原页"
+          "archiveDisclosure": "原始资料 · 故事链来源，不是故事原页",
+          "sequence": {
+            "id": "bartlett-to-loftus",
+            "phase": 2,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [
@@ -679,6 +767,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 2,
+          "compositionMode": "split-screen",
           "backgroundMode": "dark",
           "narrationText": "许多复述变短了，陌生细节被省略了。有些表达也被改得更符合讲述者熟悉的因果和语言。",
           "visualThesis": "陌生细节先被省略",
@@ -688,7 +777,12 @@
             "对照"
           ],
           "label": "从读取过去到重建过去",
-          "evidenceRole": "原始研究"
+          "evidenceRole": "原始研究",
+          "sequence": {
+            "id": "bartlett-to-loftus",
+            "phase": 3,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -719,6 +813,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 1,
+          "compositionMode": "distance-scale",
           "backgroundMode": "dark",
           "narrationText": "但经典不等于免检。后来的部分复现曾没有得到相同模式。",
           "visualThesis": "经典也要复查",
@@ -728,7 +823,12 @@
             "差异"
           ],
           "label": "从读取过去到重建过去",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "bartlett-to-loftus",
+            "phase": 4,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -759,6 +859,7 @@
           "version": "memory-lab-editorial@1",
           "family": "VERSION_DIFF",
           "compositionVariant": 0,
+          "compositionMode": "version-timeline",
           "backgroundMode": "dark",
           "narrationText": "更贴近原程序的研究，又观察到延迟后的遗漏、合理化和扭曲增加。稳妥的结论不是“复述必然越来越错”，而是回忆会受既有知识和当前理解参与组织。",
           "visualThesis": "延迟后的三种变化",
@@ -768,7 +869,12 @@
             "扭曲"
           ],
           "label": "从读取过去到重建过去",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "bartlett-to-loftus",
+            "phase": 5,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -799,6 +905,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 2,
+          "compositionMode": "evidence-table",
           "backgroundMode": "dark",
           "narrationText": "巴特利特还区分同一个人隔一段时间再讲，和故事在人与人之间传递。两种方法都可能改变材料，却不必走同一条路线。",
           "visualThesis": "两条变化路线",
@@ -806,7 +913,12 @@
             "个人复述",
             "人际传递"
           ],
-          "label": "从读取过去到重建过去"
+          "label": "从读取过去到重建过去",
+          "sequence": {
+            "id": "bartlett-to-loftus",
+            "phase": 6,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -837,6 +949,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 1,
+          "compositionMode": "overlap",
           "backgroundMode": "dark",
           "narrationText": "所谓结构，也不是一只专门制造错误的手。它先帮助我们理解，之后才可能在缺口里留下自己的形状。",
           "visualThesis": "结构先帮助理解",
@@ -846,7 +959,12 @@
             "补全"
           ],
           "label": "从读取过去到重建过去",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "bartlett-to-loftus",
+            "phase": 7,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -877,6 +995,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 0,
+          "compositionMode": "literal-flow",
           "backgroundMode": "dark",
           "narrationText": "巴特利特观察的是复述怎样变化。接下来，把变化压缩进一个可控瞬间：如果事件之后只换一句问法，后来的回答会不会不同？",
           "visualThesis": "把变化压进瞬间",
@@ -885,7 +1004,12 @@
             "换问法",
             "回答"
           ],
-          "label": "从读取过去到重建过去"
+          "label": "从读取过去到重建过去",
+          "sequence": {
+            "id": "bartlett-to-loftus",
+            "phase": 8,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -925,7 +1049,12 @@
             "提问"
           ],
           "label": "别人一句话，能改写你报告的现场吗",
-          "archiveDisclosure": "研究者肖像 · 非 1974 实验现场"
+          "archiveDisclosure": "研究者肖像 · 非 1974 实验现场",
+          "sequence": {
+            "id": "bartlett-to-loftus",
+            "phase": 9,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [
@@ -966,6 +1095,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 2,
+          "compositionMode": "paired-documents",
           "backgroundMode": "dark",
           "narrationText": "有的人被问两辆车相撞时有多快。另一些人听到的词，更接近“猛烈撞碎”。",
           "visualThesis": "换词，结果变了",
@@ -975,7 +1105,12 @@
             "估计"
           ],
           "label": "别人一句话，能改写你报告的现场吗",
-          "evidenceRole": "原始研究"
+          "evidenceRole": "原始研究",
+          "sequence": {
+            "id": "bartlett-to-loftus",
+            "phase": 10,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -1006,6 +1141,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 1,
+          "compositionMode": "split-screen",
           "backgroundMode": "dark",
           "narrationText": "用词更猛烈的一组，给出了更高的速度估计。一周后，他们也更常说自己见过碎玻璃。",
           "visualThesis": "强动词抬高估计",
@@ -1014,7 +1150,12 @@
             "主旨",
             "对照"
           ],
-          "label": "别人一句话，能改写你报告的现场吗"
+          "label": "别人一句话，能改写你报告的现场吗",
+          "sequence": {
+            "id": "bartlett-to-loftus",
+            "phase": 11,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -1045,6 +1186,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 0,
+          "compositionMode": "branch",
           "backgroundMode": "dark",
           "narrationText": "可原影片里并没有碎玻璃。事后语言，显然能够改变后来的报告。",
           "visualThesis": "事后语言改变报告",
@@ -1054,7 +1196,12 @@
             "报告"
           ],
           "label": "别人一句话，能改写你报告的现场吗",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "bartlett-to-loftus",
+            "phase": 12,
+            "view": "conclusion"
+          }
         }
       },
       "assetRequirements": [],
@@ -1085,6 +1232,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 2,
+          "compositionMode": "threshold-field",
           "backgroundMode": "dark",
           "narrationText": "这里要留一道边界。实验支持“提问会影响回忆报告”。",
           "visualThesis": "提问会改变报告",
@@ -1125,6 +1273,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 1,
+          "compositionMode": "before-after",
           "backgroundMode": "dark",
           "narrationText": "它并没有单独证明，原始痕迹已经被整段删除。旧信息、后来信息和测试策略，也可能在提取时共同竞争。",
           "visualThesis": "原痕迹没有被证明删除",
@@ -1165,6 +1314,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 0,
+          "compositionMode": "source-cluster",
           "backgroundMode": "dark",
           "narrationText": "来源监控提供了一种解释。我们回忆时，往往不是读取一枚永不脱落的来源标签。",
           "visualThesis": "来源不是固定标签",
@@ -1205,6 +1355,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 2,
+          "compositionMode": "before-after",
           "backgroundMode": "dark",
           "narrationText": "大脑会根据图像、语义、情境和思考痕迹，判断某个内容来自亲眼所见、后来听说，还是自己的想象。这个判断很有用，也可能出错。",
           "visualThesis": "判断来自多种线索",
@@ -1245,6 +1396,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 1,
+          "compositionMode": "contamination-path",
           "backgroundMode": "dark",
           "narrationText": "因此，同一句误导并不会同样影响每个人。原始记忆有多清楚，事后信息出现多晚，测试怎样提问，都可能影响结果。",
           "visualThesis": "误导不会同样生效",
@@ -1284,6 +1436,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 0,
+          "compositionMode": "source-cluster",
           "backgroundMode": "dark",
           "narrationText": "我们看到的不是语言拥有魔法。我们看到的是，回忆报告会把多个时期的信息带到同一个回答里。",
           "visualThesis": "多段信息同场竞争",
@@ -1324,6 +1477,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 2,
+          "compositionMode": "object-led-claim",
           "backgroundMode": "dark",
           "narrationText": "这一区分也影响我们怎样读实验数字。答错一道选择题，可能来自记忆、来源判断，也可能来自猜测。",
           "visualThesis": "误差不只一种来源",
@@ -1363,6 +1517,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 1,
+          "compositionMode": "distance-scale",
           "backgroundMode": "dark",
           "narrationText": "研究者必须比较不同条件，而不是把每个错误都叫作一段新记忆。片中说“被改写”的，是最后可报告的版本，不是已经证明被物理替换的文件。",
           "visualThesis": "先比较，再解释",
@@ -1440,6 +1595,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 1,
+          "compositionMode": "progressive-accumulation",
           "backgroundMode": "dark",
           "narrationText": "现在做一个简短演示；它不是中文标准化实验。",
           "visualThesis": "词表实验不等于自传记忆",
@@ -1449,7 +1605,12 @@
             "误报"
           ],
           "label": "一个从未出现过的词",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 0,
+            "view": "establish"
+          }
         }
       },
       "assetRequirements": [],
@@ -1480,6 +1641,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 1,
+          "compositionMode": "object-led-claim",
           "backgroundMode": "dark",
           "narrationText": "请依次记住这些词：床、休息、清醒、疲倦、梦、被子、打盹。",
           "visualThesis": "词表制造联想",
@@ -1488,7 +1650,12 @@
             "判断",
             "边界"
           ],
-          "label": "一个从未出现过的词"
+          "label": "一个从未出现过的词",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 1,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -1519,6 +1686,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 0,
+          "compositionMode": "branch",
           "backgroundMode": "dark",
           "narrationText": "刚才的词里，有没有“睡眠”？它和整组词都很接近。",
           "visualThesis": "诱饵词没有出现",
@@ -1527,7 +1695,12 @@
             "条件",
             "报告"
           ],
-          "label": "一个从未出现过的词"
+          "label": "一个从未出现过的词",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 2,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -1558,6 +1731,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 2,
+          "compositionMode": "two-axis",
           "backgroundMode": "dark",
           "narrationText": "如果你觉得它好像出现过，正好能体会这种诱饵词的吸引力。可我们故意没有说它。",
           "visualThesis": "熟悉感会误导",
@@ -1567,7 +1741,12 @@
             "对照"
           ],
           "label": "一个从未出现过的词",
-          "evidenceRole": "原始研究"
+          "evidenceRole": "原始研究",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 3,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -1598,6 +1777,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 1,
+          "compositionMode": "gate",
           "backgroundMode": "dark",
           "narrationText": "这就是德斯、罗迪格和麦克德莫特范式所研究的一类现象。具体项目之外，我们也会保存一组材料的共同意义。",
           "visualThesis": "把诱饵变得可观察",
@@ -1606,7 +1786,12 @@
             "诱饵",
             "测试"
           ],
-          "label": "一个从未出现过的词"
+          "label": "一个从未出现过的词",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 4,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -1637,6 +1822,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 0,
+          "compositionMode": "overlap",
           "backgroundMode": "dark",
           "narrationText": "意义能帮助理解和概括。它也会让一个高度匹配、却未出现的项目显得熟悉。",
           "visualThesis": "意义也会制造熟悉",
@@ -1646,7 +1832,12 @@
             "缺口"
           ],
           "label": "一个从未出现过的词",
-          "evidenceRole": "原始研究"
+          "evidenceRole": "原始研究",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 5,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -1677,6 +1868,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 2,
+          "compositionMode": "typographic-contradiction",
           "backgroundMode": "dark",
           "narrationText": "记错一个词，不等于形成了一段完整童年。这个范式的价值，是把内部推断造成的错误变得可观察。",
           "visualThesis": "词错不等于童年",
@@ -1686,7 +1878,12 @@
             "边界"
           ],
           "label": "一个从未出现过的词",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 6,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -1717,6 +1914,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 1,
+          "compositionMode": "literal-flow",
           "backgroundMode": "dark",
           "narrationText": "虚假记忆并不一定需要外部的人先来欺骗你。",
           "visualThesis": "错误不必来自暗示",
@@ -1726,7 +1924,12 @@
             "报告"
           ],
           "label": "一个从未出现过的词",
-          "evidenceRole": "原始研究"
+          "evidenceRole": "原始研究",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 7,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -1757,6 +1960,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 0,
+          "compositionMode": "paired-documents",
           "backgroundMode": "dark",
           "narrationText": "这个范式也提醒我们，正确和错误并非来自两套完全隔离的系统。抓住共同主题，通常能提高理解。",
           "visualThesis": "正确和错误共用线索",
@@ -1765,7 +1969,12 @@
             "主旨",
             "对照"
           ],
-          "label": "一个从未出现过的词"
+          "label": "一个从未出现过的词",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 8,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -1796,6 +2005,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 2,
+          "compositionMode": "object-led-claim",
           "backgroundMode": "dark",
           "narrationText": "精确细节又能帮助我们拒绝一个“很像、但没出现”的答案。两种信息在同一次测试里，可能相互支持，也可能相互拉扯。",
           "visualThesis": "细节能排除相似项",
@@ -1805,7 +2015,12 @@
             "拒绝"
           ],
           "label": "一个从未出现过的词",
-          "evidenceRole": "原始研究"
+          "evidenceRole": "原始研究",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 9,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -1843,7 +2058,12 @@
             "下一章"
           ],
           "label": "错误记忆为什么会有真实感",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 10,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -1874,6 +2094,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 1,
+          "compositionMode": "two-axis",
           "backgroundMode": "dark",
           "narrationText": "第一种来源，是主旨和细节的分离。我们常能保留事情的核心含义，却丢掉原句和精确顺序。",
           "visualThesis": "主旨与细节分开",
@@ -1882,7 +2103,12 @@
             "主旨",
             "对照"
           ],
-          "label": "错误记忆为什么会有真实感"
+          "label": "错误记忆为什么会有真实感",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 11,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -1913,6 +2139,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 2,
+          "compositionMode": "paired-documents",
           "backgroundMode": "dark",
           "narrationText": "回忆时，主旨帮助我们补齐一个合理版本。合理，不自动等于当时真的如此。",
           "visualThesis": "主旨能补全缺失细节",
@@ -1921,7 +2148,12 @@
             "细节"
           ],
           "label": "错误记忆为什么会有真实感",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 12,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -1952,6 +2184,7 @@
           "version": "memory-lab-editorial@1",
           "family": "VERSION_DIFF",
           "compositionVariant": 2,
+          "compositionMode": "document-redline",
           "backgroundMode": "dark",
           "narrationText": "第二种来源，是来源归因。你可能记得一幅非常鲜明的画面。",
           "visualThesis": "来源归因待检验",
@@ -1960,7 +2193,12 @@
             "后来版本",
             "差异"
           ],
-          "label": "错误记忆为什么会有真实感"
+          "label": "错误记忆为什么会有真实感",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 13,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -1991,6 +2229,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 1,
+          "compositionMode": "question-field",
           "backgroundMode": "dark",
           "narrationText": "可它究竟来自亲眼所见，还是后来读到的描述？鲜明度回答不了这个问题。",
           "visualThesis": "熟悉感缺少出处",
@@ -1999,7 +2238,12 @@
             "判断",
             "边界"
           ],
-          "label": "错误记忆为什么会有真实感"
+          "label": "错误记忆为什么会有真实感",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 14,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -2030,6 +2274,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 0,
+          "compositionMode": "claim-vs-boundary",
           "backgroundMode": "dark",
           "narrationText": "熟悉感也不能独自回答。",
           "visualThesis": "熟悉感不够回答",
@@ -2039,7 +2284,12 @@
             "对照"
           ],
           "label": "错误记忆为什么会有真实感",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 15,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -2070,6 +2320,7 @@
           "version": "memory-lab-editorial@1",
           "family": "VERSION_DIFF",
           "compositionVariant": 2,
+          "compositionMode": "layer-accumulation",
           "backgroundMode": "dark",
           "narrationText": "第三种来源，是既有结构。我们用对餐厅、课堂、家庭和社会规则的知识，压缩日常经验。",
           "visualThesis": "结构压缩日常",
@@ -2078,7 +2329,12 @@
             "主旨",
             "压缩"
           ],
-          "label": "错误记忆为什么会有真实感"
+          "label": "错误记忆为什么会有真实感",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 16,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -2109,6 +2365,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 2,
+          "compositionMode": "split-screen",
           "backgroundMode": "dark",
           "narrationText": "没有这些结构，每次理解都要从零开始。代价是，不符合预期的细节更容易被忽略，符合预期的细节也可能被补上。",
           "visualThesis": "压缩结构会抹平例外",
@@ -2117,7 +2374,12 @@
             "例外"
           ],
           "label": "错误记忆为什么会有真实感",
-          "evidenceRole": "解释"
+          "evidenceRole": "解释",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 17,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -2148,6 +2410,7 @@
           "version": "memory-lab-editorial@1",
           "family": "VERSION_DIFF",
           "compositionVariant": 0,
+          "compositionMode": "version-timeline",
           "backgroundMode": "dark",
           "narrationText": "第四种来源，经常被一句话说得太满，叫做再巩固。动物研究和部分人类研究提示，某些记忆在特定重新激活条件下会进入可更新状态。",
           "visualThesis": "再巩固不是万能解释",
@@ -2156,7 +2419,12 @@
             "后来版本",
             "差异"
           ],
-          "label": "错误记忆为什么会有真实感"
+          "label": "错误记忆为什么会有真实感",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 18,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -2187,6 +2455,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 2,
+          "compositionMode": "typographic-contradiction",
           "backgroundMode": "dark",
           "narrationText": "但提取并不总会触发这个过程，不同记忆和任务的证据也不一样。它不是“每想一次，就把整段人生覆盖保存”。",
           "visualThesis": "再巩固有条件",
@@ -2196,7 +2465,12 @@
             "边界"
           ],
           "label": "错误记忆为什么会有真实感",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 19,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -2227,6 +2501,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 1,
+          "compositionMode": "foreground-competition",
           "backgroundMode": "dark",
           "narrationText": "即使不把观察结果叫作再巩固，提醒后的变化也可能来自普通干扰或提取策略。想象一个事件，也可能提高它“似乎发生过”的信心。",
           "visualThesis": "提醒后变化有多种解释",
@@ -2235,7 +2510,12 @@
             "关系",
             "缺口"
           ],
-          "label": "错误记忆为什么会有真实感"
+          "label": "错误记忆为什么会有真实感",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 20,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -2266,6 +2546,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 0,
+          "compositionMode": "before-after",
           "backgroundMode": "dark",
           "narrationText": "报告变化是一种观察；再巩固、干扰和来源判断，是需要分别检验的解释。",
           "visualThesis": "解释必须分开",
@@ -2275,7 +2556,12 @@
             "对照"
           ],
           "label": "错误记忆为什么会有真实感",
-          "evidenceRole": "解释"
+          "evidenceRole": "解释",
+          "sequence": {
+            "id": "drm-mechanisms",
+            "phase": 21,
+            "view": "conclusion"
+          }
         }
       },
       "assetRequirements": [],
@@ -2352,7 +2638,12 @@
             "数年"
           ],
           "label": "你越确定，就越可靠吗",
-          "evidenceRole": "解释"
+          "evidenceRole": "解释",
+          "sequence": {
+            "id": "confidence-eyewitness",
+            "phase": 0,
+            "view": "establish"
+          }
         }
       },
       "assetRequirements": [],
@@ -2383,6 +2674,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 0,
+          "compositionMode": "failure-point",
           "backgroundMode": "dark",
           "narrationText": "一组研究综述认为，在公平、初次、未受污染的目击识别中，最初的高置信选择可以提供信息。低置信本身却不能告诉我们错在哪里。",
           "visualThesis": "高信心依赖条件",
@@ -2392,7 +2684,12 @@
             "报告"
           ],
           "label": "你越确定，就越可靠吗",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "confidence-eyewitness",
+            "phase": 1,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -2423,6 +2720,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 2,
+          "compositionMode": "condition-a-b",
           "backgroundMode": "dark",
           "narrationText": "这个结论依赖明确条件，不能直接搬到几年后的庭审陈述上。",
           "visualThesis": "不能搬到庭审",
@@ -2432,7 +2730,12 @@
             "对照"
           ],
           "label": "你越确定，就越可靠吗",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "confidence-eyewitness",
+            "phase": 2,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -2463,6 +2766,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 1,
+          "compositionMode": "question-field",
           "backgroundMode": "dark",
           "narrationText": "为什么？因为信心会被后来发生的事改变。",
           "visualThesis": "反馈会改写评价",
@@ -2471,7 +2775,12 @@
             "判断",
             "边界"
           ],
-          "label": "你越确定，就越可靠吗"
+          "label": "你越确定，就越可靠吗",
+          "sequence": {
+            "id": "confidence-eyewitness",
+            "phase": 3,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -2502,6 +2811,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 0,
+          "compositionMode": "before-after",
           "backgroundMode": "dark",
           "narrationText": "一次“很好，你认出了嫌疑人”的确认反馈，就可能提高目击者后来的自信。它还可能让人回头觉得，自己当时看得更久、更清楚。",
           "visualThesis": "确认反馈抬高信心",
@@ -2511,7 +2821,12 @@
             "对照"
           ],
           "label": "你越确定，就越可靠吗",
-          "evidenceRole": "解释"
+          "evidenceRole": "解释",
+          "sequence": {
+            "id": "confidence-eyewitness",
+            "phase": 4,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -2550,7 +2865,12 @@
             "数周",
             "数年"
           ],
-          "label": "你越确定，就越可靠吗"
+          "label": "你越确定，就越可靠吗",
+          "sequence": {
+            "id": "confidence-eyewitness",
+            "phase": 5,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -2581,6 +2901,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 1,
+          "compositionMode": "feedback-loop",
           "backgroundMode": "dark",
           "narrationText": "所以司法上最珍贵的，不只是法庭里坚定的语气。还包括第一次识别当下、尚未被反馈污染的原始置信陈述。",
           "visualThesis": "保存第一次信心",
@@ -2590,7 +2911,12 @@
             "报告"
           ],
           "label": "你越确定，就越可靠吗",
-          "evidenceRole": "解释"
+          "evidenceRole": "解释",
+          "sequence": {
+            "id": "confidence-eyewitness",
+            "phase": 6,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -2621,6 +2947,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 0,
+          "compositionMode": "condition-a-b",
           "backgroundMode": "dark",
           "narrationText": "即使是第一次信心，也不能脱离现场条件。距离太远、光线太差、阵列不公平，都可能降低信息质量。",
           "visualThesis": "现场条件仍关键",
@@ -2630,7 +2957,12 @@
             "对照"
           ],
           "label": "你越确定，就越可靠吗",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "confidence-eyewitness",
+            "phase": 7,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -2661,6 +2993,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 2,
+          "compositionMode": "typographic-contradiction",
           "backgroundMode": "dark",
           "narrationText": "研究说的是在明确程序下，信心可以帮助判断。它不是把一个百分数变成有罪结论的计算器。",
           "visualThesis": "信心不是定罪器",
@@ -2670,7 +3003,12 @@
             "边界"
           ],
           "label": "你越确定，就越可靠吗",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "confidence-eyewitness",
+            "phase": 8,
+            "view": "conclusion"
+          }
         }
       },
       "assetRequirements": [],
@@ -2709,7 +3047,12 @@
           ],
           "label": "为什么闪光灯记忆也会变",
           "archiveDisclosure": "背景资料 · 非研究参与者或事件",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "flashbulb-longitudinal",
+            "phase": 0,
+            "view": "establish"
+          }
         }
       },
       "assetRequirements": [
@@ -2750,6 +3093,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 2,
+          "compositionMode": "image-vs-report",
           "backgroundMode": "dark",
           "narrationText": "人也往往相信，它像照片一样被保存下来。",
           "visualThesis": "鲜明感无法保存细节",
@@ -2758,7 +3102,12 @@
             "准确性"
           ],
           "label": "为什么闪光灯记忆也会变",
-          "evidenceRole": "后续证据"
+          "evidenceRole": "后续证据",
+          "sequence": {
+            "id": "flashbulb-longitudinal",
+            "phase": 1,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -2799,8 +3148,8 @@
           "label": "为什么闪光灯记忆也会变",
           "sequence": {
             "id": "flashbulb-longitudinal",
-            "phase": 0,
-            "view": "establish"
+            "phase": 2,
+            "view": "compare"
           }
         }
       },
@@ -2832,6 +3181,7 @@
           "version": "memory-lab-editorial@1",
           "family": "VERSION_DIFF",
           "compositionVariant": 0,
+          "compositionMode": "version-timeline",
           "backgroundMode": "dark",
           "narrationText": "这样就不必依靠后来版本判断后来版本。最初记录成了一份外部基线。",
           "visualThesis": "后来版本有基线",
@@ -2843,7 +3193,7 @@
           "evidenceRole": "后续证据",
           "sequence": {
             "id": "flashbulb-longitudinal",
-            "phase": 1,
+            "phase": 3,
             "view": "compare"
           }
         }
@@ -2887,7 +3237,7 @@
           "label": "为什么闪光灯记忆也会变",
           "sequence": {
             "id": "flashbulb-longitudinal",
-            "phase": 2,
+            "phase": 4,
             "view": "compare"
           }
         }
@@ -2920,6 +3270,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 1,
+          "compositionMode": "split-screen",
           "backgroundMode": "dark",
           "narrationText": "可鲜明感和对自己记得准确的信心，往往保持得更高。这里的一致性不是客观准确率；",
           "visualThesis": "鲜明感保持更久",
@@ -2932,8 +3283,8 @@
           "evidenceRole": "边界",
           "sequence": {
             "id": "flashbulb-longitudinal",
-            "phase": 3,
-            "view": "conclusion"
+            "phase": 5,
+            "view": "compare"
           }
         }
       },
@@ -2965,6 +3316,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 0,
+          "compositionMode": "object-led-claim",
           "backgroundMode": "dark",
           "narrationText": "它只比较后来报告是否还和最初记录相同。",
           "visualThesis": "稳定不等于准确",
@@ -2977,8 +3329,8 @@
           "evidenceRole": "后续证据",
           "sequence": {
             "id": "flashbulb-longitudinal",
-            "phase": 4,
-            "view": "conclusion"
+            "phase": 6,
+            "view": "compare"
           }
         }
       },
@@ -3018,7 +3370,12 @@
             "数周",
             "数年"
           ],
-          "label": "为什么闪光灯记忆也会变"
+          "label": "为什么闪光灯记忆也会变",
+          "sequence": {
+            "id": "flashbulb-longitudinal",
+            "phase": 7,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -3049,6 +3406,7 @@
           "version": "memory-lab-editorial@1",
           "family": "VERSION_DIFF",
           "compositionVariant": 1,
+          "compositionMode": "branching-versions",
           "backgroundMode": "dark",
           "narrationText": "真实感的寿命，不等于每个细节的保质期。",
           "visualThesis": "真实感不保细节",
@@ -3058,7 +3416,12 @@
             "差异"
           ],
           "label": "为什么闪光灯记忆也会变",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "flashbulb-longitudinal",
+            "phase": 8,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -3089,6 +3452,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 0,
+          "compositionMode": "before-after",
           "backgroundMode": "dark",
           "narrationText": "十年研究还发现，较大的变化常集中在早期。后来，人们可能稳定地重复一个已经成形的版本。",
           "visualThesis": "变化多在早期",
@@ -3097,7 +3461,12 @@
             "主旨",
             "对照"
           ],
-          "label": "为什么闪光灯记忆也会变"
+          "label": "为什么闪光灯记忆也会变",
+          "sequence": {
+            "id": "flashbulb-longitudinal",
+            "phase": 9,
+            "view": "compare"
+          }
         }
       },
       "assetRequirements": [],
@@ -3128,6 +3497,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 2,
+          "compositionMode": "typographic-contradiction",
           "backgroundMode": "dark",
           "narrationText": "稳定只说明这个版本不再频繁变化。它不能自动证明，这个版本与最初记录完全一致。",
           "visualThesis": "稳定仍要看内容",
@@ -3137,7 +3507,12 @@
             "变化"
           ],
           "label": "为什么闪光灯记忆也会变",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "flashbulb-longitudinal",
+            "phase": 10,
+            "view": "conclusion"
+          }
         }
       },
       "assetRequirements": [],
@@ -3216,6 +3591,7 @@
           "version": "memory-lab-editorial@1",
           "family": "VERSION_DIFF",
           "compositionVariant": 1,
+          "compositionMode": "branching-versions",
           "backgroundMode": "dark",
           "narrationText": "如果记忆会重建，最现实的压力落在司法现场。目击者可能诚实，也可能非常认真。",
           "visualThesis": "早期记录才可比较",
@@ -3265,6 +3641,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 0,
+          "compositionMode": "progressive-accumulation",
           "backgroundMode": "dark",
           "narrationText": "问题不只在这个人有没有记忆。还在记忆形成、询问和识别时经历了什么。",
           "visualThesis": "形成条件同样重要",
@@ -3304,6 +3681,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 2,
+          "compositionMode": "contamination-path",
           "backgroundMode": "dark",
           "narrationText": "带暗示的问题，会把新信息带进来。反复访谈，会增加不同版本彼此接触的机会。",
           "visualThesis": "新信息会进入首次报告",
@@ -3343,6 +3721,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 1,
+          "compositionMode": "two-axis",
           "backgroundMode": "dark",
           "narrationText": "列队管理员如果知道谁是嫌疑人，也可能无意中提供线索。识别后的确认反馈，还会继续改变信心。",
           "visualThesis": "主持人也会给线索",
@@ -3383,6 +3762,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 0,
+          "compositionMode": "condition-a-b",
           "backgroundMode": "dark",
           "narrationText": "因此，改进重点是程序。由不知道嫌疑人身份的人主持列队。",
           "visualThesis": "程序要隔离暗示",
@@ -3422,6 +3802,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 2,
+          "compositionMode": "nested-layers",
           "backgroundMode": "dark",
           "narrationText": "明确告诉目击者，嫌疑人可能根本不在其中。在第一次选择时，就用目击者自己的话记录信心，并保存完整过程。",
           "visualThesis": "先记录，再解释",
@@ -3462,6 +3843,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 1,
+          "compositionMode": "branch",
           "backgroundMode": "dark",
           "narrationText": "这些措施不是因为目击证词毫无价值。恰恰相反，是因为一份形成条件良好的首次记忆报告很有价值。",
           "visualThesis": "首报要在暗示前留下",
@@ -3502,6 +3884,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 0,
+          "compositionMode": "nested-layers",
           "backgroundMode": "dark",
           "narrationText": "我们要保护它，不让后续信息偷偷混进来。可信度来自记录链，而不只来自一个人的坚定表情。",
           "visualThesis": "原始记录才可追溯",
@@ -3542,6 +3925,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 2,
+          "compositionMode": "condition-a-b",
           "backgroundMode": "dark",
           "narrationText": "有些因素，事后程序无法修复。目击距离、遮挡、压力和注意方向，已经发生在现场。",
           "visualThesis": "有些风险无法补救",
@@ -3581,6 +3965,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 1,
+          "compositionMode": "object-led-claim",
           "backgroundMode": "dark",
           "narrationText": "另一些因素却可以控制，比如主持人提示、列队公平和反馈。司法改革的现实目标，是先减少那些本来可以避免的污染。",
           "visualThesis": "有些风险不能补救",
@@ -3628,7 +4013,12 @@
             "下一章"
           ],
           "label": "能否形成从未发生的人生片段",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "suggested-autobiographical",
+            "phase": 0,
+            "view": "establish"
+          }
         }
       },
       "assetRequirements": [],
@@ -3659,6 +4049,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 2,
+          "compositionMode": "literal-flow",
           "backgroundMode": "dark",
           "narrationText": "实验室里更大胆的一步，是提示一段自传体事件。经典的“迷路商场”研究，会先请家人提供真实童年故事。",
           "visualThesis": "真事掺入虚构事件",
@@ -3667,7 +4058,12 @@
             "虚构事件",
             "报告"
           ],
-          "label": "能否形成从未发生的人生片段"
+          "label": "能否形成从未发生的人生片段",
+          "sequence": {
+            "id": "suggested-autobiographical",
+            "phase": 1,
+            "view": "spectrum"
+          }
         }
       },
       "assetRequirements": [],
@@ -3698,6 +4094,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 2,
+          "compositionMode": "progressive-accumulation",
           "backgroundMode": "dark",
           "narrationText": "研究者再加入一件家人确认没有发生的事。参与者随后接受两轮访谈。",
           "visualThesis": "两轮访谈塑造体验",
@@ -3707,7 +4104,12 @@
             "报告"
           ],
           "label": "能否形成从未发生的人生片段",
-          "evidenceRole": "后续证据"
+          "evidenceRole": "后续证据",
+          "sequence": {
+            "id": "suggested-autobiographical",
+            "phase": 2,
+            "view": "spectrum"
+          }
         }
       },
       "assetRequirements": [],
@@ -3738,6 +4140,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 1,
+          "compositionMode": "overlap",
           "backgroundMode": "dark",
           "narrationText": "部分参与者后来接受了这个故事。有的人还报告图像、情绪或额外细节。",
           "visualThesis": "体验从何处开始",
@@ -3748,8 +4151,8 @@
           ],
           "label": "能否形成从未发生的人生片段",
           "sequence": {
-            "id": "memory-experience-spectrum",
-            "phase": 0,
+            "id": "suggested-autobiographical",
+            "phase": 3,
             "view": "spectrum"
           }
         }
@@ -3782,6 +4185,7 @@
           "version": "memory-lab-editorial@1",
           "family": "VERSION_DIFF",
           "compositionVariant": 0,
+          "compositionMode": "layer-accumulation",
           "backgroundMode": "dark",
           "narrationText": "这说明，在权威信息、想象和反复提取共同作用下，人可能对虚构事件产生某种回忆体验。它是一个重要的可能性证明。",
           "visualThesis": "线索共同塑形",
@@ -3793,8 +4197,8 @@
           "label": "能否形成从未发生的人生片段",
           "evidenceRole": "后续证据",
           "sequence": {
-            "id": "memory-experience-spectrum",
-            "phase": 1,
+            "id": "suggested-autobiographical",
+            "phase": 4,
             "view": "spectrum"
           }
         }
@@ -3827,6 +4231,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 2,
+          "compositionMode": "nested-layers",
           "backgroundMode": "dark",
           "narrationText": "但“某种回忆体验”不是一个简单开关。相信事情发生过，不等于看见了完整情节。",
           "visualThesis": "体验不是开关",
@@ -3838,8 +4243,8 @@
           "label": "能否形成从未发生的人生片段",
           "evidenceRole": "边界",
           "sequence": {
-            "id": "memory-experience-spectrum",
-            "phase": 2,
+            "id": "suggested-autobiographical",
+            "phase": 5,
             "view": "spectrum"
           }
         }
@@ -3872,6 +4277,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 1,
+          "compositionMode": "condition-a-b",
           "backgroundMode": "dark",
           "narrationText": "配合实验要求，也不等于内心确信。部分细节、熟悉感、信念和完整记忆，应该分开编码。",
           "visualThesis": "配合不等于确信",
@@ -3882,9 +4288,9 @@
           "label": "能否形成从未发生的人生片段",
           "evidenceRole": "边界",
           "sequence": {
-            "id": "memory-experience-spectrum",
-            "phase": 3,
-            "view": "conclusion"
+            "id": "suggested-autobiographical",
+            "phase": 6,
+            "view": "spectrum"
           }
         }
       },
@@ -3916,6 +4322,7 @@
           "version": "memory-lab-editorial@1",
           "family": "VERSION_DIFF",
           "compositionVariant": 1,
+          "compositionMode": "document-redline",
           "backgroundMode": "dark",
           "narrationText": "近年的重新分析正质疑一些宽口径判定。某些被研究者归为虚假记忆的报告，甚至缺少“真的迷路”这样的核心细节。",
           "visualThesis": "成功定义决定比例",
@@ -3924,7 +4331,12 @@
             "宽口径",
             "比例"
           ],
-          "label": "能否形成从未发生的人生片段"
+          "label": "能否形成从未发生的人生片段",
+          "sequence": {
+            "id": "suggested-autobiographical",
+            "phase": 7,
+            "view": "spectrum"
+          }
         }
       },
       "assetRequirements": [],
@@ -3955,6 +4367,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 1,
+          "compositionMode": "failure-point",
           "backgroundMode": "dark",
           "narrationText": "争论没有让提示效应消失。它提醒我们，不能把“部分人受影响”夸张成“科学家能随意植入完整人生”。",
           "visualThesis": "效应不能夸大",
@@ -3964,7 +4377,12 @@
             "边界"
           ],
           "label": "能否形成从未发生的人生片段",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "suggested-autobiographical",
+            "phase": 8,
+            "view": "spectrum"
+          }
         }
       },
       "assetRequirements": [],
@@ -3995,6 +4413,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 1,
+          "compositionMode": "before-after",
           "backgroundMode": "dark",
           "narrationText": "想象膨胀研究提供了另一层区分。请一个人想象低概率的童年事件，后来“发生过”的评分可能会上升。",
           "visualThesis": "想象会抬高评分",
@@ -4004,7 +4423,12 @@
             "对照"
           ],
           "label": "能否形成从未发生的人生片段",
-          "archiveDisclosure": "背景资料 · 非实验参与者或结果"
+          "archiveDisclosure": "背景资料 · 非实验参与者或结果",
+          "sequence": {
+            "id": "suggested-autobiographical",
+            "phase": 9,
+            "view": "spectrum"
+          }
         }
       },
       "assetRequirements": [
@@ -4045,6 +4469,7 @@
           "version": "memory-lab-editorial@1",
           "family": "CONCEPT_SPACE",
           "compositionVariant": 0,
+          "compositionMode": "nested-layers",
           "backgroundMode": "dark",
           "narrationText": "上升首先是信念和信心的变化。它距离一段带时间、地点和连续情节的完整记忆，还有很长的测量距离。",
           "visualThesis": "信念离完整记忆很远",
@@ -4054,7 +4479,12 @@
             "缺口"
           ],
           "label": "能否形成从未发生的人生片段",
-          "evidenceRole": "后续证据"
+          "evidenceRole": "后续证据",
+          "sequence": {
+            "id": "suggested-autobiographical",
+            "phase": 10,
+            "view": "spectrum"
+          }
         }
       },
       "assetRequirements": [],
@@ -4085,6 +4515,7 @@
           "version": "memory-lab-editorial@1",
           "family": "PROCESS_MAP",
           "compositionVariant": 2,
+          "compositionMode": "branch",
           "backgroundMode": "dark",
           "narrationText": "实验需求和配合也必须进入讨论。参与者可能猜到研究者期待什么，或者不愿反复回答“我不知道”。",
           "visualThesis": "实验需求也会影响",
@@ -4093,7 +4524,12 @@
             "推测",
             "报告"
           ],
-          "label": "能否形成从未发生的人生片段"
+          "label": "能否形成从未发生的人生片段",
+          "sequence": {
+            "id": "suggested-autobiographical",
+            "phase": 11,
+            "view": "spectrum"
+          }
         }
       },
       "assetRequirements": [],
@@ -4124,6 +4560,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 2,
+          "compositionMode": "image-vs-report",
           "backgroundMode": "dark",
           "narrationText": "但这也不能反过来抹去所有新增细节和主观体验。争论的核心，是怎样给报告分类，而不是先宣布每个报告都真，或都假。",
           "visualThesis": "先分开信念与回忆",
@@ -4132,7 +4569,12 @@
             "回忆"
           ],
           "label": "能否形成从未发生的人生片段",
-          "evidenceRole": "边界"
+          "evidenceRole": "边界",
+          "sequence": {
+            "id": "suggested-autobiographical",
+            "phase": 12,
+            "view": "conclusion"
+          }
         }
       },
       "assetRequirements": [],
@@ -4201,6 +4643,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 1,
+          "compositionMode": "typographic-contradiction",
           "backgroundMode": "dark",
           "narrationText": "它不必逐像素保存世界，才能帮助我们生活。高效和精确，从来不是同一个目标。",
           "visualThesis": "高效不是精确",
@@ -4241,6 +4684,7 @@
           "version": "memory-lab-editorial@1",
           "family": "COMPARISON",
           "compositionVariant": 0,
+          "compositionMode": "split-screen",
           "backgroundMode": "dark",
           "narrationText": "风险更高的，是原句、来源、先后顺序和被反复询问的细节。情绪可以告诉你，这段经历对你很重要。",
           "visualThesis": "高风险细节要留证",
@@ -4413,6 +4857,7 @@
           "version": "memory-lab-editorial@1",
           "family": "VERSION_DIFF",
           "compositionVariant": 2,
+          "compositionMode": "document-redline",
           "backgroundMode": "dark",
           "narrationText": "下一次你和别人争论“我明明记得”时，也许可以换一个问题。不要急着问，究竟是谁记错了。",
           "visualThesis": "争论先看版本",
@@ -4492,6 +4937,7 @@
           "version": "memory-lab-editorial@1",
           "family": "VERSION_DIFF",
           "compositionVariant": 0,
+          "compositionMode": "layer-accumulation",
           "backgroundMode": "dark",
           "narrationText": "这份档案并不因此一无是处。它让有限的大脑保留意义，让经验能够迁移到未来。",
           "visualThesis": "档案仍有价值",
@@ -4531,6 +4977,7 @@
           "version": "memory-lab-editorial@1",
           "family": "KINETIC_CLAIM",
           "compositionVariant": 2,
+          "compositionMode": "typographic-contradiction",
           "backgroundMode": "dark",
           "narrationText": "成熟的怀疑，不是把记忆全部判为伪造。是知道什么时候可以依靠主旨，什么时候必须停下来寻找校验。",
           "visualThesis": "怀疑不是放弃判断",

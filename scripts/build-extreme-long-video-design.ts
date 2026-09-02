@@ -14,6 +14,12 @@ const plan = compileNarrationPlanV2({
 });
 type Family = 'KINETIC_CLAIM' | 'VERSION_DIFF' | 'PROCESS_MAP' | 'TIMELINE' | 'EVIDENCE_ARCHIVE' | 'CONCEPT_SPACE' | 'COMPARISON' | 'CHAPTER_INTERSTITIAL' | 'FINAL_SYNTHESIS';
 type Sequence = {id: string; phase: number; view: 'establish' | 'compare' | 'conclusion' | 'spectrum'};
+type CompositionMode =
+  | 'document-redline' | 'split-memory' | 'version-timeline' | 'layer-accumulation' | 'branching-versions'
+  | 'typographic-contradiction' | 'phrase-correction' | 'object-led-claim' | 'editorial-statement' | 'question-field'
+  | 'nested-layers' | 'continuum' | 'threshold-field' | 'source-cluster' | 'inside-outside' | 'overlap' | 'foreground-competition' | 'distance-scale'
+  | 'literal-flow' | 'branch' | 'feedback-loop' | 'gate' | 'contamination-path' | 'before-after-intervention' | 'parallel-procedures' | 'progressive-accumulation' | 'failure-point'
+  | 'split-screen' | 'overlay-difference' | 'before-after' | 'evidence-table' | 'two-axis' | 'paired-documents' | 'image-vs-report' | 'claim-vs-boundary' | 'condition-a-b';
 const chapterTitles = new Map(plan.chapters.map((chapter) => [chapter.chapter, chapter.title]));
 const chapterFamilies: Record<number, Family[]> = {
   1: ['KINETIC_CLAIM', 'VERSION_DIFF', 'CONCEPT_SPACE', 'KINETIC_CLAIM', 'COMPARISON'],
@@ -57,6 +63,68 @@ const thesisFor = (sceneId: string, text: string, family: Family): string => {
   return ({EVIDENCE_ARCHIVE: '回到可查的材料', PROCESS_MAP: '变化需要条件', TIMELINE: '时间留下版本差', CONCEPT_SPACE: '线索在关系中重组', COMPARISON: '两种信息并行', VERSION_DIFF: '版本发生偏移', CHAPTER_INTERSTITIAL: '下一段，换个问题', FINAL_SYNTHESIS: '证据构成校验路', KINETIC_CLAIM: '记忆正在被组织'})[family];
 };
 const labelsFor = (family: Family): string[] => ({KINETIC_CLAIM: ['记忆', '判断', '边界'], VERSION_DIFF: ['原版本', '后来版本', '差异'], PROCESS_MAP: ['输入', '条件', '报告'], TIMELINE: ['T0', '数周', '数年'], EVIDENCE_ARCHIVE: ['档案', '日期', '来源'], CONCEPT_SPACE: ['线索', '关系', '缺口'], COMPARISON: ['细节', '主旨', '对照'], CHAPTER_INTERSTITIAL: ['下一章'], FINAL_SYNTHESIS: ['照片', '文字', '时间戳', '证人']})[family];
+const sceneNumber = (sceneId: string) => Number(sceneId.slice(1));
+const sequenceFor = (sceneId: string): Sequence | undefined => {
+  const number = sceneNumber(sceneId);
+  const ranges = [
+    {from: 1, to: 12, id: 'opening-disagreement'},
+    {from: 13, to: 25, id: 'bartlett-to-loftus'},
+    {from: 35, to: 56, id: 'drm-mechanisms'},
+    {from: 58, to: 66, id: 'confidence-eyewitness'},
+    {from: 67, to: 77, id: 'flashbulb-longitudinal'},
+    {from: 89, to: 101, id: 'suggested-autobiographical'},
+  ].find((range) => number >= range.from && number <= range.to);
+  if (!ranges) return undefined;
+  const phase = number - ranges.from;
+  const span = ranges.to - ranges.from;
+  const view: Sequence['view'] = phase === 0 ? 'establish' : phase === span ? 'conclusion' : ranges.id === 'suggested-autobiographical' ? 'spectrum' : 'compare';
+  return {id: ranges.id, phase, view};
+};
+const compositionModeFor = (sceneId: string, family: Family, text: string): CompositionMode | undefined => {
+  const number = sceneNumber(sceneId);
+  if (family === 'VERSION_DIFF') {
+    if (/措辞|动词|原句|改写|删除/.test(text)) return 'document-redline';
+    if (/双方|我记得|你记得|争过|两个版本/.test(text)) return 'split-memory';
+    if (/T0|后来|延迟|早期记录|数周|数年|十年/.test(text)) return 'version-timeline';
+    if (/线索|信息|压缩|塑形|叠加/.test(text)) return 'layer-accumulation';
+    return (['document-redline', 'version-timeline', 'layer-accumulation', 'branching-versions'] as const)[number % 4];
+  }
+  if (family === 'KINETIC_CLAIM') {
+    if (/不等于|不是|不能|不只|不够|并非/.test(text)) return 'typographic-contradiction';
+    if (/误导|夸大|万能|全盘|有条件/.test(text)) return 'phrase-correction';
+    if (/词|记录|反馈|细节|来源|档案/.test(text)) return 'object-led-claim';
+    if (/谁|哪|为什么|？/.test(text)) return 'question-field';
+    return 'editorial-statement';
+  }
+  if (family === 'CONCEPT_SPACE') {
+    if (/层次|完整|嵌套|主旨/.test(text)) return 'nested-layers';
+    if (/距离|连续|程度|光谱/.test(text)) return 'continuum';
+    if (/阈值|边界|开关/.test(text)) return 'threshold-field';
+    if (/来源|线索|多段|共同/.test(text)) return 'source-cluster';
+    if (/内外|隔离|程序/.test(text)) return 'inside-outside';
+    if (/竞争|干扰/.test(text)) return 'foreground-competition';
+    return (['overlap', 'distance-scale', 'nested-layers', 'source-cluster'] as const)[number % 4];
+  }
+  if (family === 'PROCESS_MAP') {
+    if (/换问法|车祸|措辞/.test(text)) return 'before-after-intervention';
+    if (/反馈/.test(text)) return 'feedback-loop';
+    if (/隔离|保存|保护|程序/.test(text)) return 'gate';
+    if (/暗示|误导|掺入|新信息/.test(text)) return 'contamination-path';
+    if (/两轮|访谈|重复/.test(text)) return 'progressive-accumulation';
+    if (/平行|两种|分别/.test(text)) return 'parallel-procedures';
+    if (/失败|风险|不能/.test(text)) return 'failure-point';
+    return (['literal-flow', 'branch', 'progressive-accumulation'] as const)[number % 3];
+  }
+  if (family === 'COMPARISON') {
+    if (/前后|后来|变化/.test(text)) return 'before-after';
+    if (/条件|实验|程序/.test(text)) return 'condition-a-b';
+    if (/证据|记录|材料/.test(text)) return 'evidence-table';
+    if (/照片|图像|报告/.test(text)) return 'image-vs-report';
+    if (/边界|不能|不等于|限制/.test(text)) return 'claim-vs-boundary';
+    return (['split-screen', 'overlay-difference', 'two-axis', 'paired-documents'] as const)[number % 4];
+  }
+  return undefined;
+};
 const speech = plan.units.filter((unit) => unit.kind === 'speech');
 let cursor = 0;
 const chapterIndexes = new Map<number, number>();
@@ -74,9 +142,10 @@ const scenes = speech.map((unit, index) => {
   const durationInFrames = Math.max(165, Math.round(unit.spokenText.length / 4.5 * 30));
   const startFrame = cursor; cursor += durationInFrames;
   const evidenceRole = /不等于|不能|不是|边界|不自动|不能直接|并没有/.test(unit.spokenText) ? '边界' : unit.evidenceIds.length ? (unit.chapter <= 4 ? '原始研究' : unit.chapter >= 7 ? '后续证据' : '解释') : undefined;
-  const sequence = configured?.sequence;
+  const sequence = sequenceFor(sceneId) ?? configured?.sequence;
+  const compositionMode = compositionModeFor(sceneId, family, unit.spokenText);
   return {id: sceneId, chapter: unit.chapter, chapterTitle: chapterTitles.get(unit.chapter)!, start: startFrame / 30, end: cursor / 30, duration: durationInFrames / 30, startFrame, durationInFrames, category: archive ? 'Archive' : 'Minimal', visualType: archive ? 'Archive' : 'Minimal', template: null, sourceTemplate: null,
-    templateProps: {memoryLab: {version: MEMORY_LAB_EDITORIAL_RENDERER_VERSION, family, compositionVariant: configured?.compositionVariant ?? (chapterIndex + index) % 3, backgroundMode: 'dark', narrationText: unit.spokenText, visualThesis: configured?.thesis ?? thesisFor(sceneId, unit.spokenText, family), visualLabels: configured?.labels ?? labelsFor(family), label: chapterTitles.get(unit.chapter)!, ...(archiveDisclosures[sceneId] ? {archiveDisclosure: archiveDisclosures[sceneId]} : {}), ...(evidenceRole ? {evidenceRole} : {}), ...(sequence ? {sequence} : {})}},
+    templateProps: {memoryLab: {version: MEMORY_LAB_EDITORIAL_RENDERER_VERSION, family, compositionVariant: configured?.compositionVariant ?? (chapterIndex + index) % 3, ...(compositionMode ? {compositionMode} : {}), backgroundMode: 'dark', narrationText: unit.spokenText, visualThesis: configured?.thesis ?? thesisFor(sceneId, unit.spokenText, family), visualLabels: configured?.labels ?? labelsFor(family), label: chapterTitles.get(unit.chapter)!, ...(archiveDisclosures[sceneId] ? {archiveDisclosure: archiveDisclosures[sceneId]} : {}), ...(evidenceRole ? {evidenceRole} : {}), ...(sequence ? {sequence} : {})}},
     assetRequirements: archive ? [{requirementId: `${sceneId}-R01`, kind: 'image' as const, subject: archive.subject, query: archive.query, usage: 'primary' as const, policy: 'public_domain' as const, authenticity: 'authentic_required' as const}] : [], narrationSummary: unit.spokenText, description: `${family}: ${configured?.thesis ?? thesisFor(sceneId, unit.spokenText, family)}`, notes: `exact narration unit ${unit.id}; visual copy separated; archive audit retained=${Boolean(archive)}`, assetIds: [], licenseStatus: archive ? 'review-required' : 'not-applicable', subtitlePosition: 'bottom' as const, transitionIn: index === 0 ? 'fade' : 'cut', transitionOut: index === speech.length - 1 ? 'fade-out' : 'cut'};
 });
 const chapterTiming = plan.chapters.map((chapter) => {const rows = scenes.filter((scene) => scene.chapter === chapter.chapter); return {chapter: chapter.chapter, title: chapter.title, start: rows[0]!.start, end: rows.at(-1)!.end};});
