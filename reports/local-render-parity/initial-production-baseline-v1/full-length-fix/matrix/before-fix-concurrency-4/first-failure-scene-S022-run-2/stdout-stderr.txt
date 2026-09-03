@@ -1,0 +1,346 @@
+[renderMedia()] Free memory: 1083064320 Estimated usage parallel encoding 2073600000
+[renderMedia()] Using concurrency: 4
+[renderMedia()] delayRender() timeout: 30000
+[renderMedia()] Codec supports parallel rendering: true
+[renderMedia()] Parallel encoding is disabled.
+[renderMedia()] Rendering frames 5627-5923
+Created directory for temporary files /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsd19tgqnaob
+Ensuring browser executable
+Ensured browser is available.
+[openBrowser()] Opening browser: gl = undefined, executable = /Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell, enableMultiProcessOnLinux = true
+[compositor] Starting Rust process. Max video cache size: 4377MB, max threads = 2
+[Tab 0, delayRender()] "Loading root component - See https://remotion.dev/docs/troubleshooting/loading-root-component if you experience a timeout" handle was cleared after 1ms
+[Tab 1, delayRender()] "Loading root component - See https://remotion.dev/docs/troubleshooting/loading-root-component if you experience a timeout" handle was cleared after 0ms
+[Tab 3, delayRender()] "Loading root component - See https://remotion.dev/docs/troubleshooting/loading-root-component if you experience a timeout" handle was cleared after 1ms
+[Tab 2, delayRender()] "Loading root component - See https://remotion.dev/docs/troubleshooting/loading-root-component if you experience a timeout" handle was cleared after 0ms
+[Tab 0, delayRender()] "Waiting for root component to load - See https://remotion.dev/docs/troubleshooting/loading-root-component if you experience a timeout" handle was cleared after 3ms
+[Tab 2, delayRender()] "Waiting for root component to load - See https://remotion.dev/docs/troubleshooting/loading-root-component if you experience a timeout" handle was cleared after 4ms
+[Tab 3, delayRender()] "Waiting for root component to load - See https://remotion.dev/docs/troubleshooting/loading-root-component if you experience a timeout" handle was cleared after 4ms
+[Tab 1, delayRender()] "Waiting for root component to load - See https://remotion.dev/docs/troubleshooting/loading-root-component if you experience a timeout" handle was cleared after 9ms
+[Tab 0, delayRender()] "Waiting for Composition "ZhiyingFullCutNoSubtitles"" handle was cleared after 10ms
+[Tab 1, delayRender()] "Waiting for Composition "ZhiyingFullCutNoSubtitles"" handle was cleared after 10ms
+[Tab 2, delayRender()] "Waiting for Composition "ZhiyingFullCutNoSubtitles"" handle was cleared after 11ms
+[Tab 3, delayRender()] "Waiting for Composition "ZhiyingFullCutNoSubtitles"" handle was cleared after 10ms
+[Tab 0, delayRender()] "Loading <Img> with src=/public/assets/8f955b4c-42dd-4a02-8e76-e721a37fab41/extreme-archive-S022-A03.jpg" handle was cleared after 22ms
+[Tab 0, delayRender()] "Setting the current frame to 5627" handle was cleared after 1ms
+[Tab 1, delayRender()] "Loading <Img> with src=/public/assets/8f955b4c-42dd-4a02-8e76-e721a37fab41/extreme-archive-S022-A03.jpg" handle was cleared after 40ms
+[Tab 2, delayRender()] "Loading <Img> with src=/public/assets/8f955b4c-42dd-4a02-8e76-e721a37fab41/extreme-archive-S022-A03.jpg" handle was cleared after 50ms
+[Tab 1, delayRender()] "Setting the current frame to 5628" handle was cleared after 0ms
+[Tab 2, delayRender()] "Setting the current frame to 5629" handle was cleared after 0ms
+[Tab 3, delayRender()] "Loading <Img> with src=/public/assets/8f955b4c-42dd-4a02-8e76-e721a37fab41/extreme-archive-S022-A03.jpg" handle was cleared after 57ms
+[Tab 3, delayRender()] "Setting the current frame to 5630" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5631" handle was cleared after 2ms
+[Tab 1, delayRender()] "Setting the current frame to 5632" handle was cleared after 2ms
+[Tab 2, delayRender()] "Setting the current frame to 5633" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5634" handle was cleared after 3ms
+[Tab 3, delayRender()] "Setting the current frame to 5635" handle was cleared after 2ms
+[Tab 1, delayRender()] "Setting the current frame to 5636" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5637" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5638" handle was cleared after 2ms
+[Tab 3, delayRender()] "Setting the current frame to 5639" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5640" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5641" handle was cleared after 4ms
+[Tab 3, delayRender()] "Setting the current frame to 5642" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5643" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5644" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5645" handle was cleared after 2ms
+[Tab 3, delayRender()] "Setting the current frame to 5646" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5647" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5648" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5650" handle was cleared after 5ms
+[Tab 2, delayRender()] "Setting the current frame to 5649" handle was cleared after 8ms
+[Tab 0, delayRender()] "Setting the current frame to 5651" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5652" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5653" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5654" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5655" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5656" handle was cleared after 3ms
+[Tab 3, delayRender()] "Setting the current frame to 5657" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5658" handle was cleared after 4ms
+[Tab 1, delayRender()] "Setting the current frame to 5659" handle was cleared after 6ms
+[Tab 0, delayRender()] "Setting the current frame to 5660" handle was cleared after 4ms
+[Tab 3, delayRender()] "Setting the current frame to 5661" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5662" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5663" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5664" handle was cleared after 3ms
+[Tab 3, delayRender()] "Setting the current frame to 5665" handle was cleared after 4ms
+[Tab 2, delayRender()] "Setting the current frame to 5666" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5667" handle was cleared after 8ms
+[Tab 0, delayRender()] "Setting the current frame to 5668" handle was cleared after 6ms
+[Tab 3, delayRender()] "Setting the current frame to 5669" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5670" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5671" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5672" handle was cleared after 4ms
+[Tab 3, delayRender()] "Setting the current frame to 5673" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5674" handle was cleared after 4ms
+[Tab 1, delayRender()] "Setting the current frame to 5675" handle was cleared after 5ms
+[Tab 0, delayRender()] "Setting the current frame to 5676" handle was cleared after 2ms
+[Tab 3, delayRender()] "Setting the current frame to 5677" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5678" handle was cleared after 2ms
+[Tab 1, delayRender()] "Setting the current frame to 5679" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5680" handle was cleared after 2ms
+[Tab 3, delayRender()] "Setting the current frame to 5681" handle was cleared after 4ms
+[Tab 1, delayRender()] "Setting the current frame to 5682" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5683" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5684" handle was cleared after 3ms
+[Tab 3, delayRender()] "Setting the current frame to 5685" handle was cleared after 2ms
+[Tab 2, delayRender()] "Setting the current frame to 5686" handle was cleared after 3ms
+[Tab 1, delayRender()] "Setting the current frame to 5687" handle was cleared after 0ms
+[Tab 0, delayRender()] "Setting the current frame to 5688" handle was cleared after 3ms
+[Tab 3, delayRender()] "Setting the current frame to 5689" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5690" handle was cleared after 3ms
+[Tab 1, delayRender()] "Setting the current frame to 5691" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5692" handle was cleared after 2ms
+[Tab 3, delayRender()] "Setting the current frame to 5693" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5694" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5695" handle was cleared after 0ms
+[Tab 1, delayRender()] "Setting the current frame to 5698" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5696" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5697" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5699" handle was cleared after 6ms
+[Tab 0, delayRender()] "Setting the current frame to 5700" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5701" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5702" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5703" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5704" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5705" handle was cleared after 0ms
+[Tab 3, delayRender()] "Setting the current frame to 5706" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5707" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5708" handle was cleared after 4ms
+[Tab 2, delayRender()] "Setting the current frame to 5709" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5710" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5711" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5712" handle was cleared after 2ms
+[Tab 1, delayRender()] "Setting the current frame to 5713" handle was cleared after 2ms
+[Tab 2, delayRender()] "Setting the current frame to 5714" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5715" handle was cleared after 2ms
+[Tab 1, delayRender()] "Setting the current frame to 5716" handle was cleared after 3ms
+[Tab 0, delayRender()] "Setting the current frame to 5717" handle was cleared after 2ms
+[Tab 3, delayRender()] "Setting the current frame to 5718" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5719" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5721" handle was cleared after 4ms
+[Tab 0, delayRender()] "Setting the current frame to 5720" handle was cleared after 4ms
+[Tab 3, delayRender()] "Setting the current frame to 5722" handle was cleared after 2ms
+[Tab 2, delayRender()] "Setting the current frame to 5723" handle was cleared after 2ms
+[Tab 3, delayRender()] "Setting the current frame to 5724" handle was cleared after 0ms
+[Tab 1, delayRender()] "Setting the current frame to 5725" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5726" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5727" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5728" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5729" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5730" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5731" handle was cleared after 4ms
+[Tab 3, delayRender()] "Setting the current frame to 5732" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5733" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5734" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5735" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5736" handle was cleared after 3ms
+[Tab 1, delayRender()] "Setting the current frame to 5737" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5738" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5739" handle was cleared after 4ms
+[Tab 3, delayRender()] "Setting the current frame to 5740" handle was cleared after 3ms
+[Tab 1, delayRender()] "Setting the current frame to 5741" handle was cleared after 3ms
+[Tab 0, delayRender()] "Setting the current frame to 5742" handle was cleared after 2ms
+[Tab 3, delayRender()] "Setting the current frame to 5743" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5744" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5745" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5746" handle was cleared after 6ms
+[Tab 3, delayRender()] "Setting the current frame to 5747" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5748" handle was cleared after 5ms
+[Tab 1, delayRender()] "Setting the current frame to 5749" handle was cleared after 0ms
+[Tab 0, delayRender()] "Setting the current frame to 5750" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5751" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5752" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5753" handle was cleared after 3ms
+[Tab 0, delayRender()] "Setting the current frame to 5754" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5755" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5756" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5757" handle was cleared after 2ms
+[Tab 1, delayRender()] "Setting the current frame to 5758" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5759" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5760" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5761" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5762" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5763" handle was cleared after 2ms
+[Tab 2, delayRender()] "Setting the current frame to 5764" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5765" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5767" handle was cleared after 2ms
+[Tab 1, delayRender()] "Setting the current frame to 5766" handle was cleared after 4ms
+[Tab 2, delayRender()] "Setting the current frame to 5768" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5769" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5770" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5771" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5772" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5773" handle was cleared after 2ms
+[Tab 3, delayRender()] "Setting the current frame to 5774" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5776" handle was cleared after 4ms
+[Tab 2, delayRender()] "Setting the current frame to 5777" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5775" handle was cleared after 4ms
+[Tab 3, delayRender()] "Setting the current frame to 5778" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5779" handle was cleared after 2ms
+[Tab 2, delayRender()] "Setting the current frame to 5781" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5780" handle was cleared after 4ms
+[Tab 3, delayRender()] "Setting the current frame to 5782" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5784" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5783" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5785" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5786" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5787" handle was cleared after 3ms
+[Tab 0, delayRender()] "Setting the current frame to 5788" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5790" handle was cleared after 2ms
+[Tab 1, delayRender()] "Setting the current frame to 5789" handle was cleared after 5ms
+[Tab 2, delayRender()] "Setting the current frame to 5791" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5792" handle was cleared after 2ms
+[Tab 3, delayRender()] "Setting the current frame to 5794" handle was cleared after 3ms
+[Tab 1, delayRender()] "Setting the current frame to 5793" handle was cleared after 4ms
+[Tab 2, delayRender()] "Setting the current frame to 5795" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5796" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5797" handle was cleared after 2ms
+[Tab 1, delayRender()] "Setting the current frame to 5798" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5800" handle was cleared after 2ms
+[Tab 2, delayRender()] "Setting the current frame to 5799" handle was cleared after 3ms
+[Tab 1, delayRender()] "Setting the current frame to 5801" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5802" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5803" handle was cleared after 0ms
+[Tab 0, delayRender()] "Setting the current frame to 5804" handle was cleared after 4ms
+[Tab 1, delayRender()] "Setting the current frame to 5805" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5807" handle was cleared after 2ms
+[Tab 3, delayRender()] "Setting the current frame to 5806" handle was cleared after 4ms
+[Tab 0, delayRender()] "Setting the current frame to 5808" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5809" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5811" handle was cleared after 2ms
+[Tab 3, delayRender()] "Setting the current frame to 5810" handle was cleared after 4ms
+[Tab 0, delayRender()] "Setting the current frame to 5812" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5813" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5814" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5815" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5816" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5817" handle was cleared after 5ms
+[Tab 3, delayRender()] "Setting the current frame to 5818" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5820" handle was cleared after 3ms
+[Tab 0, delayRender()] "Setting the current frame to 5819" handle was cleared after 3ms
+[Tab 1, delayRender()] "Setting the current frame to 5821" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5822" handle was cleared after 0ms
+[Tab 1, delayRender()] "Setting the current frame to 5824" handle was cleared after 3ms
+[Tab 0, delayRender()] "Setting the current frame to 5825" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5823" handle was cleared after 3ms
+[Tab 3, delayRender()] "Setting the current frame to 5826" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5827" handle was cleared after 3ms
+[Tab 0, delayRender()] "Setting the current frame to 5829" handle was cleared after 2ms
+[Tab 2, delayRender()] "Setting the current frame to 5828" handle was cleared after 3ms
+[Tab 3, delayRender()] "Setting the current frame to 5830" handle was cleared after 2ms
+[Tab 1, delayRender()] "Setting the current frame to 5831" handle was cleared after 0ms
+[Tab 2, delayRender()] "Setting the current frame to 5832" handle was cleared after 0ms
+[Tab 0, delayRender()] "Setting the current frame to 5833" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5834" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5837" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5835" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5836" handle was cleared after 3ms
+[Tab 3, delayRender()] "Setting the current frame to 5838" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5839" handle was cleared after 2ms
+[Tab 2, delayRender()] "Setting the current frame to 5840" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5841" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5842" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5843" handle was cleared after 2ms
+[Tab 2, delayRender()] "Setting the current frame to 5844" handle was cleared after 3ms
+[Tab 1, delayRender()] "Setting the current frame to 5845" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5846" handle was cleared after 3ms
+[Tab 0, delayRender()] "Setting the current frame to 5847" handle was cleared after 2ms
+[Tab 1, delayRender()] "Setting the current frame to 5849" handle was cleared after 2ms
+[Tab 2, delayRender()] "Setting the current frame to 5848" handle was cleared after 4ms
+[Tab 3, delayRender()] "Setting the current frame to 5850" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5851" handle was cleared after 2ms
+[Tab 1, delayRender()] "Setting the current frame to 5853" handle was cleared after 2ms
+[Tab 2, delayRender()] "Setting the current frame to 5852" handle was cleared after 4ms
+[Tab 3, delayRender()] "Setting the current frame to 5854" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5855" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5856" handle was cleared after 4ms
+[Tab 2, delayRender()] "Setting the current frame to 5857" handle was cleared after 3ms
+[Tab 0, delayRender()] "Setting the current frame to 5858" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5859" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5860" handle was cleared after 3ms
+[Tab 1, delayRender()] "Setting the current frame to 5861" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5863" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5862" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5864" handle was cleared after 0ms
+[Tab 1, delayRender()] "Setting the current frame to 5865" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5867" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5866" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5868" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5869" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5871" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5872" handle was cleared after 2ms
+[Tab 0, delayRender()] "Setting the current frame to 5870" handle was cleared after 3ms
+[Tab 1, delayRender()] "Setting the current frame to 5873" handle was cleared after 6ms
+[Tab 3, delayRender()] "Setting the current frame to 5875" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5874" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5876" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5877" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5878" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5879" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5880" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5881" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5883" handle was cleared after 0ms
+[Tab 0, delayRender()] "Setting the current frame to 5882" handle was cleared after 0ms
+[Tab 3, delayRender()] "Setting the current frame to 5884" handle was cleared after 0ms
+[Tab 2, delayRender()] "Setting the current frame to 5885" handle was cleared after 0ms
+[Tab 1, delayRender()] "Setting the current frame to 5886" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5887" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5888" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5889" handle was cleared after 4ms
+[Tab 2, delayRender()] "Setting the current frame to 5891" handle was cleared after 4ms
+[Tab 1, delayRender()] "Setting the current frame to 5892" handle was cleared after 3ms
+[Tab 0, delayRender()] "Setting the current frame to 5890" handle was cleared after 4ms
+[Tab 3, delayRender()] "Setting the current frame to 5893" handle was cleared after 3ms
+[Tab 1, delayRender()] "Setting the current frame to 5896" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5895" handle was cleared after 3ms
+[Tab 0, delayRender()] "Setting the current frame to 5894" handle was cleared after 3ms
+[Tab 3, delayRender()] "Setting the current frame to 5897" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5898" handle was cleared after 3ms
+[Tab 1, delayRender()] "Setting the current frame to 5900" handle was cleared after 3ms
+[Tab 0, delayRender()] "Setting the current frame to 5899" handle was cleared after 5ms
+[Tab 3, delayRender()] "Setting the current frame to 5901" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5902" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5903" handle was cleared after 3ms
+[Tab 1, delayRender()] "Setting the current frame to 5904" handle was cleared after 2ms
+[Tab 3, delayRender()] "Setting the current frame to 5905" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5907" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5906" handle was cleared after 4ms
+[Tab 1, delayRender()] "Setting the current frame to 5908" handle was cleared after 1ms
+[Tab 3, delayRender()] "Setting the current frame to 5909" handle was cleared after 1ms
+[Tab 0, delayRender()] "Setting the current frame to 5910" handle was cleared after 0ms
+[Tab 2, delayRender()] "Setting the current frame to 5911" handle was cleared after 4ms
+[Tab 3, delayRender()] "Setting the current frame to 5913" handle was cleared after 2ms
+[Tab 1, delayRender()] "Setting the current frame to 5912" handle was cleared after 3ms
+[Tab 0, delayRender()] "Setting the current frame to 5914" handle was cleared after 4ms
+[Tab 2, delayRender()] "Setting the current frame to 5915" handle was cleared after 3ms
+[Tab 3, delayRender()] "Setting the current frame to 5917" handle was cleared after 1ms
+[Tab 1, delayRender()] "Setting the current frame to 5916" handle was cleared after 3ms
+[Tab 0, delayRender()] "Setting the current frame to 5918" handle was cleared after 1ms
+[Tab 2, delayRender()] "Setting the current frame to 5919" handle was cleared after 2ms
+[Tab 1, delayRender()] "Setting the current frame to 5920" handle was cleared after 3ms
+[Tab 0, delayRender()] "Setting the current frame to 5922" handle was cleared after 2ms
+[Tab 3, delayRender()] "Setting the current frame to 5921" handle was cleared after 3ms
+[Tab 2, delayRender()] "Setting the current frame to 5923" handle was cleared after 0ms
+Received SIGTERM signal. Killing browser process
+Trying to kill browser process group -72751
+Rendering frames done in 6922ms
+[stitchFramesToVideo()] audioCodec aac
+[stitchFramesToVideo()] pixelFormat yuv420p
+[stitchFramesToVideo()] codec h264
+[stitchFramesToVideo()] shouldRenderAudio true
+[stitchFramesToVideo()] shouldRenderVideo true
+[audio] asset positions [{"src":"/var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsd19tgqnaob/remotion-assets-dir/5880771335214376.wav","type":"audio","duration":297,"id":"audio-0.342924065887928-undefined-undefined-undefined","startInVideo":0,"trimLeft":5627,"volume":1,"playbackRate":1,"toneFrequency":1,"audioStartFrame":0,"audioStreamIndex":0}]
+[compositor] Freed memory from compositor
+Preprocessing audio track: "-hide_banner -i /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsd19tgqnaob/remotion-assets-dir/5880771335214376.wav -ac 2 -filter_script:a /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsd19tgqnaob/remotion-complex-filter/complex-filter-003293535681550397.txt -c:a pcm_s16le -ar 48000 -y /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsd19tgqnaob/remotion-audio-mixing/0.wav" Filter: [0:a]aformat=sample_fmts=s16:sample_rates=48000,atrim=187566666.66666666us:197466666.66666666us[a0]
+[audio] Encoding progress: 70%
+Preprocessed audio track 33ms
+[audio] Encoding progress: 70%
+Merging audio tracks Command: ffmpeg -hide_banner -i /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsd19tgqnaob/remotion-audio-mixing/0.wav -filter_complex_script /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsd19tgqnaob/remotion-complex-filter/complex-filter-04662851377345403.txt -c:a pcm_s16le -map [outputaudio] -y /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsd19tgqnaob/remotion-audio-preprocessing/merged.wav Complex filter script: [0:a]acopy[padded0];[padded0]amix=inputs=1:dropout_transition=0:normalize=0[outputaudio]
+[audio] Encoding progress: 80%
+[audio] Encoding progress: 80%
+[audio] Encoding progress: 100%
+[stitchFramesToVideo()] Encoder: libx264, hardware accelerated: false
+[stitchFramesToVideo()] Generated final FFmpeg command:
+[stitchFramesToVideo()] -r 30 -f image2 -s 1920x1080 -start_number 5627 -i /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/react-motion-renderomvGFQ/element-%04d.jpeg -i /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsd19tgqnaob/remotion-audio-preprocessing/audio.aac -c:a copy -c:v libx264 -pix_fmt yuv420p -video_track_timescale 90000 -crf 18 -movflags faststart -map_metadata -1 -metadata comment=Made with Remotion 4.0.492 -y /Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-scene-S022-run-2/render.tmp.mp4
+Stitching done in 2029ms

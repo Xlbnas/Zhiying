@@ -1,0 +1,20 @@
+--- render invocation ---
+TSX_TSCONFIG_PATH=/private/tmp/zhiying-full-parity-1601f55/tsconfig.json npx tsx /private/tmp/zhiying-test-local-full-length-conformance.ts
+source commit: 1601f55b3ce894632ea073d112067416afff960f
+composition: ZhiyingFullCutNoSubtitles
+frame range: 0-30398
+concurrency: 4
+
+--- observed stderr ---
+ProtocolError: Protocol error (Page.bringToFront): Target closed. https://www.remotion.dev/docs/target-closed
+The browser crashed while rendering frame 5670, retrying 1 more times.
+Killed previous browser and making new one
+The browser crashed while rendering frame 5673, retrying 1 more times.
+The browser crashed while rendering frame 5672, retrying 1 more times.
+The browser crashed while rendering frame 5671, retrying 1 more times.
+Made new browser
+Error: Protocol error (Page.bringToFront): Session closed. Most likely the page has been closed.
+Error: Timeout (30000ms exceeded rendering the component at frame 6259. You can increase the timeout using the "timeoutInMilliseconds" / "--timeout" option of the function or command you used to trigger this render.)
+
+--- preservation note ---
+The original process stdout/stderr was not redirected to a file. This reconstruction preserves the complete observed failure lines available from the Codex execution record; no additional browser verbose log, process exit code/signal, resource monitor, or macOS crash report was produced by that invocation.

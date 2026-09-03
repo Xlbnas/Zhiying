@@ -1,0 +1,53 @@
+{
+  "status": "PASS",
+  "config": "before-fix-concurrency-4",
+  "range": [
+    6258,
+    6258
+  ],
+  "durationMs": 2316,
+  "preflight": {
+    "status": "LOCAL_RENDER_INPUTS_READY",
+    "node": "v22.22.2",
+    "remotion": "4.0.492",
+    "chromium": {
+      "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+      "type": "local-puppeteer-browser"
+    },
+    "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+    "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+    "ffprobe": "/opt/homebrew/bin/ffprobe",
+    "fonts": {
+      "family": "PingFang SC",
+      "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+    },
+    "diskFreeBytes": 146471436288,
+    "audio": {
+      "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+      "version": 1,
+      "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6258-run-2/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+      "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+    },
+    "imageAssets": 7,
+    "stagedImageAssets": 0,
+    "networkDependencyDuringRender": false
+  },
+  "probe": {
+    "durationSec": 0.085333,
+    "width": 1920,
+    "height": 1080,
+    "codec": "h264",
+    "audioCodec": "aac"
+  },
+  "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6258-run-2/diagnostics.jsonl",
+  "label": "exact-6258-run-2",
+  "gate": "EXACT_FAILURE_FRAMES",
+  "targetClosed": 0,
+  "timeouts": 0,
+  "browserRecovery": 0,
+  "peakNodeRss": 517373952,
+  "peakChromiumRss": 0,
+  "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+  "parallelEncoding": false,
+  "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6258-run-2/stdout-stderr.txt"
+}

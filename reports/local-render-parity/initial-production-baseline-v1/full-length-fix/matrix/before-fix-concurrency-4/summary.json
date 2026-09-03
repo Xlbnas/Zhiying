@@ -1,0 +1,1764 @@
+{
+  "status": "PASS",
+  "config": "before-fix-concurrency-4",
+  "frozenInputs": {
+    "baseline": "INITIAL_PRODUCTION_BASELINE_V1",
+    "propsSha256": "8289a196d0aa7ff6f6aa9ae46e8a67f8bf1d6e13a2b6b0d4b4cfec734e50b23f",
+    "audioSha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+  },
+  "exactFrameRuns": 18,
+  "results": [
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5924,
+        6592
+      ],
+      "durationMs": 14034,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 140167614464,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S023-S025-run-1/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 22.357333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S023-S025-run-1/diagnostics.jsonl",
+      "label": "S023-S025-run-1",
+      "gate": "S023_S025",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 519929856,
+      "peakChromiumRss": 1232601088,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S023-S025-run-1/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5924,
+        6592
+      ],
+      "durationMs": 14532,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 139747717120,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S023-S025-run-2/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 22.357333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S023-S025-run-2/diagnostics.jsonl",
+      "label": "S023-S025-run-2",
+      "gate": "S023_S025",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 516751360,
+      "peakChromiumRss": 1237876736,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S023-S025-run-2/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5924,
+        6592
+      ],
+      "durationMs": 14447,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 139304456192,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S023-S025-run-3/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 22.357333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S023-S025-run-3/diagnostics.jsonl",
+      "label": "S023-S025-run-3",
+      "gate": "S023_S025",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 535576576,
+      "peakChromiumRss": 1229602816,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S023-S025-run-3/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        6140,
+        6395
+      ],
+      "durationMs": 7047,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 141507301376,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S024-run-1/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 8.576,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S024-run-1/diagnostics.jsonl",
+      "label": "S024-run-1",
+      "gate": "S024",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 526925824,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S024-run-1/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        6140,
+        6395
+      ],
+      "durationMs": 6659,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 141072465920,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S024-run-2/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 8.576,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S024-run-2/diagnostics.jsonl",
+      "label": "S024-run-2",
+      "gate": "S024",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 525795328,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S024-run-2/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        6140,
+        6395
+      ],
+      "durationMs": 6751,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 140610465792,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S024-run-3/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 8.576,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S024-run-3/diagnostics.jsonl",
+      "label": "S024-run-3",
+      "gate": "S024",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 514228224,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/S024-run-3/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5500,
+        6400
+      ],
+      "durationMs": 21494,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 137522884608,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/combined-window-5500-6400-run-1/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 30.08,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/combined-window-5500-6400-run-1/diagnostics.jsonl",
+      "label": "combined-window-5500-6400-run-1",
+      "gate": "COMBINED_FAILURE_WINDOW",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 519389184,
+      "peakChromiumRss": 1307721728,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/combined-window-5500-6400-run-1/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5500,
+        6400
+      ],
+      "durationMs": 20848,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 137066328064,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/combined-window-5500-6400-run-2/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 30.08,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/combined-window-5500-6400-run-2/diagnostics.jsonl",
+      "label": "combined-window-5500-6400-run-2",
+      "gate": "COMBINED_FAILURE_WINDOW",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 532676608,
+      "peakChromiumRss": 1298268160,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/combined-window-5500-6400-run-2/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5669,
+        5669
+      ],
+      "durationMs": 4681,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 151018610688,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5669-run-1/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5669-run-1/diagnostics.jsonl",
+      "label": "exact-5669-run-1",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 533610496,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5669-run-1/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5669,
+        5669
+      ],
+      "durationMs": 2477,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 150551535616,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5669-run-2/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5669-run-2/diagnostics.jsonl",
+      "label": "exact-5669-run-2",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 525893632,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5669-run-2/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5669,
+        5669
+      ],
+      "durationMs": 2530,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 150096257024,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5669-run-3/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5669-run-3/diagnostics.jsonl",
+      "label": "exact-5669-run-3",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 528056320,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5669-run-3/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5670,
+        5670
+      ],
+      "durationMs": 2428,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 149646110720,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5670-run-1/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5670-run-1/diagnostics.jsonl",
+      "label": "exact-5670-run-1",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 529793024,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5670-run-1/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5670,
+        5670
+      ],
+      "durationMs": 2321,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 149175046144,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5670-run-2/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5670-run-2/diagnostics.jsonl",
+      "label": "exact-5670-run-2",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 529432576,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5670-run-2/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5670,
+        5670
+      ],
+      "durationMs": 2449,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 148703768576,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5670-run-3/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5670-run-3/diagnostics.jsonl",
+      "label": "exact-5670-run-3",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 513507328,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5670-run-3/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5671,
+        5671
+      ],
+      "durationMs": 2502,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 148271443968,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5671-run-1/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5671-run-1/diagnostics.jsonl",
+      "label": "exact-5671-run-1",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 523616256,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5671-run-1/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5671,
+        5671
+      ],
+      "durationMs": 2418,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 147840098304,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5671-run-2/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5671-run-2/diagnostics.jsonl",
+      "label": "exact-5671-run-2",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 515833856,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5671-run-2/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5671,
+        5671
+      ],
+      "durationMs": 2430,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 147375108096,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5671-run-3/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5671-run-3/diagnostics.jsonl",
+      "label": "exact-5671-run-3",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 537690112,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-5671-run-3/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        6258,
+        6258
+      ],
+      "durationMs": 2359,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 146914164736,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6258-run-1/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6258-run-1/diagnostics.jsonl",
+      "label": "exact-6258-run-1",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 521633792,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6258-run-1/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        6258,
+        6258
+      ],
+      "durationMs": 2316,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 146471436288,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6258-run-2/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6258-run-2/diagnostics.jsonl",
+      "label": "exact-6258-run-2",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 517373952,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6258-run-2/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        6258,
+        6258
+      ],
+      "durationMs": 2587,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 146003001344,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6258-run-3/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6258-run-3/diagnostics.jsonl",
+      "label": "exact-6258-run-3",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 523583488,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6258-run-3/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        6259,
+        6259
+      ],
+      "durationMs": 2588,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 145580208128,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6259-run-1/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6259-run-1/diagnostics.jsonl",
+      "label": "exact-6259-run-1",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 525352960,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6259-run-1/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        6259,
+        6259
+      ],
+      "durationMs": 2342,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 145117478912,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6259-run-2/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6259-run-2/diagnostics.jsonl",
+      "label": "exact-6259-run-2",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 525172736,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6259-run-2/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        6259,
+        6259
+      ],
+      "durationMs": 2456,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 144669110272,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6259-run-3/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6259-run-3/diagnostics.jsonl",
+      "label": "exact-6259-run-3",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 522256384,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6259-run-3/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        6260,
+        6260
+      ],
+      "durationMs": 2351,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 144219029504,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6260-run-1/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6260-run-1/diagnostics.jsonl",
+      "label": "exact-6260-run-1",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 516063232,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6260-run-1/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        6260,
+        6260
+      ],
+      "durationMs": 2417,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 143769280512,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6260-run-2/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6260-run-2/diagnostics.jsonl",
+      "label": "exact-6260-run-2",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 520323072,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6260-run-2/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        6260,
+        6260
+      ],
+      "durationMs": 2483,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 143298605056,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6260-run-3/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 0.085333,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6260-run-3/diagnostics.jsonl",
+      "label": "exact-6260-run-3",
+      "gate": "EXACT_FAILURE_FRAMES",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 525221888,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/exact-6260-run-3/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5627,
+        5923
+      ],
+      "durationMs": 10485,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 142857601024,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-scene-S022-run-1/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 9.962667,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-scene-S022-run-1/diagnostics.jsonl",
+      "label": "first-failure-scene-S022-run-1",
+      "gate": "FIRST_FAILURE_SCENE",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 524697600,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-scene-S022-run-1/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5627,
+        5923
+      ],
+      "durationMs": 10815,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 142391156736,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-scene-S022-run-2/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 9.962667,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-scene-S022-run-2/diagnostics.jsonl",
+      "label": "first-failure-scene-S022-run-2",
+      "gate": "FIRST_FAILURE_SCENE",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 532152320,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-scene-S022-run-2/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5627,
+        5923
+      ],
+      "durationMs": 10051,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 141953687552,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-scene-S022-run-3/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 9.962667,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-scene-S022-run-3/diagnostics.jsonl",
+      "label": "first-failure-scene-S022-run-3",
+      "gate": "FIRST_FAILURE_SCENE",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 536199168,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-scene-S022-run-3/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5500,
+        5850
+      ],
+      "durationMs": 10463,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 138845478912,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-window-5500-5850-run-1/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 11.754667,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-window-5500-5850-run-1/diagnostics.jsonl",
+      "label": "first-failure-window-5500-5850-run-1",
+      "gate": "FIRST_FAILURE_WINDOW",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 524910592,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-window-5500-5850-run-1/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5500,
+        5850
+      ],
+      "durationMs": 10331,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 138400522240,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-window-5500-5850-run-2/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 11.754667,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-window-5500-5850-run-2/diagnostics.jsonl",
+      "label": "first-failure-window-5500-5850-run-2",
+      "gate": "FIRST_FAILURE_WINDOW",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 517783552,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-window-5500-5850-run-2/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        5500,
+        5850
+      ],
+      "durationMs": 10926,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 137962323968,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-window-5500-5850-run-3/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 11.754667,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-window-5500-5850-run-3/diagnostics.jsonl",
+      "label": "first-failure-window-5500-5850-run-3",
+      "gate": "FIRST_FAILURE_WINDOW",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 531922944,
+      "peakChromiumRss": 0,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/first-failure-window-5500-5850-run-3/stdout-stderr.txt"
+    },
+    {
+      "status": "PASS",
+      "config": "before-fix-concurrency-4",
+      "range": [
+        0,
+        6400
+      ],
+      "durationMs": 116597,
+      "preflight": {
+        "status": "LOCAL_RENDER_INPUTS_READY",
+        "node": "v22.22.2",
+        "remotion": "4.0.492",
+        "chromium": {
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+          "type": "local-puppeteer-browser"
+        },
+        "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+        "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+        "ffprobe": "/opt/homebrew/bin/ffprobe",
+        "fonts": {
+          "family": "PingFang SC",
+          "match": "PingFang.ttc: \"PingFang SC\" \"Regular\""
+        },
+        "diskFreeBytes": 136608264192,
+        "audio": {
+          "artifactId": "ae26c0bd-0d99-4557-9f39-44781b0d8bba",
+          "version": 1,
+          "path": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/prefix-0-6400-run-1/.bundle/public/runtime-audio/8f955b4c-42dd-4a02-8e76-e721a37fab41/ae26c0bd-0d99-4557-9f39-44781b0d8bba.wav",
+          "sha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997"
+        },
+        "imageAssets": 7,
+        "stagedImageAssets": 0,
+        "networkDependencyDuringRender": false
+      },
+      "probe": {
+        "durationSec": 213.418667,
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "audioCodec": "aac"
+      },
+      "diagnosticsPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/prefix-0-6400-run-1/diagnostics.jsonl",
+      "label": "prefix-0-6400-run-1",
+      "gate": "PREFIX_0_TO_6400",
+      "targetClosed": 0,
+      "timeouts": 0,
+      "browserRecovery": 0,
+      "peakNodeRss": 528695296,
+      "peakChromiumRss": 1558659072,
+      "browserVersion": "Google Chrome for Testing 149.0.7790.0",
+      "parallelEncoding": false,
+      "logPath": "/Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/before-fix-concurrency-4/prefix-0-6400-run-1/stdout-stderr.txt"
+    }
+  ],
+  "targetClosed": 0,
+  "timeouts": 0,
+  "browserRecovery": 0
+}

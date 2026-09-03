@@ -1,0 +1,17 @@
+{
+  "status": "FIX_LOCAL_FULL_LENGTH_RENDER",
+  "phase": "MAC_FULL_LENGTH_PARITY_RENDER",
+  "sourceCommit": "1601f55b3ce894632ea073d112067416afff960f",
+  "baseline": "INITIAL_PRODUCTION_BASELINE_V1",
+  "referenceMasterSha256": "3f79bf4215964f2dbb35d64da61ebdee5a6a58e0aafaed61f53c47df2f865239",
+  "inputPropsSha256": "8289a196d0aa7ff6f6aa9ae46e8a67f8bf1d6e13a2b6b0d4b4cfec734e50b23f",
+  "audioArtifact": "ae26c0bd-0d99-4557-9f39-44781b0d8bba@1",
+  "audioSha256": "658235d97a94f67feb9bc50d0849e7b15c2edf85f95b8db229b40b12a2460997",
+  "failureFrame": 6259,
+  "failureScene": "S024",
+  "error": "Chromium Target closed while rendering frame 5670; Remotion browser recovery then timed out at frame 6259 after 30000ms.",
+  "automaticFullLengthRetry": false,
+  "candidateCreated": false,
+  "frozenInputsChanged": false,
+  "rendererChanged": false
+}

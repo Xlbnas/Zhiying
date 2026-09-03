@@ -1,0 +1,37 @@
+[renderMedia()] Free memory: 906936320 Estimated usage parallel encoding 2073600000
+[renderMedia()] Using concurrency: 1
+[renderMedia()] delayRender() timeout: 30000
+[renderMedia()] Codec supports parallel rendering: true
+[renderMedia()] Parallel encoding is disabled.
+[renderMedia()] Rendering frames 6259-6259
+Created directory for temporary files /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsaryhwayi1u
+Ensuring browser executable
+Ensured browser is available.
+[openBrowser()] Opening browser: gl = undefined, executable = /Users/xlbnas/Documents/GitHub/Zhiying/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell, enableMultiProcessOnLinux = true
+[compositor] Starting Rust process. Max video cache size: 4607MB, max threads = 2
+[Tab 0, delayRender()] "Loading root component - See https://remotion.dev/docs/troubleshooting/loading-root-component if you experience a timeout" handle was cleared after 0ms
+[Tab 0, delayRender()] "Waiting for root component to load - See https://remotion.dev/docs/troubleshooting/loading-root-component if you experience a timeout" handle was cleared after 4ms
+[Tab 0, delayRender()] "Waiting for Composition "ZhiyingFullCutNoSubtitles"" handle was cleared after 9ms
+[Tab 0, delayRender()] "Setting the current frame to 6259" handle was cleared after 0ms
+Received SIGTERM signal. Killing browser process
+Trying to kill browser process group -79466
+Rendering frames done in 340ms
+[stitchFramesToVideo()] audioCodec aac
+[stitchFramesToVideo()] pixelFormat yuv420p
+[stitchFramesToVideo()] codec h264
+[stitchFramesToVideo()] shouldRenderAudio true
+[stitchFramesToVideo()] shouldRenderVideo true
+[compositor] Freed memory from compositor
+[audio] asset positions [{"src":"/var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsaryhwayi1u/remotion-assets-dir/018401407869532704.wav","type":"audio","duration":1,"id":"audio-0.342924065887928-undefined-undefined-undefined","startInVideo":0,"trimLeft":6259,"volume":1,"playbackRate":1,"toneFrequency":1,"audioStartFrame":0,"audioStreamIndex":0}]
+Preprocessing audio track: "-hide_banner -i /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsaryhwayi1u/remotion-assets-dir/018401407869532704.wav -ac 2 -filter_script:a /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsaryhwayi1u/remotion-complex-filter/complex-filter-07331035380194151.txt -c:a pcm_s16le -ar 48000 -y /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsaryhwayi1u/remotion-audio-mixing/0.wav" Filter: [0:a]aformat=sample_fmts=s16:sample_rates=48000,atrim=208633333.3333333us:208666666.66666666us[a0]
+[audio] Encoding progress: 56%
+Preprocessed audio track 29ms
+[audio] Encoding progress: 70%
+Merging audio tracks Command: ffmpeg -hide_banner -i /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsaryhwayi1u/remotion-audio-mixing/0.wav -filter_complex_script /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsaryhwayi1u/remotion-complex-filter/complex-filter-08240178539463943.txt -c:a pcm_s16le -map [outputaudio] -y /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsaryhwayi1u/remotion-audio-preprocessing/merged.wav Complex filter script: [0:a]acopy[padded0];[padded0]amix=inputs=1:dropout_transition=0:normalize=0[outputaudio]
+[audio] Encoding progress: 79%
+[audio] Encoding progress: 80%
+[audio] Encoding progress: 98%
+[stitchFramesToVideo()] Encoder: libx264, hardware accelerated: false
+[stitchFramesToVideo()] Generated final FFmpeg command:
+[stitchFramesToVideo()] -r 30 -f image2 -s 1920x1080 -start_number 6259 -i /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/react-motion-renderUZR8wY/element-%04d.jpeg -i /var/folders/17/012dd2y127d46k1pb9f66pwm0000gp/T/remotion-v4.0.492-assetsaryhwayi1u/remotion-audio-preprocessing/audio.aac -c:a copy -c:v libx264 -pix_fmt yuv420p -video_track_timescale 90000 -crf 18 -movflags faststart -map_metadata -1 -metadata comment=Made with Remotion 4.0.492 -y /Users/xlbnas/Documents/GitHub/Zhiying/reports/local-render-parity/initial-production-baseline-v1/full-length-fix/matrix/candidate-concurrency-1/exact-6259-run-3/render.tmp.mp4
+Stitching done in 236ms
