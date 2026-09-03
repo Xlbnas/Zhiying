@@ -38,4 +38,16 @@ The required nine representative groups were rerun after fixing the local candid
 
 Changed only `LocalRemotionExecutor` and the targeted stability test. The local default concurrency changed from 4 to 1; timeout, browser, GL, parallel encoding, scene code, props, audio, Worker, TTS, DB, queue, Remotion version, and frozen baseline were unchanged. Diagnostics are optional and append bounded JSONL; they do not alter rendered pixels.
 
-Full-length Attempt 2 is intentionally not recorded in this file until the fix commit is pushed and a clean worktree is prepared.
+## Full-length Attempt 2
+
+- Status: `PASS` after manual visual review; this was the single permitted post-fix full-length render.
+- Source: clean detached worktree at `ad153479e9b2c9fe368661833782d3a3fa73f89e`, with only exact runtime inputs materialized.
+- Render identity: local Remotion executor, concurrency 1, Remotion `4.0.492`, Chrome for Testing `149.0.7790.0`, no subtitles, no Worker/TTS/NAS/network.
+- Render window: `2026-09-03T02:49:32.661Z`–`2026-09-03T03:08:30.040Z` (`1137.379s`); all 30399 frames completed.
+- Artifact: `local-clean-full.mp4`, SHA-256 `1261ba81b77e060228d296c64559d645172d006da92a98b02bbc8eaf362afdcc`.
+- Media: 1920×1080, 30fps, H.264, `yuvj420p/pc`, AAC 48kHz stereo, no subtitle streams; independent video/audio decode passed.
+- Scene parity: 111/111 scenes, start/end drift 0, dropped/duplicated scenes 0.
+- Audio parity: constant offset `-42.667ms`, cumulative drift `0`, tail difference attributed to AAC frame padding.
+- Visual parity: 431 samples, SSIM min `0.973571`, median `0.990607`, below-0.95 outliers 0; key-scene contact sheet manually reviewed with no P0/P1 issue.
+- The initial post-render sample extraction logged an ffmpeg filter-expression/memory error; no render artifact was damaged, and chunked verification completed successfully without rerendering.
+- No Formal Render Attempt 3, production default change, Worker/TTS/DB/queue change, or automatic retry was made.
