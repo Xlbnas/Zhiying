@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {getDb} from '../db';
+import {getProjectInput} from '../project-inputs';
 import {isLegacyM1Project} from '../projects';
 import {getStage} from '../workflow/stages';
 import {getVersion} from '../workflow/versions';
@@ -68,6 +69,71 @@ function listPlanArtifacts(projectId: string): NarrationPlanArtifactRow[] {
     .all(projectId, NARRATION_PLAN_ARTIFACT_KIND) as NarrationPlanArtifactRow[];
 }
 
+export interface ApprovedNarrationScriptSource {
+  artifact: NarrationPlanArtifactRow;
+  approval: NarrationPlanArtifactRow;
+  revision: number;
+  scriptText: string;
+  plaintextSha256: string;
+  markdownSha256: string;
+}
+
+/** Resolve an immutable narration_script only through its append-only approval record. */
+export function getCurrentApprovedNarrationScript(
+  projectId: string,
+): ApprovedNarrationScriptSource | null {
+  const db = getDb();
+  const approvals = db.prepare(
+    `SELECT * FROM artifacts
+     WHERE project_id = ? AND kind = 'narration_script_approval'
+     ORDER BY version DESC`,
+  ).all(projectId) as NarrationPlanArtifactRow[];
+  const current = approvals.filter((row) => {
+    try {
+      const value = JSON.parse(row.content_json) as Record<string, unknown>;
+      return value.status === 'LOCKED' && value.userApproved === true &&
+        value.ttsEligible === true && value.currentAuthority === true;
+    } catch {
+      return false;
+    }
+  });
+  if (current.length !== 1) return null;
+
+  const approval = current[0]!;
+  const lock = JSON.parse(approval.content_json) as Record<string, unknown>;
+  if (typeof lock.artifactId !== 'string' || !Number.isInteger(lock.revision) ||
+      typeof lock.plaintextSha256 !== 'string' || typeof lock.markdownSha256 !== 'string') {
+    return null;
+  }
+  const artifact = getArtifactById(lock.artifactId);
+  if (!artifact || artifact.project_id !== projectId || artifact.kind !== 'narration_script' ||
+      artifact.version !== lock.revision) return null;
+
+  let script: Record<string, unknown>;
+  try {
+    script = JSON.parse(artifact.content_json) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (script.projectId !== projectId || script.revision !== lock.revision ||
+      typeof script.scriptText !== 'string' || script.scriptTextSha256 !== lock.plaintextSha256 ||
+      script.markdownSha256 !== lock.markdownSha256) return null;
+  const actualSha = crypto.createHash('sha256').update(script.scriptText).digest('hex');
+  if (actualSha !== lock.plaintextSha256) return null;
+  const input = getProjectInput(projectId);
+  if (!input || input.productionBaseline !== lock.productionBaseline ||
+      input.workflowChannel !== lock.channel || input.experimentalOverride !== null) return null;
+
+  return {
+    artifact,
+    approval,
+    revision: lock.revision as number,
+    scriptText: script.scriptText,
+    plaintextSha256: lock.plaintextSha256,
+    markdownSha256: lock.markdownSha256,
+  };
+}
+
 /**
  * 读取持久化 artifact：JSON.parse → narrationPlanSchema.safeParse（M3-A Hardening）。
  * 数据库内容不凭 TypeScript as 信任——Narration Plan 是 M3-B TTS 的直接输入，
@@ -90,16 +156,29 @@ export function getCurrentNarrationPlan(projectId: string): {
   artifact: NarrationPlanArtifactRow;
 } | null {
   const stage = getStage(projectId, 'script_v2');
-  if (!stage || stage.status !== 'locked' || stage.locked_version === null) {
-    return null;
+  if (stage?.status === 'locked' && stage.locked_version !== null) {
+    for (const row of listPlanArtifacts(projectId)) {
+      const plan = parsePlan(row);
+      if (
+        plan &&
+        plan.source.version === stage.locked_version &&
+        plan.compilerVersion === NARRATION_COMPILER_VERSION &&
+        plan.source.admission === undefined
+      ) {
+        return {plan, artifact: row};
+      }
+    }
   }
+  const approved = getCurrentApprovedNarrationScript(projectId);
+  if (!approved) return null;
   for (const row of listPlanArtifacts(projectId)) {
     const plan = parsePlan(row);
-    if (
-      plan &&
-      plan.source.version === stage.locked_version &&
-      plan.compilerVersion === NARRATION_COMPILER_VERSION
-    ) {
+    if (plan && plan.compilerVersion === NARRATION_COMPILER_VERSION &&
+        plan.source.admission === 'approved_external_artifact' &&
+        plan.source.artifactId === approved.artifact.id &&
+        plan.source.version === approved.revision &&
+        plan.source.plaintextSha256 === approved.plaintextSha256 &&
+        plan.source.approvalRecordId === approved.approval.id) {
       return {plan, artifact: row};
     }
   }
@@ -239,6 +318,63 @@ export function buildNarrationPlan(projectId: string): {
     if (!artifact) {
       throw new Error(`buildNarrationPlan: inserted artifact ${id} not found`);
     }
+    return {plan, artifact, reused: false};
+  });
+  return tx.immediate();
+}
+
+/** Deterministically derive the standard TTS plan from an approved external V2. */
+export function buildApprovedNarrationPlan(
+  projectId: string,
+  scriptMarkdown: string,
+): {plan: NarrationPlan; artifact: NarrationPlanArtifactRow; reused: boolean} {
+  const db = getDb();
+  const tx = db.transaction(() => {
+    const approved = getCurrentApprovedNarrationScript(projectId);
+    if (!approved) {
+      throw new NarrationPlanError('SCRIPT_V2_NOT_LOCKED', '没有可解析的 approved narration_script authority');
+    }
+    const markdownSha = crypto.createHash('sha256').update(scriptMarkdown).digest('hex');
+    if (markdownSha !== approved.markdownSha256) {
+      throw new NarrationPlanError('SCRIPT_V2_INVALID', 'approved narration Markdown SHA256 不匹配');
+    }
+    const existing = getCurrentNarrationPlan(projectId);
+    if (existing) return {...existing, reused: true};
+
+    const compiled = compileNarrationPlan({
+      scriptV2Markdown: scriptMarkdown,
+      scriptV2Version: approved.revision,
+      promptVersion: null,
+    });
+    const plan = narrationPlanSchema.parse({
+      ...compiled,
+      source: {
+        ...compiled.source,
+        artifactId: approved.artifact.id,
+        plaintextSha256: approved.plaintextSha256,
+        approvalRecordId: approved.approval.id,
+        admission: 'approved_external_artifact',
+      },
+    });
+    const reconstructed = plan.units
+      .filter((unit) => unit.kind === 'speech')
+      .map((unit) => unit.text ?? '')
+      .join('')
+      .replace(/\s+/g, '');
+    if (reconstructed !== approved.scriptText.replace(/\s+/g, '')) {
+      throw new NarrationPlanError('NARRATION_PLAN_INVALID', 'derived TTS plan 无法还原 approved plaintext');
+    }
+
+    const id = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO artifacts (id, project_id, kind, version, content_json, file_path, created_at)
+       VALUES (?, ?, ?,
+         (SELECT COALESCE(MAX(version), 0) + 1 FROM artifacts WHERE project_id = ? AND kind = ?),
+         ?, NULL, ?)`,
+    ).run(id, projectId, NARRATION_PLAN_ARTIFACT_KIND, projectId,
+      NARRATION_PLAN_ARTIFACT_KIND, JSON.stringify(plan), new Date().toISOString());
+    const artifact = getArtifactById(id);
+    if (!artifact) throw new Error(`buildApprovedNarrationPlan: inserted artifact ${id} not found`);
     return {plan, artifact, reused: false};
   });
   return tx.immediate();

@@ -89,6 +89,11 @@ export const narrationPlanSchema = z
       version: z.number().int().positive(),
       /** Script V2 的 promptVersion（溯源用）。 */
       promptVersion: z.string().nullable(),
+      /** 外部已审批正文经 production admission 接入时保留原 artifact identity。 */
+      artifactId: z.string().min(1).optional(),
+      plaintextSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+      approvalRecordId: z.string().min(1).optional(),
+      admission: z.literal('approved_external_artifact').optional(),
     }),
     chapters: z.array(narrationChapterSchema).min(1),
     units: z.array(narrationUnitSchema).min(1),

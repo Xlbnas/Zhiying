@@ -8,6 +8,7 @@ import {
   type ProjectInput,
   type ProjectInputRow,
 } from './project-inputs';
+import {z} from 'zod';
 import {initProjectStages, listStages} from './workflow/stages';
 import type {ProjectStageRow} from './workflow/types';
 import {resolveWorkflowBaseline} from './workflow/production-baseline';
@@ -43,7 +44,10 @@ export function getProjectRow(id: string): ProjectRow | undefined {
 }
 
 /** 原子创建：zod 校验 → BEGIN（单事务）→ project + inputs + 10 stages。 */
-export function createProjectWithWorkflow(rawInput: unknown): CreateProjectResult {
+export function createProjectWithWorkflow(
+  rawInput: unknown,
+  options: {projectId?: string} = {},
+): CreateProjectResult {
   const input: ProjectInput = projectInputSchema.parse(rawInput);
   resolveWorkflowBaseline({
     channel: input.workflowChannel,
@@ -51,7 +55,13 @@ export function createProjectWithWorkflow(rawInput: unknown): CreateProjectResul
   });
   const db = getDb();
   const at = new Date().toISOString();
-  const projectId = crypto.randomUUID();
+  const projectId = options.projectId === undefined
+    ? crypto.randomUUID()
+    : z.string().uuid().parse(options.projectId);
+
+  if (getProjectRow(projectId)) {
+    throw new Error(`PROJECT_ID_CONFLICT: ${projectId}`);
+  }
 
   const tx = db.transaction((): void => {
     db.prepare(
