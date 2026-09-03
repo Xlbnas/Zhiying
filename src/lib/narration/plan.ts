@@ -341,8 +341,15 @@ export function buildApprovedNarrationPlan(
     const existing = getCurrentNarrationPlan(projectId);
     if (existing) return {...existing, reused: true};
 
+    // Approved canary reports use stable A｜… chapter labels. Adapt headings only;
+    // speech text remains byte-authoritative and is rechecked below after compilation.
+    const compilerMarkdown = scriptMarkdown.replace(
+      /^##\s+([A-H])｜(.+)$/gm,
+      (_line, label: string, title: string) =>
+        `## 第 ${label.charCodeAt(0) - 'A'.charCodeAt(0) + 1} 章 ${title}`,
+    );
     const compiled = compileNarrationPlan({
-      scriptV2Markdown: scriptMarkdown,
+      scriptV2Markdown: compilerMarkdown,
       scriptV2Version: approved.revision,
       promptVersion: null,
     });

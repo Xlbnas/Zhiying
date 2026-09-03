@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   const definitionId = crypto.randomUUID();
   const researchId = crypto.randomUUID();
   const contentPlanId = crypto.randomUUID();
-  const markdown = '# NARRATION_SCRIPT_V2\n\n## 第一章 测试\n\n第一句。第二句。\n\n第三句？\n';
+  const markdown = '# NARRATION_SCRIPT_V2\n\n## A｜测试\n\n第一句。第二句。\n\n第三句？\n';
   const plaintext = '第一句。第二句。\n\n第三句？\n';
   const plaintextSha256 = sha256(plaintext);
   const markdownSha256 = sha256(markdown);
