@@ -1,0 +1,170 @@
+{
+  "schemaVersion": "narration-text-review@2.0",
+  "projectId": "75c6255a-4826-49eb-98d4-bd092df03657",
+  "scriptRevision": 2,
+  "reviewType": "INTERNAL_TEXT_LEVEL_READ_THROUGH",
+  "revisionPolicy": "MINIMAL_TEXT_REVISION",
+  "status": "DRAFT_REVIEW_REQUIRED",
+  "ttsEligible": false,
+  "characterCountMethod": "Unicode Han characters in final narration plaintext; headings, whitespace, punctuation and metadata excluded",
+  "historicalVoiceRate": {
+    "voice": "xlbnas@1",
+    "measuredCharacters": 4507,
+    "measuredDurationSeconds": 1013.299,
+    "charactersPerMinute": 266.87,
+    "source": "docs/skill_migration/32_EXTREME_LONG_VIDEO_END_TO_END_RUN.md",
+    "note": "Historical estimate only; TEXT_DURATION_ESTIMATE != ACTUAL_TTS_DURATION"
+  },
+  "scriptMetrics": {
+    "characters": 2546,
+    "paragraphs": 24,
+    "sections": 8,
+    "estimatedDuration240cpmSeconds": 636.5,
+    "estimatedDuration260cpmSeconds": 587.5,
+    "estimatedDuration266_87cpmSeconds": 572.4,
+    "estimatedDuration280cpmSeconds": 545.6,
+    "preferredRange": "PASS",
+    "hardRange": "PASS"
+  },
+  "sectionMetrics": {
+    "A": {
+      "actual_characters": 203,
+      "estimated_duration_240cpm": 50.8,
+      "estimated_duration_260cpm": 46.8,
+      "estimated_duration_266_87cpm": 45.6,
+      "estimated_duration_280cpm": 43.5,
+      "status": "PASS"
+    },
+    "B": {
+      "actual_characters": 306,
+      "estimated_duration_240cpm": 76.5,
+      "estimated_duration_260cpm": 70.6,
+      "estimated_duration_266_87cpm": 68.8,
+      "estimated_duration_280cpm": 65.6,
+      "status": "PASS"
+    },
+    "C": {
+      "actual_characters": 346,
+      "estimated_duration_240cpm": 86.5,
+      "estimated_duration_260cpm": 79.8,
+      "estimated_duration_266_87cpm": 77.8,
+      "estimated_duration_280cpm": 74.1,
+      "status": "PASS"
+    },
+    "D": {
+      "actual_characters": 431,
+      "estimated_duration_240cpm": 107.8,
+      "estimated_duration_260cpm": 99.5,
+      "estimated_duration_266_87cpm": 96.9,
+      "estimated_duration_280cpm": 92.4,
+      "status": "PASS"
+    },
+    "E": {
+      "actual_characters": 426,
+      "estimated_duration_240cpm": 106.5,
+      "estimated_duration_260cpm": 98.3,
+      "estimated_duration_266_87cpm": 95.8,
+      "estimated_duration_280cpm": 91.3,
+      "status": "PASS"
+    },
+    "F": {
+      "actual_characters": 370,
+      "estimated_duration_240cpm": 92.5,
+      "estimated_duration_260cpm": 85.4,
+      "estimated_duration_266_87cpm": 83.2,
+      "estimated_duration_280cpm": 79.3,
+      "status": "PASS"
+    },
+    "G": {
+      "actual_characters": 299,
+      "estimated_duration_240cpm": 74.8,
+      "estimated_duration_260cpm": 69,
+      "estimated_duration_266_87cpm": 67.2,
+      "estimated_duration_280cpm": 64.1,
+      "status": "PASS"
+    },
+    "H": {
+      "actual_characters": 165,
+      "estimated_duration_240cpm": 41.3,
+      "estimated_duration_260cpm": 38.1,
+      "estimated_duration_266_87cpm": 37.1,
+      "estimated_duration_280cpm": 35.4,
+      "status": "PASS"
+    }
+  },
+  "readThrough": {
+    "openingRealityWithin20Seconds": "PASS",
+    "coreQuestionWithin60Seconds": "PASS; section A ends at approximately 45.6 seconds using the measured historical rate",
+    "meaningDistinctionClear": "PASS",
+    "desireAuditNotConsumptionCritique": "PASS",
+    "lifeInterestFourTypesUnderstandable": "PASS",
+    "painToSunkCostTransition": "PASS",
+    "exitAndCommitmentBothPreserved": "PASS",
+    "fiveQuestionsUsableNotListLike": "PASS",
+    "endingBreathingRoom": "PASS; 165 characters",
+    "outlineFeel": "NO",
+    "chapterSummaryStyle": "NO",
+    "abstractRunOver120CharactersWithoutExample": "NO",
+    "obviousRepetition": "NO",
+    "selfHelpCliches": 0,
+    "unsupportedClaims": 0,
+    "finalSentenceExactAndLast": "PASS"
+  },
+  "languageReview": {
+    "oralNaturalness": "PASS",
+    "abstractDensity": "CONTROLLED",
+    "exampleDensity": "BALANCED",
+    "sentenceRhythm": "PASS",
+    "fragmentation": "LOW",
+    "rhetoricalQuestionDensity": "CONTROLLED",
+    "goldenLineDensity": "8 retained expressions across 2531 characters",
+    "selfHelpCliches": 0,
+    "authorialVoice": "RATIONAL_RESTRAINED_CONCRETE",
+    "status": "PASS"
+  },
+  "logicalBoundaries": {
+    "finite_vs_productivity": "PASS",
+    "meaning_vs_arbitrary": "PASS",
+    "audit_vs_suppression": "PASS",
+    "present_vs_future": "PASS",
+    "pain_vs_value": "PASS",
+    "exit_vs_maturity": "PASS",
+    "past_cost_vs_current_assets": "PASS",
+    "optionality_vs_commitment": "PASS",
+    "commitment_vs_permanence": "PASS",
+    "regret_vs_error": "PASS",
+    "acceptance_vs_passivity": "PASS",
+    "status": "PASS"
+  },
+  "guards": {
+    "externalResearch": 0,
+    "inventedFacts": 0,
+    "ttsCalls": 0,
+    "audioCreated": false,
+    "subtitlesCreated": false,
+    "sceneDesignCreated": false,
+    "visualAssetsCreated": false,
+    "renderJobCreated": false,
+    "baselineChanged": false,
+    "executorChanged": false,
+    "upstreamModified": false
+  },
+  "supersedes": "58892630-792a-41a1-842f-595f06c58cfd@1",
+  "revisionDiff": {
+    "intendedReplacements": 6,
+    "unintendedTextChanges": 0,
+    "updatedParagraphs": [
+      "P01",
+      "P09",
+      "P14",
+      "P17",
+      "P20",
+      "P24"
+    ],
+    "structureChanged": false,
+    "examplesChanged": false,
+    "argumentChanged": false,
+    "sourceAuthorityChanged": false,
+    "status": "PASS"
+  }
+}

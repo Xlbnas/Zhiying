@@ -1,0 +1,285 @@
+{
+  "schemaVersion": "narration-source-map@1.0",
+  "projectId": "75c6255a-4826-49eb-98d4-bd092df03657",
+  "scriptRevision": 2,
+  "sourceDocumentSha256": "d5185a5d6439c9915d4a5dfdcf4d9760e5683d25c2c3c05bb4247ded5135a411",
+  "upstream": {
+    "projectDefinition": "ad32aa72-8fc8-4376-af24-3164bcdafca9@1",
+    "research": "655f206b-e976-4290-aa2f-22de47e103f1@1",
+    "narrationPlan": "816684a1-7bc3-4e0d-99aa-66a5e33654e3@1"
+  },
+  "paragraphs": [
+    {
+      "paragraph_id": "P01",
+      "section_id": "A",
+      "source_part": "正文",
+      "source_chapter": "第四章：死亡如何改变时间的价格",
+      "source_paragraph_range": "P138–P159",
+      "claim_type": "SOURCE_PARAPHRASE",
+      "exact_quote_or_paraphrase": "工作、健康、家庭发生冲突时，真实排序由时间去向显示。",
+      "support_status": "PASS",
+      "revision_note": "V2 exact oral-language replacement 1; source meaning unchanged",
+      "v2_wording": "我们常说事业、健康、家庭和自由都重要。一次冲突未必说明全部，但长期重复的选择，会慢慢写出真实排序。"
+    },
+    {
+      "paragraph_id": "P02",
+      "section_id": "A",
+      "source_part": "正文与结语",
+      "source_chapter": "第四章；结语",
+      "source_paragraph_range": "P138–P159; P632; P666",
+      "claim_type": "SOURCE_EXACT_LINE",
+      "exact_quote_or_paraphrase": "保留“死亡使时间成为稀缺资源，而稀缺迫使选择出现”，并以“下一单位生命”提出全片问题。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P03",
+      "section_id": "B",
+      "source_part": "正文与结语",
+      "source_chapter": "第二章：没有宇宙目的，不等于没有主体意义；结语",
+      "source_paragraph_range": "P94–P115; P628–P631",
+      "claim_type": "SOURCE_PARAPHRASE",
+      "exact_quote_or_paraphrase": "没有外部规定的目的，不推出所有选择无差别或主体意义不存在。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P04",
+      "section_id": "B",
+      "source_part": "正文",
+      "source_chapter": "第二章",
+      "source_paragraph_range": "P98–P110",
+      "claim_type": "SOURCE_SYNTHESIS",
+      "exact_quote_or_paraphrase": "人为产生不等于虚假；意义通过行动、注意力和代价显形。法律、承诺和货币来自原文同组说明。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P05",
+      "section_id": "B",
+      "source_part": "正文",
+      "source_chapter": "第二章与第四章",
+      "source_paragraph_range": "P106–P115; P149–P158",
+      "claim_type": "SOURCE_SYNTHESIS",
+      "exact_quote_or_paraphrase": "价值冲突中的时间分配检验口头声称，并转入欲望是否足以构成理由。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P06",
+      "section_id": "C",
+      "source_part": "正文",
+      "source_chapter": "第六章：欲望审计",
+      "source_paragraph_range": "P186–P194",
+      "claim_type": "SOURCE_PARAPHRASE",
+      "exact_quote_or_paraphrase": "以买车统一呈现体验、便利、被看见、比较与身份等购买对象。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P07",
+      "section_id": "C",
+      "source_part": "正文",
+      "source_chapter": "第六章",
+      "source_paragraph_range": "P195–P207",
+      "claim_type": "SOURCE_SYNTHESIS",
+      "exact_quote_or_paraphrase": "合并拿掉观众、普通星期二和未来选择空间三个审计问题。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P08",
+      "section_id": "C",
+      "source_part": "正文",
+      "source_chapter": "第六章",
+      "source_paragraph_range": "P208–P211",
+      "claim_type": "SOURCE_PARAPHRASE",
+      "exact_quote_or_paraphrase": "审计不消灭欲望，而是辨认成分并判断真实价格。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P09",
+      "section_id": "D",
+      "source_part": "正文与结语",
+      "source_chapter": "第八章至第九章；结语",
+      "source_paragraph_range": "P238–P284; P635",
+      "claim_type": "SOURCE_SYNTHESIS",
+      "exact_quote_or_paraphrase": "现在拥有决策权、未来继承结果，但现在与未来都不能垄断人生。",
+      "support_status": "PASS",
+      "revision_note": "V2 exact oral-language replacement 2; source meaning unchanged",
+      "v2_wording": "今晚熬夜，明天的身体接单"
+    },
+    {
+      "paragraph_id": "P10",
+      "section_id": "D",
+      "source_part": "正文",
+      "source_chapter": "第十章：人生利率",
+      "source_paragraph_range": "P285–P298",
+      "claim_type": "SOURCE_PARAPHRASE",
+      "exact_quote_or_paraphrase": "健康警报、技术债和关系裂痕体现高息问题；能力、习惯和信誉体现复利资产。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P11",
+      "section_id": "D",
+      "source_part": "正文",
+      "source_chapter": "第十章",
+      "source_paragraph_range": "P299–P309",
+      "claim_type": "SOURCE_PARAPHRASE",
+      "exact_quote_or_paraphrase": "等待有时降低冲动与错误；父母健康的共同时间及阶段体验可能过期。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P12",
+      "section_id": "D",
+      "source_part": "正文与结语",
+      "source_chapter": "第十章；结语",
+      "source_paragraph_range": "P285–P309; P636",
+      "claim_type": "SOURCE_EXACT_LINE",
+      "exact_quote_or_paraphrase": "保留“以后再说不是免费按钮”及“该复利的尽早复利；会过期的不要无限延期”。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P13",
+      "section_id": "E",
+      "source_part": "正文",
+      "source_chapter": "第十一章：生产性痛苦与纯粹损耗",
+      "source_paragraph_range": "P310–P325",
+      "claim_type": "SOURCE_PARAPHRASE",
+      "exact_quote_or_paraphrase": "痛苦是否值得取决于目标、路径、购买对象和兑现证据。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P14",
+      "section_id": "E",
+      "source_part": "正文",
+      "source_chapter": "第十一章",
+      "source_paragraph_range": "P320–P334",
+      "claim_type": "SOURCE_EXACT_LINE",
+      "exact_quote_or_paraphrase": "保留百公斤负重原句，并保留当前难受不自动等于损耗的限制。",
+      "support_status": "PASS",
+      "revision_note": "V2 exact oral-language replacement 3; source meaning unchanged",
+      "v2_wording": "长期失眠可能先削弱做事业所需的判断力"
+    },
+    {
+      "paragraph_id": "P15",
+      "section_id": "E",
+      "source_part": "正文",
+      "source_chapter": "第十二章：沉没成本",
+      "source_paragraph_range": "P335–P354",
+      "claim_type": "SOURCE_PARAPHRASE",
+      "exact_quote_or_paraphrase": "项目已做五年不会因继续而让过去复活；现存资产与约束仍属于今天的起点。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P16",
+      "section_id": "E",
+      "source_part": "正文与结语",
+      "source_chapter": "第十二章；结语",
+      "source_paragraph_range": "P340–P360; P638",
+      "claim_type": "SOURCE_SYNTHESIS",
+      "exact_quote_or_paraphrase": "区分过去形成的当前资产与已付成本的投票权，并保留退出不自动成熟的边界。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P17",
+      "section_id": "F",
+      "source_part": "正文",
+      "source_chapter": "第十四至十五章：选择权与承诺",
+      "source_paragraph_range": "P389–P440",
+      "claim_type": "SOURCE_SYNTHESIS",
+      "exact_quote_or_paraphrase": "项目反复竞价无法沉淀，长期拒绝事实复盘则会被旧选择锁死。",
+      "support_status": "PASS",
+      "revision_note": "V2 exact oral-language replacement 4; source meaning unchanged",
+      "v2_wording": "可如果十年都拒绝根据事实复盘，承诺又会变成拒绝更新的理由。"
+    },
+    {
+      "paragraph_id": "P18",
+      "section_id": "F",
+      "source_part": "正文与结语",
+      "source_chapter": "第十四至十五章；结语",
+      "source_paragraph_range": "P389–P440; P640",
+      "claim_type": "SOURCE_EXACT_LINE",
+      "exact_quote_or_paraphrase": "保留“广度来自保持选择权，深度来自主动关闭选择权”，并放入探索、承诺、复盘节奏。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P19",
+      "section_id": "F",
+      "source_part": "正文",
+      "source_chapter": "第十五章：承诺与破约条件",
+      "source_paragraph_range": "P413–P440",
+      "claim_type": "SOURCE_PARAPHRASE",
+      "exact_quote_or_paraphrase": "承诺不是宇宙最优，而是在新证据出现前停止竞价；重大事实改变构成破约条件。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P20",
+      "section_id": "G",
+      "source_part": "附录与结语",
+      "source_chapter": "附录二：现实决策卡；结语",
+      "source_paragraph_range": "P648–P652; P680–P687",
+      "claim_type": "SOURCE_SYNTHESIS",
+      "exact_quote_or_paraphrase": "将购买对象、真实价格和时间性质压缩为连续审计的前三问。",
+      "support_status": "PASS",
+      "revision_note": "V2 exact oral-language replacement 5; source meaning unchanged",
+      "v2_wording": "再问真实价格，不只看钱，也看时间、注意力、健康、关系，以及因此放弃的其他可能。"
+    },
+    {
+      "paragraph_id": "P21",
+      "section_id": "G",
+      "source_part": "附录与结语",
+      "source_chapter": "附录二；结语",
+      "source_paragraph_range": "P688–P696; P650",
+      "claim_type": "SOURCE_SYNTHESIS",
+      "exact_quote_or_paraphrase": "将下一单位投入与对未来自我、他人的成本压缩为后两问。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P22",
+      "section_id": "G",
+      "source_part": "结语",
+      "source_chapter": "结语",
+      "source_paragraph_range": "P650–P652",
+      "claim_type": "SOURCE_EXACT_LINE",
+      "exact_quote_or_paraphrase": "保留“降低决策摩擦，不是让生活每天召开伦理委员会”，并限定完整审计的使用场景。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P23",
+      "section_id": "H",
+      "source_part": "正文与结语",
+      "source_chapter": "第二十至二十三章；结语",
+      "source_paragraph_range": "P537–P626; P627–P655",
+      "claim_type": "SOURCE_SYNTHESIS",
+      "exact_quote_or_paraphrase": "过去、未来与现在的分工；好人生无需无痛无悔；遗憾可能是有限性的价格。",
+      "support_status": "PASS"
+    },
+    {
+      "paragraph_id": "P24",
+      "section_id": "H",
+      "source_part": "结语",
+      "source_chapter": "结语",
+      "source_paragraph_range": "P644–P666",
+      "claim_type": "SOURCE_EXACT_LINE",
+      "exact_quote_or_paraphrase": "回收认领生命轨迹的中心命题，最后一句严格使用“从现在开始，下一单位生命，准备分配到哪里？”。",
+      "support_status": "PASS",
+      "revision_note": "V2 exact oral-language replacement 6; source meaning unchanged",
+      "v2_wording": "我们能做的，是减少那些清醒后仍不愿认领的损耗，选择值得承担的痛苦。在理解价格和边界以后，建立一条自己仍愿意认领的生命轨迹。"
+    }
+  ],
+  "summary": {
+    "paragraphsMapped": 24,
+    "sourceParaphrases": 9,
+    "sourceSyntheses": 9,
+    "sourceExactLines": 6,
+    "editorialTransitions": 0,
+    "unsupportedClaims": 0,
+    "inventedFacts": 0,
+    "externalResearch": 0,
+    "status": "PASS",
+    "updatedParagraphs": [
+      "P01",
+      "P09",
+      "P14",
+      "P17",
+      "P20",
+      "P24"
+    ]
+  },
+  "supersedes": "58892630-792a-41a1-842f-595f06c58cfd@1"
+}
