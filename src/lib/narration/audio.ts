@@ -9,6 +9,7 @@ import {DEFAULT_VOICE_PROFILE, getTtsProvider} from '../tts';
 import {
   enqueueTtsJobTx,
   getActiveTtsJob,
+  getTtsJob,
   getLatestSucceededTtsJob,
   parseTtsJobPayload,
   payloadSpokenText,
@@ -41,6 +42,8 @@ export const NARRATION_AUDIO_SCHEMA_VERSION = 'narration-audio@1.0';
 export const NARRATION_AUDIO_ARTIFACT_KIND = 'narration_audio_manifest';
 export const MASTER_SAMPLE_RATE = 48000;
 export const MASTER_CHANNELS = 1;
+/** Measured minimum safe margin: -1.3 dBTP reached 0.0; -1.4 dB keeps 0.1 dB clearance. */
+export const NARRATION_AUDIO_REPAIR_HEADROOM_DB = -1.4;
 
 // ---------- Manifest Schema ----------
 
@@ -111,6 +114,13 @@ export const narrationAudioManifestSchema = z.object({
     sampleRate: z.number().int().positive(),
     channels: z.number().int().positive(),
   }),
+  repair: z.object({
+    reason: z.literal('AUDIO_QC_CLIPPING'),
+    supersedes: z.object({id: z.string(), version: z.number().int().positive()}),
+    preResampleHeadroomDb: z.number().negative(),
+    reusedSegments: z.array(z.string()),
+    replacedSegments: z.array(z.string()),
+  }).optional(),
 });
 
 export type NarrationAudioManifest = z.infer<typeof narrationAudioManifestSchema>;
@@ -124,6 +134,9 @@ export type NarrationAudioErrorCode =
   | 'NARRATION_PLAN_SOURCE_MISMATCH'
   | 'NARRATION_PLAN_CONTAMINATED'
   | 'PROVIDER_SNAPSHOT_MISMATCH'
+  | 'QC_REPLACEMENT_INVALID'
+  | 'QC_REPLACEMENT_LIMIT'
+  | 'MASTER_HARD_CLIPPING'
   | 'MASTER_PATH_CONFLICT';
 
 export class NarrationAudioError extends Error {
@@ -253,6 +266,114 @@ export function enqueueNarrationAudioJobs(
       planArtifactId: artifact.id,
       planArtifactVersion: artifact.version,
     };
+  });
+  return tx.immediate();
+}
+
+export interface NarrationAudioQcReplacementRequest {
+  unitId: string;
+  supersedesJobId: string;
+}
+
+/**
+ * Append-only, affected-unit-only replacement path for generated audio that failed QC.
+ * The original succeeded job and WAV stay immutable; at most two replacement candidates
+ * may be created for one original job.
+ */
+export function enqueueNarrationAudioQcReplacementJobs(
+  projectId: string,
+  requests: NarrationAudioQcReplacementRequest[],
+  options: {
+    voiceProfile: {id: string; revision: string};
+    referenceSha256?: string;
+    expectedPlan: {artifactId: string; version: number};
+  },
+): {jobs: Array<{unitId: string; jobId: string; candidateNumber: number; reused: boolean}>} {
+  const db = getDb();
+  const provider = getTtsProvider();
+  const unique = new Map(requests.map((request) => [request.unitId, request]));
+  if (unique.size !== requests.length || requests.length === 0) {
+    throw new NarrationAudioError('QC_REPLACEMENT_INVALID', 'QC replacement units 必须非空且不重复');
+  }
+  const tx = db.transaction(() => {
+    const current = getCurrentNarrationPlan(projectId);
+    if (
+      !current ||
+      current.artifact.id !== options.expectedPlan.artifactId ||
+      current.artifact.version !== options.expectedPlan.version
+    ) {
+      throw new NarrationAudioError('NARRATION_PLAN_SOURCE_MISMATCH', 'QC replacement Narration Plan identity mismatch');
+    }
+    const units = new Map(current.plan.units.filter((unit) => unit.kind === 'speech').map((unit) => [unit.id, unit]));
+    const jobs: Array<{unitId: string; jobId: string; candidateNumber: number; reused: boolean}> = [];
+    for (const request of requests) {
+      const unit = units.get(request.unitId);
+      const original = getTtsJob(request.supersedesJobId);
+      const originalPayload = original ? parseTtsJobPayload(original.payload_json) : null;
+      if (
+        !unit || !unit.text || !original || original.status !== 'succeeded' || !originalPayload ||
+        original.project_id !== projectId || original.unit_id !== request.unitId ||
+        original.narration_plan_artifact_id !== current.artifact.id ||
+        original.narration_plan_version !== current.artifact.version ||
+        original.provider !== provider.name ||
+        original.voice_profile_id !== options.voiceProfile.id ||
+        original.voice_profile_revision !== options.voiceProfile.revision ||
+        payloadSpokenText(originalPayload) !== unit.text ||
+        originalPayload.qcReplacement !== undefined
+      ) {
+        throw new NarrationAudioError(
+          'QC_REPLACEMENT_INVALID',
+          `${request.unitId} original succeeded job identity 不满足 QC replacement contract`,
+        );
+      }
+      const rows = db.prepare(`
+        SELECT * FROM tts_jobs
+        WHERE project_id = ? AND narration_plan_artifact_id = ? AND unit_id = ?
+          AND provider = ? AND voice_profile_id = ? AND voice_profile_revision = ?
+        ORDER BY queued_at
+      `).all(
+        projectId, current.artifact.id, request.unitId, provider.name,
+        options.voiceProfile.id, options.voiceProfile.revision,
+      ) as TtsJobRow[];
+      const replacements = rows.flatMap((row) => {
+        const payload = parseTtsJobPayload(row.payload_json);
+        return payload?.qcReplacement?.supersedesJobId === original.id ? [{row, payload}] : [];
+      });
+      const active = replacements.find(({row}) => row.status === 'queued' || row.status === 'running');
+      if (active) {
+        jobs.push({
+          unitId: request.unitId,
+          jobId: active.row.id,
+          candidateNumber: active.payload.qcReplacement!.candidateNumber,
+          reused: true,
+        });
+        continue;
+      }
+      if (replacements.length >= 2) {
+        throw new NarrationAudioError(
+          'QC_REPLACEMENT_LIMIT',
+          `${request.unitId} 已达到 2 个 QC replacement candidates`,
+        );
+      }
+      const candidateNumber = replacements.length + 1;
+      const job = enqueueTtsJobTx(projectId, provider.name, options.voiceProfile.id, options.voiceProfile.revision, {
+        schemaVersion: '1.0',
+        narrationPlanArtifactId: current.artifact.id,
+        narrationPlanArtifactVersion: current.artifact.version,
+        scriptV2Version: current.plan.source.version,
+        compilerVersion: current.plan.compilerVersion,
+        unitId: unit.id,
+        unitText: unit.text,
+        ...(options.referenceSha256 ? {referenceAudioSha256: options.referenceSha256} : {}),
+        qcReplacement: {
+          reason: 'AUDIO_QC_CLIPPING',
+          supersedesJobId: original.id,
+          candidateNumber,
+        },
+      });
+      jobs.push({unitId: request.unitId, jobId: job.id, candidateNumber, reused: false});
+    }
+    return {jobs};
   });
   return tx.immediate();
 }
@@ -694,13 +815,76 @@ export async function getExactReusableNarrationAudioArtifact(
 
 // ---------- Master 构建（ffmpeg 统一 48k/mono/s16） ----------
 
-export function normalizeUnitToPcm(wavPath: string): Buffer {
+export function normalizeUnitToPcm(wavPath: string, headroomDb?: number): Buffer {
   const out = execFileSync('ffmpeg', [
     '-v', 'error', '-y', '-i', wavPath,
+    ...(headroomDb === undefined ? [] : ['-af', `volume=${headroomDb}dB`]),
     '-f', 's16le', '-acodec', 'pcm_s16le',
     '-ar', String(MASTER_SAMPLE_RATE), '-ac', String(MASTER_CHANNELS), '-',
   ], {encoding: 'buffer', maxBuffer: 256 * 1024 * 1024});
   return out;
+}
+
+export interface HardClippingMetrics {
+  fullScaleSamples: number;
+  saturationRuns: number;
+  hardPlateauRuns: number;
+  longestSaturationRun: number;
+  minSample: number;
+  maxSample: number;
+}
+
+export function analyzeS16PcmHardClipping(pcm: Buffer): HardClippingMetrics {
+  if (pcm.length % 2 !== 0) throw new Error('s16 PCM byte length must be even');
+  let fullScaleSamples = 0;
+  let saturationRuns = 0;
+  let hardPlateauRuns = 0;
+  let longestSaturationRun = 0;
+  let currentRun = 0;
+  let currentSign = 0;
+  let minSample = 32767;
+  let maxSample = -32768;
+  const finishRun = (): void => {
+    if (currentRun === 0) return;
+    saturationRuns++;
+    if (currentRun >= 2) hardPlateauRuns++;
+    longestSaturationRun = Math.max(longestSaturationRun, currentRun);
+    currentRun = 0;
+    currentSign = 0;
+  };
+  for (let offset = 0; offset < pcm.length; offset += 2) {
+    const value = pcm.readInt16LE(offset);
+    minSample = Math.min(minSample, value);
+    maxSample = Math.max(maxSample, value);
+    const sign = value === 32767 ? 1 : value === -32768 ? -1 : 0;
+    if (sign === 0) {
+      finishRun();
+      continue;
+    }
+    fullScaleSamples++;
+    if (currentRun > 0 && sign !== currentSign) finishRun();
+    if (currentRun === 0) currentSign = sign;
+    currentRun++;
+  }
+  finishRun();
+  return {fullScaleSamples, saturationRuns, hardPlateauRuns, longestSaturationRun, minSample, maxSample};
+}
+
+export function analyzeS16WavHardClipping(wavPath: string): HardClippingMetrics {
+  const wav = fs.readFileSync(wavPath);
+  if (wav.length < 44 || wav.toString('ascii', 0, 4) !== 'RIFF') throw new Error('invalid WAV');
+  let cursor = 12;
+  while (cursor + 8 <= wav.length) {
+    const id = wav.toString('ascii', cursor, cursor + 4);
+    const length = wav.readUInt32LE(cursor + 4);
+    if (id === 'data') {
+      const end = cursor + 8 + length;
+      if (end > wav.length) throw new Error('truncated WAV data chunk');
+      return analyzeS16PcmHardClipping(wav.subarray(cursor + 8, end));
+    }
+    cursor += 8 + length + (length % 2);
+  }
+  throw new Error('WAV data chunk missing');
 }
 
 export function silencePcm(durationMs: number): Buffer {
@@ -738,6 +922,13 @@ export interface FinalizeNarrationAudioDeps {
   expectedPlan?: {artifactId: string; version: number};
   voiceProfile?: {id: string; revision: string};
   referenceSha256?: string | null;
+  repair?: {
+    reason: 'AUDIO_QC_CLIPPING';
+    supersedes: {id: string; version: number};
+    preResampleHeadroomDb: number;
+    selectedTtsJobIds: Record<string, string>;
+    replacedSegments: string[];
+  };
 }
 
 /**
@@ -799,17 +990,110 @@ export function tryFinalizeNarrationAudio(
   const voice = deps.voiceProfile ?? DEFAULT_VOICE_PROFILE;
 
   const existing = readCurrentManifest(projectId, voice, deps.referenceSha256);
-  if (existing) return existing;
+  const repairMatches = (manifest: NarrationAudioManifest): boolean => {
+    if (
+      deps.repair === undefined ||
+      manifest.repair?.reason !== deps.repair.reason ||
+      manifest.repair.supersedes.id !== deps.repair.supersedes.id ||
+      manifest.repair.supersedes.version !== deps.repair.supersedes.version ||
+      manifest.repair.preResampleHeadroomDb !== deps.repair.preResampleHeadroomDb
+    ) return false;
+
+    const expectedReplaced = [...deps.repair.replacedSegments].sort();
+    const actualReplaced = [...manifest.repair.replacedSegments].sort();
+    if (
+      expectedReplaced.length !== actualReplaced.length ||
+      expectedReplaced.some((unitId, index) => unitId !== actualReplaced[index])
+    ) return false;
+
+    const speechUnits = manifest.units.filter(
+      (unit): unit is z.infer<typeof manifestSpeechUnitSchema> => unit.kind === 'speech',
+    );
+    const selected = Object.entries(deps.repair.selectedTtsJobIds);
+    return speechUnits.length === selected.length && selected.every(([unitId, jobId]) =>
+      speechUnits.some((unit) => unit.unitId === unitId && unit.ttsJobId === jobId));
+  };
+  if ((!deps.repair && existing) || (existing && repairMatches(existing))) return existing;
+
+  let supersededManifest: NarrationAudioManifest | null = null;
+  if (deps.repair) {
+    const superseded = db.prepare(
+      `SELECT project_id, kind, version, content_json FROM artifacts WHERE id = ?`,
+    ).get(deps.repair.supersedes.id) as {
+      project_id: string;
+      kind: string;
+      version: number;
+      content_json: string;
+    } | undefined;
+    let parsed: ReturnType<typeof narrationAudioManifestSchema.safeParse> | null = null;
+    if (
+      superseded && superseded.project_id === projectId &&
+      superseded.kind === NARRATION_AUDIO_ARTIFACT_KIND &&
+      superseded.version === deps.repair.supersedes.version
+    ) {
+      try {
+        parsed = narrationAudioManifestSchema.safeParse(JSON.parse(superseded.content_json));
+      } catch {
+        parsed = null;
+      }
+    }
+    if (!parsed?.success) {
+      throw new NarrationAudioError('QC_REPLACEMENT_INVALID', 'superseded audio artifact identity invalid');
+    }
+    supersededManifest = parsed.data;
+  }
 
   // 收集全部 speech 输出（必须全部 succeeded 且 result_json 合法——§十四唯一 metadata 来源）
   const speechUnits = plan.units.filter((u) => u.kind === 'speech');
+  if (deps.repair) {
+    const expected = new Set(speechUnits.map((unit) => unit.id));
+    const selected = Object.keys(deps.repair.selectedTtsJobIds);
+    if (selected.length !== expected.size || selected.some((unitId) => !expected.has(unitId))) {
+      throw new NarrationAudioError('QC_REPLACEMENT_INVALID', 'repair selectedTtsJobIds 必须精确覆盖全部 speech units');
+    }
+  }
+  const supersededJobs = new Map(
+    (supersededManifest?.units ?? [])
+      .filter((unit): unit is z.infer<typeof manifestSpeechUnitSchema> => unit.kind === 'speech')
+      .map((unit) => [unit.unitId, unit.ttsJobId]),
+  );
   const outputs: Array<{unit: NarrationUnit; job: TtsJobRow; result: TtsJobResult}> = [];
   for (const unit of speechUnits) {
-    const job = getLatestSucceededTtsJob(
-      projectId, artifact.id, unit.id, provider.name, voice.id, voice.revision,
-    );
+    const selectedJobId = deps.repair?.selectedTtsJobIds[unit.id];
+    const job = selectedJobId
+      ? getTtsJob(selectedJobId)
+      : getLatestSucceededTtsJob(
+          projectId, artifact.id, unit.id, provider.name, voice.id, voice.revision,
+        );
     if (!job || !job.output_path || job.duration_ms === null || !job.audio_sha256 || !job.result_json) {
       return null; // 未全部完成（或缺 result_json 的旧数据）→ 不允许 finalize
+    }
+    if (
+      job.status !== 'succeeded' || job.project_id !== projectId ||
+      job.narration_plan_artifact_id !== artifact.id || job.narration_plan_version !== artifact.version ||
+      job.unit_id !== unit.id || job.provider !== provider.name ||
+      job.voice_profile_id !== voice.id || job.voice_profile_revision !== voice.revision
+    ) {
+      throw new NarrationAudioError('QC_REPLACEMENT_INVALID', `${unit.id} selected TTS job identity mismatch`);
+    }
+    if (deps.repair) {
+      const originalJobId = supersededJobs.get(unit.id);
+      const selectedPayload = parseTtsJobPayload(job.payload_json);
+      const replacement = selectedPayload?.qcReplacement;
+      if (deps.repair.replacedSegments.includes(unit.id)) {
+        if (!originalJobId || replacement?.reason !== deps.repair.reason || replacement.supersedesJobId !== originalJobId) {
+          throw new NarrationAudioError('QC_REPLACEMENT_INVALID', `${unit.id} replacement provenance mismatch`);
+        }
+        const clipping = analyzeS16WavHardClipping(path.join(getDataDir(), job.output_path));
+        if (clipping.fullScaleSamples !== 0 || clipping.saturationRuns !== 0) {
+          throw new NarrationAudioError(
+            'MASTER_HARD_CLIPPING',
+            `${unit.id} replacement source still clips: fullScale=${clipping.fullScaleSamples} runs=${clipping.saturationRuns}`,
+          );
+        }
+      } else if (!originalJobId || job.id !== originalJobId || replacement !== undefined) {
+        throw new NarrationAudioError('QC_REPLACEMENT_INVALID', `${unit.id} clean original was not reused exactly`);
+      }
     }
     let parsedJson: unknown;
     try {
@@ -859,7 +1143,10 @@ export function tryFinalizeNarrationAudio(
   for (const unit of plan.units) {
     if (unit.kind === 'speech') {
       const output = outputs.find((o) => o.unit.id === unit.id)!;
-      chunks.push(normalizeUnitToPcm(path.join(getDataDir(), output.job.output_path!)));
+      chunks.push(normalizeUnitToPcm(
+        path.join(getDataDir(), output.job.output_path!),
+        deps.repair?.preResampleHeadroomDb,
+      ));
       expectedMs += output.job.duration_ms!;
     } else if (unit.kind === 'pause' && unit.pauseMs !== null) {
       chunks.push(silencePcm(unit.pauseMs));
@@ -873,9 +1160,14 @@ export function tryFinalizeNarrationAudio(
     (masterPcm.length / 2 / MASTER_CHANNELS / MASTER_SAMPLE_RATE) * 1000,
   );
 
+  const nextAudioVersion = (db.prepare(
+    `SELECT COALESCE(MAX(version), 0) + 1 AS version FROM artifacts WHERE project_id = ? AND kind = ?`,
+  ).get(projectId, NARRATION_AUDIO_ARTIFACT_KIND) as {version: number}).version;
   const relMaster = path.posix.join(
     'projects', projectId, 'audio',
-    `narration-master-v${artifact.version}-${provider.name}-${voice.id}@${voice.revision}.wav`,
+    deps.repair
+      ? `narration-master-v${artifact.version}-${provider.name}-${voice.id}@${voice.revision}-audio-r${nextAudioVersion}.wav`
+      : `narration-master-v${artifact.version}-${provider.name}-${voice.id}@${voice.revision}.wav`,
   );
   const absMaster = path.join(getDataDir(), relMaster);
   // §二十：先写唯一 tmp；winner rename 前不发生任何 DB 提交
@@ -954,7 +1246,28 @@ export function tryFinalizeNarrationAudio(
         sampleRate: MASTER_SAMPLE_RATE,
         channels: MASTER_CHANNELS,
       },
+      ...(deps.repair && supersededManifest ? {
+        repair: {
+          reason: deps.repair.reason,
+          supersedes: deps.repair.supersedes,
+          preResampleHeadroomDb: deps.repair.preResampleHeadroomDb,
+          reusedSegments: speechUnits
+            .map((unit) => unit.id)
+            .filter((unitId) => !deps.repair!.replacedSegments.includes(unitId)),
+          replacedSegments: deps.repair.replacedSegments,
+        },
+      } : {}),
     });
+
+    if (deps.repair) {
+      const clipping = analyzeS16PcmHardClipping(masterPcm);
+      if (clipping.fullScaleSamples !== 0 || clipping.saturationRuns !== 0) {
+        throw new NarrationAudioError(
+          'MASTER_HARD_CLIPPING',
+          `repaired master still clips: fullScale=${clipping.fullScaleSamples} runs=${clipping.saturationRuns}`,
+        );
+      }
+    }
 
     // 时长一致性防线：master ≈ speech + 显式 pause（允许帧取整容差 100ms）
     if (Math.abs(masterDurationMs - expectedMs) > 100) {
@@ -989,7 +1302,9 @@ export function tryFinalizeNarrationAudio(
         still.artifact.version !== artifact.version
       ) return {outcome: 'stale'};
       const won = readCurrentManifest(projectId, voice, deps.referenceSha256);
-      if (won) return {outcome: 'reuse', manifest: won};
+      if ((!deps.repair && won) || (won && repairMatches(won))) {
+        return {outcome: 'reuse', manifest: won};
+      }
       // §八：final 路径已存在时的 orphan/冲突裁决
       if (fs.existsSync(absMaster)) {
         const referenced = (

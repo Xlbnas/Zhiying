@@ -112,7 +112,7 @@ async function main(): Promise<void> {
   const {getDb} = await import('../src/lib/db');
   const {createProjectWithWorkflow} = await import('../src/lib/projects');
   const {buildNarrationPlan} = await import('../src/lib/narration/plan');
-  const {enqueueNarrationAudioJobs, tryFinalizeNarrationAudio} = await import('../src/lib/narration/audio');
+  const {enqueueNarrationAudioJobs, getCurrentNarrationAudioArtifact, tryFinalizeNarrationAudio} = await import('../src/lib/narration/audio');
   const {claimNextAnyJob} = await import('../src/lib/scheduler');
   const {runTtsJob} = await import('../src/worker/tts-executor');
   const {releaseResourceLeaseForJob} = await import('../src/lib/resources/leases');
@@ -166,6 +166,39 @@ async function main(): Promise<void> {
   const sameVoice = run(['tts', '--project', project.id, '--plan', `${plan.id}@${plan.version}`, '--voice', 'xlbnas@1']);
   const sameVoiceJson = jsonOf(sameVoice);
   ok(sameVoice.status === 0 && sameVoiceJson.result?.reusedExistingAudio === true, 'same voice exact reuse remains allowed');
+  const customAudio = getCurrentNarrationAudioArtifact(project.id, {
+    voiceProfile: {id: 'xlbnas', revision: '1'},
+    referenceSha256,
+  })!;
+  const qcMissingPair = run([
+    'tts', '--project', project.id, '--plan', `${plan.id}@${plan.version}`,
+    '--voice', 'xlbnas@1', '--qc-replace', 'N001', '--wait',
+  ]);
+  ok(
+    qcMissingPair.status !== 0 && jsonOf(qcMissingPair).error?.code === 'MISSING_ARGUMENT',
+    'QC replacement requires exact superseded audio identity',
+    qcMissingPair.stdout,
+  );
+  const qcMissingWait = run([
+    'tts', '--project', project.id, '--plan', `${plan.id}@${plan.version}`,
+    '--voice', 'xlbnas@1', '--qc-replace', 'N001',
+    '--supersedes-audio', `${customAudio.artifact.id}@${customAudio.artifact.version}`,
+  ]);
+  ok(
+    qcMissingWait.status !== 0 && jsonOf(qcMissingWait).error?.code === 'INVALID_ARGUMENT',
+    'QC replacement requires explicit wait mode',
+    qcMissingWait.stdout,
+  );
+  const qcMalformedUnits = run([
+    'tts', '--project', project.id, '--plan', `${plan.id}@${plan.version}`,
+    '--voice', 'xlbnas@1', '--qc-replace', 'N001,N001',
+    '--supersedes-audio', `${customAudio.artifact.id}@${customAudio.artifact.version}`, '--wait',
+  ]);
+  ok(
+    qcMalformedUnits.status !== 0 && jsonOf(qcMalformedUnits).error?.code === 'INVALID_ARGUMENT',
+    'QC replacement rejects duplicate or malformed unit identities',
+    qcMalformedUnits.stdout,
+  );
 
   const invalidProject = createProjectWithWorkflow({topic: 'invalid voice', coreQuestion: 'fail closed?'}).project;
   insertLockedVersion(db, invalidProject.id, 1, '# Script V2\n\n## 第 1 章 测试\n\n这是测试旁白。');

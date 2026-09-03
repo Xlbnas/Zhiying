@@ -18,7 +18,11 @@ import {closeDb, getDb, getDataDir} from '../src/lib/db';
 import {releaseResourceLeaseForJob, releaseExpiredLeases} from '../src/lib/resources/leases';
 import {buildNarrationPlan} from '../src/lib/narration/plan';
 import {
+  NARRATION_AUDIO_REPAIR_HEADROOM_DB,
+  analyzeS16PcmHardClipping,
+  analyzeS16WavHardClipping,
   enqueueNarrationAudioJobs,
+  enqueueNarrationAudioQcReplacementJobs,
   getNarrationAudioOverview,
   NarrationAudioError,
   tryFinalizeNarrationAudio,
@@ -1303,6 +1307,159 @@ async function main(): Promise<void> {
       threwG === 'MASTER_PATH_CONFLICT' && shaBefore === shaAfter,
       '[FC76] final 被历史 artifact 引用（非 current）→ MASTER_PATH_CONFLICT，不覆盖历史文件',
       threwG,
+    );
+  }
+
+  // ============ QC clipping repair（append-only replacement + pre-resample headroom） ============
+  {
+    const clipped = Buffer.alloc(12);
+    [0, 32767, 32767, 0, -32768, 0].forEach((value, index) => clipped.writeInt16LE(value, index * 2));
+    const metrics = analyzeS16PcmHardClipping(clipped);
+    ok(
+      metrics.fullScaleSamples === 3 && metrics.saturationRuns === 2 &&
+        metrics.hardPlateauRuns === 1 && metrics.longestSaturationRun === 2,
+      '[QC1] hard clipping detector counts full-scale samples and plateau runs',
+      metrics,
+    );
+  }
+  {
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, SCRIPT_V2);
+    buildNarrationPlan(pid);
+    enqueueNarrationAudioJobs(pid);
+    await runAllTtsJobs(pid);
+    const originalManifest = tryFinalizeNarrationAudio(pid)!;
+    const originalArtifact = db.prepare(
+      'SELECT id, version FROM artifacts WHERE project_id = ? AND kind = ? ORDER BY version DESC LIMIT 1',
+    ).get(pid, NARRATION_AUDIO_ARTIFACT_KIND) as {id: string; version: number};
+    const originalMaster = path.join(getDataDir(), originalManifest.master.filePath);
+    const originalMasterBytes = fs.readFileSync(originalMaster);
+    const originalSpeech = originalManifest.units.filter((unit) => unit.kind === 'speech');
+    const target = originalSpeech[0]!;
+    const originalJob = getTtsJob(target.ttsJobId)!;
+    const queued = enqueueNarrationAudioQcReplacementJobs(pid, [{
+      unitId: target.unitId,
+      supersedesJobId: target.ttsJobId,
+    }], {
+      expectedPlan: {
+        artifactId: originalJob.narration_plan_artifact_id,
+        version: originalJob.narration_plan_version,
+      },
+      voiceProfile: {id: originalJob.voice_profile_id, revision: originalJob.voice_profile_revision},
+    });
+    await runAllTtsJobs(pid);
+    const replacement = getTtsJob(queued.jobs[0]!.jobId)!;
+    const replacementPayload = JSON.parse(replacement.payload_json) as {
+      qcReplacement?: {reason: string; supersedesJobId: string; candidateNumber: number};
+    };
+    ok(
+      replacement.status === 'succeeded' && replacement.id !== originalJob.id &&
+        replacementPayload.qcReplacement?.reason === 'AUDIO_QC_CLIPPING' &&
+        replacementPayload.qcReplacement.supersedesJobId === originalJob.id &&
+        replacementPayload.qcReplacement.candidateNumber === 1 &&
+        fs.existsSync(path.join(getDataDir(), originalJob.output_path!)),
+      '[QC2] QC replacement is append-only and preserves original succeeded WAV',
+    );
+    const second = enqueueNarrationAudioQcReplacementJobs(pid, [{
+      unitId: target.unitId,
+      supersedesJobId: target.ttsJobId,
+    }], {
+      expectedPlan: {
+        artifactId: originalJob.narration_plan_artifact_id,
+        version: originalJob.narration_plan_version,
+      },
+      voiceProfile: {id: originalJob.voice_profile_id, revision: originalJob.voice_profile_revision},
+    });
+    await runAllTtsJobs(pid);
+    let replacementLimit: string | null = null;
+    try {
+      enqueueNarrationAudioQcReplacementJobs(pid, [{
+        unitId: target.unitId,
+        supersedesJobId: target.ttsJobId,
+      }], {
+        expectedPlan: {
+          artifactId: originalJob.narration_plan_artifact_id,
+          version: originalJob.narration_plan_version,
+        },
+        voiceProfile: {id: originalJob.voice_profile_id, revision: originalJob.voice_profile_revision},
+      });
+    } catch (err) {
+      replacementLimit = err instanceof NarrationAudioError ? err.code : String(err);
+    }
+    ok(
+      getTtsJob(second.jobs[0]!.jobId)?.status === 'succeeded' && replacementLimit === 'QC_REPLACEMENT_LIMIT',
+      '[QC2b] one original permits at most two append-only replacement candidates',
+      replacementLimit,
+    );
+    const selectedTtsJobIds = Object.fromEntries(
+      originalSpeech.map((unit) => [unit.unitId, unit.unitId === target.unitId ? replacement.id : unit.ttsJobId]),
+    );
+    const repaired = tryFinalizeNarrationAudio(pid, {
+      expectedPlan: {
+        artifactId: originalJob.narration_plan_artifact_id,
+        version: originalJob.narration_plan_version,
+      },
+      voiceProfile: {id: originalJob.voice_profile_id, revision: originalJob.voice_profile_revision},
+      repair: {
+        reason: 'AUDIO_QC_CLIPPING',
+        supersedes: originalArtifact,
+        preResampleHeadroomDb: NARRATION_AUDIO_REPAIR_HEADROOM_DB,
+        selectedTtsJobIds,
+        replacedSegments: [target.unitId],
+      },
+    })!;
+    const artifacts = db.prepare(
+      'SELECT id, version FROM artifacts WHERE project_id = ? AND kind = ? ORDER BY version',
+    ).all(pid, NARRATION_AUDIO_ARTIFACT_KIND) as Array<{id: string; version: number}>;
+    const repairedMaster = path.join(getDataDir(), repaired.master.filePath);
+    const repairedTarget = repaired.units.find((unit) => unit.unitId === target.unitId);
+    ok(
+      artifacts.length === 2 && artifacts[0]!.id === originalArtifact.id && artifacts[1]!.version === 2 &&
+        repaired.master.filePath !== originalManifest.master.filePath &&
+        fs.readFileSync(originalMaster).equals(originalMasterBytes),
+      '[QC3] repaired audio is revision 2 and original artifact/master remain unchanged',
+      {artifacts, repairedPath: repaired.master.filePath},
+    );
+    ok(
+      repaired.repair?.reason === 'AUDIO_QC_CLIPPING' &&
+        repaired.repair.supersedes.id === originalArtifact.id &&
+        repaired.repair.preResampleHeadroomDb === NARRATION_AUDIO_REPAIR_HEADROOM_DB &&
+        repaired.repair.replacedSegments.length === 1 &&
+        repaired.repair.reusedSegments.length === originalSpeech.length - 1 &&
+        repairedTarget?.kind === 'speech' && repairedTarget.ttsJobId === replacement.id,
+      '[QC4] repair provenance pins exact replacement and reused originals',
+      repaired.repair,
+    );
+    const repairedClipping = analyzeS16WavHardClipping(repairedMaster);
+    ok(
+      repairedClipping.fullScaleSamples === 0 && repairedClipping.saturationRuns === 0,
+      '[QC5] repaired finalize applies measured headroom and emits no hard clipping',
+      repairedClipping,
+    );
+    const repairedWithSecondCandidate = tryFinalizeNarrationAudio(pid, {
+      expectedPlan: {
+        artifactId: originalJob.narration_plan_artifact_id,
+        version: originalJob.narration_plan_version,
+      },
+      voiceProfile: {id: originalJob.voice_profile_id, revision: originalJob.voice_profile_revision},
+      repair: {
+        reason: 'AUDIO_QC_CLIPPING',
+        supersedes: originalArtifact,
+        preResampleHeadroomDb: NARRATION_AUDIO_REPAIR_HEADROOM_DB,
+        selectedTtsJobIds: {
+          ...selectedTtsJobIds,
+          [target.unitId]: second.jobs[0]!.jobId,
+        },
+        replacedSegments: [target.unitId],
+      },
+    })!;
+    const secondCandidateTarget = repairedWithSecondCandidate.units.find((unit) => unit.unitId === target.unitId);
+    ok(
+      repairedWithSecondCandidate.master.filePath !== repaired.master.filePath &&
+        secondCandidateTarget?.kind === 'speech' && secondCandidateTarget.ttsJobId === second.jobs[0]!.jobId,
+      '[QC6] idempotent reuse requires the exact selected replacement job identity',
+      {first: repaired.master.filePath, second: repairedWithSecondCandidate.master.filePath},
     );
   }
 

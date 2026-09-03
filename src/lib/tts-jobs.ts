@@ -41,6 +41,12 @@ export interface TtsJobRow {
   cancel_requested: number;
 }
 
+const ttsQcReplacementSchema = z.object({
+  reason: z.literal('AUDIO_QC_CLIPPING'),
+  supersedesJobId: z.string().min(1),
+  candidateNumber: z.number().int().min(1).max(2),
+});
+
 /** 入队快照（immutable Narration Plan source + unit + voice）。 */
 export const ttsJobPayloadSchema = z.object({
   schemaVersion: z.literal('1.0'),
@@ -52,6 +58,8 @@ export const ttsJobPayloadSchema = z.object({
   unitText: z.string().min(1),
   /** Optional legacy-registry reference snapshot; absent on historical jobs. */
   referenceAudioSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  /** Append-only replacement of a technically succeeded unit that failed audio QC. */
+  qcReplacement: ttsQcReplacementSchema.optional(),
 });
 
 export type TtsJobPayload = z.infer<typeof ttsJobPayloadSchema>;
@@ -71,6 +79,7 @@ export const ttsJobPayloadV11Schema = z.object({
   delivery: z.enum(['normal', 'slow', 'fast', 'soft', 'firm', 'emphasis']),
   ttsInputFingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/),
   referenceAudioSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  qcReplacement: ttsQcReplacementSchema.optional(),
 });
 
 export type TtsJobPayloadV11 = z.infer<typeof ttsJobPayloadV11Schema>;

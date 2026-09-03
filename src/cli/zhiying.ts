@@ -10,7 +10,17 @@ import {
   FINAL_RENDER_ATTEMPT_ARTIFACT_KIND,
   finalRenderAttemptSchema,
 } from '../lib/final-render/schema';
-import {enqueueNarrationAudioJobs, getCurrentNarrationAudioArtifact, getExactNarrationAudioArtifact, getExactReusableNarrationAudioArtifact, getNarrationAudioOverview, tryFinalizeNarrationAudio} from '../lib/narration/audio';
+import {
+  NARRATION_AUDIO_REPAIR_HEADROOM_DB,
+  analyzeS16WavHardClipping,
+  enqueueNarrationAudioJobs,
+  enqueueNarrationAudioQcReplacementJobs,
+  getCurrentNarrationAudioArtifact,
+  getExactNarrationAudioArtifact,
+  getExactReusableNarrationAudioArtifact,
+  getNarrationAudioOverview,
+  tryFinalizeNarrationAudio,
+} from '../lib/narration/audio';
 import {
   getExactNarrationAudioV2Artifact,
   tryFinalizeNarrationAudioV2,
@@ -30,7 +40,7 @@ import {getStage, listStages} from '../lib/workflow/stages';
 import {getVersion} from '../lib/workflow/versions';
 import {getRenderArtifact, probeRenderOutput, resolveOutputAbs, sha256File} from '../lib/render/artifact';
 import {probeAudio} from '../lib/tts-c/audio-probe';
-import {getTtsJob, type TtsJobRow} from '../lib/tts-jobs';
+import {getTtsJob, parseTtsJobPayload, type TtsJobRow} from '../lib/tts-jobs';
 import {resolveRequestedVoice} from '../lib/tts/voice-registry';
 import {getTtsProvider} from '../lib/tts';
 import type {RenderJobRow} from '../lib/jobs';
@@ -74,7 +84,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   }
   const allowedValues: Record<string, string[]> = {
     inspect: ['project', 'artifact', 'job'],
-    tts: ['project', 'plan', 'timeout-seconds', 'voice'],
+    tts: ['project', 'plan', 'timeout-seconds', 'voice', 'qc-replace', 'supersedes-audio'],
     subtitles: ['project', 'audio', 'artifact', 'export-dir'],
     visuals: ['project', 'design', 'plan', 'audio', 'subtitles', 'choreography'],
     reconcile: ['project', 'scenes', 'audio', 'subtitles'],
@@ -106,6 +116,17 @@ function timeoutMs(args: ParsedArgs): number {
     throw new CliError('INVALID_ARGUMENT', '--timeout-seconds 必须是正整数');
   }
   return seconds * 1000;
+}
+
+function parseQcReplacementUnits(raw: string): string[] {
+  const units = raw.split(',').map((unit) => unit.trim()).filter(Boolean);
+  if (
+    units.length === 0 || new Set(units).size !== units.length ||
+    units.some((unit) => !/^N\d{3}$/.test(unit))
+  ) {
+    throw new CliError('INVALID_ARGUMENT', '--qc-replace 必须是逗号分隔且不重复的 N001 形式 unit IDs');
+  }
+  return units;
 }
 
 function projectRow(projectId: string): Record<string, unknown> {
@@ -305,6 +326,165 @@ async function tts(args: ParsedArgs): Promise<Record<string, unknown>> {
   }
   if (args.flags.has('finalize-only')) {
     throw new CliError('INVALID_ARGUMENT', '--finalize-only 仅支持 exact narration_plan_v2；V1 tts 行为保持不变');
+  }
+  const qcReplaceRaw = args.values.get('qc-replace');
+  const supersedesAudioRaw = args.values.get('supersedes-audio');
+  if ((qcReplaceRaw && !supersedesAudioRaw) || (!qcReplaceRaw && supersedesAudioRaw)) {
+    throw new CliError('MISSING_ARGUMENT', '--qc-replace 与 --supersedes-audio 必须同时提供');
+  }
+  if (qcReplaceRaw && supersedesAudioRaw) {
+    if (!args.flags.has('wait')) {
+      throw new CliError('INVALID_ARGUMENT', 'QC replacement 必须显式使用 --wait');
+    }
+    if (requestedVoice === undefined) {
+      throw new CliError('MISSING_ARGUMENT', 'QC replacement 必须显式提供 --voice <id>@<revision>');
+    }
+    assertCurrentPlan(projectId, plan);
+    const supersedes = parseIdentity(supersedesAudioRaw, '--supersedes-audio');
+    const originalAudio = await getExactNarrationAudioArtifact(projectId, {
+      artifactId: supersedes.id,
+      version: supersedes.version,
+    });
+    if (
+      !originalAudio ||
+      originalAudio.manifest.source.narrationPlanArtifactId !== plan.id ||
+      originalAudio.manifest.source.narrationPlanArtifactVersion !== plan.version ||
+      originalAudio.manifest.provider.voiceProfile.id !== resolvedVoice.id ||
+      originalAudio.manifest.provider.voiceProfile.revision !== resolvedVoice.revision
+    ) {
+      throw new CliError('AUDIO_SOURCE_MISMATCH', 'QC replacement superseded audio identity/source/voice mismatch');
+    }
+    const requestedUnits = parseQcReplacementUnits(qcReplaceRaw);
+    const originalSpeech = new Map(
+      originalAudio.manifest.units
+        .filter((unit) => unit.kind === 'speech')
+        .map((unit) => [unit.unitId, unit]),
+    );
+    if (requestedUnits.some((unitId) => !originalSpeech.has(unitId))) {
+      throw new CliError('INVALID_ARGUMENT', '--qc-replace 包含 superseded audio 中不存在的 speech unit');
+    }
+
+    const replacementEvidence: Array<{
+      unitId: string;
+      jobId: string;
+      candidateNumber: number;
+      clipping: ReturnType<typeof analyzeS16WavHardClipping>;
+    }> = [];
+    const selectedReplacementJobs = new Map<string, string>();
+    const readReplacementRows = (unitId: string, originalJobId: string): Array<{
+      row: TtsJobRow;
+      candidateNumber: number;
+    }> => (getDb().prepare(`
+      SELECT * FROM tts_jobs
+      WHERE project_id = ? AND narration_plan_artifact_id = ? AND unit_id = ?
+        AND provider = ? AND voice_profile_id = ? AND voice_profile_revision = ?
+      ORDER BY queued_at
+    `).all(
+      projectId, plan.id, unitId, getTtsProvider().name,
+      resolvedVoice.id, resolvedVoice.revision,
+    ) as TtsJobRow[]).flatMap((row) => {
+      const payload = parseTtsJobPayload(row.payload_json);
+      return payload?.qcReplacement?.supersedesJobId === originalJobId
+        ? [{row, candidateNumber: payload.qcReplacement.candidateNumber}]
+        : [];
+    });
+
+    for (let cycle = 0; cycle < 3 && selectedReplacementJobs.size < requestedUnits.length; cycle++) {
+      const enqueueRequests: Array<{unitId: string; supersedesJobId: string}> = [];
+      const waitJobIds = new Set<string>();
+      for (const unitId of requestedUnits) {
+        if (selectedReplacementJobs.has(unitId)) continue;
+        const originalJobId = originalSpeech.get(unitId)!.ttsJobId;
+        const replacements = readReplacementRows(unitId, originalJobId);
+        let accepted = false;
+        for (const replacement of [...replacements].reverse()) {
+          if (replacement.row.status !== 'succeeded' || !replacement.row.output_path) continue;
+          const clipping = analyzeS16WavHardClipping(path.join(getDataDir(), replacement.row.output_path));
+          if (!replacementEvidence.some((item) => item.jobId === replacement.row.id)) {
+            replacementEvidence.push({unitId, jobId: replacement.row.id, candidateNumber: replacement.candidateNumber, clipping});
+          }
+          if (clipping.fullScaleSamples === 0 && clipping.saturationRuns === 0) {
+            selectedReplacementJobs.set(unitId, replacement.row.id);
+            accepted = true;
+            break;
+          }
+        }
+        if (accepted) continue;
+        const active = replacements.find(({row}) => row.status === 'queued' || row.status === 'running');
+        if (active) {
+          waitJobIds.add(active.row.id);
+          continue;
+        }
+        const failed = replacements.find(({row}) => row.status === 'failed' || row.status === 'cancelled');
+        if (failed) {
+          throw new CliError('TTS_TERMINAL_FAILURE', `${unitId} QC replacement ${failed.row.id} status=${failed.row.status}`);
+        }
+        if (replacements.length >= 2) {
+          throw new CliError('PROVIDER_SEGMENT_CLIPPING_BLOCKER', `${unitId} 两个 replacement candidates 均有 hard clipping`);
+        }
+        enqueueRequests.push({unitId, supersedesJobId: originalJobId});
+      }
+      if (enqueueRequests.length > 0) {
+        const enqueued = enqueueNarrationAudioQcReplacementJobs(projectId, enqueueRequests, {
+          expectedPlan: {artifactId: plan.id, version: plan.version},
+          voiceProfile: {id: resolvedVoice.id, revision: resolvedVoice.revision},
+          referenceSha256: resolvedVoice.referenceSha256 ?? undefined,
+        });
+        for (const job of enqueued.jobs) waitJobIds.add(job.jobId);
+      }
+      if (waitJobIds.size > 0) {
+        await waitFor(timeoutMs(args), async () => {
+          const rows = [...waitJobIds].map((jobId) => getTtsJob(jobId));
+          const failed = rows.find((row) => row?.status === 'failed' || row?.status === 'cancelled');
+          if (failed) {
+            throw new CliError('TTS_TERMINAL_FAILURE', `QC replacement ${failed.id} status=${failed.status}`);
+          }
+          return rows.every((row) => row?.status === 'succeeded') ? rows : null;
+        });
+      }
+    }
+    if (selectedReplacementJobs.size !== requestedUnits.length) {
+      throw new CliError('PROVIDER_SEGMENT_CLIPPING_BLOCKER', '未能获得全部 clean QC replacements');
+    }
+
+    const selectedTtsJobIds = Object.fromEntries(
+      [...originalSpeech].map(([unitId, unit]) => [unitId, selectedReplacementJobs.get(unitId) ?? unit.ttsJobId]),
+    );
+    const manifest = tryFinalizeNarrationAudio(projectId, {
+      expectedPlan: {artifactId: plan.id, version: plan.version},
+      voiceProfile: {id: resolvedVoice.id, revision: resolvedVoice.revision},
+      referenceSha256: resolvedVoice.referenceSha256,
+      repair: {
+        reason: 'AUDIO_QC_CLIPPING',
+        supersedes,
+        preResampleHeadroomDb: NARRATION_AUDIO_REPAIR_HEADROOM_DB,
+        selectedTtsJobIds,
+        replacedSegments: requestedUnits,
+      },
+    });
+    const audio = getCurrentNarrationAudioArtifact(projectId, voiceOptions);
+    if (!manifest || !audio || audio.manifest.repair?.supersedes.id !== supersedes.id) {
+      throw new CliError('AUDIO_FINALIZE_FAILED', 'QC replacement repaired audio artifact 未形成');
+    }
+    const masterClipping = analyzeS16WavHardClipping(path.join(getDataDir(), audio.manifest.master.filePath));
+    if (masterClipping.fullScaleSamples !== 0 || masterClipping.saturationRuns !== 0) {
+      throw new CliError('MASTER_HARD_CLIPPING', 'repaired master hard clipping gate failed');
+    }
+    return {
+      ok: true,
+      command: 'tts',
+      mode: 'qc-replacement',
+      plan,
+      supersedesAudio: supersedes,
+      requestedUnits,
+      replacementEvidence,
+      repair: {
+        headroomDb: NARRATION_AUDIO_REPAIR_HEADROOM_DB,
+        reusedSegments: originalSpeech.size - requestedUnits.length,
+        replacedSegments: requestedUnits.length,
+      },
+      result: {status: 'ready', audio: {artifact: audio.artifact, manifest: audio.manifest}, masterClipping},
+    };
   }
   assertCurrentPlan(projectId, plan);
   const reusableAudio = await getExactReusableNarrationAudioArtifact(projectId, {
