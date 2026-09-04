@@ -45,6 +45,24 @@ const ttsQcReplacementSchema = z.object({
   reason: z.literal('AUDIO_QC_CLIPPING'),
   supersedesJobId: z.string().min(1),
   candidateNumber: z.number().int().min(1).max(2),
+  method: z.literal('EXACT_TEXT_MICRO_SEGMENT').optional(),
+  microComposite: z.object({
+    splitPlan: z.number().int().min(1).max(2),
+    parentTextSha256: z.string().regex(/^[0-9a-f]{64}$/),
+    childJobIds: z.array(z.string().min(1)).min(2).max(3),
+  }).optional(),
+});
+
+const ttsQcMicroSegmentSchema = z.object({
+  reason: z.literal('AUDIO_QC_PROVIDER_CLIPPING'),
+  supersedesJobId: z.string().min(1),
+  parentUnitId: z.string().regex(/^N\d{3}$/),
+  parentTextSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  childTextSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  splitPlan: z.number().int().min(1).max(2),
+  childIndex: z.number().int().min(1).max(3),
+  childCount: z.number().int().min(2).max(3),
+  candidateNumber: z.number().int().min(1).max(2),
 });
 
 /** 入队快照（immutable Narration Plan source + unit + voice）。 */
@@ -54,12 +72,14 @@ export const ttsJobPayloadSchema = z.object({
   narrationPlanArtifactVersion: z.number().int().positive(),
   scriptV2Version: z.number().int().positive(),
   compilerVersion: z.string().min(1),
-  unitId: z.string().regex(/^N\d{3}$/),
+  unitId: z.string().regex(/^N\d{3}(?:-R[12]-[A-C])?$/),
   unitText: z.string().min(1),
   /** Optional legacy-registry reference snapshot; absent on historical jobs. */
   referenceAudioSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   /** Append-only replacement of a technically succeeded unit that failed audio QC. */
   qcReplacement: ttsQcReplacementSchema.optional(),
+  /** Exact-text child generated only to repair a clipped logical parent unit. */
+  qcMicroSegment: ttsQcMicroSegmentSchema.optional(),
 });
 
 export type TtsJobPayload = z.infer<typeof ttsJobPayloadSchema>;
@@ -80,6 +100,7 @@ export const ttsJobPayloadV11Schema = z.object({
   ttsInputFingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/),
   referenceAudioSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   qcReplacement: ttsQcReplacementSchema.optional(),
+  qcMicroSegment: ttsQcMicroSegmentSchema.optional(),
 });
 
 export type TtsJobPayloadV11 = z.infer<typeof ttsJobPayloadV11Schema>;
@@ -202,6 +223,7 @@ export function enqueueTtsJobTx(
   voiceProfileId: string,
   voiceProfileRevision: string,
   payload: AnyTtsJobPayload,
+  options: {maxAttempts?: number} = {},
 ): TtsJobRow {
   const db = getDb();
   const active = getActiveTtsJob(
@@ -218,13 +240,17 @@ export function enqueueTtsJobTx(
       `${payload.unitId} 已有进行中的 TTS 任务（${active.id}）`,
     );
   }
+  const maxAttempts = options.maxAttempts ?? 2;
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+    throw new RangeError('maxAttempts 必须为正整数');
+  }
   const id = crypto.randomUUID();
   db.prepare(
     `INSERT INTO tts_jobs (
        id, project_id, narration_plan_artifact_id, narration_plan_version, unit_id,
        provider, voice_profile_id, voice_profile_revision,
        status, payload_json, queued_at, attempt, max_attempts
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0, 2)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0, ?)`,
   ).run(
     id,
     projectId,
@@ -236,6 +262,7 @@ export function enqueueTtsJobTx(
     voiceProfileRevision,
     JSON.stringify(payload),
     now(),
+    maxAttempts,
   );
   const row = getTtsJob(id);
   if (!row) {

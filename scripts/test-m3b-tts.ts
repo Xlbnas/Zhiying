@@ -21,7 +21,9 @@ import {
   NARRATION_AUDIO_REPAIR_HEADROOM_DB,
   analyzeS16PcmHardClipping,
   analyzeS16WavHardClipping,
+  assembleNarrationAudioMicroRepairParent,
   enqueueNarrationAudioJobs,
+  enqueueNarrationAudioMicroRepairJobs,
   enqueueNarrationAudioQcReplacementJobs,
   getNarrationAudioOverview,
   NarrationAudioError,
@@ -1460,6 +1462,110 @@ async function main(): Promise<void> {
         secondCandidateTarget?.kind === 'speech' && secondCandidateTarget.ttsJobId === second.jobs[0]!.jobId,
       '[QC6] idempotent reuse requires the exact selected replacement job identity',
       {first: repaired.master.filePath, second: repairedWithSecondCandidate.master.filePath},
+    );
+  }
+  {
+    const pid = newProject();
+    await lockThroughScriptV2(pid);
+    setScriptV2(pid, `# Script V2
+
+## 第 1 章 Micro Repair
+
+理解利率，不是把人生变成财务公式，而是承认时间会改变价格。既然时间交易有价格，吃苦和坚持也不能只看还能不能扛。`);
+    const planArtifact = buildNarrationPlan(pid).artifact;
+    enqueueNarrationAudioJobs(pid);
+    await runAllTtsJobs(pid);
+    const originalManifest = tryFinalizeNarrationAudio(pid)!;
+    const originalArtifact = db.prepare(
+      'SELECT id, version FROM artifacts WHERE project_id = ? AND kind = ? ORDER BY version DESC LIMIT 1',
+    ).get(pid, NARRATION_AUDIO_ARTIFACT_KIND) as {id: string; version: number};
+    const originalMaster = path.join(getDataDir(), originalManifest.master.filePath);
+    const originalMasterBytes = fs.readFileSync(originalMaster);
+    const speech = originalManifest.units.filter((unit) => unit.kind === 'speech');
+    const target = speech[0]!;
+    const children = target.text.match(/[^。！？；]+[。！？；]|[^。！？；]+$/gu) ?? [];
+    const queued = enqueueNarrationAudioMicroRepairJobs(pid, [{
+      parentUnitId: target.unitId,
+      supersedesJobId: target.ttsJobId,
+      splitPlan: 1,
+      children,
+    }], {
+      expectedPlan: {artifactId: planArtifact.id, version: planArtifact.version},
+      voiceProfile: {id: 'default', revision: '1'},
+    });
+    await runAllTtsJobs(pid);
+    const childJobs = queued.jobs.map(({jobId}) => getTtsJob(jobId)!);
+    const childPayloads = childJobs.map((job) => JSON.parse(job.payload_json) as {
+      unitText: string;
+      qcMicroSegment: {parentUnitId: string; childIndex: number; childCount: number};
+    });
+    ok(
+      queued.jobs.length === 2 && childJobs.every((job) => job.max_attempts === 1) &&
+        childPayloads.map((payload) => payload.unitText).join('') === target.text &&
+        childPayloads.every((payload, index) =>
+          payload.qcMicroSegment.parentUnitId === target.unitId &&
+          payload.qcMicroSegment.childIndex === index + 1 && payload.qcMicroSegment.childCount === 2),
+      '[QC7] exact-text micro children reconstruct the locked logical parent',
+      childPayloads,
+    );
+    const targetedRetry = enqueueNarrationAudioMicroRepairJobs(pid, [{
+      parentUnitId: target.unitId,
+      supersedesJobId: target.ttsJobId,
+      splitPlan: 1,
+      children,
+      childIndexes: [1],
+    }], {
+      expectedPlan: {artifactId: planArtifact.id, version: planArtifact.version},
+      voiceProfile: {id: 'default', revision: '1'},
+    });
+    ok(
+      targetedRetry.jobs.length === 1 && targetedRetry.jobs[0]!.childIndex === 1 &&
+        targetedRetry.jobs[0]!.candidateNumber === 2,
+      '[QC8] micro retry creates only the explicitly failed child candidate',
+      targetedRetry.jobs,
+    );
+    const composite = assembleNarrationAudioMicroRepairParent(pid, {
+      parentUnitId: target.unitId,
+      supersedesJobId: target.ttsJobId,
+      splitPlan: 1,
+      selectedChildJobIds: childJobs.map((job) => job.id),
+    }, {
+      expectedPlan: {artifactId: planArtifact.id, version: planArtifact.version},
+      voiceProfile: {id: 'default', revision: '1'},
+    });
+    const compositePayload = JSON.parse(composite.job.payload_json) as {
+      unitText: string;
+      qcReplacement: {method: string; microComposite: {childJobIds: string[]}};
+    };
+    ok(
+      composite.job.status === 'succeeded' && compositePayload.unitText === target.text &&
+        compositePayload.qcReplacement.method === 'EXACT_TEXT_MICRO_SEGMENT' &&
+        compositePayload.qcReplacement.microComposite.childJobIds.length === 2 &&
+        composite.clipping.fullScaleSamples === 0 && composite.clipping.saturationRuns === 0,
+      '[QC9] clean micro children assemble append-only into one logical parent replacement',
+      compositePayload,
+    );
+    const selectedTtsJobIds = Object.fromEntries(
+      speech.map((unit) => [unit.unitId, unit.unitId === target.unitId ? composite.job.id : unit.ttsJobId]),
+    );
+    const repaired = tryFinalizeNarrationAudio(pid, {
+      expectedPlan: {artifactId: planArtifact.id, version: planArtifact.version},
+      voiceProfile: {id: 'default', revision: '1'},
+      repair: {
+        reason: 'AUDIO_QC_CLIPPING',
+        supersedes: originalArtifact,
+        preResampleHeadroomDb: NARRATION_AUDIO_REPAIR_HEADROOM_DB,
+        selectedTtsJobIds,
+        replacedSegments: [target.unitId],
+      },
+    })!;
+    const repairedTarget = repaired.units.find((unit) => unit.kind === 'speech' && unit.unitId === target.unitId);
+    ok(
+      repairedTarget?.kind === 'speech' && repairedTarget.ttsJobId === composite.job.id &&
+        analyzeS16WavHardClipping(path.join(getDataDir(), repaired.master.filePath)).fullScaleSamples === 0 &&
+        fs.readFileSync(originalMaster).equals(originalMasterBytes),
+      '[QC10] micro parent flows through repair-only finalize without overwriting original master',
+      repaired.repair,
     );
   }
 

@@ -199,6 +199,36 @@ async function main(): Promise<void> {
     'QC replacement rejects duplicate or malformed unit identities',
     qcMalformedUnits.stdout,
   );
+  const microMissingPair = run([
+    'tts', '--project', project.id, '--plan', `${plan.id}@${plan.version}`,
+    '--voice', 'xlbnas@1', '--qc-micro-repair', 'N001', '--wait',
+  ]);
+  ok(
+    microMissingPair.status !== 0 && jsonOf(microMissingPair).error?.code === 'MISSING_ARGUMENT',
+    'micro repair requires exact superseded audio identity',
+    microMissingPair.stdout,
+  );
+  const microMissingWait = run([
+    'tts', '--project', project.id, '--plan', `${plan.id}@${plan.version}`,
+    '--voice', 'xlbnas@1', '--qc-micro-repair', 'N001',
+    '--supersedes-audio', `${customAudio.artifact.id}@${customAudio.artifact.version}`,
+  ]);
+  ok(
+    microMissingWait.status !== 0 && jsonOf(microMissingWait).error?.code === 'INVALID_ARGUMENT',
+    'micro repair requires explicit wait mode',
+    microMissingWait.stdout,
+  );
+  const mutuallyExclusiveRepairModes = run([
+    'tts', '--project', project.id, '--plan', `${plan.id}@${plan.version}`,
+    '--voice', 'xlbnas@1', '--qc-replace', 'N001', '--qc-micro-repair', 'N001',
+    '--supersedes-audio', `${customAudio.artifact.id}@${customAudio.artifact.version}`, '--wait',
+  ]);
+  ok(
+    mutuallyExclusiveRepairModes.status !== 0 &&
+      jsonOf(mutuallyExclusiveRepairModes).error?.code === 'INVALID_ARGUMENT',
+    'full replacement and micro repair modes are mutually exclusive',
+    mutuallyExclusiveRepairModes.stdout,
+  );
 
   const invalidProject = createProjectWithWorkflow({topic: 'invalid voice', coreQuestion: 'fail closed?'}).project;
   insertLockedVersion(db, invalidProject.id, 1, '# Script V2\n\n## 第 1 章 测试\n\n这是测试旁白。');

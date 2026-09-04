@@ -337,7 +337,9 @@ export function enqueueNarrationAudioQcReplacementJobs(
       ) as TtsJobRow[];
       const replacements = rows.flatMap((row) => {
         const payload = parseTtsJobPayload(row.payload_json);
-        return payload?.qcReplacement?.supersedesJobId === original.id ? [{row, payload}] : [];
+        return payload?.qcReplacement?.supersedesJobId === original.id &&
+          payload.qcReplacement.method !== 'EXACT_TEXT_MICRO_SEGMENT'
+          ? [{row, payload}] : [];
       });
       const active = replacements.find(({row}) => row.status === 'queued' || row.status === 'running');
       if (active) {
@@ -372,6 +374,157 @@ export function enqueueNarrationAudioQcReplacementJobs(
         },
       });
       jobs.push({unitId: request.unitId, jobId: job.id, candidateNumber, reused: false});
+    }
+    return {jobs};
+  });
+  return tx.immediate();
+}
+
+export interface NarrationAudioMicroRepairRequest {
+  parentUnitId: string;
+  supersedesJobId: string;
+  splitPlan: 1 | 2;
+  children: string[];
+  /** Omit for the first candidate of every child; provide only failed child indexes for targeted retry. */
+  childIndexes?: number[];
+}
+
+/**
+ * Enqueue exact-text micro children through the existing TTS queue/Worker.
+ * Children retain a physical child id while the locked parent plan remains unchanged.
+ */
+export function enqueueNarrationAudioMicroRepairJobs(
+  projectId: string,
+  requests: NarrationAudioMicroRepairRequest[],
+  options: {
+    voiceProfile: {id: string; revision: string};
+    referenceSha256?: string;
+    expectedPlan: {artifactId: string; version: number};
+  },
+): {jobs: Array<{
+  parentUnitId: string;
+  childUnitId: string;
+  childIndex: number;
+  jobId: string;
+  candidateNumber: number;
+  reused: boolean;
+}>} {
+  const db = getDb();
+  const provider = getTtsProvider();
+  if (requests.length === 0 || new Set(requests.map((request) => request.parentUnitId)).size !== requests.length) {
+    throw new NarrationAudioError('QC_REPLACEMENT_INVALID', 'micro repair parents 必须非空且不重复');
+  }
+  const tx = db.transaction(() => {
+    const current = getCurrentNarrationPlan(projectId);
+    if (
+      !current || current.artifact.id !== options.expectedPlan.artifactId ||
+      current.artifact.version !== options.expectedPlan.version
+    ) {
+      throw new NarrationAudioError('NARRATION_PLAN_SOURCE_MISMATCH', 'micro repair Narration Plan identity mismatch');
+    }
+    const units = new Map(current.plan.units.filter((unit) => unit.kind === 'speech').map((unit) => [unit.id, unit]));
+    const jobs: Array<{
+      parentUnitId: string;
+      childUnitId: string;
+      childIndex: number;
+      jobId: string;
+      candidateNumber: number;
+      reused: boolean;
+    }> = [];
+    for (const request of requests) {
+      const parent = units.get(request.parentUnitId);
+      const original = getTtsJob(request.supersedesJobId);
+      const originalPayload = original ? parseTtsJobPayload(original.payload_json) : null;
+      if (
+        !parent?.text || request.children.length < 2 || request.children.length > 3 ||
+        request.children.some((child) => child.length === 0) || request.children.join('') !== parent.text ||
+        request.children.slice(0, -1).some((child) => !/[。！？；]$/u.test(child)) ||
+        !original || original.status !== 'succeeded' || !originalPayload ||
+        original.project_id !== projectId || original.unit_id !== request.parentUnitId ||
+        original.narration_plan_artifact_id !== current.artifact.id ||
+        original.narration_plan_version !== current.artifact.version ||
+        original.provider !== provider.name || original.voice_profile_id !== options.voiceProfile.id ||
+        original.voice_profile_revision !== options.voiceProfile.revision ||
+        payloadSpokenText(originalPayload) !== parent.text || originalPayload.qcReplacement !== undefined ||
+        originalPayload.qcMicroSegment !== undefined
+      ) {
+        throw new NarrationAudioError(
+          'QC_REPLACEMENT_INVALID',
+          `${request.parentUnitId} micro repair identity/text/split contract invalid`,
+        );
+      }
+      const parentTextSha256 = crypto.createHash('sha256').update(parent.text).digest('hex');
+      const requestedIndexes = request.childIndexes ?? request.children.map((_, index) => index + 1);
+      if (
+        requestedIndexes.length === 0 || new Set(requestedIndexes).size !== requestedIndexes.length ||
+        requestedIndexes.some((index) => index < 1 || index > request.children.length)
+      ) {
+        throw new NarrationAudioError('QC_REPLACEMENT_INVALID', `${request.parentUnitId} childIndexes invalid`);
+      }
+      request.children.forEach((childText, offset) => {
+        const childIndex = offset + 1;
+        if (!requestedIndexes.includes(childIndex)) return;
+        const childLetter = String.fromCharCode(64 + childIndex);
+        const childUnitId = `${request.parentUnitId}-R${request.splitPlan}-${childLetter}`;
+        const rows = db.prepare(`
+          SELECT * FROM tts_jobs
+          WHERE project_id = ? AND narration_plan_artifact_id = ? AND unit_id = ?
+            AND provider = ? AND voice_profile_id = ? AND voice_profile_revision = ?
+          ORDER BY queued_at
+        `).all(
+          projectId, current.artifact.id, childUnitId, provider.name,
+          options.voiceProfile.id, options.voiceProfile.revision,
+        ) as TtsJobRow[];
+        const candidates = rows.flatMap((row) => {
+          const payload = parseTtsJobPayload(row.payload_json);
+          const micro = payload?.qcMicroSegment;
+          return payload && micro?.supersedesJobId === original.id && micro.parentUnitId === request.parentUnitId &&
+            micro.splitPlan === request.splitPlan && micro.childIndex === childIndex &&
+            micro.childCount === request.children.length && payloadSpokenText(payload) === childText
+            ? [{row, micro}] : [];
+        });
+        const active = candidates.find(({row}) => row.status === 'queued' || row.status === 'running');
+        if (active) {
+          jobs.push({
+            parentUnitId: request.parentUnitId, childUnitId, childIndex,
+            jobId: active.row.id, candidateNumber: active.micro.candidateNumber, reused: true,
+          });
+          return;
+        }
+        if (candidates.length >= 2) {
+          throw new NarrationAudioError(
+            'QC_REPLACEMENT_LIMIT',
+            `${childUnitId} 已达到 2 个 micro repair candidates`,
+          );
+        }
+        const candidateNumber = candidates.length + 1;
+        const childTextSha256 = crypto.createHash('sha256').update(childText).digest('hex');
+        const job = enqueueTtsJobTx(projectId, provider.name, options.voiceProfile.id, options.voiceProfile.revision, {
+          schemaVersion: '1.0',
+          narrationPlanArtifactId: current.artifact.id,
+          narrationPlanArtifactVersion: current.artifact.version,
+          scriptV2Version: current.plan.source.version,
+          compilerVersion: current.plan.compilerVersion,
+          unitId: childUnitId,
+          unitText: childText,
+          ...(options.referenceSha256 ? {referenceAudioSha256: options.referenceSha256} : {}),
+          qcMicroSegment: {
+            reason: 'AUDIO_QC_PROVIDER_CLIPPING',
+            supersedesJobId: original.id,
+            parentUnitId: request.parentUnitId,
+            parentTextSha256,
+            childTextSha256,
+            splitPlan: request.splitPlan,
+            childIndex,
+            childCount: request.children.length,
+            candidateNumber,
+          },
+        }, {maxAttempts: 1});
+        jobs.push({
+          parentUnitId: request.parentUnitId, childUnitId, childIndex,
+          jobId: job.id, candidateNumber, reused: false,
+        });
+      });
     }
     return {jobs};
   });
@@ -893,6 +1046,10 @@ export function silencePcm(durationMs: number): Buffer {
 }
 
 export function wrapPcmAsWav(pcm: Buffer): Buffer {
+  return wrapPcm16AsWav(pcm, MASTER_SAMPLE_RATE, MASTER_CHANNELS);
+}
+
+function wrapPcm16AsWav(pcm: Buffer, sampleRate: number, channels: number): Buffer {
   const header = Buffer.alloc(44);
   header.write('RIFF', 0);
   header.writeUInt32LE(36 + pcm.length, 4);
@@ -900,14 +1057,228 @@ export function wrapPcmAsWav(pcm: Buffer): Buffer {
   header.write('fmt ', 12);
   header.writeUInt32LE(16, 16);
   header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(MASTER_CHANNELS, 22);
-  header.writeUInt32LE(MASTER_SAMPLE_RATE, 24);
-  header.writeUInt32LE(MASTER_SAMPLE_RATE * MASTER_CHANNELS * 2, 28);
-  header.writeUInt16LE(MASTER_CHANNELS * 2, 32);
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * channels * 2, 28);
+  header.writeUInt16LE(channels * 2, 32);
   header.writeUInt16LE(16, 34);
   header.write('data', 36);
   header.writeUInt32LE(pcm.length, 40);
   return Buffer.concat([header, pcm]);
+}
+
+function readPcm16Wav(wavPath: string): {pcm: Buffer; sampleRate: number; channels: number} {
+  const wav = fs.readFileSync(wavPath);
+  if (wav.length < 44 || wav.toString('ascii', 0, 4) !== 'RIFF' || wav.toString('ascii', 8, 12) !== 'WAVE') {
+    throw new NarrationAudioError('QC_REPLACEMENT_INVALID', `invalid WAV: ${wavPath}`);
+  }
+  let cursor = 12;
+  let format: {audioFormat: number; channels: number; sampleRate: number; bitsPerSample: number} | null = null;
+  let pcm: Buffer | null = null;
+  while (cursor + 8 <= wav.length) {
+    const id = wav.toString('ascii', cursor, cursor + 4);
+    const length = wav.readUInt32LE(cursor + 4);
+    const start = cursor + 8;
+    const end = start + length;
+    if (end > wav.length) throw new NarrationAudioError('QC_REPLACEMENT_INVALID', `truncated WAV: ${wavPath}`);
+    if (id === 'fmt ' && length >= 16) {
+      format = {
+        audioFormat: wav.readUInt16LE(start),
+        channels: wav.readUInt16LE(start + 2),
+        sampleRate: wav.readUInt32LE(start + 4),
+        bitsPerSample: wav.readUInt16LE(start + 14),
+      };
+    } else if (id === 'data') {
+      pcm = wav.subarray(start, end);
+    }
+    cursor = end + (length % 2);
+  }
+  if (!format || format.audioFormat !== 1 || format.bitsPerSample !== 16 || !pcm || pcm.length % 2 !== 0) {
+    throw new NarrationAudioError('QC_REPLACEMENT_INVALID', `micro repair requires PCM s16 WAV: ${wavPath}`);
+  }
+  return {pcm, sampleRate: format.sampleRate, channels: format.channels};
+}
+
+export function assembleNarrationAudioMicroRepairParent(
+  projectId: string,
+  request: {
+    parentUnitId: string;
+    supersedesJobId: string;
+    splitPlan: 1 | 2;
+    selectedChildJobIds: string[];
+  },
+  options: {
+    voiceProfile: {id: string; revision: string};
+    referenceSha256?: string;
+    expectedPlan: {artifactId: string; version: number};
+  },
+): {job: TtsJobRow; childJobIds: string[]; clipping: HardClippingMetrics} {
+  const db = getDb();
+  const provider = getTtsProvider();
+  const current = getCurrentNarrationPlan(projectId);
+  if (
+    !current || current.artifact.id !== options.expectedPlan.artifactId ||
+    current.artifact.version !== options.expectedPlan.version
+  ) {
+    throw new NarrationAudioError('NARRATION_PLAN_SOURCE_MISMATCH', 'micro parent Narration Plan identity mismatch');
+  }
+  const parent = current.plan.units.find(
+    (unit) => unit.kind === 'speech' && unit.id === request.parentUnitId,
+  );
+  const original = getTtsJob(request.supersedesJobId);
+  const originalPayload = original ? parseTtsJobPayload(original.payload_json) : null;
+  if (
+    !parent?.text || !original || original.status !== 'succeeded' || !originalPayload ||
+    original.project_id !== projectId || original.unit_id !== request.parentUnitId ||
+    original.narration_plan_artifact_id !== current.artifact.id ||
+    original.narration_plan_version !== current.artifact.version ||
+    original.provider !== provider.name || original.voice_profile_id !== options.voiceProfile.id ||
+    original.voice_profile_revision !== options.voiceProfile.revision ||
+    payloadSpokenText(originalPayload) !== parent.text ||
+    request.selectedChildJobIds.length < 2 || request.selectedChildJobIds.length > 3
+  ) {
+    throw new NarrationAudioError('QC_REPLACEMENT_INVALID', `${request.parentUnitId} micro parent identity invalid`);
+  }
+  const parentTextSha256 = crypto.createHash('sha256').update(parent.text).digest('hex');
+  const childJobs = request.selectedChildJobIds.map((jobId) => getTtsJob(jobId));
+  const parsedChildren = childJobs.map((job, offset) => {
+    const payload = job ? parseTtsJobPayload(job.payload_json) : null;
+    const micro = payload?.qcMicroSegment;
+    let result: TtsJobResult | null = null;
+    try {
+      const parsed = ttsJobResultSchema.safeParse(JSON.parse(job?.result_json ?? ''));
+      result = parsed.success ? parsed.data : null;
+    } catch {
+      result = null;
+    }
+    if (
+      !job || job.status !== 'succeeded' || !job.output_path || !job.audio_sha256 || !result || !payload || !micro ||
+      job.project_id !== projectId || job.narration_plan_artifact_id !== current.artifact.id ||
+      job.narration_plan_version !== current.artifact.version || job.provider !== provider.name ||
+      job.voice_profile_id !== options.voiceProfile.id || job.voice_profile_revision !== options.voiceProfile.revision ||
+      micro.reason !== 'AUDIO_QC_PROVIDER_CLIPPING' || micro.supersedesJobId !== original.id ||
+      micro.parentUnitId !== parent.id || micro.parentTextSha256 !== parentTextSha256 ||
+      micro.splitPlan !== request.splitPlan || micro.childIndex !== offset + 1 ||
+      micro.childCount !== request.selectedChildJobIds.length ||
+      micro.childTextSha256 !== crypto.createHash('sha256').update(payloadSpokenText(payload)).digest('hex') ||
+      (options.referenceSha256 && payload.referenceAudioSha256 !== options.referenceSha256)
+    ) {
+      throw new NarrationAudioError('QC_REPLACEMENT_INVALID', `${request.parentUnitId} child ${offset + 1} identity invalid`);
+    }
+    const absPath = path.join(getDataDir(), job.output_path);
+    const clipping = analyzeS16WavHardClipping(absPath);
+    if (clipping.fullScaleSamples !== 0 || clipping.saturationRuns !== 0) {
+      throw new NarrationAudioError('MASTER_HARD_CLIPPING', `${job.unit_id} selected child still clips`);
+    }
+    return {job, payload, result, wav: readPcm16Wav(absPath)};
+  });
+  if (parsedChildren.map(({payload}) => payloadSpokenText(payload)).join('') !== parent.text) {
+    throw new NarrationAudioError('QC_REPLACEMENT_INVALID', `${request.parentUnitId} reconstructed child text mismatch`);
+  }
+  const first = parsedChildren[0]!;
+  if (parsedChildren.some(({result, wav}) =>
+    result.provider !== first.result.provider || result.model !== first.result.model ||
+    result.providerVersion !== first.result.providerVersion || result.providerCommit !== first.result.providerCommit ||
+    result.settings.voiceProfileId !== first.result.settings.voiceProfileId ||
+    result.settings.voiceProfileRevision !== first.result.settings.voiceProfileRevision ||
+    result.settings.referenceSha256 !== first.result.settings.referenceSha256 ||
+    result.settings.useRandom !== false || wav.sampleRate !== first.wav.sampleRate || wav.channels !== first.wav.channels
+  )) {
+    throw new NarrationAudioError('PROVIDER_SNAPSHOT_MISMATCH', `${request.parentUnitId} micro children snapshot mismatch`);
+  }
+  const existing = (db.prepare(`
+    SELECT * FROM tts_jobs WHERE project_id = ? AND narration_plan_artifact_id = ? AND unit_id = ?
+      AND provider = ? AND voice_profile_id = ? AND voice_profile_revision = ? AND status = 'succeeded'
+    ORDER BY finished_at DESC
+  `).all(
+    projectId, current.artifact.id, parent.id, provider.name,
+    options.voiceProfile.id, options.voiceProfile.revision,
+  ) as TtsJobRow[]).find((row) => {
+    const payload = parseTtsJobPayload(row.payload_json);
+    const composite = payload?.qcReplacement?.microComposite;
+    return payload?.qcReplacement?.method === 'EXACT_TEXT_MICRO_SEGMENT' &&
+      payload.qcReplacement.supersedesJobId === original.id && composite?.splitPlan === request.splitPlan &&
+      composite.parentTextSha256 === parentTextSha256 &&
+      composite.childJobIds.length === request.selectedChildJobIds.length &&
+      composite.childJobIds.every((id, index) => id === request.selectedChildJobIds[index]);
+  });
+  if (existing?.output_path && fs.existsSync(path.join(getDataDir(), existing.output_path))) {
+    return {
+      job: existing,
+      childJobIds: request.selectedChildJobIds,
+      clipping: analyzeS16WavHardClipping(path.join(getDataDir(), existing.output_path)),
+    };
+  }
+
+  const parentPcm = Buffer.concat(parsedChildren.map(({wav}) => wav.pcm));
+  const parentWav = wrapPcm16AsWav(parentPcm, first.wav.sampleRate, first.wav.channels);
+  const clipping = analyzeS16PcmHardClipping(parentPcm);
+  if (clipping.fullScaleSamples !== 0 || clipping.saturationRuns !== 0) {
+    throw new NarrationAudioError('MASTER_HARD_CLIPPING', `${parent.id} assembled micro parent clips`);
+  }
+  const id = crypto.randomUUID();
+  const relPath = path.posix.join(
+    'projects', projectId, 'audio', 'repair-parents', String(current.artifact.version),
+    `${parent.id}-R${request.splitPlan}-${id}.wav`,
+  );
+  const absPath = path.join(getDataDir(), relPath);
+  const tmpPath = `${absPath}.tmp`;
+  fs.mkdirSync(path.dirname(absPath), {recursive: true});
+  fs.writeFileSync(tmpPath, parentWav);
+  fs.renameSync(tmpPath, absPath);
+  try {
+    const probed = probeAudio(absPath, 'wav');
+    const audioSha256 = crypto.createHash('sha256').update(parentWav).digest('hex');
+    const at = new Date().toISOString();
+    const payload = {
+      schemaVersion: '1.0' as const,
+      narrationPlanArtifactId: current.artifact.id,
+      narrationPlanArtifactVersion: current.artifact.version,
+      scriptV2Version: current.plan.source.version,
+      compilerVersion: current.plan.compilerVersion,
+      unitId: parent.id,
+      unitText: parent.text,
+      ...(options.referenceSha256 ? {referenceAudioSha256: options.referenceSha256} : {}),
+      qcReplacement: {
+        reason: 'AUDIO_QC_CLIPPING' as const,
+        supersedesJobId: original.id,
+        candidateNumber: request.splitPlan,
+        method: 'EXACT_TEXT_MICRO_SEGMENT' as const,
+        microComposite: {
+          splitPlan: request.splitPlan,
+          parentTextSha256,
+          childJobIds: request.selectedChildJobIds,
+        },
+      },
+    };
+    const result: TtsJobResult = {
+      provider: first.result.provider,
+      model: first.result.model,
+      providerVersion: first.result.providerVersion,
+      providerCommit: first.result.providerCommit,
+      settings: first.result.settings,
+      audio: {codec: probed.codec, sampleRate: probed.sampleRate, channels: probed.channels},
+    };
+    db.prepare(`
+      INSERT INTO tts_jobs (
+        id, project_id, narration_plan_artifact_id, narration_plan_version, unit_id,
+        provider, voice_profile_id, voice_profile_revision, status, payload_json,
+        output_path, duration_ms, audio_sha256, result_json,
+        queued_at, started_at, finished_at, attempt, max_attempts, progress, cancel_requested
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'succeeded', ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 100, 0)
+    `).run(
+      id, projectId, current.artifact.id, current.artifact.version, parent.id,
+      provider.name, options.voiceProfile.id, options.voiceProfile.revision,
+      JSON.stringify(payload), relPath, probed.durationMs, audioSha256, JSON.stringify(result),
+      at, at, at,
+    );
+    const job = getTtsJob(id);
+    if (!job) throw new Error(`micro parent composite ${id} missing after insert`);
+    return {job, childJobIds: request.selectedChildJobIds, clipping};
+  } catch (error) {
+    fs.rmSync(absPath, {force: true});
+    throw error;
+  }
 }
 
 // ---------- Finalize ----------

@@ -13,7 +13,9 @@ import {
 import {
   NARRATION_AUDIO_REPAIR_HEADROOM_DB,
   analyzeS16WavHardClipping,
+  assembleNarrationAudioMicroRepairParent,
   enqueueNarrationAudioJobs,
+  enqueueNarrationAudioMicroRepairJobs,
   enqueueNarrationAudioQcReplacementJobs,
   getCurrentNarrationAudioArtifact,
   getExactNarrationAudioArtifact,
@@ -40,7 +42,7 @@ import {getStage, listStages} from '../lib/workflow/stages';
 import {getVersion} from '../lib/workflow/versions';
 import {getRenderArtifact, probeRenderOutput, resolveOutputAbs, sha256File} from '../lib/render/artifact';
 import {probeAudio} from '../lib/tts-c/audio-probe';
-import {getTtsJob, parseTtsJobPayload, type TtsJobRow} from '../lib/tts-jobs';
+import {getTtsJob, parseTtsJobPayload, payloadSpokenText, type TtsJobRow} from '../lib/tts-jobs';
 import {resolveRequestedVoice} from '../lib/tts/voice-registry';
 import {getTtsProvider} from '../lib/tts';
 import type {RenderJobRow} from '../lib/jobs';
@@ -84,7 +86,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   }
   const allowedValues: Record<string, string[]> = {
     inspect: ['project', 'artifact', 'job'],
-    tts: ['project', 'plan', 'timeout-seconds', 'voice', 'qc-replace', 'supersedes-audio'],
+    tts: ['project', 'plan', 'timeout-seconds', 'voice', 'qc-replace', 'qc-micro-repair', 'supersedes-audio'],
     subtitles: ['project', 'audio', 'artifact', 'export-dir'],
     visuals: ['project', 'design', 'plan', 'audio', 'subtitles', 'choreography'],
     reconcile: ['project', 'scenes', 'audio', 'subtitles'],
@@ -127,6 +129,14 @@ function parseQcReplacementUnits(raw: string): string[] {
     throw new CliError('INVALID_ARGUMENT', '--qc-replace 必须是逗号分隔且不重复的 N001 形式 unit IDs');
   }
   return units;
+}
+
+function splitAtExistingNaturalStops(text: string): string[] {
+  const children = text.match(/[^。！？；]+[。！？；]|[^。！？；]+$/gu) ?? [];
+  if (children.length < 2 || children.length > 3 || children.join('') !== text) {
+    throw new CliError('INVALID_ARGUMENT', 'micro repair parent 必须能仅用现有句号/问号/感叹号/分号拆成 2-3 段');
+  }
+  return children;
 }
 
 function projectRow(projectId: string): Record<string, unknown> {
@@ -328,9 +338,271 @@ async function tts(args: ParsedArgs): Promise<Record<string, unknown>> {
     throw new CliError('INVALID_ARGUMENT', '--finalize-only 仅支持 exact narration_plan_v2；V1 tts 行为保持不变');
   }
   const qcReplaceRaw = args.values.get('qc-replace');
+  const qcMicroRepairRaw = args.values.get('qc-micro-repair');
   const supersedesAudioRaw = args.values.get('supersedes-audio');
-  if ((qcReplaceRaw && !supersedesAudioRaw) || (!qcReplaceRaw && supersedesAudioRaw)) {
-    throw new CliError('MISSING_ARGUMENT', '--qc-replace 与 --supersedes-audio 必须同时提供');
+  if (qcReplaceRaw && qcMicroRepairRaw) {
+    throw new CliError('INVALID_ARGUMENT', '--qc-replace 与 --qc-micro-repair 不能同时使用');
+  }
+  if ((qcReplaceRaw || qcMicroRepairRaw) && !supersedesAudioRaw) {
+    throw new CliError('MISSING_ARGUMENT', 'QC repair 必须显式提供 --supersedes-audio');
+  }
+  if (!qcReplaceRaw && !qcMicroRepairRaw && supersedesAudioRaw) {
+    throw new CliError('MISSING_ARGUMENT', '--supersedes-audio 必须与 QC repair 参数同时提供');
+  }
+  if (qcMicroRepairRaw && supersedesAudioRaw) {
+    if (!args.flags.has('wait')) throw new CliError('INVALID_ARGUMENT', 'micro repair 必须显式使用 --wait');
+    if (requestedVoice === undefined) {
+      throw new CliError('MISSING_ARGUMENT', 'micro repair 必须显式提供 --voice <id>@<revision>');
+    }
+    assertCurrentPlan(projectId, plan);
+    const supersedes = parseIdentity(supersedesAudioRaw, '--supersedes-audio');
+    const originalAudio = await getExactNarrationAudioArtifact(projectId, {
+      artifactId: supersedes.id,
+      version: supersedes.version,
+    });
+    if (
+      !originalAudio || originalAudio.manifest.source.narrationPlanArtifactId !== plan.id ||
+      originalAudio.manifest.source.narrationPlanArtifactVersion !== plan.version ||
+      originalAudio.manifest.provider.voiceProfile.id !== resolvedVoice.id ||
+      originalAudio.manifest.provider.voiceProfile.revision !== resolvedVoice.revision
+    ) {
+      throw new CliError('AUDIO_SOURCE_MISMATCH', 'micro repair superseded audio identity/source/voice mismatch');
+    }
+    const requestedUnits = parseQcReplacementUnits(qcMicroRepairRaw);
+    const originalSpeech = new Map(
+      originalAudio.manifest.units.filter((unit) => unit.kind === 'speech').map((unit) => [unit.unitId, unit]),
+    );
+    if (requestedUnits.some((unitId) => !originalSpeech.has(unitId))) {
+      throw new CliError('INVALID_ARGUMENT', '--qc-micro-repair 包含 superseded audio 中不存在的 speech unit');
+    }
+    const currentPlan = getCurrentNarrationPlan(projectId);
+    if (!currentPlan || currentPlan.artifact.id !== plan.id || currentPlan.artifact.version !== plan.version) {
+      throw new CliError('NARRATION_PLAN_SOURCE_MISMATCH', 'micro repair current plan changed');
+    }
+    const planSpeech = new Map(
+      currentPlan.plan.units.filter((unit) => unit.kind === 'speech').map((unit) => [unit.id, unit]),
+    );
+    const repairs = requestedUnits.map((parentUnitId) => {
+      const parent = planSpeech.get(parentUnitId);
+      const original = originalSpeech.get(parentUnitId);
+      if (!parent?.text || !original || parent.text !== original.text) {
+        throw new CliError('AUDIO_SOURCE_MISMATCH', `${parentUnitId} locked parent text mismatch`);
+      }
+      return {
+        parentUnitId,
+        supersedesJobId: original.ttsJobId,
+        splitPlan: 1 as const,
+        children: splitAtExistingNaturalStops(parent.text),
+      };
+    });
+    const expectedChildCount = repairs.reduce((sum, repair) => sum + repair.children.length, 0);
+    const selectedChildren = new Map<string, string>();
+    const childEvidence: Array<{
+      parentUnitId: string;
+      childUnitId: string;
+      childIndex: number;
+      candidateNumber: number;
+      jobId: string;
+      clipping: ReturnType<typeof analyzeS16WavHardClipping>;
+    }> = [];
+    const readChildRows = (repair: typeof repairs[number], childIndex: number): Array<{
+      row: TtsJobRow;
+      candidateNumber: number;
+    }> => {
+      const childUnitId = `${repair.parentUnitId}-R${repair.splitPlan}-${String.fromCharCode(64 + childIndex)}`;
+      return (getDb().prepare(`
+        SELECT * FROM tts_jobs
+        WHERE project_id = ? AND narration_plan_artifact_id = ? AND unit_id = ?
+          AND provider = ? AND voice_profile_id = ? AND voice_profile_revision = ?
+        ORDER BY queued_at
+      `).all(
+        projectId, plan.id, childUnitId, getTtsProvider().name,
+        resolvedVoice.id, resolvedVoice.revision,
+      ) as TtsJobRow[]).flatMap((row) => {
+        const payload = parseTtsJobPayload(row.payload_json);
+        const micro = payload?.qcMicroSegment;
+        return payload && micro?.parentUnitId === repair.parentUnitId &&
+          micro.supersedesJobId === repair.supersedesJobId && micro.splitPlan === repair.splitPlan &&
+          micro.childIndex === childIndex && micro.childCount === repair.children.length &&
+          payloadSpokenText(payload) === repair.children[childIndex - 1]
+          ? [{row, candidateNumber: micro.candidateNumber}] : [];
+      });
+    };
+
+    for (let cycle = 0; cycle < 3 && selectedChildren.size < expectedChildCount; cycle++) {
+      const enqueueRequests: Array<typeof repairs[number] & {childIndexes: number[]}> = [];
+      const waitJobIds = new Set<string>();
+      for (const repair of repairs) {
+        const childIndexes: number[] = [];
+        for (let childIndex = 1; childIndex <= repair.children.length; childIndex++) {
+          const childKey = `${repair.parentUnitId}:${childIndex}`;
+          if (selectedChildren.has(childKey)) continue;
+          const rows = readChildRows(repair, childIndex);
+          let accepted = false;
+          for (const candidate of [...rows].reverse()) {
+            if (candidate.row.status !== 'succeeded' || !candidate.row.output_path) continue;
+            const clipping = analyzeS16WavHardClipping(path.join(getDataDir(), candidate.row.output_path));
+            if (!childEvidence.some((item) => item.jobId === candidate.row.id)) {
+              childEvidence.push({
+                parentUnitId: repair.parentUnitId,
+                childUnitId: candidate.row.unit_id,
+                childIndex,
+                candidateNumber: candidate.candidateNumber,
+                jobId: candidate.row.id,
+                clipping,
+              });
+            }
+            if (clipping.fullScaleSamples === 0 && clipping.saturationRuns === 0) {
+              selectedChildren.set(childKey, candidate.row.id);
+              accepted = true;
+              break;
+            }
+          }
+          if (accepted) continue;
+          const active = rows.find(({row}) => row.status === 'queued' || row.status === 'running');
+          if (active) {
+            waitJobIds.add(active.row.id);
+            continue;
+          }
+          if (rows.length >= 2) {
+            throw new CliError(
+              'PROVIDER_CLIPPING_REQUIRES_DEEPER_INVESTIGATION',
+              `${repair.parentUnitId} child ${childIndex} 两个 candidates 均未通过`,
+            );
+          }
+          childIndexes.push(childIndex);
+        }
+        if (childIndexes.length > 0) enqueueRequests.push({...repair, childIndexes});
+      }
+      if (enqueueRequests.length > 0) {
+        const enqueued = enqueueNarrationAudioMicroRepairJobs(projectId, enqueueRequests, {
+          expectedPlan: {artifactId: plan.id, version: plan.version},
+          voiceProfile: {id: resolvedVoice.id, revision: resolvedVoice.revision},
+          referenceSha256: resolvedVoice.referenceSha256 ?? undefined,
+        });
+        enqueued.jobs.forEach((job) => waitJobIds.add(job.jobId));
+      }
+      if (waitJobIds.size > 0) {
+        await waitFor(timeoutMs(args), async () => {
+          const rows = [...waitJobIds].map((jobId) => getTtsJob(jobId));
+          return rows.every((row) => row && ['succeeded', 'failed', 'cancelled'].includes(row.status)) ? rows : null;
+        });
+      }
+    }
+    if (selectedChildren.size !== expectedChildCount) {
+      throw new CliError('PROVIDER_CLIPPING_REQUIRES_DEEPER_INVESTIGATION', '未获得全部 clean micro children');
+    }
+
+    const parentRepairs = repairs.map((repair) => assembleNarrationAudioMicroRepairParent(projectId, {
+      parentUnitId: repair.parentUnitId,
+      supersedesJobId: repair.supersedesJobId,
+      splitPlan: repair.splitPlan,
+      selectedChildJobIds: repair.children.map((_, index) => selectedChildren.get(`${repair.parentUnitId}:${index + 1}`)!),
+    }, {
+      expectedPlan: {artifactId: plan.id, version: plan.version},
+      voiceProfile: {id: resolvedVoice.id, revision: resolvedVoice.revision},
+      referenceSha256: resolvedVoice.referenceSha256 ?? undefined,
+    }));
+    const parentJobs = new Map(parentRepairs.map(({job}) => [job.unit_id, job.id]));
+    const selectedTtsJobIds: Record<string, string> = {};
+    const replacedSegments: string[] = [];
+    let cleanOriginals = 0;
+    let existingCleanReplacements = 0;
+    for (const [unitId, unit] of originalSpeech) {
+      const originalPath = path.join(getDataDir(), unit.filePath);
+      const originalClipping = analyzeS16WavHardClipping(originalPath);
+      if (originalClipping.fullScaleSamples === 0 && originalClipping.saturationRuns === 0) {
+        selectedTtsJobIds[unitId] = unit.ttsJobId;
+        cleanOriginals++;
+        continue;
+      }
+      replacedSegments.push(unitId);
+      const microParentJobId = parentJobs.get(unitId);
+      if (microParentJobId) {
+        selectedTtsJobIds[unitId] = microParentJobId;
+        continue;
+      }
+      const replacement = (getDb().prepare(`
+        SELECT * FROM tts_jobs
+        WHERE project_id = ? AND narration_plan_artifact_id = ? AND unit_id = ?
+          AND provider = ? AND voice_profile_id = ? AND voice_profile_revision = ? AND status = 'succeeded'
+        ORDER BY queued_at
+      `).all(
+        projectId, plan.id, unitId, getTtsProvider().name,
+        resolvedVoice.id, resolvedVoice.revision,
+      ) as TtsJobRow[]).find((row) => {
+        const payload = parseTtsJobPayload(row.payload_json);
+        if (
+          payload?.qcReplacement?.supersedesJobId !== unit.ttsJobId ||
+          payload.qcReplacement.method === 'EXACT_TEXT_MICRO_SEGMENT' || !row.output_path
+        ) return false;
+        const clipping = analyzeS16WavHardClipping(path.join(getDataDir(), row.output_path));
+        return clipping.fullScaleSamples === 0 && clipping.saturationRuns === 0;
+      });
+      if (!replacement) {
+        throw new CliError('PROVIDER_CLIPPING_REQUIRES_DEEPER_INVESTIGATION', `${unitId} 没有 clean repair input`);
+      }
+      selectedTtsJobIds[unitId] = replacement.id;
+      existingCleanReplacements++;
+    }
+    if (
+      cleanOriginals + existingCleanReplacements + parentRepairs.length !== originalSpeech.size ||
+      Object.keys(selectedTtsJobIds).length !== originalSpeech.size
+    ) {
+      throw new CliError('AUDIO_FINALIZE_FAILED', 'micro repair final input set count mismatch');
+    }
+    for (const jobId of Object.values(selectedTtsJobIds)) {
+      const job = getTtsJob(jobId);
+      if (!job?.output_path) throw new CliError('AUDIO_FINALIZE_FAILED', `selected input missing: ${jobId}`);
+      const clipping = analyzeS16WavHardClipping(path.join(getDataDir(), job.output_path));
+      if (clipping.fullScaleSamples !== 0 || clipping.saturationRuns !== 0) {
+        throw new CliError('MASTER_HARD_CLIPPING', `selected input clips: ${job.unit_id}`);
+      }
+    }
+    const manifest = tryFinalizeNarrationAudio(projectId, {
+      expectedPlan: {artifactId: plan.id, version: plan.version},
+      voiceProfile: {id: resolvedVoice.id, revision: resolvedVoice.revision},
+      referenceSha256: resolvedVoice.referenceSha256,
+      repair: {
+        reason: 'AUDIO_QC_CLIPPING',
+        supersedes,
+        preResampleHeadroomDb: NARRATION_AUDIO_REPAIR_HEADROOM_DB,
+        selectedTtsJobIds,
+        replacedSegments,
+      },
+    });
+    const audio = getCurrentNarrationAudioArtifact(projectId, voiceOptions);
+    if (!manifest || !audio || audio.manifest.repair?.supersedes.id !== supersedes.id) {
+      throw new CliError('AUDIO_FINALIZE_FAILED', 'micro repair narration audio artifact 未形成');
+    }
+    const masterClipping = analyzeS16WavHardClipping(path.join(getDataDir(), audio.manifest.master.filePath));
+    if (masterClipping.fullScaleSamples !== 0 || masterClipping.saturationRuns !== 0) {
+      throw new CliError('MASTER_HARD_CLIPPING', 'micro repair master hard clipping gate failed');
+    }
+    return {
+      ok: true,
+      command: 'tts',
+      mode: 'qc-micro-repair',
+      plan,
+      supersedesAudio: supersedes,
+      requestedUnits,
+      splitPlans: repairs.map(({parentUnitId, splitPlan, children}) => ({
+        parentUnitId, splitPlan, children, reconstructedTextMatch: children.join('') === planSpeech.get(parentUnitId)?.text,
+      })),
+      childEvidence,
+      parentRepairs: parentRepairs.map(({job, childJobIds, clipping}) => ({
+        parentUnitId: job.unit_id, jobId: job.id, childJobIds, clipping,
+      })),
+      finalInputSet: {
+        cleanOriginals,
+        existingCleanReplacements,
+        newBlockerRepairs: parentRepairs.length,
+        logicalUnits: Object.keys(selectedTtsJobIds).length,
+        physicalAudioPieces: Object.keys(selectedTtsJobIds).length + expectedChildCount,
+      },
+      repair: {headroomDb: NARRATION_AUDIO_REPAIR_HEADROOM_DB, replacedSegments},
+      result: {status: 'ready', audio: {artifact: audio.artifact, manifest: audio.manifest}, masterClipping},
+    };
   }
   if (qcReplaceRaw && supersedesAudioRaw) {
     if (!args.flags.has('wait')) {
@@ -384,7 +656,8 @@ async function tts(args: ParsedArgs): Promise<Record<string, unknown>> {
       resolvedVoice.id, resolvedVoice.revision,
     ) as TtsJobRow[]).flatMap((row) => {
       const payload = parseTtsJobPayload(row.payload_json);
-      return payload?.qcReplacement?.supersedesJobId === originalJobId
+      return payload?.qcReplacement?.supersedesJobId === originalJobId &&
+        payload.qcReplacement.method !== 'EXACT_TEXT_MICRO_SEGMENT'
         ? [{row, candidateNumber: payload.qcReplacement.candidateNumber}]
         : [];
     });
