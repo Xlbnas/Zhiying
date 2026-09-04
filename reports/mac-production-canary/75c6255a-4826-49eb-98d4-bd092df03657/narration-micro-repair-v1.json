@@ -1,0 +1,134 @@
+{
+  "schemaVersion": "canary-narration-micro-repair@1.0",
+  "projectId": "75c6255a-4826-49eb-98d4-bd092df03657",
+  "narrationPlan": "e39bed7d-f3d9-423a-ade9-2f237df8b758@1",
+  "supersedesAudio": "e1080081-5c12-4f8a-83b7-d99c6048215b@1",
+  "outputAudio": "ea84e5fa-d06c-4449-a649-a5d21b507695@2",
+  "provider": "indextts2",
+  "voice": "xlbnas@1",
+  "lockedPlaintextSha256": "bc85e2ce7da55150e3c6c327c37f9663d36b4afbe9f8474c67247aca5721917f",
+  "normalizedSpeechTextSha256": "69a34454b7280192f9c6515e7f9873eaaf9a39c42be48aa229b756dd4f20db73",
+  "inputSet": {
+    "cleanOriginals": 47,
+    "existingCleanReplacements": 10,
+    "repairedParentReplacements": 3,
+    "logicalUnits": 60
+  },
+  "repairs": [
+    {
+      "parentUnitId": "N031",
+      "parentTextSha256": "d2863b5a78c4d9fb3b06a5e863075f2069ab7f298f224a016725813dfeea72d7",
+      "children": [
+        {
+          "unitId": "N031-R1-A",
+          "jobId": "d493c200-7d19-49a2-8aa3-807ec5380510",
+          "audioSha256": "a8b561bfe06349b7f09983040102724e5bb2cde709668ca44723ee4162baaafa",
+          "durationMs": 7268,
+          "attempt": 1,
+          "maxAttempts": 1,
+          "fullScaleSamples": 0,
+          "saturationRuns": 0
+        },
+        {
+          "unitId": "N031-R1-B",
+          "jobId": "218cf0e5-05e4-46c9-9d88-3638a8c5b552",
+          "audioSha256": "981e2a0d4d6e49558fda6e5afd7429f95ec80f453ae5c0a63015c6c2d96fc14a",
+          "durationMs": 7187,
+          "attempt": 1,
+          "maxAttempts": 1,
+          "fullScaleSamples": 0,
+          "saturationRuns": 0
+        }
+      ],
+      "replacementJobId": "3f5f599f-ff53-480b-9af5-20562b5822f7",
+      "replacementSha256": "0d1cade6776ae4c28b32754a7d89342f900b00f9fb74470d438de9ecc230f751",
+      "reconstructedTextMatch": true,
+      "joinGapSeconds": 0.0675283,
+      "fullScaleSamples": 0,
+      "saturationRuns": 0
+    },
+    {
+      "parentUnitId": "N036",
+      "parentTextSha256": "d161977719037d3e88796ca8dc64ec60b305053ec9d19dcdf8f1e95a7dab2f32",
+      "children": [
+        {
+          "unitId": "N036-R1-A",
+          "jobId": "ea2368a6-753d-48f9-9542-137cdb52b39f",
+          "audioSha256": "653d9ce12ddd66026c53af75e0946a1a670aea9abec46674a494aa6cfc12744b",
+          "durationMs": 6142,
+          "attempt": 1,
+          "maxAttempts": 1,
+          "fullScaleSamples": 0,
+          "saturationRuns": 0
+        },
+        {
+          "unitId": "N036-R1-B",
+          "jobId": "2be0b704-3e53-4ff4-85f0-76b165d13589",
+          "audioSha256": "35fe359ed03872d4fb908e9e1c8c2240f77ee4acdff3c5adad09e85e89d56cf5",
+          "durationMs": 7581,
+          "attempt": 1,
+          "maxAttempts": 1,
+          "fullScaleSamples": 0,
+          "saturationRuns": 0
+        }
+      ],
+      "replacementJobId": "24fd3404-13db-4eb9-87ab-49953a3984d9",
+      "replacementSha256": "d4bfe425ba3cc4d903dbb403dcd0269cb4cd6512095afca909a3d8628320201c",
+      "reconstructedTextMatch": true,
+      "joinGapSeconds": 0.0679819,
+      "fullScaleSamples": 0,
+      "saturationRuns": 0
+    },
+    {
+      "parentUnitId": "N045",
+      "parentTextSha256": "a89a28709d06ce6e64a59d4dc6e2f17deaf580ddb9472a5fdfaf057ea53bcade",
+      "children": [
+        {
+          "unitId": "N045-R1-A",
+          "jobId": "00887154-960f-4f57-b44c-2379db30a23b",
+          "audioSha256": "4e936eeb2eeef0e22eb459440fff60abf0ffd74af919216bc52fa316f7336b14",
+          "durationMs": 6165,
+          "attempt": 1,
+          "maxAttempts": 1,
+          "fullScaleSamples": 0,
+          "saturationRuns": 0
+        },
+        {
+          "unitId": "N045-R1-B",
+          "jobId": "8d7b898d-4594-4382-8ec9-4de65c44f694",
+          "audioSha256": "ed8cc1e098a87bd9e062d1356dad48b9cc83de542ae9d1e74dcf72b92bf5100e",
+          "durationMs": 9961,
+          "attempt": 1,
+          "maxAttempts": 1,
+          "fullScaleSamples": 0,
+          "saturationRuns": 0
+        }
+      ],
+      "replacementJobId": "21aac056-e1fd-4e7f-80ca-9ab830eda5ad",
+      "replacementSha256": "68fd7beddeedc890ae68e19efd3ddbb7400e2099a08ccd3ffd28a7530f74fe42",
+      "reconstructedTextMatch": true,
+      "joinGapSeconds": 0.0686621,
+      "fullScaleSamples": 0,
+      "saturationRuns": 0
+    }
+  ],
+  "execution": {
+    "childrenTotal": 6,
+    "firstCandidateSuccess": 6,
+    "targetedRetries": 0,
+    "providerSwitches": 0,
+    "voiceSwitches": 0
+  },
+  "finalize": {
+    "preResampleHeadroomDb": -1.4,
+    "limiter": false,
+    "compressor": false,
+    "speedChanged": false,
+    "masterSha256": "3821ed838f9548b3d7a733cba13fbd6b896be765fe29e4cf4a722d805d7191e8",
+    "durationSeconds": 627.814292,
+    "fullScaleSamples": 0,
+    "saturationRuns": 0,
+    "decodeErrors": 0
+  },
+  "status": "TECHNICAL_PASS_LISTENING_PENDING"
+}
